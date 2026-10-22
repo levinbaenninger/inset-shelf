@@ -32,6 +32,7 @@ export type ShelfCommand =
   | { readonly kind: "remove"; readonly id: ItemId }
   | { readonly kind: "newSection" }
   | { readonly kind: "newNote" }
+  | { readonly kind: "find" }
   /** Edit › Copy and Undo: a text field keeps its own, otherwise they act on items. */
   | { readonly kind: "copy" }
   | { readonly kind: "undo" };

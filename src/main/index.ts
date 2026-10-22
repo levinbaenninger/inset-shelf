@@ -38,6 +38,7 @@ import {
   shell,
   systemPreferences,
 } from "electron";
+import type { MenuItemConstructorOptions } from "electron";
 
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { captureDisplay, sampleAnchor } from "./capture";
@@ -593,6 +594,15 @@ const start = async (): Promise<void> => {
         break;
       }
 
+      case "moveTo": {
+        controller.apply({
+          id: choice.id,
+          sectionId: choice.sectionId,
+          type: "moveItem",
+        });
+        break;
+      }
+
       case "edit":
       case "remove":
       case "newSection": {
@@ -607,27 +617,30 @@ const start = async (): Promise<void> => {
     }
   };
 
+  const menuItem = (entry: MenuEntry): MenuItemConstructorOptions => {
+    if (entry.kind === "separator") {
+      return { type: "separator" };
+    }
+
+    if (entry.kind === "submenu") {
+      return { label: entry.label, submenu: entry.entries.map(menuItem) };
+    }
+
+    return {
+      accelerator: entry.accelerator,
+      checked: entry.checked,
+      click: () => {
+        runChoice(entry.choice);
+      },
+      enabled: entry.enabled,
+      label: entry.label,
+      registerAccelerator: false,
+      type: entry.checked === undefined ? "normal" : "checkbox",
+    };
+  };
+
   const nativeMenu = (entries: readonly MenuEntry[]): Menu =>
-    Menu.buildFromTemplate(
-      entries.map((entry) =>
-        entry.kind === "separator"
-          ? { type: "separator" as const }
-          : {
-              accelerator: entry.accelerator,
-              checked: entry.checked,
-              click: () => {
-                runChoice(entry.choice);
-              },
-              enabled: entry.enabled,
-              label: entry.label,
-              registerAccelerator: false,
-              type:
-                entry.checked === undefined
-                  ? ("normal" as const)
-                  : ("checkbox" as const),
-            }
-      )
-    );
+    Menu.buildFromTemplate(entries.map(menuItem));
 
   const shelfServer = serveContract(
     shelfContract,
@@ -678,7 +691,7 @@ const start = async (): Promise<void> => {
         const item = controller.item(id);
 
         if (item !== undefined) {
-          shelf.popup(nativeMenu(itemMenu(item)), x, y);
+          shelf.popup(nativeMenu(itemMenu(item, controller.view().doc)), x, y);
         }
       },
       showSectionMenu: ({ x, y }) => {
@@ -805,6 +818,9 @@ const start = async (): Promise<void> => {
             closeShelf: shelf.hide,
             copy: () => {
               sendCommand?.({ kind: "copy" });
+            },
+            find: () => {
+              void commandShelf({ kind: "find" });
             },
             newNote: () => {
               void commandShelf({ kind: "newNote" });

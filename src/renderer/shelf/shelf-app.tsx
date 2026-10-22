@@ -1,17 +1,23 @@
-import { ArrowDown01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ShelfCommand, ShelfView } from "@shared/contracts";
-import { itemsInSection } from "@shared/shelf";
+import { groupItems } from "@shared/shelf";
 import type { ItemId, ShelfOp } from "@shared/shelf";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { shelfBridge } from "@/shared/bridge";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
@@ -55,8 +61,8 @@ const HeaderButton = ({
   onClick,
 }: {
   readonly label: string;
-  readonly icon: typeof Cancel01Icon;
-  readonly onClick: () => void;
+  readonly icon: typeof Search01Icon;
+  readonly onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) => (
   <Tooltip>
     <TooltipTrigger asChild>
@@ -82,7 +88,7 @@ const UndoBar = ({ onUndo }: { readonly onUndo: () => void }) => (
   </output>
 );
 
-const showSectionMenu = (event: MouseEvent<HTMLButtonElement>): void => {
+const showSectionMenu = (event: MouseEvent<HTMLElement>): void => {
   const box = event.currentTarget.getBoundingClientRect();
 
   api.showSectionMenu({ x: box.left, y: box.bottom + 4 });
@@ -90,9 +96,17 @@ const showSectionMenu = (event: MouseEvent<HTMLButtonElement>): void => {
 
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
-  const items = itemsInSection(doc, doc.activeSectionId);
+  const [query, setQuery] = useState("");
+  const groups = groupItems(doc, query);
+  const items = groups.flatMap((group) => group.items);
+  // ↑ and ↓ walk the items in the order they are shown, across sections.
   const ids = items.map((item) => item.id);
-  const newest = ids.at(-1);
+
+  const newest = doc.items.findLast(
+    (item) => item.sectionId === doc.activeSectionId
+  )?.id;
+
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const sectionName =
     doc.sections.find((section) => section.id === doc.activeSectionId)?.name ??
@@ -206,6 +220,12 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         break;
       }
 
+      case "find": {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        break;
+      }
+
       case "newNote": {
         focusComposer();
         break;
@@ -247,26 +267,38 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   return (
     <div className="text-foreground flex h-svh flex-col">
-      <header className="drag-region flex h-11 shrink-0 items-center justify-between gap-1 px-2">
-        <h1 className="sr-only">Inset Shelf: {sectionName}</h1>
-        <Button
-          className="max-w-56 justify-start"
-          onClick={showSectionMenu}
-          size="sm"
-          variant="ghost"
-        >
-          <span className="truncate font-semibold">{sectionName}</span>
-          <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
-        </Button>
-        <div className="flex items-center">
-          <HeaderButton
-            icon={Cancel01Icon}
-            label="Hide"
-            onClick={() => {
-              api.hide();
+      <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
+        <h1 className="sr-only">Inset Shelf</h1>
+        <InputGroup>
+          <InputGroupAddon>
+            <HugeiconsIcon icon={Search01Icon} />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label="Search the shelf"
+            onChange={(event) => {
+              setQuery(event.target.value);
             }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setQuery("");
+                event.currentTarget.blur();
+              }
+            }}
+            placeholder="Search"
+            ref={searchRef}
+            type="search"
+            value={query}
           />
-        </div>
+        </InputGroup>
+        <HeaderButton
+          icon={MoreHorizontalIcon}
+          label="Sections"
+          onClick={(event) => {
+            showSectionMenu(event);
+          }}
+        />
       </header>
       <Banners
         onDismissProblem={() => {
@@ -277,53 +309,85 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         }}
         status={status}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {items.length === 0 ? (
-          <p className="text-muted-foreground px-5 py-8 text-center text-sm">
-            Nothing here yet
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-1">
+        {groups.length === 0 ? (
+          <p className="text-muted-foreground px-3 py-8 text-center text-sm">
+            {query === "" ? "Nothing here yet" : "No matches"}
           </p>
-        ) : (
-          <ul
-            aria-label={`Items in ${sectionName}`}
-            className="flex flex-col gap-1.5 px-2 py-1"
-          >
-            {items.map((item) => (
-              <ItemRow
-                copied={copiedId === item.id}
-                editing={editingId === item.id}
-                item={item}
-                key={item.id}
-                onContextMenu={(point) => {
-                  setSelectedId(item.id);
-                  api.showItemMenu({ id: item.id, ...point });
-                }}
-                onDragImage={() => {
-                  api.startDrag(item.id);
-                }}
-                onEdit={() => {
-                  setSelectedId(item.id);
-                  setEditingId(item.id);
-                }}
-                onEditNote={(note) => {
-                  apply({ id: item.id, note, type: "editNote" });
-                }}
-                onEditText={(text) => {
-                  apply({ id: item.id, text, type: "editText" });
-                }}
-                onSelect={() => {
-                  setSelectedId(item.id);
-                }}
-                onStopEditing={() => {
-                  setEditingId(null);
-                }}
-                onToggle={() => {
-                  apply({ id: item.id, type: "toggleDone" });
-                }}
-                selected={selectedId === item.id}
+        ) : null}
+        {groups.map((group) => (
+          <section aria-label={group.section.name} key={group.section.id}>
+            <button
+              aria-pressed={group.active}
+              className={cn(
+                "focus-visible:ring-ring/50 flex w-full items-center gap-1.5 rounded-md px-1 pt-2.5 pb-1.5 text-left text-xs font-medium outline-none focus-visible:ring-3",
+                group.active ? "text-foreground" : "text-muted-foreground"
+              )}
+              onClick={() => {
+                apply({ id: group.section.id, type: "selectSection" });
+              }}
+              title={group.active ? "New items go here" : "Add new items here"}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-1.5 rounded-full",
+                  group.active ? "bg-pin" : "bg-transparent"
+                )}
               />
-            ))}
-          </ul>
-        )}
+              {group.section.name}
+            </button>
+            <ul className="flex flex-col gap-1.5">
+              {group.items.map((item) => (
+                <ItemRow
+                  copied={copiedId === item.id}
+                  editing={editingId === item.id}
+                  item={item}
+                  key={item.id}
+                  onContextMenu={(point) => {
+                    setSelectedId(item.id);
+                    api.showItemMenu({ id: item.id, ...point });
+                  }}
+                  onDragImage={() => {
+                    api.startDrag(item.id);
+                  }}
+                  onEdit={() => {
+                    setSelectedId(item.id);
+                    setEditingId(item.id);
+                  }}
+                  onEditNote={(note) => {
+                    apply({ id: item.id, note, type: "editNote" });
+                  }}
+                  onEditText={(text) => {
+                    apply({ id: item.id, text, type: "editText" });
+                  }}
+                  onSelect={() => {
+                    // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
+                    if (editingId !== item.id) {
+                      setEditingId(null);
+
+                      const field = document.activeElement;
+
+                      if (field instanceof HTMLElement && isTextField(field)) {
+                        field.blur();
+                      }
+                    }
+
+                    setSelectedId(item.id);
+                  }}
+                  onStopEditing={() => {
+                    setEditingId(null);
+                  }}
+                  onToggle={() => {
+                    apply({ id: item.id, type: "toggleDone" });
+                  }}
+                  selected={selectedId === item.id}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
       </div>
       {undoShown !== null && canUndo ? <UndoBar onUndo={undo} /> : null}
       <Composer

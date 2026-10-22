@@ -7,10 +7,20 @@ export type MenuChoice =
   | { readonly kind: "copy"; readonly id: ItemId }
   | { readonly kind: "edit"; readonly id: ItemId }
   | { readonly kind: "toggleDone"; readonly id: ItemId }
-  | { readonly kind: "remove"; readonly id: ItemId };
+  | { readonly kind: "remove"; readonly id: ItemId }
+  | {
+      readonly kind: "moveTo";
+      readonly id: ItemId;
+      readonly sectionId: SectionId;
+    };
 
 export type MenuEntry =
   | { readonly kind: "separator" }
+  | {
+      readonly kind: "submenu";
+      readonly label: string;
+      readonly entries: readonly MenuEntry[];
+    }
   | {
       readonly kind: "choice";
       readonly label: string;
@@ -54,8 +64,32 @@ export const sectionMenu = (doc: ShelfDoc): readonly MenuEntry[] => {
   ];
 };
 
+const moveTo = (item: ShelfItem, doc: ShelfDoc): readonly MenuEntry[] => {
+  const others = doc.sections.filter(
+    (section) => section.id !== item.sectionId
+  );
+
+  return others.length === 0
+    ? []
+    : [
+        {
+          entries: others.map((section): MenuEntry => ({
+            choice: { id: item.id, kind: "moveTo", sectionId: section.id },
+            enabled: true,
+            kind: "choice",
+            label: section.name,
+          })),
+          kind: "submenu",
+          label: "Move to",
+        },
+      ];
+};
+
 /** What a right-click on an item offers, with the keys that do the same in the list. */
-export const itemMenu = (item: ShelfItem): readonly MenuEntry[] => [
+export const itemMenu = (
+  item: ShelfItem,
+  doc: ShelfDoc
+): readonly MenuEntry[] => [
   {
     accelerator: "CommandOrControl+C",
     choice: { id: item.id, kind: "copy" },
@@ -77,6 +111,7 @@ export const itemMenu = (item: ShelfItem): readonly MenuEntry[] => [
     kind: "choice",
     label: item.done ? "Mark as Not Done" : "Mark as Done",
   },
+  ...moveTo(item, doc),
   SEPARATOR,
   {
     accelerator: "Backspace",

@@ -149,6 +149,11 @@ export const ShelfOpSchema = z.discriminatedUnion("type", [
   z.object({ id: ItemIdSchema, type: z.literal("remove") }),
   z.object({ type: z.literal("undoRemove") }),
   z.object({ id: SectionIdSchema, type: z.literal("selectSection") }),
+  z.object({
+    id: ItemIdSchema,
+    sectionId: SectionIdSchema,
+    type: z.literal("moveItem"),
+  }),
   z.object({ type: z.literal("clearDone") }),
 ]);
 
@@ -367,6 +372,25 @@ export const applyOp = (
         : unchanged(doc);
     }
 
+    case "moveItem": {
+      if (!doc.sections.some((section) => section.id === op.sectionId)) {
+        return unchanged(doc);
+      }
+
+      // Moved to the end of its new section, as if it had just been added there.
+      const item = doc.items.find((candidate) => candidate.id === op.id);
+
+      return item === undefined || item.sectionId === op.sectionId
+        ? unchanged(doc)
+        : changed({
+            ...doc,
+            items: [
+              ...doc.items.filter((candidate) => candidate.id !== op.id),
+              { ...item, sectionId: op.sectionId },
+            ],
+          });
+    }
+
     case "clearDone": {
       const discarded = doc.items.filter(
         (item) => item.done && item.sectionId === doc.activeSectionId
@@ -394,3 +418,44 @@ export const itemsInSection = (
   sectionId: SectionId
 ): readonly ShelfItem[] =>
   doc.items.filter((item) => item.sectionId === sectionId);
+
+export interface ItemGroup {
+  readonly section: Section;
+  readonly active: boolean;
+  readonly items: readonly ShelfItem[];
+}
+
+const SEARCH_TERM = /\s+/u;
+
+const searchableText = (item: ShelfItem): string =>
+  item.kind === "text" ? item.text : `${item.note} ${item.source ?? ""}`;
+
+/**
+ * The shelf as one list grouped by section, in section order. Without a query
+ * every section with items shows, and the active one even when empty. With a
+ * query only matching items show, and sections without a match are left out.
+ */
+export const groupItems = (
+  doc: ShelfDoc,
+  query: string
+): readonly ItemGroup[] => {
+  const terms = query.toLocaleLowerCase().split(SEARCH_TERM).filter(Boolean);
+
+  const matches = (item: ShelfItem): boolean => {
+    const text = searchableText(item).toLocaleLowerCase();
+
+    return terms.every((term) => text.includes(term));
+  };
+
+  return doc.sections.flatMap((section) => {
+    const active = section.id === doc.activeSectionId;
+
+    const items = doc.items.filter(
+      (item) => item.sectionId === section.id && matches(item)
+    );
+
+    const shown = items.length > 0 || (active && terms.length === 0);
+
+    return shown ? [{ active, items, section }] : [];
+  });
+};

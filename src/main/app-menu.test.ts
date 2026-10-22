@@ -24,6 +24,7 @@ const actions: AppMenuActions = {
   clearDone: vi.fn<() => void>(),
   closeShelf: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),
+  find: vi.fn<() => void>(),
   newNote: vi.fn<() => void>(),
   newSection: vi.fn<() => void>(),
   openHelp: vi.fn<() => void>(),
