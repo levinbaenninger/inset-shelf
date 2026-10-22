@@ -294,6 +294,11 @@ export const ShelfOpSchema = z.discriminatedUnion("type", [
     sectionId: SectionIdSchema,
     type: z.literal("moveItem"),
   }),
+  z.object({
+    color: ColorSchema.nullable(),
+    id: ItemIdSchema,
+    type: z.literal("setColor"),
+  }),
   z.object({ type: z.literal("clearDone") }),
 ]);
 
@@ -437,6 +442,29 @@ const restore = (doc: ShelfDoc, removed: Removed | null): OpResult => {
   return changed({ ...doc, items });
 };
 
+const moveItem = (
+  doc: ShelfDoc,
+  id: ItemId,
+  sectionId: SectionId
+): OpResult => {
+  if (!doc.sections.some((section) => section.id === sectionId)) {
+    return unchanged(doc);
+  }
+
+  // Moved to the end of its new section, as if it had just been added there.
+  const item = doc.items.find((candidate) => candidate.id === id);
+
+  return item === undefined || item.sectionId === sectionId
+    ? unchanged(doc)
+    : changed({
+        ...doc,
+        items: [
+          ...doc.items.filter((candidate) => candidate.id !== id),
+          { ...item, sectionId },
+        ],
+      });
+};
+
 /**
  * Applies one operation. `lastRemoved` is the pending undo; it stays undoable
  * until the next remove, which discards it for good.
@@ -539,23 +567,14 @@ export const applyOp = (
         : unchanged(doc);
     }
 
+    case "setColor": {
+      return changed(
+        mapItem(doc, op.id, (item) => ({ ...item, color: op.color }))
+      );
+    }
+
     case "moveItem": {
-      if (!doc.sections.some((section) => section.id === op.sectionId)) {
-        return unchanged(doc);
-      }
-
-      // Moved to the end of its new section, as if it had just been added there.
-      const item = doc.items.find((candidate) => candidate.id === op.id);
-
-      return item === undefined || item.sectionId === op.sectionId
-        ? unchanged(doc)
-        : changed({
-            ...doc,
-            items: [
-              ...doc.items.filter((candidate) => candidate.id !== op.id),
-              { ...item, sectionId: op.sectionId },
-            ],
-          });
+      return moveItem(doc, op.id, op.sectionId);
     }
 
     case "clearDone": {
@@ -640,3 +659,42 @@ export const groupItems = (
     return shown ? [{ active, items, section }] : [];
   });
 };
+
+/** The words an item stands for when it is copied as text. */
+export const itemText = (item: ShelfItem): string => {
+  if (item.kind === "text") {
+    return item.text;
+  }
+
+  if (item.kind === "file") {
+    return item.note.trim() === "" ? item.file.name : item.note;
+  }
+
+  return item.note.trim() === "" ? "Image" : item.note;
+};
+
+/** An item's words followed by the page it came from, for pasting where the link matters. */
+export const itemTextWithLink = (item: ShelfItem): string =>
+  item.context?.url === null || item.context === null
+    ? itemText(item)
+    : `${itemText(item)}\n${item.context.url}`;
+
+/**
+ * The open items, as a Markdown list in the order shown, each with its page
+ * link when it has one. Checked items are left out: they are done.
+ */
+export const itemsAsList = (items: readonly ShelfItem[]): string =>
+  items
+    .flatMap((item) => {
+      if (item.done) {
+        return [];
+      }
+
+      const [first = "", ...rest] = itemText(item).trim().split("\n");
+      const more = rest.map((line) => `  ${line}`).join("\n");
+      const url = item.context?.url ?? null;
+      const link = url === null ? "" : ` (${url})`;
+
+      return [`- ${first}${link}${more === "" ? "" : `\n${more}`}`];
+    })
+    .join("\n");

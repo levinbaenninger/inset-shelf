@@ -251,3 +251,10 @@
     background: transparent;
   }
 }
+
+/* A colour tag: a coloured left edge on the item's card. */
+@layer components {
+  [data-tagged] {
+    border-left: 3px solid var(--tag);
+  }
+}

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyOp,
   groupItems,
+  itemsAsList,
+  itemTextWithLink,
   parseShelfDocument,
   emptyShelf,
   ItemIdSchema,
@@ -377,5 +379,75 @@ describe(parseShelfDocument, () => {
       parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 3 }))
     ).toBeNull();
     expect(parseShelfDocument("{ not a shelf")).toBeNull();
+  });
+});
+
+describe(itemsAsList, () => {
+  it("lists open items as Markdown with their links and leaves checked ones out", () => {
+    const e = env();
+
+    const { doc } = apply(
+      emptyShelf(INBOX),
+      [
+        {
+          context: {
+            app: "Chrome",
+            title: "Pricing",
+            url: "https://example.com/pricing",
+          },
+          text: "Trial needs a card",
+          type: "addText",
+          via: "selection",
+        },
+        { text: "Ask Nina\nabout Q3", type: "compose" },
+        { text: "done already", type: "compose" },
+      ],
+      e
+    );
+
+    const last = doc.items.at(-1);
+
+    if (last === undefined) {
+      throw new Error("missing item");
+    }
+
+    const marked = apply(doc, [{ id: last.id, type: "toggleDone" }], e).doc;
+
+    expect(itemsAsList(marked.items)).toBe(
+      "- Trial needs a card (https://example.com/pricing)\n- Ask Nina\n  about Q3"
+    );
+    expect(itemTextWithLink(marked.items[0] ?? last)).toBe(
+      "Trial needs a card\nhttps://example.com/pricing"
+    );
+  });
+});
+
+describe("setColor", () => {
+  it("tags an item with a colour and clears it again", () => {
+    const e = env();
+
+    const { doc } = apply(
+      emptyShelf(INBOX),
+      [{ text: "x", type: "compose" }],
+      e
+    );
+
+    const [item] = doc.items;
+
+    if (item === undefined) {
+      throw new Error("missing item");
+    }
+
+    const tagged = apply(
+      doc,
+      [{ color: "green", id: item.id, type: "setColor" }],
+      e
+    ).doc;
+
+    expect(tagged.items[0]?.color).toBe("green");
+    expect(
+      apply(tagged, [{ color: null, id: item.id, type: "setColor" }], e).doc
+        .items[0]?.color
+    ).toBeNull();
   });
 });
