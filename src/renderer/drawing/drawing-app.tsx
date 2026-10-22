@@ -89,6 +89,10 @@ const Editor = () => {
     },
   });
 
+  useEffect(() => {
+    api.setDirty(!empty);
+  }, [empty]);
+
   // The menu bar's Undo and Redo arrive here instead of as keys.
   useEffect(
     () =>

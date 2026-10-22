@@ -1018,6 +1018,7 @@ const start = async (): Promise<void> => {
       cancel: () => {
         drawing.close();
       },
+      setDirty: drawing.setDirty,
       save: async ({ copy, png }) => {
         const image = nativeImage.createFromBuffer(Buffer.from(png));
 
@@ -1114,7 +1115,7 @@ const start = async (): Promise<void> => {
             },
             closeWindow: () => {
               if (drawing.isFocused()) {
-                drawing.close();
+                drawing.requestClose();
               } else if (settingsWindow.isFocused()) {
                 settingsWindow.close();
               } else {
