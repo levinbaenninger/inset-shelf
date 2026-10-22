@@ -154,6 +154,9 @@ export const SHELF_WIDTH_DIP = 340;
 export const SHELF_MIN_HEIGHT_DIP = 360;
 export const SHELF_DEFAULT_HEIGHT_DIP = 560;
 
+/** A tall window still gets a shelf of a comfortable height, aligned to its top. */
+export const SHELF_MAX_HEIGHT_DIP = 620;
+
 /** Space between the shelf and the window it docks to, and to the screen edge. */
 export const SHELF_GAP_DIP = 8;
 
@@ -183,7 +186,7 @@ export const dockShelf = (
   const height = clamp(
     target.height,
     Math.min(SHELF_MIN_HEIGHT_DIP, workArea.height),
-    workArea.height
+    Math.min(SHELF_MAX_HEIGHT_DIP, workArea.height)
   );
 
   const y = clamp(target.y, workArea.y, bottom - height);

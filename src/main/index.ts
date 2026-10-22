@@ -658,6 +658,22 @@ const start = async (): Promise<void> => {
         }
       },
       openKeySettings,
+      showAddMenu: ({ x, y }) => {
+        shelf.popup(
+          Menu.buildFromTemplate([
+            {
+              accelerator: AREA_ACCELERATOR,
+              click: () => {
+                void captureArea();
+              },
+              label: "Capture Area",
+              registerAccelerator: false,
+            },
+          ]),
+          x,
+          y
+        );
+      },
       showItemMenu: ({ id, x, y }) => {
         const item = controller.item(id);
 

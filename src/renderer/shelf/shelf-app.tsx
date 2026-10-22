@@ -1,8 +1,4 @@
-import {
-  ArrowDown01Icon,
-  Cancel01Icon,
-  CropIcon,
-} from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ShelfCommand, ShelfView } from "@shared/contracts";
 import { itemsInSection } from "@shared/shelf";
@@ -59,7 +55,7 @@ const HeaderButton = ({
   onClick,
 }: {
   readonly label: string;
-  readonly icon: typeof CropIcon;
+  readonly icon: typeof Cancel01Icon;
   readonly onClick: () => void;
 }) => (
   <Tooltip>
@@ -264,13 +260,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         </Button>
         <div className="flex items-center">
           <HeaderButton
-            icon={CropIcon}
-            label="Capture area"
-            onClick={() => {
-              api.captureArea();
-            }}
-          />
-          <HeaderButton
             icon={Cancel01Icon}
             label="Hide"
             onClick={() => {
@@ -296,7 +285,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         ) : (
           <ul
             aria-label={`Items in ${sectionName}`}
-            className="flex flex-col gap-0.5 px-1.5 py-1"
+            className="flex flex-col gap-1.5 px-2 py-1"
           >
             {items.map((item) => (
               <ItemRow
@@ -307,9 +296,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                 onContextMenu={(point) => {
                   setSelectedId(item.id);
                   api.showItemMenu({ id: item.id, ...point });
-                }}
-                onCopy={() => {
-                  void copy(item.id);
                 }}
                 onDragImage={() => {
                   api.startDrag(item.id);
@@ -323,9 +309,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                 }}
                 onEditText={(text) => {
                   apply({ id: item.id, text, type: "editText" });
-                }}
-                onRemove={() => {
-                  remove(item.id);
                 }}
                 onSelect={() => {
                   setSelectedId(item.id);
@@ -344,6 +327,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       </div>
       {undoShown !== null && canUndo ? <UndoBar onUndo={undo} /> : null}
       <Composer
+        onAddMenu={(point) => {
+          api.showAddMenu(point);
+        }}
         onEscape={() => {
           api.hide();
         }}

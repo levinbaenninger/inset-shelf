@@ -173,9 +173,9 @@ describe(dockShelf, () => {
     );
   });
 
-  it("sits inside the right edge of a window that fills the screen", () => {
+  it("sits inside the right edge of a window that fills the screen, at most 620 tall", () => {
     expect(dockShelf(rect<"screen">(0, 25, 1440, 850), work)).toStrictEqual(
-      rect(1092, 25, 340, 850)
+      rect(1092, 25, 340, 620)
     );
   });
 

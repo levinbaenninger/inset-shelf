@@ -1,14 +1,10 @@
-import {
-  Copy01Icon,
-  Delete02Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { MoreHorizontalIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { insetUrl } from "@shared/inset-url";
 import { TEXT_MAX } from "@shared/shelf";
 import type { ImageItem, ShelfItem, TextItem } from "@shared/shelf";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -33,8 +29,6 @@ export interface RowHandlers {
   /** Double-clicking a text item edits it. */
   readonly onEdit: () => void;
   readonly onToggle: () => void;
-  readonly onCopy: () => void;
-  readonly onRemove: () => void;
   readonly onEditText: (text: string) => void;
   readonly onEditNote: (note: string) => void;
   readonly onStopEditing: () => void;
@@ -61,33 +55,6 @@ const contextMenuAt =
 
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
-
-const RowAction = ({
-  children,
-  label,
-  onClick,
-}: {
-  readonly children: ReactNode;
-  readonly label: string;
-  readonly onClick: () => void;
-}) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Button
-        aria-label={label}
-        onClick={(event) => {
-          event.stopPropagation();
-          onClick();
-        }}
-        size="icon-xs"
-        variant="ghost"
-      >
-        {children}
-      </Button>
-    </TooltipTrigger>
-    <TooltipContent side="left">{label}</TooltipContent>
-  </Tooltip>
-);
 
 const KIND_LABEL = {
   area: "Screen area",
@@ -335,8 +302,10 @@ export const ItemRow = (props: ItemRowProps) => {
     <li
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "group relative flex gap-2.5 rounded-lg px-2 py-2",
-        selected ? "bg-foreground/10" : "hover:bg-foreground/5"
+        "group bg-background/60 relative flex items-start gap-2.5 rounded-lg border px-2.5 py-2",
+        selected
+          ? "border-primary"
+          : "border-foreground/10 hover:border-foreground/20"
       )}
       data-item-id={item.id}
     >
@@ -358,7 +327,6 @@ export const ItemRow = (props: ItemRowProps) => {
           <button
             className={cn(
               "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
-              item.via === "selection" && "border-border border-l-2 pl-2.5",
               item.done && "text-muted-foreground line-through",
               !selected && "line-clamp-6"
             )}
@@ -386,19 +354,34 @@ export const ItemRow = (props: ItemRowProps) => {
           <p className="text-muted-foreground text-xs">{metaText(item)}</p>
         ) : null}
       </div>
-      <div
+      <span
         className={cn(
-          "flex shrink-0 flex-col gap-0.5",
-          selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          "-my-0.5 shrink-0",
+          selected || copied
+            ? "opacity-100"
+            : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
         )}
       >
-        <RowAction label={copied ? "Copied" : "Copy"} onClick={props.onCopy}>
-          <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} />
-        </RowAction>
-        <RowAction label="Delete" onClick={props.onRemove}>
-          <HugeiconsIcon icon={Delete02Icon} />
-        </RowAction>
-      </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={copied ? "Copied" : "More"}
+              onClick={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+
+                props.onContextMenu({ x: box.left, y: box.bottom + 2 });
+              }}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <HugeiconsIcon icon={copied ? Tick02Icon : MoreHorizontalIcon} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            {copied ? "Copied" : "More"}
+          </TooltipContent>
+        </Tooltip>
+      </span>
     </li>
   );
 };
