@@ -7,6 +7,8 @@ export interface SettingsWindow {
   readonly webContents: WebContents;
   readonly load: () => Promise<void>;
   readonly open: () => void;
+  readonly close: () => void;
+  readonly isFocused: () => boolean;
 }
 
 /** A small, fixed-size settings window, like a Mac app's Settings, kept above the shelf. */
@@ -38,6 +40,10 @@ export const createSettingsWindow = (options: {
   });
 
   return {
+    close: () => {
+      window.hide();
+    },
+    isFocused: () => window.isVisible() && window.isFocused(),
     load: async () => {
       await window.loadURL(options.url);
     },

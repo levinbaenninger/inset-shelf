@@ -750,6 +750,91 @@ const checkCopy = async (): Promise<void> => {
   );
 };
 
+const ownWindow = (width: number, height: number) =>
+  windows().find(
+    (window) =>
+      window.owner === processName &&
+      window.width === width &&
+      window.height === height
+  );
+
+const menuItem = (menu: string, item: string): void => {
+  osa(
+    `tell application "System Events" to tell process "${processName}" to click menu item "${item}" of menu "${menu}" of menu bar 1`
+  );
+};
+
+const checkDrawing = async (): Promise<void> => {
+  const mark = events().length;
+
+  menuItem("File", "New Drawing…");
+  await delay(1000);
+
+  const editor = ownWindow(760, 560);
+
+  record(
+    "File › New Drawing opens the editor above the shelf",
+    editor !== undefined && editor.layer > 3,
+    JSON.stringify(editor ?? null)
+  );
+
+  if (editor === undefined || frontmost() !== processName) {
+    return;
+  }
+
+  input(
+    "drag",
+    String(editor.x + 200),
+    String(editor.y + 200),
+    String(editor.x + 420),
+    String(editor.y + 320)
+  );
+  await delay(300);
+  guardedKeys(() => {
+    osa('tell application "System Events" to key code 36 using command down');
+  }, [processName]);
+
+  const added = await waitFor("itemAdded", mark);
+
+  record(
+    "⌘↩ saves the drawing into the shelf",
+    added?.via === "drawing" &&
+      items().some((item) => item.id === added.itemId),
+    added?.via ?? "nothing added"
+  );
+  record("the editor closes after saving", ownWindow(760, 560) === undefined);
+};
+
+const checkSettings = async (): Promise<void> => {
+  osa(
+    `tell application "System Events" to tell process "${processName}" to click menu item "Settings…" of menu 1 of menu bar item 2 of menu bar 1`
+  );
+  await delay(1000);
+
+  const settings = windows().find(
+    (window) => window.owner === processName && window.width === 460
+  );
+
+  record(
+    "Settings… opens the settings window above the shelf",
+    settings !== undefined && settings.layer > 3,
+    JSON.stringify(settings ?? null)
+  );
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "w" using command down');
+  }, [processName]);
+  await delay(600);
+
+  const own = windows().filter((window) => window.owner === processName);
+
+  record(
+    "⌘W closes Settings and leaves the shelf open",
+    own.every((window) => window.width !== 460) &&
+      own.some((window) => window.width === 340),
+    own.map((window) => `${window.width}x${window.height}`).join(", ")
+  );
+};
+
 const checkRestart = async (app: ChildProcess): Promise<ChildProcess> => {
   const before = items().length;
 
@@ -836,6 +921,8 @@ const main = async (): Promise<void> => {
     await checkToggle();
     await checkArea();
     await checkCopy();
+    await checkDrawing();
+    await checkSettings();
     app = await checkRestart(app);
     await checkFailedWrite();
   } finally {
