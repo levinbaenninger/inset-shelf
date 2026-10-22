@@ -1,4 +1,5 @@
 import type {
+  DrawingContract,
   OverlayContract,
   ShelfContract,
   ToastContract,
@@ -11,6 +12,7 @@ declare global {
     readonly insetShelf?: Client<ShelfContract>;
     readonly insetOverlay?: Client<OverlayContract>;
     readonly insetToast?: Client<ToastContract>;
+    readonly insetDrawing?: Client<DrawingContract>;
   }
 }
 
@@ -30,3 +32,6 @@ export const overlayBridge = (): Client<OverlayContract> =>
 
 export const toastBridge = (): Client<ToastContract> =>
   require(window.insetToast, "toast");
+
+export const drawingBridge = (): Client<DrawingContract> =>
+  require(window.insetDrawing, "drawing window");
