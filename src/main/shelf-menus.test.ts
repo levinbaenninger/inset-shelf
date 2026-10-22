@@ -63,12 +63,19 @@ describe(itemMenu, () => {
       throw new Error("missing item");
     }
 
-    expect(labels(itemMenu(item))).toStrictEqual([
+    expect(labels(itemMenu(item, doc))).toStrictEqual([
       "Copy",
       "Edit",
       "Mark as Not Done",
+      "Move to",
       "---",
       "Delete",
     ]);
+    expect(itemMenu(item, doc)[3]).toMatchObject({
+      entries: [
+        { choice: { kind: "moveTo", sectionId: LATER }, label: "Later" },
+      ],
+      kind: "submenu",
+    });
   });
 });

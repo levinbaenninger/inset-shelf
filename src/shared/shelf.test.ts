@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOp,
+  groupItems,
   emptyShelf,
   ItemIdSchema,
   parseComposer,
@@ -213,5 +214,96 @@ describe(applyOp, () => {
       apply(start, [{ text: "   ", type: "addText", via: "selection" }]).doc
         .items
     ).toHaveLength(0);
+  });
+});
+
+describe(groupItems, () => {
+  const e = env();
+
+  const filled = apply(
+    emptyShelf(INBOX),
+    [
+      { text: "Total ignores the discount", type: "compose" },
+      { text: "# Later", type: "compose" },
+      { text: "Check the plan picker copy", type: "compose" },
+      { text: "# Empty", type: "compose" },
+      { text: "# Inbox", type: "compose" },
+    ],
+    e
+  ).doc;
+
+  it("lists sections with items in order and the active one even when empty", () => {
+    const groups = groupItems(
+      { ...filled, activeSectionId: filled.sections[2]?.id ?? INBOX },
+      ""
+    );
+
+    expect(
+      groups.map((group) => [
+        group.section.name,
+        group.items.length,
+        group.active,
+      ])
+    ).toStrictEqual([
+      ["Inbox", 1, false],
+      ["Later", 1, false],
+      ["Empty", 0, true],
+    ]);
+  });
+
+  it("keeps only matching items and drops sections without a match", () => {
+    expect(
+      groupItems(filled, "PLAN copy").map((group) => [
+        group.section.name,
+        group.items.length,
+      ])
+    ).toStrictEqual([["Later", 1]]);
+  });
+});
+
+describe("moveItem", () => {
+  it("moves an item to the end of another section and ignores unknown sections", () => {
+    const e = env();
+
+    const filled = apply(
+      emptyShelf(INBOX),
+      [
+        { text: "first", type: "compose" },
+        { text: "# Later", type: "compose" },
+        { text: "second", type: "compose" },
+      ],
+      e
+    ).doc;
+
+    const [first] = filled.items;
+    const later = filled.sections[1]?.id;
+
+    if (first === undefined || later === undefined) {
+      throw new Error("missing fixture");
+    }
+
+    const moved = apply(
+      filled,
+      [{ id: first.id, sectionId: later, type: "moveItem" }],
+      e
+    ).doc;
+
+    expect(moved.items.map((item) => [item.id, item.sectionId])).toStrictEqual([
+      [filled.items[1]?.id, later],
+      [first.id, later],
+    ]);
+    expect(
+      apply(
+        filled,
+        [
+          {
+            id: first.id,
+            sectionId: SectionIdSchema.parse(uuid(80)),
+            type: "moveItem",
+          },
+        ],
+        e
+      ).doc
+    ).toStrictEqual(filled);
   });
 });

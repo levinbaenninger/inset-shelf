@@ -14,6 +14,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { z } from "zod";
 
+import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
 import { ShelfDocSchema } from "../../src/shared/shelf.ts";
 import type { ShelfDoc } from "../../src/shared/shelf.ts";
 
@@ -461,11 +462,11 @@ const checkShelfStaysInFront = async (): Promise<void> => {
 
   record("tray opens the shelf", shown !== undefined, JSON.stringify(bounds));
   record(
-    "the shelf docks beside the window in front, at its top and height",
+    "the shelf docks beside the window in front, at its top",
     bounds !== undefined &&
       bounds.x === target.x + target.width + 8 &&
       bounds.y === target.y &&
-      bounds.height === target.height,
+      bounds.height === Math.min(target.height, SHELF_MAX_HEIGHT_DIP),
     `window ${JSON.stringify(target)}`
   );
   await delay(500);
@@ -705,18 +706,26 @@ const checkArea = async (): Promise<void> => {
   );
 };
 
+/** Selects the typed note, then copies it with Edit › Copy from the menu bar. */
 const checkCopy = async (): Promise<void> => {
   enableWebAccessibility();
+  showShelfFromTray();
   pbcopy(CLIPBOARD_SENTINEL);
 
   const mark = events().length;
-  const clicked = await clickElement("AXButton", "Copy");
+  const selected = await clickElement("AXButton", "Ask about step four");
+
+  await delay(400);
+  osa(
+    `tell application "System Events" to tell process "${processName}" to click menu item "Copy" of menu "Edit" of menu bar 1`
+  );
+
   const copied = await waitFor("copied", mark);
 
   record(
-    "Copy puts an item on the clipboard",
-    clicked && copied !== undefined && pbpaste() !== CLIPBOARD_SENTINEL,
-    copied?.kind ?? ""
+    "Edit › Copy puts the selected item on the clipboard",
+    selected && copied !== undefined && pbpaste() === "Ask about step four",
+    pbpaste().slice(0, 40)
   );
 };
 
