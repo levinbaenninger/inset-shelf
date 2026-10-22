@@ -76,6 +76,12 @@ const RowAction = ({
   </Tooltip>
 );
 
+const KIND_LABEL = {
+  area: "Screen area",
+  paste: "Pasted image",
+  pin: "Pinned spot",
+} as const;
+
 const metaText = (item: ShelfItem): string => {
   const when = whenText(item.createdAt);
 
@@ -83,11 +89,7 @@ const metaText = (item: ShelfItem): string => {
     return item.via === "selection" ? `${when} · from a selection` : when;
   }
 
-  const what = {
-    area: "Screen area",
-    paste: "Pasted image",
-    pin: "Pinned spot",
-  }[item.via];
+  const what = KIND_LABEL[item.via];
 
   const where = item.source === null ? "" : ` · ${item.source}`;
 
@@ -201,6 +203,53 @@ const NoteField = ({
   );
 };
 
+/** The picture, which selects on click and drags out as a file. */
+const Picture = ({
+  compact,
+  item,
+  onDragImage,
+  onSelect,
+}: {
+  readonly item: ImageItem;
+  readonly compact: boolean;
+} & Pick<RowHandlers, "onDragImage" | "onSelect">) => (
+  <button
+    aria-label={item.note === "" ? "Select this image" : `Select: ${item.note}`}
+    className={cn(
+      "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
+      compact ? "w-24" : "w-full"
+    )}
+    draggable
+    onClick={onSelect}
+    onDragStart={(event) => {
+      event.preventDefault();
+      onDragImage();
+    }}
+    title="Drag into another app"
+    type="button"
+  >
+    <img
+      alt={item.note === "" ? KIND_LABEL[item.via] : item.note}
+      className="block h-auto w-full"
+      draggable={false}
+      height={item.image.heightPx}
+      src={insetUrl.attachment(item.image.file)}
+      width={item.image.widthPx}
+    />
+    {item.pin === null ? null : (
+      <PinMarker
+        left={percent(item.pin.x, item.image.widthPx)}
+        top={percent(item.pin.y, item.image.heightPx)}
+        width={percent(
+          PIN_DIAMETER_DIP * item.image.pixelsPerDip,
+          item.image.widthPx
+        )}
+      />
+    )}
+  </button>
+);
+
+/** Unselected images are a thumbnail beside their note; the selected one opens full width with its note field. */
 const ImageBody = ({
   editing,
   item,
@@ -216,42 +265,39 @@ const ImageBody = ({
 } & Pick<
   RowHandlers,
   "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
->) => (
-  <div className="flex flex-col gap-1.5">
-    <button
-      aria-label={
-        item.note === "" ? "Select this image" : `Select: ${item.note}`
-      }
-      className="bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block w-full cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing"
-      draggable
-      onClick={onSelect}
-      onDragStart={(event) => {
-        event.preventDefault();
-        onDragImage();
-      }}
-      title="Drag into another app"
-      type="button"
-    >
-      <img
-        alt={item.note === "" ? "Captured screen area" : item.note}
-        className="block h-auto w-full"
-        draggable={false}
-        height={item.image.heightPx}
-        src={insetUrl.attachment(item.image.file)}
-        width={item.image.widthPx}
-      />
-      {item.pin === null ? null : (
-        <PinMarker
-          left={percent(item.pin.x, item.image.widthPx)}
-          top={percent(item.pin.y, item.image.heightPx)}
-          width={percent(
-            PIN_DIAMETER_DIP * item.image.pixelsPerDip,
-            item.image.widthPx
-          )}
+>) => {
+  if (!selected && !editing) {
+    return (
+      <div className="flex gap-2.5">
+        <Picture
+          compact
+          item={item}
+          onDragImage={onDragImage}
+          onSelect={onSelect}
         />
-      )}
-    </button>
-    {selected || editing ? (
+        <button
+          className={cn(
+            "focus-visible:ring-ring/50 line-clamp-3 min-w-0 flex-1 rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
+            item.note === "" && "text-muted-foreground",
+            item.done && "text-muted-foreground line-through"
+          )}
+          onClick={onSelect}
+          type="button"
+        >
+          {item.note === "" ? KIND_LABEL[item.via] : item.note}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Picture
+        compact={false}
+        item={item}
+        onDragImage={onDragImage}
+        onSelect={onSelect}
+      />
       <NoteField
         autoFocus={editing}
         item={item}
@@ -259,14 +305,9 @@ const ImageBody = ({
         onChange={onEditNote}
         onDone={onStopEditing}
       />
-    ) : null}
-    {!selected && !editing && item.note !== "" ? (
-      <p className="line-clamp-3 text-sm leading-snug break-words whitespace-pre-wrap">
-        {item.note}
-      </p>
-    ) : null}
-  </div>
-);
+    </div>
+  );
+};
 
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
@@ -298,6 +339,7 @@ export const ItemRow = (props: ItemRowProps) => {
           <button
             className={cn(
               "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
+              item.via === "selection" && "border-border border-l-2 pl-2.5",
               item.done && "text-muted-foreground line-through",
               !selected && "line-clamp-6"
             )}
