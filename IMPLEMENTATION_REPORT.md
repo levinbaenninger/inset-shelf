@@ -76,7 +76,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Real desktop runs
 
-`scripts/e2e/verify-macos.ts` passed 35 of 35 checks against the dev build. An earlier version with 25 checks also passed against the packaged, ad-hoc signed `Inset Shelf.app`. The run covers:
+`scripts/e2e/verify-macos.ts` passed 35 of 35 checks against the dev build and again against the packaged, ad-hoc signed `Inset Shelf.app`. The run covers:
 
 - Launch opens the shelf, the app has a regular menu bar, and double Shift is listening.
 - The shelf docks beside the test app's window, at its top. When another app comes to the front, the shelf stays on screen at window layer 3, above the other app's layer 0.
