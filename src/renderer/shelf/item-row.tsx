@@ -1,0 +1,341 @@
+import {
+  Copy01Icon,
+  Delete02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { insetUrl } from "@shared/inset-url";
+import { TEXT_MAX } from "@shared/shelf";
+import type { ImageItem, ShelfItem, TextItem } from "@shared/shelf";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { PinMarker } from "@/shared/pin-marker";
+
+import { whenText } from "./format";
+
+export interface RowHandlers {
+  readonly onSelect: () => void;
+  /** Double-clicking a text item edits it. */
+  readonly onEdit: () => void;
+  readonly onToggle: () => void;
+  readonly onCopy: () => void;
+  readonly onRemove: () => void;
+  readonly onEditText: (text: string) => void;
+  readonly onEditNote: (note: string) => void;
+  readonly onStopEditing: () => void;
+  readonly onDragImage: () => void;
+}
+
+export interface ItemRowProps extends RowHandlers {
+  readonly item: ShelfItem;
+  readonly selected: boolean;
+  readonly editing: boolean;
+  readonly copied: boolean;
+}
+
+/** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
+const PIN_DIAMETER_DIP = 28;
+
+const percent = (value: number, total: number): string =>
+  `${(value / total) * 100}%`;
+
+const RowAction = ({
+  children,
+  label,
+  onClick,
+}: {
+  readonly children: ReactNode;
+  readonly label: string;
+  readonly onClick: () => void;
+}) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Button
+        aria-label={label}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        size="icon-xs"
+        variant="ghost"
+      >
+        {children}
+      </Button>
+    </TooltipTrigger>
+    <TooltipContent side="left">{label}</TooltipContent>
+  </Tooltip>
+);
+
+const metaText = (item: ShelfItem): string => {
+  const when = whenText(item.createdAt);
+
+  if (item.kind === "text") {
+    return item.via === "selection" ? `${when} · from a selection` : when;
+  }
+
+  const what = {
+    area: "Screen area",
+    paste: "Pasted image",
+    pin: "Pinned spot",
+  }[item.via];
+
+  const where = item.source === null ? "" : ` · ${item.source}`;
+
+  return `${when} · ${what}${where}`;
+};
+
+/** Edits a text item in place; ⌘↩ or Return saves, ⇧↩ adds a line, Escape keeps the old text. */
+const TextEditor = ({
+  item,
+  onDone,
+  onSave,
+}: {
+  readonly item: TextItem;
+  readonly onSave: (text: string) => void;
+  readonly onDone: () => void;
+}) => {
+  const [text, setText] = useState(item.text);
+
+  const finish = (): void => {
+    if (text.trim() !== "" && text !== item.text) {
+      onSave(text.trim());
+    }
+
+    onDone();
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      finish();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onDone();
+    }
+  };
+
+  return (
+    <Textarea
+      aria-label="Edit item"
+      autoFocus
+      className="min-h-0"
+      maxLength={TEXT_MAX}
+      onBlur={finish}
+      onChange={(event) => {
+        setText(event.target.value);
+      }}
+      onFocus={(event) => {
+        const end = event.currentTarget.value.length;
+
+        event.currentTarget.setSelectionRange(end, end);
+      }}
+      onKeyDown={onKeyDown}
+      value={text}
+    />
+  );
+};
+
+/** The note under an image saves as you type; the main process waits for a pause before writing. */
+const NoteField = ({
+  autoFocus,
+  item,
+  onChange,
+  onDone,
+}: {
+  readonly item: ImageItem;
+  readonly autoFocus: boolean;
+  readonly onChange: (note: string) => void;
+  readonly onDone: () => void;
+}) => {
+  const [note, setNote] = useState(item.note);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (autoFocus) {
+      ref.current?.focus();
+    }
+  }, [autoFocus]);
+
+  return (
+    <Textarea
+      aria-label="Note for this image"
+      className="min-h-0"
+      maxLength={TEXT_MAX}
+      onChange={(event) => {
+        setNote(event.target.value);
+        onChange(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Escape" ||
+          (event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.blur();
+          onDone();
+        }
+      }}
+      placeholder="What matters here?"
+      ref={ref}
+      rows={1}
+      value={note}
+    />
+  );
+};
+
+const ImageBody = ({
+  editing,
+  item,
+  onDragImage,
+  onEditNote,
+  onSelect,
+  onStopEditing,
+  selected,
+}: {
+  readonly item: ImageItem;
+  readonly selected: boolean;
+  readonly editing: boolean;
+} & Pick<
+  RowHandlers,
+  "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
+>) => (
+  <div className="flex flex-col gap-1.5">
+    <button
+      aria-label={
+        item.note === "" ? "Select this image" : `Select: ${item.note}`
+      }
+      className="bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block w-full cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing"
+      draggable
+      onClick={onSelect}
+      onDragStart={(event) => {
+        event.preventDefault();
+        onDragImage();
+      }}
+      title="Drag into another app"
+      type="button"
+    >
+      <img
+        alt={item.note === "" ? "Captured screen area" : item.note}
+        className="block h-auto w-full"
+        draggable={false}
+        height={item.image.heightPx}
+        src={insetUrl.attachment(item.image.file)}
+        width={item.image.widthPx}
+      />
+      {item.pin === null ? null : (
+        <PinMarker
+          left={percent(item.pin.x, item.image.widthPx)}
+          top={percent(item.pin.y, item.image.heightPx)}
+          width={percent(
+            PIN_DIAMETER_DIP * item.image.pixelsPerDip,
+            item.image.widthPx
+          )}
+        />
+      )}
+    </button>
+    {selected || editing ? (
+      <NoteField
+        autoFocus={editing}
+        item={item}
+        key={item.id}
+        onChange={onEditNote}
+        onDone={onStopEditing}
+      />
+    ) : null}
+    {!selected && !editing && item.note !== "" ? (
+      <p className="line-clamp-3 text-sm leading-snug break-words whitespace-pre-wrap">
+        {item.note}
+      </p>
+    ) : null}
+  </div>
+);
+
+export const ItemRow = (props: ItemRowProps) => {
+  const { copied, editing, item, selected } = props;
+
+  return (
+    <li
+      aria-current={selected ? "true" : undefined}
+      className={cn(
+        "group relative flex gap-2.5 rounded-lg px-2 py-2",
+        selected ? "bg-muted" : "hover:bg-muted/50"
+      )}
+      data-item-id={item.id}
+    >
+      <Checkbox
+        aria-label={item.done ? "Mark as not done" : "Mark as done"}
+        checked={item.done}
+        className="mt-0.5"
+        onCheckedChange={props.onToggle}
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {item.kind === "text" && editing ? (
+          <TextEditor
+            item={item}
+            onDone={props.onStopEditing}
+            onSave={props.onEditText}
+          />
+        ) : null}
+        {item.kind === "text" && !editing ? (
+          <button
+            className={cn(
+              "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
+              item.done && "text-muted-foreground line-through",
+              !selected && "line-clamp-6"
+            )}
+            onClick={props.onSelect}
+            onDoubleClick={props.onEdit}
+            type="button"
+          >
+            {item.text}
+          </button>
+        ) : null}
+        {item.kind === "image" ? (
+          <ImageBody
+            editing={editing}
+            item={item}
+            onDragImage={props.onDragImage}
+            onEditNote={props.onEditNote}
+            onSelect={props.onSelect}
+            onStopEditing={props.onStopEditing}
+            selected={selected}
+          />
+        ) : null}
+        {selected ? (
+          <p className="text-muted-foreground text-xs">{metaText(item)}</p>
+        ) : null}
+      </div>
+      <div
+        className={cn(
+          "flex shrink-0 flex-col gap-0.5",
+          selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}
+      >
+        <RowAction label={copied ? "Copied" : "Copy"} onClick={props.onCopy}>
+          <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} />
+        </RowAction>
+        <RowAction label="Delete" onClick={props.onRemove}>
+          <HugeiconsIcon icon={Delete02Icon} />
+        </RowAction>
+      </div>
+    </li>
+  );
+};

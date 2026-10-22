@@ -1,0 +1,109 @@
+import { z } from "zod";
+
+import { defineContract, event, invoke, out, send } from "./ipc";
+import { ItemIdSchema, ShelfOpSchema } from "./shelf";
+import type { ItemId, ShelfDoc } from "./shelf";
+
+export type Permission = "granted" | "missing" | "notNeeded";
+
+export interface ShelfStatus {
+  /** Double Shift needs Accessibility on macOS; elsewhere it works without a grant. */
+  readonly keys: Permission;
+  /** Copying the selection is macOS-only for now; Windows terminals treat Ctrl+C as an interrupt. */
+  readonly selectionCapture: boolean;
+  /** The last write failed; the shelf keeps working in memory. */
+  readonly saveError: string | null;
+  /** A capture or paste could not be completed. */
+  readonly problem: string | null;
+}
+
+export interface ShelfView {
+  readonly doc: ShelfDoc;
+  readonly status: ShelfStatus;
+  /** The item to select and scroll to, set by a capture. Changes with every capture. */
+  readonly focus: { readonly id: ItemId; readonly seq: number } | null;
+  /** An item can be restored with undoRemove. */
+  readonly canUndo: boolean;
+}
+
+export type ActionResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
+const PASTE_MAX_BYTES = 30 * 1024 * 1024;
+
+export const shelfContract = defineContract({
+  events: { view: event<ShelfView>() },
+  global: "insetShelf",
+  methods: {
+    apply: send(ShelfOpSchema),
+    captureArea: send(z.void()),
+    copy: invoke(ItemIdSchema, out<ActionResult>()),
+    dismissProblem: send(z.void()),
+    getView: invoke(z.void(), out<ShelfView>()),
+    hide: send(z.void()),
+    openKeySettings: send(z.void()),
+    pasteImage: invoke(
+      z
+        .instanceof(Uint8Array)
+        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES),
+      out<ActionResult>()
+    ),
+    startDrag: send(ItemIdSchema),
+  },
+  name: "shelf",
+});
+
+export interface OverlayView {
+  readonly frameUrl: string;
+  readonly display: { readonly width: number; readonly height: number };
+}
+
+const Dip = z.number().min(-100_000).max(100_000);
+
+export const OverlayCommitSchema = z.discriminatedUnion("kind", [
+  z.object({
+    area: z.object({
+      height: z.number().min(0).max(100_000),
+      width: z.number().min(0).max(100_000),
+      x: Dip,
+      y: Dip,
+    }),
+    kind: z.literal("area"),
+  }),
+  z.object({ kind: z.literal("pin"), point: z.object({ x: Dip, y: Dip }) }),
+]);
+
+export type OverlayCommit = z.output<typeof OverlayCommitSchema>;
+
+export const overlayContract = defineContract({
+  events: { view: event<OverlayView | null>() },
+  global: "insetOverlay",
+  methods: {
+    cancel: send(z.void()),
+    commit: send(OverlayCommitSchema),
+    getView: invoke(z.void(), out<OverlayView | null>()),
+  },
+  name: "overlay",
+});
+
+export interface ToastView {
+  readonly title: string;
+  readonly detail: string;
+  readonly seq: number;
+}
+
+export const toastContract = defineContract({
+  events: { view: event<ToastView>() },
+  global: "insetToast",
+  methods: {
+    getView: invoke(z.void(), out<ToastView | null>()),
+  },
+  name: "toast",
+});
+
+export type ShelfContract = typeof shelfContract;
+
+export type OverlayContract = typeof overlayContract;
+
+export type ToastContract = typeof toastContract;

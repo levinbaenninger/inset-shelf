@@ -1,0 +1,44 @@
+appId: ch.inset.prototype.shelf
+productName: Inset Shelf
+artifactName: inset-shelf-${version}-${os}-${arch}.${ext}
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: resources
+    to: resources
+    filter:
+      - "*.png"
+asar: true
+# The key monitor ships N-API prebuilds; a native module cannot load from inside the asar.
+asarUnpack:
+  - "**/node_modules/uiohook-napi/**"
+npmRebuild: false
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  identity: "-"
+  hardenedRuntime: false
+  extendInfo:
+    LSUIElement: true
+    NSAccessibilityUsageDescription: Inset Shelf reads your text selection when you tap Shift twice.
+dmg:
+  writeUpdateInfo: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64, arm64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+publish: null
