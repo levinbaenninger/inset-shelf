@@ -1,7 +1,14 @@
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { TEXT_MAX } from "@shared/shelf";
 import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
 
-import { Textarea } from "@/components/ui/textarea";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
 
 export interface ComposerProps {
   readonly sectionName: string;
@@ -15,6 +22,11 @@ export interface ComposerProps {
   /** Escape in an empty composer hides the shelf. */
   readonly onEscape: () => void;
   readonly ref?: Ref<HTMLTextAreaElement>;
+  /** Opens the native menu of other ways to add: an area, files, a drawing. */
+  readonly onAddMenu: (point: {
+    readonly x: number;
+    readonly y: number;
+  }) => void;
 }
 
 const imageFrom = (event: ClipboardEvent<HTMLTextAreaElement>): File | null => {
@@ -36,6 +48,7 @@ const pasteFile = async (
 
 /** Return adds the note, ⇧↩ adds a line, and "# Name" switches to (or makes) a section. */
 export const Composer = ({
+  onAddMenu,
   onEscape,
   onLeaveUp,
   onPasteImage,
@@ -73,28 +86,43 @@ export const Composer = ({
   };
 
   return (
-    <div className="px-3 pt-2 pb-3">
-      <Textarea
-        aria-label={`New note in ${sectionName}`}
-        className="max-h-32 min-h-0 resize-none"
-        maxLength={TEXT_MAX}
-        onChange={(event) => {
-          onTextChange(event.target.value);
-        }}
-        onKeyDown={onKeyDown}
-        onPaste={(event) => {
-          const file = imageFrom(event);
+    <div className="px-2 pt-1 pb-2">
+      <InputGroup>
+        <InputGroupAddon>
+          <InputGroupButton
+            aria-label="Add"
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
 
-          if (file !== null) {
-            event.preventDefault();
-            void pasteFile(file, onPasteImage);
-          }
-        }}
-        placeholder="Note or prompt"
-        ref={ref}
-        rows={1}
-        value={text}
-      />
+              onAddMenu({ x: box.left, y: box.top - 4 });
+            }}
+            size="icon-xs"
+          >
+            <HugeiconsIcon icon={PlusSignIcon} />
+          </InputGroupButton>
+        </InputGroupAddon>
+        <InputGroupTextarea
+          aria-label={`New note in ${sectionName}`}
+          className="max-h-32 min-h-0"
+          maxLength={TEXT_MAX}
+          onChange={(event) => {
+            onTextChange(event.target.value);
+          }}
+          onKeyDown={onKeyDown}
+          onPaste={(event) => {
+            const file = imageFrom(event);
+
+            if (file !== null) {
+              event.preventDefault();
+              void pasteFile(file, onPasteImage);
+            }
+          }}
+          placeholder="Jot down a thought…"
+          ref={ref}
+          rows={1}
+          value={text}
+        />
+      </InputGroup>
     </div>
   );
 };
