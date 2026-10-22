@@ -140,4 +140,17 @@ describe(openShelfStore, () => {
     );
     expect(store.attachmentPath("../shelf.json")).toBeNull();
   });
+
+  it("copies an added file under a generated name with its extension", async () => {
+    const store = await openShelfStore(dir, options);
+    const source = path.join(dir, "Quarterly report.pdf");
+
+    await writeFile(source, "pdf bytes");
+
+    const stored = await store.copyAttachment(source, "pdf");
+    const copy = await readFile(path.join(dir, "attachments", stored), "utf-8");
+
+    expect(stored).toMatch(/^[0-9a-f-]{36}\.pdf$/u);
+    expect(copy).toBe("pdf bytes");
+  });
 });

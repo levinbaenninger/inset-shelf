@@ -52,6 +52,11 @@ export const shelfContract = defineContract({
   events: { command: event<ShelfCommand>(), view: event<ShelfView>() },
   global: "insetShelf",
   methods: {
+    /** Files dropped or pasted into the shelf, by path; main reads them. */
+    addFiles: invoke(
+      z.array(z.string().min(1).max(4096)).min(1).max(50),
+      out<ActionResult>()
+    ),
     apply: send(ShelfOpSchema),
     captureArea: send(z.void()),
     copy: invoke(ItemIdSchema, out<ActionResult>()),

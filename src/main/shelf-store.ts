@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+} from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -25,6 +33,8 @@ export interface StoreFs {
     file: string,
     data: string | Uint8Array
   ) => Promise<void>;
+  /** Copies to a temporary sibling and renames it into place. */
+  readonly copyAtomic: (from: string, to: string) => Promise<void>;
   readonly rename: (from: string, to: string) => Promise<void>;
   readonly list: (dir: string) => Promise<readonly string[]>;
   readonly remove: (file: string) => Promise<void>;
@@ -53,7 +63,20 @@ const writeAtomic = async (
   }
 };
 
+const copyAtomic = async (from: string, to: string): Promise<void> => {
+  const temp = `${to}.${randomUUID()}.tmp`;
+
+  try {
+    await copyFile(from, temp);
+    await rename(temp, to);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+};
+
 export const nodeStoreFs: StoreFs = {
+  copyAtomic,
   list: async (dir) => await readdir(dir),
   mkdir: async (dir) => {
     await mkdir(dir, { recursive: true });
@@ -90,6 +113,8 @@ export interface ShelfStore {
   /** Coalesces: while one write runs, only the newest pending document is written next. */
   readonly save: (doc: ShelfDoc) => Promise<WriteResult>;
   readonly writeAttachment: (png: Uint8Array) => Promise<string>;
+  /** Copies a file the user added; returns its stored name with the given extension. */
+  readonly copyAttachment: (from: string, extension: string) => Promise<string>;
   readonly deleteAttachment: (file: string) => Promise<void>;
   readonly attachmentPath: (file: string) => string | null;
 }
@@ -239,6 +264,13 @@ export const openShelfStore = async (
     initial: doc,
     recovered,
     save,
+    copyAttachment: async (from, extension) => {
+      const file = `${randomUUID()}.${extension}`;
+
+      await fs.copyAtomic(from, path.join(attachments, file));
+
+      return file;
+    },
     writeAttachment: async (png) => {
       const file = `${randomUUID()}.png`;
 

@@ -13,6 +13,7 @@ declare global {
     readonly insetOverlay?: Client<OverlayContract>;
     readonly insetToast?: Client<ToastContract>;
     readonly insetDrawing?: Client<DrawingContract>;
+    readonly insetFiles?: { readonly pathFor: (file: File) => string };
   }
 }
 
@@ -35,3 +36,7 @@ export const toastBridge = (): Client<ToastContract> =>
 
 export const drawingBridge = (): Client<DrawingContract> =>
   require(window.insetDrawing, "drawing window");
+
+/** The path of a dropped or pasted file; empty when it has none, such as an image copied from a page. */
+export const filePath = (file: File): string =>
+  window.insetFiles?.pathFor(file) ?? "";

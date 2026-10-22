@@ -1,7 +1,7 @@
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { TEXT_MAX } from "@shared/shelf";
-import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
+import type { KeyboardEvent, Ref } from "react";
 
 import {
   InputGroup,
@@ -16,7 +16,6 @@ export interface ComposerProps {
   readonly text: string;
   readonly onTextChange: (text: string) => void;
   readonly onSubmit: (text: string) => void;
-  readonly onPasteImage: (bytes: Uint8Array<ArrayBuffer>) => void;
   /** ↑ in an empty composer moves into the list. */
   readonly onLeaveUp: () => void;
   /** Escape in an empty composer hides the shelf. */
@@ -29,29 +28,11 @@ export interface ComposerProps {
   }) => void;
 }
 
-const imageFrom = (event: ClipboardEvent<HTMLTextAreaElement>): File | null => {
-  for (const item of event.clipboardData.items) {
-    if (item.kind === "file" && item.type.startsWith("image/")) {
-      return item.getAsFile();
-    }
-  }
-
-  return null;
-};
-
-const pasteFile = async (
-  file: File,
-  onPasteImage: (bytes: Uint8Array<ArrayBuffer>) => void
-): Promise<void> => {
-  onPasteImage(new Uint8Array(await file.arrayBuffer()));
-};
-
 /** Return adds the note, ⇧↩ adds a line, and "# Name" switches to (or makes) a section. */
 export const Composer = ({
   onAddMenu,
   onEscape,
   onLeaveUp,
-  onPasteImage,
   onSubmit,
   onTextChange,
   ref,
@@ -109,14 +90,6 @@ export const Composer = ({
             onTextChange(event.target.value);
           }}
           onKeyDown={onKeyDown}
-          onPaste={(event) => {
-            const file = imageFrom(event);
-
-            if (file !== null) {
-              event.preventDefault();
-              void pasteFile(file, onPasteImage);
-            }
-          }}
           placeholder="Jot down a thought…"
           ref={ref}
           rows={1}

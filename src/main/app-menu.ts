@@ -21,6 +21,7 @@ export interface AppMenuActions {
   readonly closeShelf: () => void;
   readonly undo: () => void;
   readonly copy: () => void;
+  readonly copyAsList: () => void;
   readonly find: () => void;
   readonly clearDone: () => void;
   readonly selectSection: (id: SectionId) => void;
@@ -110,6 +111,11 @@ export const appMenuTemplate = (
       SEPARATOR,
       { role: "cut" },
       { accelerator: "CommandOrControl+C", click: actions.copy, label: "Copy" },
+      {
+        accelerator: "Shift+CommandOrControl+C",
+        click: actions.copyAsList,
+        label: "Copy Section as List",
+      },
       { role: "paste" },
       { role: "selectAll" },
       SEPARATOR,

@@ -18,7 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { shelfBridge } from "@/shared/bridge";
+import { filePath, shelfBridge } from "@/shared/bridge";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 
@@ -94,6 +94,84 @@ const showSectionMenu = (event: MouseEvent<HTMLElement>): void => {
   api.showSectionMenu({ x: box.left, y: box.bottom + 4 });
 };
 
+/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). */
+const addDataFiles = async (files: readonly File[]): Promise<void> => {
+  const paths = files.flatMap((file) => {
+    const found = filePath(file);
+
+    return found === "" ? [] : [found];
+  });
+
+  if (paths.length > 0) {
+    await api.addFiles(paths);
+
+    return;
+  }
+
+  const images = files.filter((file) => file.type.startsWith("image/"));
+
+  await Promise.all(
+    images.map(async (file) => {
+      await api.pasteImage(new Uint8Array(await file.arrayBuffer()));
+    })
+  );
+};
+
+const hasFiles = (event: DragEvent): boolean =>
+  event.dataTransfer?.types.includes("Files") === true;
+
+/** Files can be dropped anywhere on the shelf, or pasted when the clipboard holds files. */
+const useFileDrops = (): boolean => {
+  const [over, setOver] = useState(false);
+
+  const onDragOver = useEffectEvent((event: DragEvent) => {
+    if (hasFiles(event)) {
+      event.preventDefault();
+      setOver(true);
+    }
+  });
+
+  const onDragLeave = useEffectEvent((event: DragEvent) => {
+    if (event.relatedTarget === null) {
+      setOver(false);
+    }
+  });
+
+  const onDrop = useEffectEvent((event: DragEvent) => {
+    setOver(false);
+
+    if (hasFiles(event)) {
+      event.preventDefault();
+      void addDataFiles([...(event.dataTransfer?.files ?? [])]);
+    }
+  });
+
+  const onPaste = useEffectEvent((event: ClipboardEvent) => {
+    const files = [...(event.clipboardData?.files ?? [])];
+
+    if (files.length > 0) {
+      event.preventDefault();
+      void addDataFiles(files);
+    }
+  });
+
+  useEffect(() => {
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("paste", onPaste);
+
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, []);
+
+  return over;
+};
+
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
   const [query, setQuery] = useState("");
@@ -107,6 +185,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   )?.id;
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const dropping = useFileDrops();
 
   const sectionName =
     doc.sections.find((section) => section.id === doc.activeSectionId)?.name ??
@@ -266,7 +345,12 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   useEffect(() => api.on("command", onCommand), []);
 
   return (
-    <div className="text-foreground flex h-svh flex-col">
+    <div
+      className={cn(
+        "text-foreground flex h-svh flex-col rounded-xl",
+        dropping && "ring-pin ring-2 ring-inset"
+      )}
+    >
       <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
         <h1 className="sr-only">Inset Shelf</h1>
         <InputGroup>
@@ -404,9 +488,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           if (newest !== undefined) {
             selectItem(newest);
           }
-        }}
-        onPasteImage={(bytes) => {
-          void api.pasteImage(bytes);
         }}
         onSubmit={(text) => {
           apply({ text, type: "compose" });

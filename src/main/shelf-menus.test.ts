@@ -70,6 +70,7 @@ describe(itemMenu, () => {
       "Edit",
       "Mark as Not Done",
       "Move to",
+      "Colour",
       "---",
       "Delete",
     ]);

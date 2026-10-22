@@ -1,10 +1,23 @@
-import type { ItemId, SectionId, ShelfDoc, ShelfItem } from "@shared/shelf";
+import { COLORS } from "@shared/shelf";
+import type {
+  ItemColor,
+  ItemId,
+  SectionId,
+  ShelfDoc,
+  ShelfItem,
+} from "@shared/shelf";
 
 export type MenuChoice =
   | { readonly kind: "selectSection"; readonly id: SectionId }
   | { readonly kind: "clearDone" }
   | { readonly kind: "newSection" }
   | { readonly kind: "copy"; readonly id: ItemId }
+  | { readonly kind: "copyWithLink"; readonly id: ItemId }
+  | {
+      readonly kind: "setColor";
+      readonly id: ItemId;
+      readonly color: ItemColor | null;
+    }
   | { readonly kind: "edit"; readonly id: ItemId }
   | { readonly kind: "toggleDone"; readonly id: ItemId }
   | { readonly kind: "remove"; readonly id: ItemId }
@@ -30,6 +43,8 @@ export type MenuEntry =
       readonly checked?: boolean;
       /** The shelf's own key for this action, shown at the right edge. */
       readonly accelerator?: string;
+      /** A colour swatch drawn before the label. */
+      readonly swatch?: ItemColor;
     };
 
 const SEPARATOR: MenuEntry = { kind: "separator" };
@@ -85,6 +100,50 @@ const moveTo = (item: ShelfItem, doc: ShelfDoc): readonly MenuEntry[] => {
       ];
 };
 
+const COLOR_NAMES: Record<ItemColor, string> = {
+  blue: "Blue",
+  gray: "Gray",
+  green: "Green",
+  orange: "Orange",
+  purple: "Purple",
+  red: "Red",
+  yellow: "Yellow",
+};
+
+const colorMenu = (item: ShelfItem): MenuEntry => ({
+  entries: [
+    ...COLORS.map((color): MenuEntry => ({
+      checked: item.color === color,
+      choice: { color, id: item.id, kind: "setColor" },
+      enabled: true,
+      kind: "choice",
+      label: COLOR_NAMES[color],
+      swatch: color,
+    })),
+    SEPARATOR,
+    {
+      choice: { color: null, id: item.id, kind: "setColor" },
+      enabled: item.color !== null,
+      kind: "choice",
+      label: "No Colour",
+    },
+  ],
+  kind: "submenu",
+  label: "Colour",
+});
+
+const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
+  item.context?.url === null || item.context === null
+    ? []
+    : [
+        {
+          choice: { id: item.id, kind: "copyWithLink" },
+          enabled: true,
+          kind: "choice",
+          label: "Copy with Link",
+        },
+      ];
+
 /** What a right-click on an item offers, with the keys that do the same in the list. */
 export const itemMenu = (
   item: ShelfItem,
@@ -97,6 +156,7 @@ export const itemMenu = (
     kind: "choice",
     label: "Copy",
   },
+  ...copyWithLink(item),
   {
     accelerator: "Enter",
     choice: { id: item.id, kind: "edit" },
@@ -112,6 +172,7 @@ export const itemMenu = (
     label: item.done ? "Mark as Not Done" : "Mark as Done",
   },
   ...moveTo(item, doc),
+  colorMenu(item),
   SEPARATOR,
   {
     accelerator: "Backspace",

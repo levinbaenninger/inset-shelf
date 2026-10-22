@@ -5,6 +5,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { COLOR_HEX } from "@shared/colors";
 import { insetUrl } from "@shared/inset-url";
 import { TEXT_MAX } from "@shared/shelf";
 import type {
@@ -398,6 +399,10 @@ export const ItemRow = (props: ItemRowProps) => {
           : "border-foreground/10 hover:border-foreground/20"
       )}
       data-item-id={item.id}
+      data-tagged={item.color === null ? undefined : true}
+      style={
+        item.color === null ? undefined : { "--tag": COLOR_HEX[item.color] }
+      }
     >
       <Checkbox
         aria-label={item.done ? "Mark as not done" : "Mark as done"}

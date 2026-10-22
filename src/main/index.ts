@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
+import { COLOR_HEX } from "@shared/colors";
 import {
+  drawingContract,
   overlayContract,
   shelfContract,
   toastContract,
@@ -23,8 +27,19 @@ import {
 } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
-import { ItemIdSchema, SectionIdSchema } from "@shared/shelf";
-import type { ImageItem, ItemContext, ItemId } from "@shared/shelf";
+import {
+  ItemIdSchema,
+  SectionIdSchema,
+  itemsAsList,
+  itemTextWithLink,
+} from "@shared/shelf";
+import type {
+  ImageItem,
+  ItemColor,
+  ItemContext,
+  ItemId,
+  MainOp,
+} from "@shared/shelf";
 import { AREA_ACCELERATOR, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
   app,
@@ -38,11 +53,13 @@ import {
   shell,
   systemPreferences,
 } from "electron";
-import type { MenuItemConstructorOptions } from "electron";
+import type { MenuItemConstructorOptions, NativeImage } from "electron";
 
+import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { captureDisplay, sampleAnchor } from "./capture";
 import type { Anchor, CapturedFrame, CaptureProblem } from "./capture";
+import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
@@ -57,6 +74,7 @@ import { itemMenu, sectionMenu } from "./shelf-menus";
 import type { MenuChoice, MenuEntry } from "./shelf-menus";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
 import { createShelfWindow } from "./shelf-window";
+import { swatchBitmap } from "./swatch";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
@@ -80,6 +98,11 @@ const MAC_ACCESSIBILITY_SETTINGS =
 const HIDE_SETTLE_MS = 150;
 const KEYS_POLL_MS = 3000;
 const FRAME_JPEG_QUALITY = 90;
+
+/** The macOS pasteboard type for a file, which Electron reaches through its raw formats. */
+const MAC_FILE_URL =
+  'electron application/osclipboard;format="public.file-url"';
+
 const TOAST_EXCERPT = 80;
 
 const isMac = process.platform === "darwin";
@@ -162,6 +185,15 @@ const restoreClipboard = async (saved: ClipboardSnapshot): Promise<void> => {
 
   await clipboard.write(saved.map((data) => new ClipboardItem(data)));
 };
+
+const SWATCH_POINTS = 12;
+
+/** A colour dot for a native menu, drawn at twice its size for Retina. */
+const swatchIcon = (color: ItemColor): NativeImage =>
+  nativeImage.createFromBitmap(
+    Buffer.from(swatchBitmap(COLOR_HEX[color], SWATCH_POINTS * 2)),
+    { height: SWATCH_POINTS * 2, scaleFactor: 2, width: SWATCH_POINTS * 2 }
+  );
 
 const start = async (): Promise<void> => {
   await app.whenReady();
@@ -248,6 +280,11 @@ const start = async (): Promise<void> => {
   const overlay = createOverlayWindow({
     preload: preloadPath("overlay"),
     url: pageUrl("overlay"),
+  });
+
+  const drawing = createDrawingWindow({
+    preload: preloadPath("drawing"),
+    url: pageUrl("drawing"),
   });
 
   const toast = createToastWindow({
@@ -549,6 +586,133 @@ const start = async (): Promise<void> => {
     }
   };
 
+  /** Reads one added file into an operation, or says why it can't be added. */
+  const prepareFile = async (
+    filePath: string
+  ): Promise<MainOp | { readonly problem: string }> => {
+    const added = classifyAddedFile(filePath);
+
+    try {
+      const info = await stat(filePath);
+
+      if (!info.isFile()) {
+        return { problem: `${added.name} is a folder, not a file.` };
+      }
+
+      if (info.size > ADDED_FILE_MAX_BYTES) {
+        return { problem: `${added.name} is larger than 200 MB.` };
+      }
+
+      const image =
+        added.kind === "image" ? nativeImage.createFromPath(filePath) : null;
+
+      if (image !== null && !image.isEmpty()) {
+        const { height, width } = image.getSize();
+
+        return {
+          context: null,
+          image: {
+            file: await store.writeAttachment(image.toPNG()),
+            heightPx: height,
+            pixelsPerDip: 1,
+            widthPx: width,
+          },
+          pin: null,
+          source: null,
+          type: "addImage",
+          via: "paste",
+        };
+      }
+
+      return {
+        context: null,
+        file: {
+          bytes: info.size,
+          name: added.name,
+          stored: await store.copyAttachment(filePath, added.extension),
+        },
+        type: "addFile",
+      };
+    } catch {
+      return { problem: `${added.name} couldn't be read.` };
+    }
+  };
+
+  /** Adds files in the order given; the last one added is shown. */
+  const addFiles = async (paths: readonly string[]): Promise<ActionResult> => {
+    // A file dragged out of the shelf and dropped back in is already there.
+    const outside = paths.filter((filePath) => !staging.contains(filePath));
+    const prepared = await Promise.all(outside.map(prepareFile));
+    let lastId: ItemId | null = null;
+
+    for (const op of prepared) {
+      if (!("problem" in op)) {
+        lastId = controller.apply(op) ?? lastId;
+      }
+    }
+
+    if (lastId !== null) {
+      e2eLog("itemAdded", { itemId: lastId, kind: "file", via: "added" });
+      controller.focus(lastId);
+    }
+
+    const problems = prepared.flatMap((op) =>
+      "problem" in op ? [op.problem] : []
+    );
+
+    return problems.length === 0
+      ? { ok: true }
+      : { message: problems.join(" "), ok: false };
+  };
+
+  /** Drags an image (with its pin drawn in) or a file out of the shelf as a named file. */
+  const dragOut = async (id: ItemId): Promise<void> => {
+    const item = controller.item(id);
+
+    if (item?.kind === "file") {
+      const stored = store.attachmentPath(item.file.stored);
+
+      if (stored !== null) {
+        const file = staging.copy(id, item.file.name, stored);
+
+        shelf.webContents.startDrag({
+          file,
+          icon: await app.getFileIcon(file, { size: "normal" }),
+        });
+      }
+
+      return;
+    }
+
+    const file =
+      item?.kind === "image" ? store.attachmentPath(item.image.file) : null;
+
+    const exported =
+      item?.kind === "image" && file !== null ? exportImage(item, file) : null;
+
+    if (item?.kind === "image" && exported !== null) {
+      shelf.webContents.startDrag({
+        file: staging.write(id, exportFileName(item.note), exported.png),
+        icon: exported.image.resize({ width: 128 }),
+      });
+    }
+  };
+
+  const pickFiles = async (): Promise<void> => {
+    const picked = await dialog.showOpenDialog({
+      properties: ["openFile", "multiSelections"],
+      title: "Attach Files",
+    });
+
+    if (!picked.canceled && picked.filePaths.length > 0) {
+      const result = await addFiles(picked.filePaths);
+
+      if (!result.ok) {
+        controller.setStatus({ problem: result.message });
+      }
+    }
+  };
+
   const copyItem = async (id: ItemId): Promise<ActionResult> => {
     const item = controller.item(id);
 
@@ -560,9 +724,21 @@ const start = async (): Promise<void> => {
       if (item.kind === "text") {
         await clipboard.writeText(item.text);
       } else if (item.kind === "file") {
-        await clipboard.writeText(
-          item.note.trim() === "" ? item.file.name : item.note
-        );
+        const stored = store.attachmentPath(item.file.stored);
+
+        if (stored === null) {
+          return { message: "The file can't be read.", ok: false };
+        }
+
+        // A named copy goes on the clipboard as a file, so it pastes into Finder or Mail as itself.
+        const file = staging.copy(id, item.file.name, stored);
+
+        await clipboard.write([
+          new ClipboardItem({
+            [MAC_FILE_URL]: new Blob([pathToFileURL(file).href]),
+            "text/plain": new Blob([item.file.name], { type: "text/plain" }),
+          }),
+        ]);
       } else {
         const file = store.attachmentPath(item.image.file);
         const exported = file === null ? null : exportImage(item, file);
@@ -616,6 +792,25 @@ const start = async (): Promise<void> => {
         break;
       }
 
+      case "copyWithLink": {
+        const item = controller.item(choice.id);
+
+        if (item !== undefined) {
+          void clipboard.writeText(itemTextWithLink(item));
+        }
+
+        break;
+      }
+
+      case "setColor": {
+        controller.apply({
+          color: choice.color,
+          id: choice.id,
+          type: "setColor",
+        });
+        break;
+      }
+
       case "moveTo": {
         controller.apply({
           id: choice.id,
@@ -651,6 +846,7 @@ const start = async (): Promise<void> => {
     return {
       accelerator: entry.accelerator,
       checked: entry.checked,
+      icon: entry.swatch === undefined ? undefined : swatchIcon(entry.swatch),
       click: () => {
         runChoice(entry.choice);
       },
@@ -667,6 +863,7 @@ const start = async (): Promise<void> => {
   const shelfServer = serveContract(
     shelfContract,
     {
+      addFiles: async (paths) => await addFiles(paths),
       apply: (op) => {
         controller.apply(op);
 
@@ -710,6 +907,18 @@ const start = async (): Promise<void> => {
               },
               label: "Capture Area",
               registerAccelerator: false,
+            },
+            {
+              click: () => {
+                void pickFiles();
+              },
+              label: "Attach Files…",
+            },
+            {
+              click: () => {
+                drawing.open();
+              },
+              label: "Create Drawing…",
             },
           ]),
           x,
@@ -756,24 +965,7 @@ const start = async (): Promise<void> => {
         return { ok: true };
       },
       startDrag: (id) => {
-        const item = controller.item(id);
-
-        const file =
-          item?.kind === "image" ? store.attachmentPath(item.image.file) : null;
-
-        const exported =
-          item?.kind === "image" && file !== null
-            ? exportImage(item, file)
-            : null;
-
-        if (item?.kind !== "image" || exported === null) {
-          return;
-        }
-
-        shelf.webContents.startDrag({
-          file: staging.write(id, exportFileName(item.note), exported.png),
-          icon: exported.image.resize({ width: 128 }),
-        });
+        void dragOut(id);
       },
     },
     {
@@ -800,6 +992,65 @@ const start = async (): Promise<void> => {
       target: () => overlay.webContents,
     }
   );
+
+  /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
+  const DRAWING_PIXELS_PER_DIP = 2;
+
+  const drawingServer = serveContract(
+    drawingContract,
+    {
+      cancel: () => {
+        drawing.close();
+      },
+      save: async ({ copy, png }) => {
+        const image = nativeImage.createFromBuffer(Buffer.from(png));
+
+        if (image.isEmpty()) {
+          return { message: "The drawing could not be read.", ok: false };
+        }
+
+        const { height, width } = image.getSize();
+
+        const id = controller.apply({
+          context: null,
+          image: {
+            file: await store.writeAttachment(image.toPNG()),
+            heightPx: height,
+            pixelsPerDip: DRAWING_PIXELS_PER_DIP,
+            widthPx: width,
+          },
+          pin: null,
+          source: null,
+          type: "addImage",
+          via: "drawing",
+        });
+
+        if (copy && id !== null) {
+          await copyItem(id);
+        }
+
+        drawing.close();
+
+        if (id !== null) {
+          e2eLog("itemAdded", { itemId: id, kind: "image", via: "drawing" });
+          controller.focus(id);
+          void showShelf();
+        }
+
+        return { ok: true };
+      },
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => drawing.webContents,
+    }
+  );
+
+  drawing.onReset(() => {
+    drawingServer.emit("reset", null);
+  });
 
   const toastServer = serveContract(
     toastContract,
@@ -848,6 +1099,17 @@ const start = async (): Promise<void> => {
             closeShelf: shelf.hide,
             copy: () => {
               sendCommand?.({ kind: "copy" });
+            },
+            copyAsList: () => {
+              const current = controller.view().doc;
+
+              void clipboard.writeText(
+                itemsAsList(
+                  current.items.filter(
+                    (item) => item.sectionId === current.activeSectionId
+                  )
+                )
+              );
             },
             find: () => {
               void commandShelf({ kind: "find" });
@@ -908,7 +1170,12 @@ const start = async (): Promise<void> => {
     refreshTray();
   });
 
-  await Promise.all([shelf.load(), overlay.load(), toast.load()]);
+  await Promise.all([
+    shelf.load(),
+    overlay.load(),
+    toast.load(),
+    drawing.load(),
+  ]);
 
   const shortcutsRegistered =
     globalShortcut.register(TOGGLE_ACCELERATOR, () => {
