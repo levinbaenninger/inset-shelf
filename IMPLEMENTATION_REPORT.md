@@ -90,7 +90,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 - Quitting from the tray exits, and the items are there after a restart.
 - With a write failure forced, the shelf shows **Not saved to disk**, keeps the new item on screen, and leaves the file as it was.
 
-Some things were checked by hand against a test data folder: switching the icon to the menu bar only (the app becomes a UI element without a Dock icon) and back to the Dock only (the status-bar icon goes away), that toggling **Mark as done when copied** writes `settings.json`, that `⌘Z` in the drawing undoes one mark, and that drawn text keeps its position when committed and in the exported PNG.
+Some things were checked by hand against a test data folder: switching the icon to the menu bar only (the app becomes a UI element without a Dock icon) and back to the Dock only (the status-bar icon goes away), that toggling **Mark as done when copied** writes `settings.json`, that `⌘Z` in the drawing undoes one mark, that drawn text keeps its position when committed and in the exported PNG, and that closing a drawing with marks asks first. In Menu Bar Only mode, typing into the note field and `⌘C` still reached the shelf. A file copied in Finder pasted into the shelf as a file item, and copying that item put a file URL on the clipboard.
 
 Getting the suite stable took three changes to the test itself, not the app. Chromium's accessibility tree is now enabled once per launch, because setting it again rebuilds the tree. The test clicks the last matching button, which is in view. It retries reads while the tree fills in after a restart.
 
@@ -108,7 +108,7 @@ Screenshots of the real shelf, the area overlay and the capture notice were chec
 - **Dragging an image out and pasting a copied image** into a real receiving app. The clipboard was checked; a drop into another app was not.
 - **Pasting an image into the note field, keyboard navigation in the list, undo and Clear Checked Items** in the real app. They were exercised only in a browser preview, or not at all.
 - **Browser addresses.** Reading the page address needs the Automation consent for each browser. No browser was used in the tests, so no item with an address and no Automation prompt was observed. Saved selections from ChatGPT or another web app should carry the chat's title and address, but that was not observed either.
-- **Files.** Attaching, dropping and pasting Finder files, copying a file item into Finder or Mail, and dragging a file out were not tried in the real app. Whether other apps accept the file URL the app writes to the clipboard is unverified.
+- **Files.** Pasting one Finder file and copying it back out were checked by hand, as above. Attaching with the file dialog, dropping files, dragging a file out, and pasting the copied file into Finder or Mail were not tried. The copied file lives in a temporary folder that is emptied when the app quits.
 - **Copy and Save** in the drawing window, and **Copy with Link**, **Move to** and **Colour** in the real app.
 - **Open at Login.** The switch calls the system's login item API, but it was never turned on in a test.
 - **Screen readers.**

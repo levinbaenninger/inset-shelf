@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, screen } from "electron";
+import { app, BrowserWindow, dialog, nativeTheme, screen } from "electron";
 import type { WebContents } from "electron";
 
 import { harden, secureWebPreferences } from "./window-security";
@@ -12,6 +12,9 @@ export interface DrawingWindow {
   /** Opens a blank canvas in the middle of the display under the pointer. */
   readonly open: () => void;
   readonly close: () => void;
+  /** Closes like the window's close button, asking first when there are marks. */
+  readonly requestClose: () => void;
+  readonly setDirty: (dirty: boolean) => void;
   readonly isFocused: () => boolean;
   readonly onReset: (listener: () => void) => void;
   readonly allowClose: () => void;
@@ -25,6 +28,7 @@ export const createDrawingWindow = (options: {
   readonly url: string;
 }): DrawingWindow => {
   let closable = false;
+  let dirty = false;
   let onReset: () => void = ignore;
 
   const window = new BrowserWindow({
@@ -46,9 +50,31 @@ export const createDrawingWindow = (options: {
   window.setAlwaysOnTop(true, "floating", 1);
   harden(window.webContents, "drawing");
 
+  /** A sheet on the window, which, unlike an app-modal alert, keeps the window's level. */
+  const confirmDiscard = async (): Promise<void> => {
+    const { response } = await dialog.showMessageBox(window, {
+      buttons: ["Discard", "Cancel"],
+      cancelId: 1,
+      defaultId: 1,
+      message: "Discard this drawing?",
+      type: "warning",
+    });
+
+    if (response === 0) {
+      window.hide();
+    }
+  };
+
   window.on("close", (event) => {
-    if (!closable) {
-      event.preventDefault();
+    if (closable) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (dirty) {
+      void confirmDiscard();
+    } else {
       window.hide();
     }
   });
@@ -61,6 +87,12 @@ export const createDrawingWindow = (options: {
       window.hide();
     },
     isFocused: () => window.isVisible() && window.isFocused(),
+    requestClose: () => {
+      window.close();
+    },
+    setDirty: (next) => {
+      dirty = next;
+    },
     load: async () => {
       await window.loadURL(options.url);
     },
@@ -72,6 +104,7 @@ export const createDrawingWindow = (options: {
         screen.getCursorScreenPoint()
       );
 
+      dirty = false;
       onReset();
       window.setBounds({
         height: HEIGHT,

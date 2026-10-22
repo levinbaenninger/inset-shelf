@@ -145,6 +145,8 @@ export const drawingContract = defineContract({
   global: "insetDrawing",
   methods: {
     cancel: send(z.void()),
+    /** Whether the page has marks, so closing it asks before throwing them away. */
+    setDirty: send(z.boolean()),
     save: invoke(
       z.object({
         /** Also put the drawing on the clipboard, for pasting into a prompt. */
