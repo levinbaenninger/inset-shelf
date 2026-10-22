@@ -76,7 +76,7 @@ export const Banners = ({
       <Banner
         action={{ label: "Dismiss", run: onDismissProblem }}
         text={status.problem}
-        title="Something needs a look"
+        title="Needs your attention"
         tone="error"
       />
     )}
