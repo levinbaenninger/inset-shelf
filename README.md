@@ -1,6 +1,6 @@
 # Inset Shelf
 
-Inset Shelf is a small side window that stays next to your work and keeps what you want to come back to. You can save selected text from any app, drag over part of the screen, pin a spot, or write a note or a prompt for later. Each item can be checked off, copied back into another app, or dragged out.
+Inset Shelf is a small side window that docks next to the window you are working in and keeps what you want to come back to. You can save selected text from any app, drag over part of the screen, pin a spot, draw a sketch, attach files, or write a note or a prompt for later. Each item remembers the app, window and web page it came from. It can be checked off, copied back into another app, or dragged out.
 
 It is the third Inset prototype. [Inset Context Pin](https://github.com/levinbaenninger/inset-pin) tests one pinned thought per capture in a popover. Inset Shelf tests a running list that you build up while you work. The idea follows [Copper](https://shadcn.com/copper) by shadcn, which combines a to-do list, a clipboard and a scratchpad. Inset Shelf is an independent prototype and is not affiliated with Copper.
 
@@ -17,13 +17,14 @@ The builds are not signed with a developer certificate, so each system warns onc
 1. Download `inset-shelf-<version>-mac-arm64.dmg` for Apple silicon, or `-mac-x64.dmg` for an Intel Mac.
 2. Open the disk image and drag **Inset Shelf** to **Applications**.
 3. Open the app. macOS blocks it the first time. Open **System Settings > Privacy & Security** and click **Open Anyway**. If you prefer the terminal, run `xattr -dr com.apple.quarantine "/Applications/Inset Shelf.app"` and open the app again.
-4. Grant two permissions:
-   - **Accessibility**, for double Shift. The shelf shows **Double Shift is off** with a button that opens the right settings page. Turn on **Inset Shelf** there. The app checks again every few seconds, so it should start listening without a restart.
-   - **Screen & System Audio Recording**, for area capture. Press `⌃⌥A` once. If capture is refused, turn on **Inset Shelf** in that settings page, then quit and reopen the app.
+4. Grant the permissions you want:
+   - **Accessibility**, for double Shift and for a browser page's address. The shelf shows **Double Shift is off** with a button that opens the right settings page. Turn on **Inset Shelf** there. The app checks again every few seconds, so it should start listening without a restart.
+   - **Screen & System Audio Recording**, for area capture and for the title of the window an item came from. Press `⌃⌥A` once. If capture is refused, turn on **Inset Shelf** in that settings page, then quit and reopen the app.
+   - **Automation**, once per browser, the first time an item is saved from it. It lets the app read the address of the page in front.
 
-The app has no Dock icon. Look for the Inset mark in the menu bar.
+The app has a Dock icon, a menu bar and an Inset mark in the menu bar's status area. **Settings…** (`⌘,`) can hide either icon.
 
-macOS ties both grants to the app's signature. These builds have an ad-hoc signature that changes with every build, so after installing a newer build you may have to turn the permissions off and on again.
+macOS ties the grants to the app's signature. These builds have an ad-hoc signature that changes with every build, so after installing a newer build you may have to turn the permissions off and on again.
 
 ### Windows
 
@@ -37,22 +38,28 @@ The Windows build compiles and packages in CI. Nobody has run it on Windows yet.
 
 | Keys | What happens |
 | --- | --- |
-| `⇧ ⇧` (tap Shift twice) with text selected | Saves the selection to the current section. A short notice confirms it when the shelf is hidden. Your clipboard is put back as it was. |
+| `⇧ ⇧` (tap Shift twice) with text selected | Saves the selection, with the app, window and page it came from. A short notice confirms it when the shelf is hidden. Your clipboard is put back as it was. |
 | `⇧ ⇧` with nothing selected | Shows or hides the shelf. |
 | `⌃⌥S` (`Ctrl+Alt+S` on Windows) | Shows the shelf, or hides it when it is already in front. |
 | `⌃⌥A` (`Ctrl+Alt+A`) | Freezes the screen under the pointer. Drag to keep an area, or click once to pin a spot with some context around it. `Esc` cancels. |
 
-The shelf floats above other windows, on every Space and over full-screen apps, until you hide it. Clicking into another app leaves it where it is. Drag its header to move it; it opens in the same place next time.
+The shelf opens beside the window in front, at its top and up to 620 points tall. When there is no room beside it, it opens inside the window's right edge. It floats above other windows, on every Space and over full-screen apps, until you hide it.
 
 Inside the shelf:
 
-- Type a note or a prompt and press `Return`. `⇧↩` adds a line. Paste an image with `⌘V`.
-- Type `# Name` and press `Return` to make a section, or to switch to one that exists. New items go to the current section. `⌘K` opens the section menu, which also clears checked items.
-- `↑` and `↓` move through the items. `Space` checks one off, `Return` edits it, `⌘C` copies it, and `⌫` deletes it. `⌘Z` brings back the last deleted item.
-- Copying an image puts the image, with its pin drawn in, and its note on the clipboard. Drag an image out of the shelf to drop it as a file named after its note.
-- `Esc` hides the shelf.
+- Jot down a note or a prompt and press `Return`. `⇧↩` adds a line. The **+** in the note field captures an area, attaches files or opens a new drawing. You can also drop files on the shelf or paste an image.
+- The list shows every section as a group. Type `# Name` and press `Return` to make a section or switch to one. New items go to the current section. The **⋯** button at the top, the **View** menu and `⌘1` to `⌘9` switch sections.
+- The search field (`⌘F`) narrows the list by text, note, file name, app, window title or address.
+- Each item's **⋯** button, or a right-click, opens its menu: **Copy**, **Copy with Link**, **Edit**, **Mark as Done**, **Move to**, **Colour** and **Delete**.
+- `↑` and `↓` move through the items. `Space` checks one off, `Return` edits it, `⌘C` copies it, and `⌫` deletes it. `⌘Z` brings back the last deleted item. `Esc` hides the shelf.
+- **Edit > Copy Section as List** (`⇧⌘C`) copies the open items of the current section as a Markdown list, with their links.
+- Copying an image puts the image, with its pin drawn in, and its note on the clipboard. Copying a file puts the file itself on the clipboard. Drag an image or a file out of the shelf to drop it into another app.
 
-The shelf is stored in one file, `shelf.json`, with the images in an `attachments` folder next to it:
+**File > New Drawing…** (`⌥⌘N`) opens a drawing window with pen, line, arrow, rectangle, ellipse and text tools. **Save** (`⌘↩`) adds the drawing to the shelf. **Copy and Save** also puts it on the clipboard.
+
+**Settings…** (`⌘,`) turns on Open at Login, chooses whether the app's icon shows in the Dock, the menu bar or both, and can mark items as done when they are copied.
+
+The shelf is stored in one file, `shelf.json`, with images and files in an `attachments` folder and the settings in `settings.json` next to it:
 
 - macOS: `~/Library/Application Support/Inset Shelf`
 - Windows: `%APPDATA%\Inset Shelf`
@@ -91,7 +98,7 @@ node scripts/e2e/verify-macos.ts dev       # builds, then tests out/ with Electr
 pnpm package:dir && node scripts/e2e/verify-macos.ts packaged
 ```
 
-The script takes over the mouse and keyboard for about two minutes and overwrites the clipboard. At the end it puts back plain text it found there, but not images or files. The terminal needs **Accessibility** access, Xcode command line tools must be installed for `swiftc`, and the app under test needs **Screen & System Audio Recording** access. It writes every result and the event log to a temporary folder and prints the path.
+The script takes over the mouse and keyboard for about three minutes and overwrites the clipboard. At the end it puts back plain text it found there, but not images or files. The terminal needs **Accessibility** access, Xcode command line tools must be installed for `swiftc`, and the app under test needs **Screen & System Audio Recording** access. It writes every result and the event log to a temporary folder and prints the path.
 
 ## Release
 
