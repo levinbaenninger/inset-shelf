@@ -126,6 +126,30 @@ export const toastContract = defineContract({
   name: "toast",
 });
 
+const DRAWING_MAX_BYTES = 30 * 1024 * 1024;
+
+/** The drawing window: a blank canvas that saves one PNG to the shelf. */
+export const drawingContract = defineContract({
+  events: { reset: event<null>() },
+  global: "insetDrawing",
+  methods: {
+    cancel: send(z.void()),
+    save: invoke(
+      z.object({
+        /** Also put the drawing on the clipboard, for pasting into a prompt. */
+        copy: z.boolean(),
+        png: z
+          .instanceof(Uint8Array)
+          .refine((bytes) => bytes.byteLength <= DRAWING_MAX_BYTES),
+      }),
+      out<ActionResult>()
+    ),
+  },
+  name: "drawing",
+});
+
+export type DrawingContract = typeof drawingContract;
+
 export type ShelfContract = typeof shelfContract;
 
 export type OverlayContract = typeof overlayContract;
