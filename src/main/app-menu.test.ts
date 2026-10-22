@@ -29,6 +29,7 @@ const actions: AppMenuActions = {
   newNote: vi.fn<() => void>(),
   newSection: vi.fn<() => void>(),
   openHelp: vi.fn<() => void>(),
+  openSettings: vi.fn<() => void>(),
   selectSection: vi.fn<(id: string) => void>(),
   setFloatOnTop: vi.fn<(on: boolean) => void>(),
   turnOnKeys: vi.fn<() => void>(),

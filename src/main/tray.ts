@@ -12,6 +12,7 @@ export interface TrayOptions {
 
 export interface ShelfTray {
   readonly refresh: () => void;
+  readonly destroy: () => void;
 }
 
 const toMenuItem = (
@@ -56,5 +57,10 @@ export const createTray = (options: TrayOptions): ShelfTray => {
     });
   }
 
-  return { refresh };
+  return {
+    destroy: () => {
+      tray.destroy();
+    },
+    refresh,
+  };
 };

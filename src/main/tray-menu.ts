@@ -5,7 +5,11 @@ import {
   TOGGLE_ACCELERATOR,
 } from "@shared/shortcut";
 
-export type TrayAction = "toggleShelf" | "captureArea" | "turnOnKeys";
+export type TrayAction =
+  | "toggleShelf"
+  | "captureArea"
+  | "turnOnKeys"
+  | "openSettings";
 
 export type TrayItem =
   | { readonly kind: "separator" }
@@ -58,6 +62,12 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
     },
     ...permission,
     SEPARATOR,
+    {
+      action: "openSettings",
+      kind: "item",
+      label: "Settings…",
+      ...accelerator("CommandOrControl+,"),
+    },
     { kind: "role", role: "about" },
     { kind: "role", role: "quit" },
   ];

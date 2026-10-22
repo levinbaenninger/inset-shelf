@@ -8,6 +8,7 @@ import { COLOR_HEX } from "@shared/colors";
 import {
   drawingContract,
   overlayContract,
+  settingsContract,
   shelfContract,
   toastContract,
 } from "@shared/contracts";
@@ -27,6 +28,7 @@ import {
 } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
+import type { IconPlace, SettingsView } from "@shared/settings";
 import {
   ItemIdSchema,
   SectionIdSchema,
@@ -69,6 +71,8 @@ import { createKeyMonitor } from "./key-monitor";
 import { createOverlayWindow } from "./overlay-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import { captureSelection } from "./selection";
+import { openSettingsStore } from "./settings-store";
+import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
 import { itemMenu, sectionMenu } from "./shelf-menus";
 import type { MenuChoice, MenuEntry } from "./shelf-menus";
@@ -216,6 +220,8 @@ const start = async (): Promise<void> => {
     now: () => new Date(),
   });
 
+  const settings = await openSettingsStore(dataDir, nodeStoreFs);
+
   const selectionCapture = isMac;
 
   const trusted = (): boolean =>
@@ -290,6 +296,11 @@ const start = async (): Promise<void> => {
   const toast = createToastWindow({
     preload: preloadPath("toast"),
     url: pageUrl("toast"),
+  });
+
+  const settingsWindow = createSettingsWindow({
+    preload: preloadPath("settings"),
+    url: pageUrl("settings"),
   });
 
   // The frozen frame behind the overlay, kept only while the overlay is open.
@@ -759,6 +770,10 @@ const start = async (): Promise<void> => {
         await clipboard.write([new ClipboardItem(data)]);
       }
 
+      if (settings.current().markDoneOnCopy && !item.done) {
+        controller.apply({ id, type: "toggleDone" });
+      }
+
       e2eLog("copied", { itemId: id, kind: item.kind });
 
       return { ok: true };
@@ -1131,6 +1146,7 @@ const start = async (): Promise<void> => {
               shelf.setFloatOnTop(on);
               refreshAppMenu();
             },
+            openSettings: settingsWindow.open,
             turnOnKeys: openKeySettings,
             undo: () => {
               sendCommand?.({ kind: "undo" });
@@ -1175,6 +1191,7 @@ const start = async (): Promise<void> => {
     overlay.load(),
     toast.load(),
     drawing.load(),
+    settingsWindow.load(),
   ]);
 
   const shortcutsRegistered =
@@ -1186,24 +1203,103 @@ const start = async (): Promise<void> => {
     });
 
   const run = (action: TrayAction): void => {
-    if (action === "toggleShelf") {
-      void toggleShelf();
-    } else if (action === "captureArea") {
-      void captureArea();
-    } else {
-      openKeySettings();
+    switch (action) {
+      case "toggleShelf": {
+        void toggleShelf();
+        break;
+      }
+
+      case "captureArea": {
+        void captureArea();
+        break;
+      }
+
+      case "turnOnKeys": {
+        openKeySettings();
+        break;
+      }
+
+      case "openSettings": {
+        settingsWindow.open();
+        break;
+      }
+
+      default: {
+        break;
+      }
     }
   };
 
-  tray = createTray({
-    iconPath: trayIconPath(),
-    model: () => ({
-      keys: controller.view().status.keys,
-      shelfVisible: shelf.isVisible(),
-      shortcutsRegistered,
-    }),
-    run,
+  /**
+   * Shows the app's icon in the Dock, the menu bar or both. Without the Dock
+   * icon the app is an accessory, so it has no menu bar of its own either.
+   * Elsewhere the tray is the only icon, so it always stays.
+   */
+  const placeIcon = (place: IconPlace): void => {
+    const wantsTray = !isMac || place !== "dock";
+
+    if (wantsTray && tray === null) {
+      tray = createTray({
+        iconPath: trayIconPath(),
+        model: () => ({
+          keys: controller.view().status.keys,
+          shelfVisible: shelf.isVisible(),
+          shortcutsRegistered,
+        }),
+        run,
+      });
+    } else if (!wantsTray && tray !== null) {
+      tray.destroy();
+      tray = null;
+    }
+
+    if (isMac) {
+      app.setActivationPolicy(place === "menuBar" ? "accessory" : "regular");
+    }
+  };
+
+  placeIcon(settings.current().iconIn);
+
+  const settingsView = (): SettingsView => ({
+    openAtLogin: app.getLoginItemSettings().openAtLogin,
+    settings: settings.current(),
   });
+
+  const settingsServer = serveContract(
+    settingsContract,
+    {
+      getView: settingsView,
+      setOpenAtLogin: (on) => {
+        app.setLoginItemSettings({ openAtLogin: on });
+        settingsServer.emit("view", settingsView());
+      },
+      update: (change) => {
+        const before = settings.current().iconIn;
+
+        void (async () => {
+          try {
+            await settings.update(change);
+          } catch (error) {
+            console.warn(`Settings not saved: ${errorMessage(error)}`);
+          }
+
+          if (settings.current().iconIn !== before) {
+            placeIcon(settings.current().iconIn);
+            // Turning into an accessory can send the app's windows away.
+            settingsWindow.open();
+          }
+
+          settingsServer.emit("view", settingsView());
+        })();
+      },
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => settingsWindow.webContents,
+    }
+  );
 
   let quitting = false;
 

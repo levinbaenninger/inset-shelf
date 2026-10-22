@@ -1,6 +1,7 @@
 import type {
   DrawingContract,
   OverlayContract,
+  SettingsContract,
   ShelfContract,
   ToastContract,
 } from "@shared/contracts";
@@ -13,6 +14,7 @@ declare global {
     readonly insetOverlay?: Client<OverlayContract>;
     readonly insetToast?: Client<ToastContract>;
     readonly insetDrawing?: Client<DrawingContract>;
+    readonly insetSettings?: Client<SettingsContract>;
     readonly insetFiles?: { readonly pathFor: (file: File) => string };
   }
 }
@@ -40,3 +42,6 @@ export const drawingBridge = (): Client<DrawingContract> =>
 /** The path of a dropped or pasted file; empty when it has none, such as an image copied from a page. */
 export const filePath = (file: File): string =>
   window.insetFiles?.pathFor(file) ?? "";
+
+export const settingsBridge = (): Client<SettingsContract> =>
+  require(window.insetSettings, "settings window");

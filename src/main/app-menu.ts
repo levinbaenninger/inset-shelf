@@ -27,6 +27,7 @@ export interface AppMenuActions {
   readonly selectSection: (id: SectionId) => void;
   readonly setFloatOnTop: (on: boolean) => void;
   readonly turnOnKeys: () => void;
+  readonly openSettings: () => void;
   readonly openHelp: () => void;
 }
 
@@ -37,6 +38,12 @@ const appSubmenu = (
   actions: AppMenuActions
 ): MenuItemConstructorOptions[] => [
   { role: "about" },
+  SEPARATOR,
+  {
+    accelerator: "CommandOrControl+,",
+    click: actions.openSettings,
+    label: "Settings…",
+  },
   ...(state.keys === "missing"
     ? [SEPARATOR, { click: actions.turnOnKeys, label: "Turn On Double Shift…" }]
     : []),

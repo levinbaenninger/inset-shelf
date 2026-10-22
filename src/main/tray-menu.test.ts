@@ -24,6 +24,7 @@ describe(trayMenu, () => {
       "Show Inset Shelf",
       "Capture Area",
       "---",
+      "Settings…",
       "[about]",
       "[quit]",
     ]);
