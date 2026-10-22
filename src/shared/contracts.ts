@@ -61,6 +61,8 @@ export const shelfContract = defineContract({
     /** Copy and Undo inside a text field, done by the window's own edit commands. */
     nativeEdit: send(z.enum(["copy", "undo"])),
     openKeySettings: send(z.void()),
+    /** Opens the page an item was captured from; main checks it is http or https. */
+    openLink: send(ItemIdSchema),
     /** The "+" in the note field: ways to add something other than typing. */
     showAddMenu: send(MenuPoint),
     showItemMenu: send(MenuPoint.extend({ id: ItemIdSchema })),

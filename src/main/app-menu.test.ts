@@ -93,6 +93,8 @@ describe(appMenuTemplate, () => {
         ...doc,
         items: [
           {
+            color: null,
+            context: null,
             createdAt: "2026-10-22T10:00:00.000Z",
             done: true,
             id: ItemIdSchema.parse(uuid(10)),

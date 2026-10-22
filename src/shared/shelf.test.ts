@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyOp,
   groupItems,
+  parseShelfDocument,
   emptyShelf,
   ItemIdSchema,
   parseComposer,
@@ -182,6 +183,7 @@ describe(applyOp, () => {
         image,
         pin: { x: 480, y: 300 },
         source: "Built-in Retina Display",
+        context: null,
         type: "addImage",
         via: "pin",
       },
@@ -211,8 +213,9 @@ describe(applyOp, () => {
 
   it("ignores a blank selection and edits that target the wrong kind", () => {
     expect(
-      apply(start, [{ text: "   ", type: "addText", via: "selection" }]).doc
-        .items
+      apply(start, [
+        { context: null, text: "   ", type: "addText", via: "selection" },
+      ]).doc.items
     ).toHaveLength(0);
   });
 });
@@ -305,5 +308,74 @@ describe("moveItem", () => {
         e
       ).doc
     ).toStrictEqual(filled);
+  });
+});
+
+describe(parseShelfDocument, () => {
+  // Shaped like a shelf saved by the first build testers ran.
+  const firstFormat = {
+    activeSectionId: uuid(1),
+    items: [
+      {
+        createdAt: "2026-10-22T17:35:59.435Z",
+        done: false,
+        id: uuid(20),
+        kind: "text",
+        sectionId: uuid(1),
+        text: "Building this little habit app\n",
+        via: "selection",
+      },
+      {
+        createdAt: "2026-10-22T17:40:00.000Z",
+        done: true,
+        id: uuid(21),
+        image: {
+          file: `${uuid(50)}.png`,
+          heightPx: 600,
+          pixelsPerDip: 2,
+          widthPx: 960,
+        },
+        kind: "image",
+        note: "",
+        pin: { x: 480, y: 300 },
+        sectionId: uuid(1),
+        source: "Built-in Retina Display",
+        via: "pin",
+      },
+    ],
+    schemaVersion: 1,
+    sections: [{ id: uuid(1), name: "Inbox" }],
+  };
+
+  it("upgrades the first format and keeps every item as it was", () => {
+    const doc = parseShelfDocument(JSON.stringify(firstFormat));
+
+    expect(doc?.schemaVersion).toBe(2);
+    expect(doc?.items).toMatchObject([
+      {
+        color: null,
+        context: null,
+        id: uuid(20),
+        text: "Building this little habit app\n",
+      },
+      {
+        color: null,
+        context: null,
+        done: true,
+        id: uuid(21),
+        pin: { x: 480, y: 300 },
+      },
+    ]);
+    expect(ShelfDocSchema.safeParse(doc).success).toBeTruthy();
+  });
+
+  it("reads the current format as is and rejects anything else", () => {
+    const current = emptyShelf(INBOX);
+
+    expect(parseShelfDocument(JSON.stringify(current))).toStrictEqual(current);
+    expect(
+      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 3 }))
+    ).toBeNull();
+    expect(parseShelfDocument("{ not a shelf")).toBeNull();
   });
 });

@@ -24,7 +24,7 @@ import {
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import { ItemIdSchema, SectionIdSchema } from "@shared/shelf";
-import type { ImageItem, ItemId } from "@shared/shelf";
+import type { ImageItem, ItemContext, ItemId } from "@shared/shelf";
 import { AREA_ACCELERATOR, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
   app,
@@ -46,7 +46,7 @@ import type { Anchor, CapturedFrame, CaptureProblem } from "./capture";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
-import { frontWindowBounds } from "./front-window";
+import { frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import { createOverlayWindow } from "./overlay-window";
@@ -232,7 +232,9 @@ const start = async (): Promise<void> => {
 
   /** Docks to the window in front, read before the shelf takes any focus. */
   const showShelf = async (): Promise<void> => {
-    shelf.show(await frontWindowBounds());
+    const front = await frontWindow();
+
+    shelf.show(front.bounds);
   };
 
   const toggleShelf = async (): Promise<void> => {
@@ -258,13 +260,16 @@ const start = async (): Promise<void> => {
     readonly token: string;
     readonly anchor: Anchor;
     readonly captured: CapturedFrame;
+    readonly context: ItemContext | null;
     jpeg: Uint8Array | null;
   } | null = null;
 
   let shelfWasVisible = false;
 
   handleInsetProtocol({
-    attachmentFile: store.attachmentPath,
+    // Only images are shown in the shelf; other attached files are never served to a page.
+    attachmentFile: (file) =>
+      file.endsWith(".png") ? store.attachmentPath(file) : null,
     frame: (token) => {
       if (frame === null || frame.token !== token) {
         return null;
@@ -307,6 +312,8 @@ const start = async (): Promise<void> => {
     }
 
     const anchor = sampleAnchor();
+    // Read before Inset hides or shows anything, while the user's app is still in front.
+    const front = frontWindow();
 
     overlayOpen = true;
     shelfWasVisible = shelf.isVisible();
@@ -325,9 +332,13 @@ const start = async (): Promise<void> => {
     }
 
     controller.setStatus({ problem: null });
+
+    const sampled = await front;
+
     frame = {
       anchor,
       captured: result.frame,
+      context: sampled.context,
       jpeg: null,
       token: randomUUID().replaceAll("-", ""),
     };
@@ -350,7 +361,7 @@ const start = async (): Promise<void> => {
 
     closeOverlay();
 
-    const { anchor, captured } = current;
+    const { anchor, captured, context } = current;
 
     const displaySize = size<"screen">(
       anchor.display.bounds.width,
@@ -400,6 +411,7 @@ const start = async (): Promise<void> => {
         source: anchor.display.label,
         type: "addImage",
         via: commit.kind,
+        context,
       });
 
       if (id !== null) {
@@ -435,6 +447,9 @@ const start = async (): Promise<void> => {
     capturingSelection = true;
 
     try {
+      // Sampled alongside the copy, while the app with the selection is in front.
+      const front = frontWindow();
+
       const result = await captureSelection({
         clear: () => {
           clipboard.clear();
@@ -457,7 +472,10 @@ const start = async (): Promise<void> => {
         return;
       }
 
+      const { context } = await front;
+
       const id = controller.apply({
+        context,
         text: result.text,
         type: "addText",
         via: "selection",
@@ -541,6 +559,10 @@ const start = async (): Promise<void> => {
     try {
       if (item.kind === "text") {
         await clipboard.writeText(item.text);
+      } else if (item.kind === "file") {
+        await clipboard.writeText(
+          item.note.trim() === "" ? item.file.name : item.note
+        );
       } else {
         const file = store.attachmentPath(item.image.file);
         const exported = file === null ? null : exportImage(item, file);
@@ -671,6 +693,13 @@ const start = async (): Promise<void> => {
         }
       },
       openKeySettings,
+      openLink: (id) => {
+        const url = controller.item(id)?.context?.url;
+
+        if (url !== undefined && url !== null && /^https?:\/\//u.test(url)) {
+          void shell.openExternal(url);
+        }
+      },
       showAddMenu: ({ x, y }) => {
         shelf.popup(
           Menu.buildFromTemplate([
@@ -716,6 +745,7 @@ const start = async (): Promise<void> => {
           source: null,
           type: "addImage",
           via: "paste",
+          context: null,
         });
 
         if (id !== null) {

@@ -3,9 +3,10 @@ import { mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  attachmentOf,
   AttachmentFileSchema,
   emptyShelf,
-  ShelfDocSchema,
+  parseShelfDocument,
 } from "@shared/shelf";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
 
@@ -93,16 +94,6 @@ export interface ShelfStore {
   readonly attachmentPath: (file: string) => string | null;
 }
 
-const parseShelf = (raw: string): ShelfDoc | null => {
-  try {
-    const result = ShelfDocSchema.safeParse(JSON.parse(raw));
-
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
-};
-
 interface Loaded {
   readonly doc: ShelfDoc;
   readonly recovered: string | null;
@@ -123,7 +114,7 @@ const load = async (
     return { doc: emptyShelf(newSectionId()), recovered: null };
   }
 
-  const doc = parseShelf(raw);
+  const doc = parseShelfDocument(raw);
 
   if (doc !== null) {
     return { doc, recovered: null };
@@ -146,9 +137,11 @@ const collectGarbage = async (
   doc: ShelfDoc
 ): Promise<void> => {
   const used = new Set(
-    doc.items.flatMap((item) =>
-      item.kind === "image" ? [item.image.file] : []
-    )
+    doc.items.flatMap((item) => {
+      const file = attachmentOf(item);
+
+      return file === null ? [] : [file];
+    })
   );
 
   const names = await fs.list(attachments);
