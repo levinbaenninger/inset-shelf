@@ -386,6 +386,12 @@ const ImageBody = ({
   );
 };
 
+/** A colour tag shows as a coloured left edge, drawn by [data-tagged] in styles.css. */
+const tagAttributes = (item: ShelfItem) =>
+  item.color === null
+    ? {}
+    : { "data-tagged": true, style: { "--tag": COLOR_HEX[item.color] } };
+
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
 
@@ -399,10 +405,7 @@ export const ItemRow = (props: ItemRowProps) => {
           : "border-foreground/10 hover:border-foreground/20"
       )}
       data-item-id={item.id}
-      data-tagged={item.color === null ? undefined : true}
-      style={
-        item.color === null ? undefined : { "--tag": COLOR_HEX[item.color] }
-      }
+      {...tagAttributes(item)}
     >
       <Checkbox
         aria-label={item.done ? "Mark as not done" : "Mark as done"}
