@@ -1,5 +1,5 @@
 import type { ShelfStatus, ShelfView } from "@shared/contracts";
-import { applyOp } from "@shared/shelf";
+import { applyOp, attachmentOf } from "@shared/shelf";
 import type {
   ItemId,
   MainOp,
@@ -83,9 +83,11 @@ export const createShelfController = (
     }
 
     await Promise.all(
-      deletable.flatMap((item) =>
-        item.kind === "image" ? [deps.deleteAttachment(item.image.file)] : []
-      )
+      deletable.flatMap((item) => {
+        const file = attachmentOf(item);
+
+        return file === null ? [] : [deps.deleteAttachment(file)];
+      })
     );
   };
 

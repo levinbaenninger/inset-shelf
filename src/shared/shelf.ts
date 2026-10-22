@@ -3,8 +3,12 @@ import { z } from "zod";
 const LOWER_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
-/** An attachment is always a PNG named after a UUID the app generated. */
+/** Attachments are named after a UUID the app generated, keeping a short lower-case extension. */
 const ATTACHMENT_FILE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,8}$/u;
+
+/** Captures and pasted images are always stored as PNG. */
+const IMAGE_FILE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/u;
 
 const SECTION_HEADING = /^#\s+(?<name>\S.*)$/u;
@@ -33,8 +37,10 @@ export const PinSchema = z.object({ x: Pixel, y: Pixel });
 
 export type Pin = z.output<typeof PinSchema>;
 
+export const ImageFileSchema = z.string().regex(IMAGE_FILE);
+
 export const ImageSchema = z.object({
-  file: AttachmentFileSchema,
+  file: ImageFileSchema,
   heightPx: Extent,
   pixelsPerDip: z.number().positive().max(8),
   widthPx: Extent,
@@ -42,34 +48,86 @@ export const ImageSchema = z.object({
 
 export type ShelfImage = z.output<typeof ImageSchema>;
 
-const ItemBase = {
+const ItemBaseV1 = {
   createdAt: z.iso.datetime(),
   done: z.boolean(),
   id: ItemIdSchema,
   sectionId: SectionIdSchema,
 };
 
-export const TextItemSchema = z.object({
-  ...ItemBase,
+/** Where an item came from: the app in front, its window title and, for a browser, the page. */
+export const ContextSchema = z.object({
+  app: z.string().max(200).nullable(),
+  title: z.string().max(500).nullable(),
+  url: z
+    .url({ protocol: /^https?$/u })
+    .max(2000)
+    .nullable(),
+});
+
+export type ItemContext = z.output<typeof ContextSchema>;
+
+export const COLORS = [
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "blue",
+  "purple",
+  "gray",
+] as const;
+
+export const ColorSchema = z.enum(COLORS);
+
+export type ItemColor = z.output<typeof ColorSchema>;
+
+const ItemBase = {
+  ...ItemBaseV1,
+  color: ColorSchema.nullable(),
+  context: ContextSchema.nullable(),
+};
+
+const TextFields = {
   kind: z.literal("text"),
   text: z.string().min(1).max(TEXT_MAX),
   via: z.enum(["typed", "selection"]),
-});
+};
 
-export const ImageItemSchema = z.object({
-  ...ItemBase,
+const ImageFields = {
   image: ImageSchema,
   kind: z.literal("image"),
   note: z.string().max(TEXT_MAX),
   /** Relative to the image; null when the area was dragged without a pin. */
   pin: PinSchema.nullable(),
+  /** The display an area or pin was captured on. */
   source: z.string().max(200).nullable(),
-  via: z.enum(["area", "pin", "paste"]),
+  via: z.enum(["area", "pin", "paste", "drawing"]),
+};
+
+export const StoredFileSchema = z.object({
+  bytes: z.number().int().min(0),
+  /** The name the file had, used again when it is dragged or copied out. */
+  name: z.string().min(1).max(255),
+  stored: AttachmentFileSchema,
+});
+
+export type StoredFile = z.output<typeof StoredFileSchema>;
+
+export const TextItemSchema = z.object({ ...ItemBase, ...TextFields });
+
+export const ImageItemSchema = z.object({ ...ItemBase, ...ImageFields });
+
+export const FileItemSchema = z.object({
+  ...ItemBase,
+  file: StoredFileSchema,
+  kind: z.literal("file"),
+  note: z.string().max(TEXT_MAX),
 });
 
 export const ItemSchema = z.discriminatedUnion("kind", [
   TextItemSchema,
   ImageItemSchema,
+  FileItemSchema,
 ]);
 
 export type ShelfItem = z.output<typeof ItemSchema>;
@@ -78,6 +136,8 @@ export type TextItem = z.output<typeof TextItemSchema>;
 
 export type ImageItem = z.output<typeof ImageItemSchema>;
 
+export type FileItem = z.output<typeof FileItemSchema>;
+
 export const SectionSchema = z.object({
   id: SectionIdSchema,
   name: z.string().min(1).max(SECTION_NAME_MAX),
@@ -85,29 +145,109 @@ export const SectionSchema = z.object({
 
 export type Section = z.output<typeof SectionSchema>;
 
+interface ShelfReferences {
+  readonly activeSectionId: SectionId;
+  readonly sections: readonly { readonly id: SectionId }[];
+  readonly items: readonly { readonly sectionId: SectionId }[];
+}
+
+const activeExists = (doc: ShelfReferences): boolean =>
+  doc.sections.some((section) => section.id === doc.activeSectionId);
+
+const itemsBelong = (doc: ShelfReferences): boolean => {
+  const ids = new Set(doc.sections.map((section) => section.id));
+
+  return doc.items.every((item) => ids.has(item.sectionId));
+};
+
 export const ShelfDocSchema = z
   .object({
     activeSectionId: SectionIdSchema,
     items: z.array(ItemSchema),
+    schemaVersion: z.literal(2),
+    sections: z.array(SectionSchema).min(1),
+  })
+  .refine(activeExists, "The active section must exist.")
+  .refine(itemsBelong, "Every item must belong to a section.");
+
+export type ShelfDoc = z.output<typeof ShelfDocSchema>;
+
+/** The first shelf format: no source context, colours or files. */
+const ShelfDocV1Schema = z
+  .object({
+    activeSectionId: SectionIdSchema,
+    items: z.array(
+      z.discriminatedUnion("kind", [
+        z.object({ ...ItemBaseV1, ...TextFields }),
+        z.object({
+          ...ItemBaseV1,
+          ...ImageFields,
+          via: z.enum(["area", "pin", "paste"]),
+        }),
+      ])
+    ),
     schemaVersion: z.literal(1),
     sections: z.array(SectionSchema).min(1),
   })
-  .refine(
-    (doc) => doc.sections.some((section) => section.id === doc.activeSectionId),
-    "The active section must exist."
-  )
-  .refine((doc) => {
-    const ids = new Set(doc.sections.map((section) => section.id));
+  .refine(activeExists)
+  .refine(itemsBelong);
 
-    return doc.items.every((item) => ids.has(item.sectionId));
-  }, "Every item must belong to a section.");
+/** Text that holds valid JSON, parsed. */
+const JsonTextSchema = z
+  .string()
+  .transform((text, ctx): z.core.util.JSONType => {
+    try {
+      return z.json().parse(JSON.parse(text));
+    } catch {
+      ctx.addIssue({ code: "custom", message: "not valid JSON" });
 
-export type ShelfDoc = z.output<typeof ShelfDocSchema>;
+      return z.NEVER;
+    }
+  });
+
+/** Reads a stored shelf in any known format, upgrading older ones; null when it is neither. */
+export const parseShelfDocument = (raw: string): ShelfDoc | null => {
+  const json = JsonTextSchema.safeParse(raw);
+
+  if (!json.success) {
+    return null;
+  }
+
+  const { data } = json;
+  const current = ShelfDocSchema.safeParse(data);
+
+  if (current.success) {
+    return current.data;
+  }
+
+  const first = ShelfDocV1Schema.safeParse(data);
+
+  return first.success
+    ? {
+        ...first.data,
+        items: first.data.items.map((item) => ({
+          ...item,
+          color: null,
+          context: null,
+        })),
+        schemaVersion: 2,
+      }
+    : null;
+};
+
+/** The stored file an item keeps next to the shelf, if any. */
+export const attachmentOf = (item: ShelfItem): string | null => {
+  if (item.kind === "image") {
+    return item.image.file;
+  }
+
+  return item.kind === "file" ? item.file.stored : null;
+};
 
 export const emptyShelf = (sectionId: SectionId): ShelfDoc => ({
   activeSectionId: sectionId,
   items: [],
-  schemaVersion: 1,
+  schemaVersion: 2,
   sections: [{ id: sectionId, name: DEFAULT_SECTION_NAME }],
 });
 
@@ -164,6 +304,7 @@ export type MainOp =
       readonly type: "addText";
       readonly text: string;
       readonly via: TextItem["via"];
+      readonly context: ItemContext | null;
     }
   | {
       readonly type: "addImage";
@@ -171,6 +312,12 @@ export type MainOp =
       readonly pin: Pin | null;
       readonly source: string | null;
       readonly via: ImageItem["via"];
+      readonly context: ItemContext | null;
+    }
+  | {
+      readonly type: "addFile";
+      readonly file: StoredFile;
+      readonly context: ItemContext | null;
     };
 
 export interface OpEnv {
@@ -230,6 +377,8 @@ const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
 
   if (entry.kind === "note") {
     return addItem(doc, {
+      color: null,
+      context: null,
       createdAt: env.now().toISOString(),
       done: false,
       id: env.newItemId(),
@@ -307,6 +456,8 @@ export const applyOp = (
       return op.text.trim() === ""
         ? unchanged(doc)
         : addItem(doc, {
+            color: null,
+            context: op.context,
             createdAt: env.now().toISOString(),
             done: false,
             id: env.newItemId(),
@@ -319,6 +470,8 @@ export const applyOp = (
 
     case "addImage": {
       return addItem(doc, {
+        color: null,
+        context: op.context,
         createdAt: env.now().toISOString(),
         done: false,
         id: env.newItemId(),
@@ -329,6 +482,20 @@ export const applyOp = (
         sectionId: doc.activeSectionId,
         source: op.source,
         via: op.via,
+      });
+    }
+
+    case "addFile": {
+      return addItem(doc, {
+        color: null,
+        context: op.context,
+        createdAt: env.now().toISOString(),
+        done: false,
+        file: op.file,
+        id: env.newItemId(),
+        kind: "file",
+        note: "",
+        sectionId: doc.activeSectionId,
       });
     }
 
@@ -427,8 +594,22 @@ export interface ItemGroup {
 
 const SEARCH_TERM = /\s+/u;
 
+const KIND_TEXT: Record<ShelfItem["kind"], (item: ShelfItem) => string> = {
+  file: (item) =>
+    item.kind === "file" ? `${item.file.name} ${item.note}` : "",
+  image: (item) =>
+    item.kind === "image" ? `${item.note} ${item.source ?? ""}` : "",
+  text: (item) => (item.kind === "text" ? item.text : ""),
+};
+
+/** Everything a search looks at: the item's words and where it came from. */
 const searchableText = (item: ShelfItem): string =>
-  item.kind === "text" ? item.text : `${item.note} ${item.source ?? ""}`;
+  [
+    KIND_TEXT[item.kind](item),
+    item.context?.app ?? "",
+    item.context?.title ?? "",
+    item.context?.url ?? "",
+  ].join(" ");
 
 /**
  * The shelf as one list grouped by section, in section order. Without a query

@@ -1,8 +1,19 @@
-import { MoreHorizontalIcon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  File01Icon,
+  Link01Icon,
+  MoreHorizontalIcon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { insetUrl } from "@shared/inset-url";
 import { TEXT_MAX } from "@shared/shelf";
-import type { ImageItem, ShelfItem, TextItem } from "@shared/shelf";
+import type {
+  FileItem,
+  ImageItem,
+  ItemContext,
+  ShelfItem,
+  TextItem,
+} from "@shared/shelf";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
@@ -19,7 +30,83 @@ import { PinMarker } from "@/shared/pin-marker";
 
 import { whenText } from "./format";
 
+/** A right-click on any part of an item opens its native menu. */
+const contextMenuAt =
+  (open: RowHandlers["onContextMenu"]) =>
+  (event: MouseEvent): void => {
+    event.preventDefault();
+    open({ x: event.clientX, y: event.clientY });
+  };
+
+/** Where an item came from, in one quiet line; a page address opens in the browser. */
+const SourceLine = ({
+  context,
+  onOpenLink,
+}: {
+  readonly context: ItemContext;
+  readonly onOpenLink: () => void;
+}) => {
+  const label = [context.app, context.title].filter(Boolean).join(" · ");
+
+  if (context.url === null) {
+    return label === "" ? null : (
+      <p className="text-muted-foreground truncate text-xs">{label}</p>
+    );
+  }
+
+  return (
+    <button
+      className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
+      onClick={onOpenLink}
+      title={context.url}
+      type="button"
+    >
+      <HugeiconsIcon className="shrink-0" icon={Link01Icon} size={12} />
+      <span className="truncate">{label === "" ? context.url : label}</span>
+    </button>
+  );
+};
+
+/** An attached file: its name and size; it drags out like an image. */
+const FileBody = ({
+  item,
+  onContextMenu,
+  onDragImage,
+  onSelect,
+}: {
+  readonly item: FileItem;
+} & Pick<RowHandlers, "onContextMenu" | "onDragImage" | "onSelect">) => (
+  <button
+    className="focus-visible:ring-ring/50 flex min-w-0 cursor-grab items-center gap-2 rounded-sm text-left text-sm outline-none focus-visible:ring-3 active:cursor-grabbing"
+    draggable
+    onClick={onSelect}
+    onContextMenu={contextMenuAt(onContextMenu)}
+    onDragStart={(event) => {
+      event.preventDefault();
+      onDragImage();
+    }}
+    title="Drag into another app"
+    type="button"
+  >
+    <HugeiconsIcon
+      className="text-muted-foreground shrink-0"
+      icon={File01Icon}
+      size={16}
+    />
+    <span
+      className={cn(
+        "truncate",
+        item.done && "text-muted-foreground line-through"
+      )}
+    >
+      {item.note === "" ? item.file.name : item.note}
+    </span>
+  </button>
+);
+
 export interface RowHandlers {
+  /** Opens the page an item was captured from. */
+  readonly onOpenLink: () => void;
   readonly onSelect: () => void;
   /** A right-click opens the native item menu at that point. */
   readonly onContextMenu: (point: {
@@ -45,22 +132,23 @@ export interface ItemRowProps extends RowHandlers {
 /** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
 const PIN_DIAMETER_DIP = 28;
 
-/** A right-click on any part of an item opens its native menu. */
-const contextMenuAt =
-  (open: RowHandlers["onContextMenu"]) =>
-  (event: MouseEvent): void => {
-    event.preventDefault();
-    open({ x: event.clientX, y: event.clientY });
-  };
-
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
 
 const KIND_LABEL = {
   area: "Screen area",
+  drawing: "Drawing",
   paste: "Pasted image",
   pin: "Pinned spot",
 } as const;
+
+const FILE_SIZE = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 1,
+  notation: "compact",
+  style: "unit",
+  unit: "byte",
+  unitDisplay: "narrow",
+});
 
 const metaText = (item: ShelfItem): string => {
   const when = whenText(item.createdAt);
@@ -69,11 +157,13 @@ const metaText = (item: ShelfItem): string => {
     return item.via === "selection" ? `${when} · from a selection` : when;
   }
 
-  const what = KIND_LABEL[item.via];
+  if (item.kind === "file") {
+    return `${when} · ${FILE_SIZE.format(item.file.bytes)}`;
+  }
 
   const where = item.source === null ? "" : ` · ${item.source}`;
 
-  return `${when} · ${what}${where}`;
+  return `${when} · ${KIND_LABEL[item.via]}${where}`;
 };
 
 /** Edits a text item in place; ⌘↩ or Return saves, ⇧↩ adds a line, Escape keeps the old text. */
@@ -350,6 +440,17 @@ export const ItemRow = (props: ItemRowProps) => {
             selected={selected}
           />
         ) : null}
+        {item.kind === "file" ? (
+          <FileBody
+            item={item}
+            onContextMenu={props.onContextMenu}
+            onDragImage={props.onDragImage}
+            onSelect={props.onSelect}
+          />
+        ) : null}
+        {item.context === null ? null : (
+          <SourceLine context={item.context} onOpenLink={props.onOpenLink} />
+        )}
         {selected ? (
           <p className="text-muted-foreground text-xs">{metaText(item)}</p>
         ) : null}

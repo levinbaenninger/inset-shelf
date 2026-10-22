@@ -1,4 +1,4 @@
-import { AttachmentFileSchema } from "./shelf";
+import { ImageFileSchema } from "./shelf";
 
 export const INSET_SCHEME = "inset";
 export const APP_ORIGIN = "inset://app";
@@ -62,7 +62,7 @@ export const parseInsetUrl = (raw: string): InsetRequest | null => {
   }
 
   if (url.host === "attachment") {
-    return AttachmentFileSchema.safeParse(name).success
+    return ImageFileSchema.safeParse(name).success
       ? { file: name, kind: "attachment" }
       : null;
   }

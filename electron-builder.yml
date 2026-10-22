@@ -29,6 +29,7 @@ mac:
   hardenedRuntime: false
   extendInfo:
     NSAccessibilityUsageDescription: Inset Shelf reads your text selection when you tap Shift twice.
+    NSAppleEventsUsageDescription: Inset Shelf saves the address of the page you capture from, so you can open it again.
 dmg:
   writeUpdateInfo: false
 win:

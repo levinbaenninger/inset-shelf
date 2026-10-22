@@ -359,6 +359,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   onEditNote={(note) => {
                     apply({ id: item.id, note, type: "editNote" });
                   }}
+                  onOpenLink={() => {
+                    api.openLink(item.id);
+                  }}
                   onEditText={(text) => {
                     apply({ id: item.id, text, type: "editText" });
                   }}

@@ -570,6 +570,16 @@ const checkSelection = async (): Promise<void> => {
     added?.via === "selection" &&
       items().some((item) => item.kind === "text" && item.text === text)
   );
+
+  const saved = items().find(
+    (item) => item.kind === "text" && item.text === text
+  );
+
+  record(
+    "the selection keeps the app and window it came from",
+    saved?.context?.app === "source" && saved.context.title === "Source",
+    JSON.stringify(saved?.context ?? null)
+  );
   record(
     "the clipboard is put back",
     pbpaste() === CLIPBOARD_SENTINEL,
@@ -706,11 +716,22 @@ const checkArea = async (): Promise<void> => {
   );
 };
 
-/** Selects the typed note, then copies it with Edit › Copy from the menu bar. */
+/** Finds the typed note with search, selects it, then copies it with Edit › Copy from the menu bar. */
 const checkCopy = async (): Promise<void> => {
   enableWebAccessibility();
   showShelfFromTray();
   pbcopy(CLIPBOARD_SENTINEL);
+  await clickElement("AXTextField", "Search the shelf");
+  await delay(300);
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "step four"');
+  }, ["source", processName]);
+  await delay(500);
+
+  const found = await windowShows("Ask about step four");
+  const others = windowText().includes("Progress indicator");
+
+  record("search narrows the list to matching items", found && !others);
 
   const mark = events().length;
   const selected = await clickElement("AXButton", "Ask about step four");

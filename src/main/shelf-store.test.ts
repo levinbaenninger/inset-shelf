@@ -33,6 +33,8 @@ const withNote = (doc: ShelfDoc, text: string): ShelfDoc => ({
   items: [
     ...doc.items,
     {
+      color: null,
+      context: null,
       createdAt: "2026-10-22T10:00:00.000Z",
       done: false,
       id: ItemIdSchema.parse(

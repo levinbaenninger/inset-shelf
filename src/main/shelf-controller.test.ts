@@ -68,6 +68,7 @@ describe(createShelfController, () => {
       image,
       pin: null,
       source: null,
+      context: null,
       type: "addImage",
       via: "area",
     });
@@ -97,6 +98,7 @@ describe(createShelfController, () => {
       image,
       pin: null,
       source: null,
+      context: null,
       type: "addImage",
       via: "area",
     });
