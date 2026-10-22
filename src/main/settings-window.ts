@@ -9,7 +9,7 @@ export interface SettingsWindow {
   readonly open: () => void;
 }
 
-/** A small, fixed-size settings window, like a Mac app's Settings. */
+/** A small, fixed-size settings window, like a Mac app's Settings, kept above the shelf. */
 export const createSettingsWindow = (options: {
   readonly preload: string;
   readonly url: string;
@@ -17,17 +17,20 @@ export const createSettingsWindow = (options: {
   const window = new BrowserWindow({
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
     fullscreenable: false,
-    height: 300,
+    height: 330,
     maximizable: false,
     minimizable: false,
     resizable: false,
     show: false,
     title: "Settings",
+    useContentSize: true,
     webPreferences: secureWebPreferences(options.preload),
     width: 460,
   });
 
   harden(window.webContents, "settings");
+  // One level above the floating shelf, which would otherwise cover it.
+  window.setAlwaysOnTop(true, "floating", 1);
 
   window.on("close", (event) => {
     event.preventDefault();

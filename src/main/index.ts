@@ -45,6 +45,7 @@ import type {
 import { AREA_ACCELERATOR, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
   app,
+  BrowserWindow,
   clipboard,
   ClipboardItem,
   dialog,
@@ -1129,6 +1130,7 @@ const start = async (): Promise<void> => {
             find: () => {
               void commandShelf({ kind: "find" });
             },
+            newDrawing: drawing.open,
             newNote: () => {
               void commandShelf({ kind: "newNote" });
             },
@@ -1147,9 +1149,20 @@ const start = async (): Promise<void> => {
               refreshAppMenu();
             },
             openSettings: settingsWindow.open,
+            redo: () => {
+              if (drawing.isFocused()) {
+                drawingServer.emit("edit", "redo");
+              } else {
+                BrowserWindow.getFocusedWindow()?.webContents.redo();
+              }
+            },
             turnOnKeys: openKeySettings,
             undo: () => {
-              sendCommand?.({ kind: "undo" });
+              if (drawing.isFocused()) {
+                drawingServer.emit("edit", "undo");
+              } else {
+                sendCommand?.({ kind: "undo" });
+              }
             },
           }
         )
@@ -1185,14 +1198,6 @@ const start = async (): Promise<void> => {
     e2eLog("shelfHidden");
     refreshTray();
   });
-
-  await Promise.all([
-    shelf.load(),
-    overlay.load(),
-    toast.load(),
-    drawing.load(),
-    settingsWindow.load(),
-  ]);
 
   const shortcutsRegistered =
     globalShortcut.register(TOGGLE_ACCELERATOR, () => {
@@ -1300,6 +1305,14 @@ const start = async (): Promise<void> => {
       target: () => settingsWindow.webContents,
     }
   );
+
+  await Promise.all([
+    shelf.load(),
+    overlay.load(),
+    toast.load(),
+    drawing.load(),
+    settingsWindow.load(),
+  ]);
 
   let quitting = false;
 

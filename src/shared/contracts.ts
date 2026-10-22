@@ -137,7 +137,11 @@ const DRAWING_MAX_BYTES = 30 * 1024 * 1024;
 
 /** The drawing window: a blank canvas that saves one PNG to the shelf. */
 export const drawingContract = defineContract({
-  events: { reset: event<null>() },
+  events: {
+    /** Undo and Redo from the menu bar, which takes ⌘Z before the page sees it. */
+    edit: event<"undo" | "redo">(),
+    reset: event<null>(),
+  },
   global: "insetDrawing",
   methods: {
     cancel: send(z.void()),
