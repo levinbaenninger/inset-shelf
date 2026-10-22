@@ -19,7 +19,7 @@ export interface AppMenuActions {
   readonly newSection: () => void;
   readonly newDrawing: () => void;
   readonly captureArea: () => void;
-  readonly closeShelf: () => void;
+  readonly closeWindow: () => void;
   readonly undo: () => void;
   readonly redo: () => void;
   readonly copy: () => void;
@@ -112,7 +112,7 @@ export const appMenuTemplate = (
       SEPARATOR,
       {
         accelerator: "CommandOrControl+W",
-        click: actions.closeShelf,
+        click: actions.closeWindow,
         label: "Close",
       },
     ],

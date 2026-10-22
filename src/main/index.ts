@@ -1112,7 +1112,15 @@ const start = async (): Promise<void> => {
             clearDone: () => {
               controller.apply({ type: "clearDone" });
             },
-            closeShelf: shelf.hide,
+            closeWindow: () => {
+              if (drawing.isFocused()) {
+                drawing.close();
+              } else if (settingsWindow.isFocused()) {
+                settingsWindow.close();
+              } else {
+                shelf.hide();
+              }
+            },
             copy: () => {
               sendCommand?.({ kind: "copy" });
             },
