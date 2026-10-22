@@ -12,6 +12,7 @@ export interface DrawingWindow {
   /** Opens a blank canvas in the middle of the display under the pointer. */
   readonly open: () => void;
   readonly close: () => void;
+  readonly isFocused: () => boolean;
   readonly onReset: (listener: () => void) => void;
   readonly allowClose: () => void;
 }
@@ -34,12 +35,15 @@ export const createDrawingWindow = (options: {
     minWidth: 480,
     show: false,
     title: "New Drawing",
+    // The page's own header holds the traffic lights, centred in its 48 points.
+    titleBarStyle: "hidden",
+    trafficLightPosition: { x: 18, y: 18 },
     webPreferences: secureWebPreferences(options.preload),
     width: WIDTH,
   });
 
   // Above the floating shelf, so the canvas is never behind it.
-  window.setAlwaysOnTop(true, "floating");
+  window.setAlwaysOnTop(true, "floating", 1);
   harden(window.webContents, "drawing");
 
   window.on("close", (event) => {
@@ -56,6 +60,7 @@ export const createDrawingWindow = (options: {
     close: () => {
       window.hide();
     },
+    isFocused: () => window.isVisible() && window.isFocused(),
     load: async () => {
       await window.loadURL(options.url);
     },
