@@ -17,9 +17,11 @@ export interface AppMenuState {
 export interface AppMenuActions {
   readonly newNote: () => void;
   readonly newSection: () => void;
+  readonly newDrawing: () => void;
   readonly captureArea: () => void;
   readonly closeShelf: () => void;
   readonly undo: () => void;
+  readonly redo: () => void;
   readonly copy: () => void;
   readonly copyAsList: () => void;
   readonly find: () => void;
@@ -95,6 +97,11 @@ export const appMenuTemplate = (
         click: actions.newSection,
         label: "New Section…",
       },
+      {
+        accelerator: "Alt+CommandOrControl+N",
+        click: actions.newDrawing,
+        label: "New Drawing…",
+      },
       SEPARATOR,
       {
         accelerator: AREA_ACCELERATOR,
@@ -114,7 +121,11 @@ export const appMenuTemplate = (
     label: "Edit",
     submenu: [
       { accelerator: "CommandOrControl+Z", click: actions.undo, label: "Undo" },
-      { role: "redo" },
+      {
+        accelerator: "Shift+CommandOrControl+Z",
+        click: actions.redo,
+        label: "Redo",
+      },
       SEPARATOR,
       { role: "cut" },
       { accelerator: "CommandOrControl+C", click: actions.copy, label: "Copy" },
