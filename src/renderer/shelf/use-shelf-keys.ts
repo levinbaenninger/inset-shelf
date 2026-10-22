@@ -1,14 +1,9 @@
 import { useEffect, useEffectEvent } from "react";
 
-import { isMac } from "@/shared/platform";
-
-/** What the shelf does for each key; every action is optional, so a missing selection simply skips it. */
+/** Plain keys for the item list; Copy, Undo and the rest come from the app's menu bar. */
 export interface ShelfKeyActions {
-  readonly toggleMenu: () => void;
-  readonly undo: (() => void) | null;
   readonly move: (offset: 1 | -1) => void;
   readonly hide: () => void;
-  readonly copy: (() => void) | null;
   readonly toggleDone: (() => void) | null;
   readonly edit: (() => void) | null;
   readonly remove: (() => void) | null;
@@ -16,39 +11,20 @@ export interface ShelfKeyActions {
   readonly startNote: () => void;
 }
 
-const isTextField = (target: EventTarget | null): boolean =>
+export const isTextField = (target: EventTarget | null): boolean =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLInputElement ||
-  (target instanceof HTMLElement &&
-    (target.isContentEditable || target.closest('[role="menu"]') !== null));
+  (target instanceof HTMLElement && target.isContentEditable);
 
 const isPrintable = (event: KeyboardEvent): boolean =>
   event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
 
-/** Keys with a command modifier work everywhere; plain keys only outside text fields. */
 const actionFor = (
   event: KeyboardEvent,
   actions: ShelfKeyActions
 ): (() => void) | null => {
-  const command = isMac ? event.metaKey : event.ctrlKey;
-
-  if (command && event.key === "k") {
-    return actions.toggleMenu;
-  }
-
-  if (isTextField(event.target)) {
+  if (isTextField(event.target) || event.metaKey || event.ctrlKey) {
     return null;
-  }
-
-  if (command) {
-    // A text selection inside an item keeps the normal copy.
-    const selecting = window.getSelection()?.isCollapsed === false;
-
-    if (event.key === "z") {
-      return actions.undo;
-    }
-
-    return event.key === "c" && !selecting ? actions.copy : null;
   }
 
   const plain = new Map<string, (() => void) | null>([

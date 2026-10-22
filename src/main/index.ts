@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -12,6 +11,7 @@ import type {
   ActionResult,
   OverlayCommit,
   Permission,
+  ShelfCommand,
 } from "@shared/contracts";
 import {
   areaToImage,
@@ -38,19 +38,22 @@ import {
   shell,
   systemPreferences,
 } from "electron";
-import { z } from "zod";
 
+import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { captureDisplay, sampleAnchor } from "./capture";
 import type { Anchor, CapturedFrame, CaptureProblem } from "./capture";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
+import { frontWindowBounds } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import { createOverlayWindow } from "./overlay-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import { captureSelection } from "./selection";
 import { createShelfController } from "./shelf-controller";
+import { itemMenu, sectionMenu } from "./shelf-menus";
+import type { MenuChoice, MenuEntry } from "./shelf-menus";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
 import { createShelfWindow } from "./shelf-window";
 import { createToastWindow } from "./toast-window";
@@ -108,42 +111,6 @@ const trayIconPath = (): string => {
   return path.join(base, isMac ? "trayTemplate.png" : "tray.png");
 };
 
-const BoundsSchema = z.object({
-  height: z.number().int().min(1).max(100_000),
-  width: z.number().int().min(1).max(100_000),
-  x: z.number().int().min(-100_000).max(100_000),
-  y: z.number().int().min(-100_000).max(100_000),
-});
-
-/** The shelf's last place, kept across launches; a missing or broken file just means the default place. */
-const windowState = (file: string) => ({
-  read: (): Rect<"screen"> | null => {
-    try {
-      const parsed = BoundsSchema.safeParse(
-        JSON.parse(readFileSync(file, "utf-8"))
-      );
-
-      return parsed.success
-        ? rect(
-            parsed.data.x,
-            parsed.data.y,
-            parsed.data.width,
-            parsed.data.height
-          )
-        : null;
-    } catch {
-      return null;
-    }
-  },
-  write: (bounds: Rect<"screen">): void => {
-    try {
-      writeFileSync(file, JSON.stringify(bounds));
-    } catch {
-      // The place is a convenience; losing it is harmless.
-    }
-  },
-});
-
 const problemText = (problem: CaptureProblem): string => {
   if (problem.kind === "screenPermission") {
     return problem.status === "granted-but-empty"
@@ -198,20 +165,11 @@ const restoreClipboard = async (saved: ClipboardSnapshot): Promise<void> => {
 const start = async (): Promise<void> => {
   await app.whenReady();
 
-  if (isMac) {
-    app.dock?.hide();
-  }
-
-  // macOS routes Cmd+C/V/X/Z/A through the application menu; Windows needs none.
-  Menu.setApplicationMenu(
-    isMac
-      ? Menu.buildFromTemplate([
-          { role: "appMenu" },
-          { role: "editMenu" },
-          { role: "windowMenu" },
-        ])
-      : null
-  );
+  app.setAboutPanelOptions({
+    applicationName: PRODUCT_NAME,
+    applicationVersion: app.getVersion(),
+    credits: "A prototype for the Inset capture experiments.",
+  });
   secureSession();
 
   const dataDir = app.getPath("userData");
@@ -258,7 +216,6 @@ const start = async (): Promise<void> => {
 
   staging.clear();
 
-  const windowFile = windowState(path.join(dataDir, "window.json"));
   let overlayOpen = false;
   let tray: ShelfTray | null = null;
 
@@ -269,10 +226,21 @@ const start = async (): Promise<void> => {
   const shelf = createShelfWindow({
     otherWindowVisible: () => overlayOpen,
     preload: preloadPath("shelf"),
-    remember: windowFile.write,
-    remembered: windowFile.read(),
     url: pageUrl("shelf"),
   });
+
+  /** Docks to the window in front, read before the shelf takes any focus. */
+  const showShelf = async (): Promise<void> => {
+    shelf.show(await frontWindowBounds());
+  };
+
+  const toggleShelf = async (): Promise<void> => {
+    if (shelf.isFocused()) {
+      shelf.hide();
+    } else {
+      await showShelf();
+    }
+  };
 
   const overlay = createOverlayWindow({
     preload: preloadPath("overlay"),
@@ -310,7 +278,7 @@ const start = async (): Promise<void> => {
 
   const showItem = (id: ItemId): void => {
     controller.focus(id);
-    shelf.show();
+    void showShelf();
   };
 
   const closeOverlay = (): void => {
@@ -328,7 +296,7 @@ const start = async (): Promise<void> => {
     closeOverlay();
 
     if (shelfWasVisible) {
-      shelf.show();
+      void showShelf();
     }
   };
 
@@ -350,7 +318,7 @@ const start = async (): Promise<void> => {
     if (!result.ok) {
       overlayOpen = false;
       controller.setStatus({ problem: problemText(result.problem) });
-      shelf.show();
+      void showShelf();
 
       return;
     }
@@ -441,7 +409,7 @@ const start = async (): Promise<void> => {
       controller.setStatus({
         problem: `The area couldn't be saved: ${errorMessage(error)}`,
       });
-      shelf.show();
+      void showShelf();
     }
   };
 
@@ -458,7 +426,7 @@ const start = async (): Promise<void> => {
 
     // Inside the shelf, double Shift only hides it: copying would capture Inset's own text.
     if (!selectionCapture || shelf.isFocused()) {
-      shelf.toggle();
+      void toggleShelf();
 
       return;
     }
@@ -483,7 +451,7 @@ const start = async (): Promise<void> => {
       });
 
       if (result.kind === "none") {
-        shelf.toggle();
+        void toggleShelf();
 
         return;
       }
@@ -600,6 +568,67 @@ const start = async (): Promise<void> => {
     }
   };
 
+  // Set once the shelf's IPC server exists; menus built before then only reach it later.
+  let sendCommand: ((command: ShelfCommand) => void) | null = null;
+
+  const runChoice = (choice: MenuChoice): void => {
+    switch (choice.kind) {
+      case "selectSection": {
+        controller.apply({ id: choice.id, type: "selectSection" });
+        break;
+      }
+
+      case "clearDone": {
+        controller.apply({ type: "clearDone" });
+        break;
+      }
+
+      case "toggleDone": {
+        controller.apply({ id: choice.id, type: "toggleDone" });
+        break;
+      }
+
+      case "copy": {
+        void copyItem(choice.id);
+        break;
+      }
+
+      case "edit":
+      case "remove":
+      case "newSection": {
+        // Editing, deleting with undo and starting a section live in the shelf window.
+        sendCommand?.(choice);
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  };
+
+  const nativeMenu = (entries: readonly MenuEntry[]): Menu =>
+    Menu.buildFromTemplate(
+      entries.map((entry) =>
+        entry.kind === "separator"
+          ? { type: "separator" as const }
+          : {
+              accelerator: entry.accelerator,
+              checked: entry.checked,
+              click: () => {
+                runChoice(entry.choice);
+              },
+              enabled: entry.enabled,
+              label: entry.label,
+              registerAccelerator: false,
+              type:
+                entry.checked === undefined
+                  ? ("normal" as const)
+                  : ("checkbox" as const),
+            }
+      )
+    );
+
   const shelfServer = serveContract(
     shelfContract,
     {
@@ -621,7 +650,24 @@ const start = async (): Promise<void> => {
       hide: () => {
         shelf.hide();
       },
+      nativeEdit: (action) => {
+        if (action === "copy") {
+          shelf.webContents.copy();
+        } else {
+          shelf.webContents.undo();
+        }
+      },
       openKeySettings,
+      showItemMenu: ({ id, x, y }) => {
+        const item = controller.item(id);
+
+        if (item !== undefined) {
+          shelf.popup(nativeMenu(itemMenu(item)), x, y);
+        }
+      },
+      showSectionMenu: ({ x, y }) => {
+        shelf.popup(nativeMenu(sectionMenu(controller.view().doc)), x, y);
+      },
       pasteImage: async (bytes) => {
         const image = nativeImage.createFromBuffer(Buffer.from(bytes));
 
@@ -707,9 +753,81 @@ const start = async (): Promise<void> => {
     }
   );
 
+  sendCommand = (command) => {
+    shelfServer.emit("command", command);
+  };
+
+  let floatOnTop = true;
+
+  /** Sends a menu choice to the shelf, showing it first, since it acts on the shelf's own state. */
+  const commandShelf = async (command: ShelfCommand): Promise<void> => {
+    if (!shelf.isFocused()) {
+      await showShelf();
+    }
+
+    sendCommand(command);
+  };
+
+  const refreshAppMenu = (): void => {
+    if (!isMac) {
+      return;
+    }
+
+    const { doc, status } = controller.view();
+
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(
+        appMenuTemplate(
+          { doc, floatOnTop, keys: status.keys },
+          {
+            captureArea: () => {
+              void captureArea();
+            },
+            clearDone: () => {
+              controller.apply({ type: "clearDone" });
+            },
+            closeShelf: shelf.hide,
+            copy: () => {
+              sendCommand?.({ kind: "copy" });
+            },
+            newNote: () => {
+              void commandShelf({ kind: "newNote" });
+            },
+            newSection: () => {
+              void commandShelf({ kind: "newSection" });
+            },
+            openHelp: () => {
+              void shell.openExternal(HELP_URL);
+            },
+            selectSection: (id) => {
+              controller.apply({ id, type: "selectSection" });
+            },
+            setFloatOnTop: (on) => {
+              floatOnTop = on;
+              shelf.setFloatOnTop(on);
+              refreshAppMenu();
+            },
+            turnOnKeys: openKeySettings,
+            undo: () => {
+              sendCommand?.({ kind: "undo" });
+            },
+          }
+        )
+      )
+    );
+  };
+
+  refreshAppMenu();
   controller.subscribe(() => {
     shelfServer.emit("view", controller.view());
     refreshTray();
+    refreshAppMenu();
+  });
+  // A click on the Dock icon brings the shelf back.
+  app.on("activate", () => {
+    if (!shelf.isVisible() && !overlayOpen) {
+      void showShelf();
+    }
   });
   overlay.onView((view) => {
     overlayServer.emit("view", view);
@@ -732,7 +850,7 @@ const start = async (): Promise<void> => {
 
   const shortcutsRegistered =
     globalShortcut.register(TOGGLE_ACCELERATOR, () => {
-      shelf.toggle();
+      void toggleShelf();
     }) &&
     globalShortcut.register(AREA_ACCELERATOR, () => {
       void captureArea();
@@ -740,22 +858,18 @@ const start = async (): Promise<void> => {
 
   const run = (action: TrayAction): void => {
     if (action === "toggleShelf") {
-      shelf.toggle();
+      void toggleShelf();
     } else if (action === "captureArea") {
       void captureArea();
-    } else if (action === "turnOnKeys") {
-      openKeySettings();
     } else {
-      app.quit();
+      openKeySettings();
     }
   };
 
   tray = createTray({
     iconPath: trayIconPath(),
     model: () => ({
-      isMac,
       keys: controller.view().status.keys,
-      selectionCapture,
       shelfVisible: shelf.isVisible(),
       shortcutsRegistered,
     }),
@@ -764,34 +878,36 @@ const start = async (): Promise<void> => {
 
   let quitting = false;
 
-  // Writes a pending note before the windows may close.
+  /**
+   * Writes a pending note, then exits. A second app.quit() after a held-back
+   * quit closes the windows but does not end the app on macOS when the quit
+   * came from the Quit menu item, so the app exits itself.
+   */
   const finishQuit = async (): Promise<void> => {
     try {
       await controller.flush();
     } finally {
-      shelf.allowClose();
-      overlay.allowClose();
-      toast.allowClose();
-      app.quit();
+      globalShortcut.unregisterAll();
+      app.exit(0);
     }
   };
 
   app.on("before-quit", (event) => {
+    event.preventDefault();
+
     if (quitting) {
       return;
     }
 
-    event.preventDefault();
     quitting = true;
     keyMonitor.stop();
     staging.clear();
     void finishQuit();
   });
-  app.on("will-quit", () => {
-    globalShortcut.unregisterAll();
-  });
 
   e2eLog("launch");
+  // Like any app's window, the shelf opens when the app starts.
+  await showShelf();
 };
 
 const startOrExit = async (): Promise<void> => {

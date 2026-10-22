@@ -30,6 +30,9 @@ const packagedApp = path.join(
 );
 
 const processName = mode === "packaged" ? "Inset Shelf" : "Electron";
+
+// The Quit item names the bundle: Electron in dev.
+const quitLabel = `Quit ${processName}`;
 const work = mkdtempSync(path.join(tmpdir(), "inset-shelf-e2e-"));
 const bin = path.join(work, "bin");
 const userData = path.join(work, "userData");
@@ -199,6 +202,31 @@ const clickElement = async (
   return await clickElement(role, name, attempts - 1);
 };
 
+const isFocused = (role: string, name: string): boolean =>
+  jxa(`const hit = ${processElements}.findLast((e) => {
+      try { return e.role() === ${JSON.stringify(role)} && (e.name() === ${JSON.stringify(name)} || e.description() === ${JSON.stringify(name)}); } catch { return false; }
+    });
+    hit ? String(hit.focused()) : "false";`) === "true";
+
+/** Typing before the field has focus would send the keys to the app in front instead. */
+const waitForFocus = async (
+  role: string,
+  name: string,
+  attempts = 10
+): Promise<boolean> => {
+  if (isFocused(role, name)) {
+    return true;
+  }
+
+  if (attempts <= 1) {
+    return false;
+  }
+
+  await delay(200);
+
+  return await waitForFocus(role, name, attempts - 1);
+};
+
 const windowText = (): string =>
   jxa(`${processElements}.map((e) => {
       try { return String(e.value() ?? "") + " " + String(e.name() ?? ""); } catch { return ""; }
@@ -227,7 +255,35 @@ const trayItem = (item: string): void => {
   );
 };
 
+/** Opens the shelf from the tray unless it is on screen already. */
+const showShelfFromTray = (): void => {
+  const open = windows().some(
+    (window) => window.owner === processName && window.width >= 300
+  );
+
+  if (!open) {
+    trayItem("Show Inset Shelf");
+  }
+};
+
 let source: ChildProcess | undefined;
+
+/** A just-launched app answers Cmd+C only once its text view has keyboard focus. */
+const sourceReady = async (attempts = 15): Promise<boolean> => {
+  const ready =
+    frontmost() === "source" &&
+    // macOS may add a small helper window, so every window of the app is searched.
+    jxa(`const area = Application("System Events").processes.byName("source").windows().flatMap((w) => w.entireContents()).find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } });
+      area ? String(area.focused()) : "false";`) === "true";
+
+  if (ready || attempts <= 1) {
+    return ready;
+  }
+
+  await delay(200);
+
+  return await sourceReady(attempts - 1);
+};
 
 const stopSource = (): void => {
   source?.kill("SIGKILL");
@@ -249,16 +305,26 @@ const showSource = async (
   );
   await delay(1200);
   osa(`tell application id "${sourceBundleId}" to activate`);
-  await delay(500);
+  await delay(300);
 
-  return frontmost() === "source";
+  // A click on the title bar makes the window key, as a person would, without touching the selection.
+  const [x = "0", y = "0"] = osa(
+    'tell application "System Events" to get position of window 1 of process "source"'
+  ).split(", ");
+
+  input("click", String(Number(x) + 120), String(Number(y) + 12));
+
+  return await sourceReady();
 };
 
-/** Keys go out only while the test's own source app is in front. */
-const guardedKeys = (send: () => void): boolean => {
+/** Keys go out only while the test's own source app, or the app under test, is in front. */
+const guardedKeys = (
+  send: () => void,
+  allowed: readonly string[] = ["source"]
+): boolean => {
   const front = frontmost();
 
-  if (front !== "source") {
+  if (!allowed.includes(front)) {
     console.log(`  skipped keys: ${front} is in front`);
 
     return false;
@@ -275,7 +341,7 @@ const typeIntoShelf = (text: string): boolean =>
       `tell application "System Events" to keystroke ${JSON.stringify(text)}`
     );
     osa('tell application "System Events" to key code 36');
-  });
+  }, ["source", processName]);
 
 const swift = (name: string, out: string): void => {
   execFileSync("swiftc", [
@@ -353,25 +419,71 @@ const items = (): ShelfDoc["items"] => shelfDoc()?.items ?? [];
 
 const checkLaunch = async (): Promise<void> => {
   const launched = await waitFor("launch", 0, Date.now() + 15_000);
+  const shown = await waitFor("shelfShown", 0);
   const keys = events().some((event) => event.event === "keysReady");
 
-  record("launch logged without a window", launched?.windows === 0);
+  record(
+    "launch opens the shelf",
+    launched !== undefined && shown !== undefined
+  );
   record("double Shift is listening", keys);
 };
 
+interface Box {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+const sourceBounds = (): Box => {
+  const [x = 0, y = 0, width = 0, height = 0] = osa(
+    'tell application "System Events" to get {position, size} of window 1 of process "source"'
+  )
+    .split(", ")
+    .map(Number);
+
+  return { height, width, x, y };
+};
+
 const checkShelfStaysInFront = async (): Promise<void> => {
+  trayItem("Hide Inset Shelf");
+  await waitFor("shelfHidden", 0);
+  await showSource("A window from another app", "none");
+
+  const target = sourceBounds();
   const mark = events().length;
 
-  trayItem("Show Shelf");
+  trayItem("Show Inset Shelf");
 
   const shown = await waitFor("shelfShown", mark);
+  const bounds = shown?.bounds;
+
+  record("tray opens the shelf", shown !== undefined, JSON.stringify(bounds));
+  record(
+    "the shelf docks beside the window in front, at its top and height",
+    bounds !== undefined &&
+      bounds.x === target.x + target.width + 8 &&
+      bounds.y === target.y &&
+      bounds.height === target.height,
+    `window ${JSON.stringify(target)}`
+  );
+  await delay(500);
+
+  const menus = osa(
+    `tell application "System Events" to get name of every menu bar item of menu bar 1 of process "${processName}"`
+  );
 
   record(
-    "tray opens the shelf",
-    shown !== undefined,
-    JSON.stringify(shown?.bounds)
+    "the app has a regular menu bar",
+    ["File", "Edit", "View", "Window", "Help"].every((name) =>
+      menus.includes(name)
+    ),
+    menus
   );
-  await showSource("A window from another app", "none");
+
+  // Back to the other app with a click, as a person would.
+  input("click", String(target.x + 120), String(target.y + 12));
   await delay(600);
 
   const list = windows();
@@ -384,10 +496,12 @@ const checkShelfStaysInFront = async (): Promise<void> => {
 
   record(
     "shelf stays visible when another app comes to the front",
-    shelf !== undefined &&
+    frontmost() === "source" &&
+      shelf !== undefined &&
       !events()
         .slice(mark)
-        .some((event) => event.event === "shelfHidden")
+        .some((event) => event.event === "shelfHidden"),
+    frontmost()
   );
   record(
     "shelf floats above normal windows",
@@ -402,7 +516,10 @@ const checkComposer = async (): Promise<void> => {
   const clicked = await clickElement("AXTextArea", "New note in Inbox");
 
   record("note field found", clicked);
-  await delay(300);
+  record(
+    "clicking the note field focuses it",
+    await waitForFocus("AXTextArea", "New note in Inbox")
+  );
   typeIntoShelf("Ask about step four");
   await delay(800);
   record(
@@ -494,13 +611,13 @@ const checkToggle = async (): Promise<void> => {
   guardedKeys(() => {
     input("double-shift");
   });
-  await delay(1200);
+  const shown = await waitFor("shelfShown", before, Date.now() + 4000);
 
-  const toggled = events()
-    .slice(before)
-    .some(
-      (event) => event.event === "shelfHidden" || event.event === "shelfShown"
-    );
+  const toggled =
+    shown !== undefined ||
+    events()
+      .slice(before)
+      .some((event) => event.event === "shelfHidden");
 
   record("double Shift with nothing selected toggles the shelf", toggled);
   record(
@@ -518,7 +635,7 @@ const checkArea = async (): Promise<void> => {
 
   let mark = events().length;
 
-  trayItem("Capture Area or Pin");
+  trayItem("Capture Area");
 
   const shown = await waitFor("overlayShown", mark);
 
@@ -556,7 +673,7 @@ const checkArea = async (): Promise<void> => {
 
   mark = events().length;
   input("move", "700", "500");
-  trayItem("Capture Area or Pin");
+  trayItem("Capture Area");
   await waitFor("overlayShown", mark);
   input("click", "900", "600");
 
@@ -570,11 +687,12 @@ const checkArea = async (): Promise<void> => {
   );
 
   mark = events().length;
-  trayItem("Capture Area or Pin");
+  trayItem("Capture Area");
   await waitFor("overlayShown", mark);
+  // The overlay is Inset's own window, so Escape may go to it while Inset is in front.
   guardedKeys(() => {
     osa('tell application "System Events" to key code 53');
-  });
+  }, ["source", processName]);
 
   const closed = await waitFor("overlayClosed", mark);
 
@@ -605,8 +723,18 @@ const checkCopy = async (): Promise<void> => {
 const checkRestart = async (app: ChildProcess): Promise<ChildProcess> => {
   const before = items().length;
 
-  trayItem("Quit Inset Shelf");
-  record("tray Quit exits", await exited(app));
+  trayItem(quitLabel);
+  const quit = await exited(app);
+
+  record(
+    "tray Quit exits",
+    quit,
+    quit
+      ? ""
+      : spawnSync("pgrep", ["-fl", "out/main/index.js|Inset Shelf.app"], {
+          encoding: "utf-8",
+        }).stdout.trim()
+  );
 
   const next = launch({ INSET_FAIL_NEXT_WRITE: "1" });
 
@@ -635,7 +763,7 @@ const checkFailedWrite = async (): Promise<void> => {
   });
   await delay(1500);
   enableWebAccessibility();
-  trayItem("Show Shelf");
+  showShelfFromTray();
   await delay(800);
   record(
     "a failed write is shown",
@@ -682,7 +810,7 @@ const main = async (): Promise<void> => {
     await checkFailedWrite();
   } finally {
     stopSource();
-    trayItem("Quit Inset Shelf");
+    trayItem(quitLabel);
     await exited(app);
     pbcopy(clipboardBefore);
   }

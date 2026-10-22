@@ -1,12 +1,11 @@
-import { intersects, placeShelf, rect } from "@shared/geometry";
+import { dockShelf, rect, SHELF_MIN_HEIGHT_DIP } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
-import { app, BrowserWindow, nativeTheme, screen } from "electron";
-import type { Rectangle, WebContents } from "electron";
+import { app, BrowserWindow, screen } from "electron";
+import type { Menu, Rectangle, WebContents } from "electron";
 
 import { harden, secureWebPreferences } from "./window-security";
 
 const MIN_WIDTH = 300;
-const MIN_HEIGHT = 320;
 
 const isMac = process.platform === "darwin";
 
@@ -15,71 +14,67 @@ export interface ShelfWindow {
   readonly load: () => Promise<void>;
   readonly isVisible: () => boolean;
   readonly isFocused: () => boolean;
-  readonly show: () => void;
+  /** Docks to the given window, or opens at the top right without one. */
+  readonly show: (target: Rect<"screen"> | null) => void;
   /** Hides and hands focus back to the app that was in front. */
   readonly hide: () => void;
-  readonly toggle: () => void;
-  readonly bounds: () => Rectangle | null;
   readonly onShown: (listener: (bounds: Rectangle) => void) => void;
   readonly onHidden: (listener: () => void) => void;
   readonly allowClose: () => void;
+  /** On by default; the Window menu turns it off. */
+  readonly setFloatOnTop: (on: boolean) => void;
+  /** Opens a native menu at a point inside the shelf. */
+  readonly popup: (menu: Menu, x: number, y: number) => void;
 }
 
 export interface ShelfWindowOptions {
   readonly preload: string;
   readonly url: string;
-  readonly remembered: Rect<"screen"> | null;
-  readonly remember: (bounds: Rect<"screen">) => void;
   /** Another Inset window is on screen, so app.hide() would hide it too. */
   readonly otherWindowVisible: () => boolean;
 }
 
-const backgroundColor = (): string =>
-  nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+const ignore = (): void => undefined;
 
 const toRect = (bounds: Rectangle): Rect<"screen"> =>
   rect(bounds.x, bounds.y, bounds.width, bounds.height);
 
-/** The last place still on some display, else the top right of the display under the pointer. */
-const placement = (remembered: Rect<"screen"> | null): Rectangle => {
-  const onScreen =
-    remembered !== null &&
-    screen
-      .getAllDisplays()
-      .some((display) => intersects(toRect(display.workArea), remembered));
+const placement = (target: Rect<"screen"> | null): Rectangle => {
+  const display =
+    target === null
+      ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+      : screen.getDisplayMatching(target);
 
-  const workArea = onScreen
-    ? screen.getDisplayMatching(remembered).workArea
-    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-
-  return placeShelf(toRect(workArea), onScreen ? remembered : null);
+  return dockShelf(target, toRect(display.workArea));
 };
 
-/** A floating panel that stays above other windows, on every Space, until it is hidden on purpose. */
+/**
+ * A window beside the window in front. It stays above other windows,
+ * on every Space, until it is hidden on purpose; macOS draws its translucent
+ * sidebar material behind the content.
+ */
 export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
-  let { remembered } = options;
   let closable = false;
-
-  const listeners = {
-    hidden: (): void => undefined,
-    shown: (_bounds: Rectangle): void => undefined,
-  };
+  let onShown: (bounds: Rectangle) => void = ignore;
+  let onHidden: () => void = ignore;
 
   const window = new BrowserWindow({
-    backgroundColor: backgroundColor(),
+    backgroundColor: isMac ? "#00000000" : undefined,
     frame: false,
     fullscreenable: false,
     hasShadow: true,
     maximizable: false,
-    minHeight: MIN_HEIGHT,
+    minHeight: SHELF_MIN_HEIGHT_DIP,
     minWidth: MIN_WIDTH,
     minimizable: false,
     show: false,
     skipTaskbar: true,
     title: "Inset Shelf",
-    type: isMac ? "panel" : undefined,
+    transparent: isMac,
+    vibrancy: isMac ? "sidebar" : undefined,
+    visualEffectState: isMac ? "active" : undefined,
     webPreferences: secureWebPreferences(options.preload),
-    ...placement(remembered),
+    ...placement(null),
   });
 
   // "floating" sits above normal windows and below menus and the Dock.
@@ -101,18 +96,8 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
       app.hide();
     }
 
-    listeners.hidden();
+    onHidden();
   };
-
-  const keepBounds = (): void => {
-    if (window.isVisible()) {
-      remembered = toRect(window.getBounds());
-      options.remember(remembered);
-    }
-  };
-
-  window.on("moved", keepBounds);
-  window.on("resized", keepBounds);
 
   window.on("close", (event) => {
     if (!closable) {
@@ -127,25 +112,10 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
     }
   });
 
-  const show = (): void => {
-    if (!window.isVisible()) {
-      window.setBounds(placement(remembered));
-    }
-
-    if (isMac) {
-      app.show();
-    }
-
-    window.show();
-    window.focus();
-    listeners.shown(window.getBounds());
-  };
-
   return {
     allowClose: () => {
       closable = true;
     },
-    bounds: () => (window.isVisible() ? window.getBounds() : null),
     hide,
     isFocused: () => window.isVisible() && window.isFocused(),
     isVisible: () => window.isVisible(),
@@ -153,18 +123,27 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
       await window.loadURL(options.url);
     },
     onHidden: (listener) => {
-      listeners.hidden = listener;
+      onHidden = listener;
     },
     onShown: (listener) => {
-      listeners.shown = listener;
+      onShown = listener;
     },
-    show,
-    toggle: () => {
-      if (window.isVisible() && window.isFocused()) {
-        hide();
-      } else {
-        show();
+    setFloatOnTop: (on) => {
+      window.setAlwaysOnTop(on, "floating");
+    },
+    popup: (menu, x, y) => {
+      menu.popup({ window, x: Math.round(x), y: Math.round(y) });
+    },
+    show: (target) => {
+      window.setBounds(placement(target));
+
+      if (isMac) {
+        app.show();
       }
+
+      window.show();
+      window.focus();
+      onShown(window.getBounds());
     },
     webContents: window.webContents,
   };

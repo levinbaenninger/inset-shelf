@@ -244,3 +244,10 @@
     -webkit-app-region: no-drag;
   }
 }
+
+/* The shelf on macOS: the window's vibrancy shows through the page. */
+@layer base {
+  [data-platform="mac"] body {
+    background: transparent;
+  }
+}

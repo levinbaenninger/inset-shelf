@@ -8,7 +8,7 @@ import { insetUrl } from "@shared/inset-url";
 import { TEXT_MAX } from "@shared/shelf";
 import type { ImageItem, ShelfItem, TextItem } from "@shared/shelf";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -25,6 +25,11 @@ import { whenText } from "./format";
 
 export interface RowHandlers {
   readonly onSelect: () => void;
+  /** A right-click opens the native item menu at that point. */
+  readonly onContextMenu: (point: {
+    readonly x: number;
+    readonly y: number;
+  }) => void;
   /** Double-clicking a text item edits it. */
   readonly onEdit: () => void;
   readonly onToggle: () => void;
@@ -45,6 +50,14 @@ export interface ItemRowProps extends RowHandlers {
 
 /** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
 const PIN_DIAMETER_DIP = 28;
+
+/** A right-click on any part of an item opens its native menu. */
+const contextMenuAt =
+  (open: RowHandlers["onContextMenu"]) =>
+  (event: MouseEvent): void => {
+    event.preventDefault();
+    open({ x: event.clientX, y: event.clientY });
+  };
 
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
@@ -207,12 +220,13 @@ const NoteField = ({
 const Picture = ({
   compact,
   item,
+  onContextMenu,
   onDragImage,
   onSelect,
 }: {
   readonly item: ImageItem;
   readonly compact: boolean;
-} & Pick<RowHandlers, "onDragImage" | "onSelect">) => (
+} & Pick<RowHandlers, "onContextMenu" | "onDragImage" | "onSelect">) => (
   <button
     aria-label={item.note === "" ? "Select this image" : `Select: ${item.note}`}
     className={cn(
@@ -221,6 +235,7 @@ const Picture = ({
     )}
     draggable
     onClick={onSelect}
+    onContextMenu={contextMenuAt(onContextMenu)}
     onDragStart={(event) => {
       event.preventDefault();
       onDragImage();
@@ -253,6 +268,7 @@ const Picture = ({
 const ImageBody = ({
   editing,
   item,
+  onContextMenu,
   onDragImage,
   onEditNote,
   onSelect,
@@ -264,7 +280,7 @@ const ImageBody = ({
   readonly editing: boolean;
 } & Pick<
   RowHandlers,
-  "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
+  "onContextMenu" | "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
 >) => {
   if (!selected && !editing) {
     return (
@@ -272,6 +288,7 @@ const ImageBody = ({
         <Picture
           compact
           item={item}
+          onContextMenu={onContextMenu}
           onDragImage={onDragImage}
           onSelect={onSelect}
         />
@@ -282,6 +299,7 @@ const ImageBody = ({
             item.done && "text-muted-foreground line-through"
           )}
           onClick={onSelect}
+          onContextMenu={contextMenuAt(onContextMenu)}
           type="button"
         >
           {item.note === "" ? KIND_LABEL[item.via] : item.note}
@@ -295,6 +313,7 @@ const ImageBody = ({
       <Picture
         compact={false}
         item={item}
+        onContextMenu={onContextMenu}
         onDragImage={onDragImage}
         onSelect={onSelect}
       />
@@ -317,7 +336,7 @@ export const ItemRow = (props: ItemRowProps) => {
       aria-current={selected ? "true" : undefined}
       className={cn(
         "group relative flex gap-2.5 rounded-lg px-2 py-2",
-        selected ? "bg-muted" : "hover:bg-muted/50"
+        selected ? "bg-foreground/10" : "hover:bg-foreground/5"
       )}
       data-item-id={item.id}
     >
@@ -344,6 +363,7 @@ export const ItemRow = (props: ItemRowProps) => {
               !selected && "line-clamp-6"
             )}
             onClick={props.onSelect}
+            onContextMenu={contextMenuAt(props.onContextMenu)}
             onDoubleClick={props.onEdit}
             type="button"
           >
@@ -354,6 +374,7 @@ export const ItemRow = (props: ItemRowProps) => {
           <ImageBody
             editing={editing}
             item={item}
+            onContextMenu={props.onContextMenu}
             onDragImage={props.onDragImage}
             onEditNote={props.onEditNote}
             onSelect={props.onSelect}

@@ -3,5 +3,6 @@ minimumReleaseAgeExclude:
   - vite@8.3.5
 allowBuilds:
   electron-winstaller: false
-  # Its install script only picks the bundled N-API prebuild.
+  # Both install scripts only pick the bundled prebuilds.
+  get-windows: true
   uiohook-napi: true

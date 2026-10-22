@@ -23,7 +23,7 @@ const Banner = ({
     className={
       tone === "error"
         ? "bg-destructive/10 text-destructive mx-3 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
-        : "bg-muted mx-3 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
+        : "bg-foreground/5 mx-3 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
     }
     role={tone === "error" ? "alert" : "status"}
   >
@@ -59,7 +59,7 @@ export const Banners = ({
           label: "Open Accessibility settings",
           run: onOpenKeySettings,
         }}
-        text="Turn on Inset Shelf under Privacy & Security › Accessibility. Inset Shelf then reads your selection when you tap Shift twice."
+        text="Allow Accessibility to save selected text."
         title="Double Shift is off"
         tone="notice"
       />
