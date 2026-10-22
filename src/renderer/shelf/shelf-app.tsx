@@ -1,32 +1,32 @@
-import { Cancel01Icon, CropIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  Cancel01Icon,
+  CropIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ShelfView } from "@shared/contracts";
+import type { ShelfCommand, ShelfView } from "@shared/contracts";
 import { itemsInSection } from "@shared/shelf";
 import type { ItemId, ShelfOp } from "@shared/shelf";
-import { shortcutLabels } from "@shared/shortcut";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { shelfBridge } from "@/shared/bridge";
-import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 
 import { Banners } from "./banners";
 import { Composer } from "./composer";
 import { ItemRow } from "./item-row";
-import { SectionMenu } from "./section-menu";
 import { selectionAfterRemoval, stepSelection } from "./selection";
-import { useShelfKeys } from "./use-shelf-keys";
+import { isTextField, useShelfKeys } from "./use-shelf-keys";
 
 const api = shelfBridge();
-const labels = shortcutLabels(isMac);
 
 const COPIED_MS = 1400;
 const UNDO_VISIBLE_MS = 6000;
@@ -48,30 +48,17 @@ const reveal = (id: ItemId): void => {
   });
 };
 
-const EmptySection = ({ name }: { readonly name: string }) => (
-  <div className="text-muted-foreground flex flex-col gap-3 px-5 py-8 text-sm">
-    <p className="text-foreground font-medium">Nothing in {name} yet</p>
-    <ul className="flex flex-col gap-2">
-      <li>
-        Select text in any app and tap <Kbd>{labels.doubleShift}</Kbd>.
-      </li>
-      <li>
-        Press <Kbd>{labels.area}</Kbd>, then drag over the screen to keep an
-        area, or click to pin a spot.
-      </li>
-      <li>Write a note or a prompt below, or paste an image.</li>
-    </ul>
-  </div>
-);
+/** A text field, or a text selection anywhere, keeps the normal Copy and Undo. */
+const inTextContext = (): boolean =>
+  isTextField(document.activeElement) ||
+  window.getSelection()?.isCollapsed === false;
 
 const HeaderButton = ({
-  hint,
   icon,
   label,
   onClick,
 }: {
   readonly label: string;
-  readonly hint: string;
   readonly icon: typeof CropIcon;
   readonly onClick: () => void;
 }) => (
@@ -86,20 +73,24 @@ const HeaderButton = ({
         <HugeiconsIcon icon={icon} />
       </Button>
     </TooltipTrigger>
-    <TooltipContent side="bottom">
-      {label} <Kbd>{hint}</Kbd>
-    </TooltipContent>
+    <TooltipContent side="bottom">{label}</TooltipContent>
   </Tooltip>
 );
 
 const UndoBar = ({ onUndo }: { readonly onUndo: () => void }) => (
-  <output className="bg-muted mx-3 mb-1 flex items-center justify-between rounded-lg px-3 py-1.5 text-xs">
-    <span>Item deleted</span>
+  <output className="bg-foreground/5 mx-3 mb-1 flex items-center justify-between rounded-lg px-3 py-1 text-xs">
+    <span>Deleted</span>
     <Button onClick={onUndo} size="xs" variant="ghost">
-      Undo <Kbd>{isMac ? "⌘Z" : "Ctrl+Z"}</Kbd>
+      Undo
     </Button>
   </output>
 );
+
+const showSectionMenu = (event: MouseEvent<HTMLButtonElement>): void => {
+  const box = event.currentTarget.getBoundingClientRect();
+
+  api.showSectionMenu({ x: box.left, y: box.bottom + 4 });
+};
 
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
@@ -113,7 +104,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   const [selectedId, setSelectedId] = useState<ItemId | null>(null);
   const [editingId, setEditingId] = useState<ItemId | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [draft, setDraft] = useState("");
   const [handledFocus, setHandledFocus] = useState(0);
   const [copiedId, setCopiedId] = useExpiringState<ItemId>(COPIED_MS);
   const [undoShown, setUndoShown] = useExpiringState<true>(UNDO_VISIBLE_MS);
@@ -186,9 +177,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         };
 
   useShelfKeys({
-    copy: onSelected((id) => {
-      void copy(id);
-    }),
     edit: onSelected(setEditingId),
     hide: () => {
       api.hide();
@@ -207,41 +195,84 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     toggleDone: onSelected((id) => {
       apply({ id, type: "toggleDone" });
     }),
-    toggleMenu: () => {
-      setMenuOpen((open) => !open);
-    },
-    undo: canUndo ? undo : null,
   });
 
+  const onCommand = useEffectEvent((command: ShelfCommand) => {
+    switch (command.kind) {
+      case "edit": {
+        setSelectedId(command.id);
+        setEditingId(command.id);
+        break;
+      }
+
+      case "remove": {
+        remove(command.id);
+        break;
+      }
+
+      case "newNote": {
+        focusComposer();
+        break;
+      }
+
+      case "newSection": {
+        setDraft("# ");
+        focusComposer();
+        break;
+      }
+
+      case "copy": {
+        if (inTextContext()) {
+          api.nativeEdit("copy");
+        } else if (selected !== undefined) {
+          void copy(selected.id);
+        }
+
+        break;
+      }
+
+      case "undo": {
+        if (inTextContext()) {
+          api.nativeEdit("undo");
+        } else if (canUndo) {
+          undo();
+        }
+
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  });
+
+  useEffect(() => api.on("command", onCommand), []);
+
   return (
-    <div className="bg-background text-foreground flex h-svh flex-col">
+    <div className="text-foreground flex h-svh flex-col">
       <header className="drag-region flex h-11 shrink-0 items-center justify-between gap-1 px-2">
         <h1 className="sr-only">Inset Shelf: {sectionName}</h1>
-        <SectionMenu
-          doc={doc}
-          onClearDone={() => {
-            apply({ type: "clearDone" });
-          }}
-          onOpenChange={setMenuOpen}
-          onSelect={(id) => {
-            setSelectedId(null);
-            apply({ id, type: "selectSection" });
-          }}
-          open={menuOpen}
-        />
+        <Button
+          className="max-w-56 justify-start"
+          onClick={showSectionMenu}
+          size="sm"
+          variant="ghost"
+        >
+          <span className="truncate font-semibold">{sectionName}</span>
+          <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
+        </Button>
         <div className="flex items-center">
           <HeaderButton
-            hint={labels.area}
             icon={CropIcon}
-            label="Capture area or pin"
+            label="Capture area"
             onClick={() => {
               api.captureArea();
             }}
           />
           <HeaderButton
-            hint="Esc"
             icon={Cancel01Icon}
-            label="Hide shelf"
+            label="Hide"
             onClick={() => {
               api.hide();
             }}
@@ -259,11 +290,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {items.length === 0 ? (
-          <EmptySection name={sectionName} />
+          <p className="text-muted-foreground px-5 py-8 text-center text-sm">
+            Nothing here yet
+          </p>
         ) : (
           <ul
             aria-label={`Items in ${sectionName}`}
-            className="flex flex-col gap-0.5 px-1.5 py-1 outline-none"
+            className="flex flex-col gap-0.5 px-1.5 py-1"
           >
             {items.map((item) => (
               <ItemRow
@@ -271,11 +304,19 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                 editing={editingId === item.id}
                 item={item}
                 key={item.id}
+                onContextMenu={(point) => {
+                  setSelectedId(item.id);
+                  api.showItemMenu({ id: item.id, ...point });
+                }}
                 onCopy={() => {
                   void copy(item.id);
                 }}
                 onDragImage={() => {
                   api.startDrag(item.id);
+                }}
+                onEdit={() => {
+                  setSelectedId(item.id);
+                  setEditingId(item.id);
                 }}
                 onEditNote={(note) => {
                   apply({ id: item.id, note, type: "editNote" });
@@ -285,10 +326,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                 }}
                 onRemove={() => {
                   remove(item.id);
-                }}
-                onEdit={() => {
-                  setSelectedId(item.id);
-                  setEditingId(item.id);
                 }}
                 onSelect={() => {
                   setSelectedId(item.id);
@@ -321,8 +358,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         onSubmit={(text) => {
           apply({ text, type: "compose" });
         }}
+        onTextChange={setDraft}
         ref={composerRef}
         sectionName={sectionName}
+        text={draft}
       />
     </div>
   );

@@ -5,77 +5,63 @@ import {
   TOGGLE_ACCELERATOR,
 } from "@shared/shortcut";
 
-export type TrayAction = "toggleShelf" | "captureArea" | "turnOnKeys" | "quit";
+export type TrayAction = "toggleShelf" | "captureArea" | "turnOnKeys";
 
 export type TrayItem =
   | { readonly kind: "separator" }
+  | { readonly kind: "role"; readonly role: "about" | "quit" }
   | {
       readonly kind: "item";
       readonly label: string;
-      readonly action: TrayAction | null;
-      readonly enabled: boolean;
+      readonly action: TrayAction;
       /** Shown next to the label; the global shortcut is registered elsewhere. */
       readonly accelerator?: string;
     };
 
 export interface TrayModel {
-  readonly isMac: boolean;
   readonly shelfVisible: boolean;
   readonly keys: Permission;
-  readonly selectionCapture: boolean;
   readonly shortcutsRegistered: boolean;
 }
 
 const SEPARATOR: TrayItem = { kind: "separator" };
 
+/** A plain macOS menu-bar menu: the app's actions, then About and Quit. */
 export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
-  const labels = shortcutLabels(model.isMac);
+  const accelerator = (value: string): { accelerator?: string } =>
+    model.shortcutsRegistered ? { accelerator: value } : {};
 
-  const doubleShift: TrayItem[] =
+  const permission: readonly TrayItem[] =
     model.keys === "missing"
       ? [
+          SEPARATOR,
           {
             action: "turnOnKeys",
-            enabled: true,
             kind: "item",
             label: "Turn On Double Shift…",
           },
         ]
-      : [
-          {
-            action: null,
-            enabled: false,
-            kind: "item",
-            label: model.selectionCapture
-              ? `${labels.doubleShift} saves selected text`
-              : `${labels.doubleShift} shows the shelf`,
-          },
-        ];
+      : [];
 
   return [
     {
-      accelerator: model.shortcutsRegistered ? TOGGLE_ACCELERATOR : undefined,
       action: "toggleShelf",
-      enabled: true,
       kind: "item",
-      label: model.shelfVisible ? "Hide Shelf" : "Show Shelf",
+      label: model.shelfVisible ? "Hide Inset Shelf" : "Show Inset Shelf",
+      ...accelerator(TOGGLE_ACCELERATOR),
     },
     {
-      accelerator: model.shortcutsRegistered ? AREA_ACCELERATOR : undefined,
       action: "captureArea",
-      enabled: true,
       kind: "item",
-      label: "Capture Area or Pin",
+      label: "Capture Area",
+      ...accelerator(AREA_ACCELERATOR),
     },
+    ...permission,
     SEPARATOR,
-    ...doubleShift,
-    SEPARATOR,
-    { action: "quit", enabled: true, kind: "item", label: "Quit Inset Shelf" },
+    { kind: "role", role: "about" },
+    { kind: "role", role: "quit" },
   ];
 };
 
-export const trayTooltip = (isMac: boolean): string => {
-  const labels = shortcutLabels(isMac);
-
-  return `Inset Shelf: ${labels.toggle} shows the shelf, ${labels.area} captures an area`;
-};
+export const trayTooltip = (isMac: boolean): string =>
+  `Inset Shelf (${shortcutLabels(isMac).toggle})`;

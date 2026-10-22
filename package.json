@@ -21,6 +21,7 @@
     "icons": "node scripts/generate-icons.ts"
   },
   "dependencies": {
+    "get-windows": "9.3.0",
     "uiohook-napi": "1.5.5"
   },
   "devDependencies": {

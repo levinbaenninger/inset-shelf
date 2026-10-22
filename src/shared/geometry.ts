@@ -150,42 +150,58 @@ export const dragRect = (
     Math.abs(to.y - from.y)
   );
 
-export const SHELF_SIZE_DIP = { height: 560, width: 360 } as const;
-export const SHELF_MARGIN_DIP = 12;
+export const SHELF_WIDTH_DIP = 340;
+export const SHELF_MIN_HEIGHT_DIP = 360;
+export const SHELF_DEFAULT_HEIGHT_DIP = 560;
 
-/** The shelf opens at the top right of the work area, or keeps its last place when that still fits. */
-export const placeShelf = (
-  workArea: Rect<"screen">,
-  remembered: Rect<"screen"> | null
+/** Space between the shelf and the window it docks to, and to the screen edge. */
+export const SHELF_GAP_DIP = 8;
+
+/**
+ * Docks the shelf to the window in front: beside its right edge, else beside
+ * its left edge, else inside its right edge when it fills the screen. The
+ * shelf takes the window's top and height. Without a window it opens at the
+ * top right of the work area.
+ */
+export const dockShelf = (
+  target: Rect<"screen"> | null,
+  workArea: Rect<"screen">
 ): Rect<"screen"> => {
-  if (remembered !== null) {
-    const width = Math.min(remembered.width, workArea.width);
-    const height = Math.min(remembered.height, workArea.height);
+  const width = Math.min(SHELF_WIDTH_DIP, workArea.width);
+  const right = workArea.x + workArea.width;
+  const bottom = workArea.y + workArea.height;
 
+  if (target === null) {
     return rect(
-      clamp(remembered.x, workArea.x, workArea.x + workArea.width - width),
-      clamp(remembered.y, workArea.y, workArea.y + workArea.height - height),
+      Math.max(workArea.x, right - width - SHELF_GAP_DIP),
+      workArea.y + SHELF_GAP_DIP,
       width,
-      height
+      Math.min(SHELF_DEFAULT_HEIGHT_DIP, workArea.height - 2 * SHELF_GAP_DIP)
     );
   }
 
-  const width = Math.min(SHELF_SIZE_DIP.width, workArea.width);
-
-  const height = Math.min(
-    SHELF_SIZE_DIP.height,
-    workArea.height - 2 * SHELF_MARGIN_DIP
+  const height = clamp(
+    target.height,
+    Math.min(SHELF_MIN_HEIGHT_DIP, workArea.height),
+    workArea.height
   );
 
-  return rect(
-    Math.max(
-      workArea.x,
-      workArea.x + workArea.width - width - SHELF_MARGIN_DIP
-    ),
-    workArea.y + SHELF_MARGIN_DIP,
-    width,
-    Math.max(height, 1)
-  );
+  const y = clamp(target.y, workArea.y, bottom - height);
+  const beside = target.x + target.width + SHELF_GAP_DIP;
+  const before = target.x - width - SHELF_GAP_DIP;
+
+  if (beside + width <= right) {
+    return rect(beside, y, width, height);
+  }
+
+  if (before >= workArea.x) {
+    return rect(before, y, width, height);
+  }
+
+  const inside =
+    Math.min(target.x + target.width, right) - width - SHELF_GAP_DIP;
+
+  return rect(clamp(inside, workArea.x, right - width), y, width, height);
 };
 
 /** True when the rectangle overlaps the area at all. */

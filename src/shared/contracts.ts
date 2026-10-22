@@ -26,6 +26,21 @@ export interface ShelfView {
   readonly canUndo: boolean;
 }
 
+/** Menu choices the shelf window carries out itself, so its own state (editing, undo) stays in one place. */
+export type ShelfCommand =
+  | { readonly kind: "edit"; readonly id: ItemId }
+  | { readonly kind: "remove"; readonly id: ItemId }
+  | { readonly kind: "newSection" }
+  | { readonly kind: "newNote" }
+  /** Edit › Copy and Undo: a text field keeps its own, otherwise they act on items. */
+  | { readonly kind: "copy" }
+  | { readonly kind: "undo" };
+
+const MenuPoint = z.object({
+  x: z.number().min(0).max(10_000),
+  y: z.number().min(0).max(10_000),
+});
+
 export type ActionResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly message: string };
@@ -33,7 +48,7 @@ export type ActionResult =
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
 export const shelfContract = defineContract({
-  events: { view: event<ShelfView>() },
+  events: { command: event<ShelfCommand>(), view: event<ShelfView>() },
   global: "insetShelf",
   methods: {
     apply: send(ShelfOpSchema),
@@ -42,7 +57,11 @@ export const shelfContract = defineContract({
     dismissProblem: send(z.void()),
     getView: invoke(z.void(), out<ShelfView>()),
     hide: send(z.void()),
+    /** Copy and Undo inside a text field, done by the window's own edit commands. */
+    nativeEdit: send(z.enum(["copy", "undo"])),
     openKeySettings: send(z.void()),
+    showItemMenu: send(MenuPoint.extend({ id: ItemIdSchema })),
+    showSectionMenu: send(MenuPoint),
     pasteImage: invoke(
       z
         .instanceof(Uint8Array)

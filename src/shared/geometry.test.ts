@@ -6,7 +6,7 @@ import {
   dragRect,
   pinInCrop,
   pixelsPerDip,
-  placeShelf,
+  dockShelf,
   pt,
   rect,
   screenToImage,
@@ -158,22 +158,34 @@ describe(pinInCrop, () => {
   });
 });
 
-describe(placeShelf, () => {
+describe(dockShelf, () => {
   const work = rect<"screen">(0, 25, 1440, 850);
 
-  it("opens at the top right of the work area", () => {
-    expect(placeShelf(work, null)).toStrictEqual(rect(1068, 37, 360, 560));
-  });
-
-  it("keeps a remembered place and pulls it back inside the work area", () => {
-    expect(placeShelf(work, rect<"screen">(1300, 600, 360, 560))).toStrictEqual(
-      rect(1080, 315, 360, 560)
+  it("docks beside the right edge of the window, at its top and height", () => {
+    expect(dockShelf(rect<"screen">(100, 100, 800, 600), work)).toStrictEqual(
+      rect(908, 100, 340, 600)
     );
   });
 
-  it("fits a small screen", () => {
-    expect(placeShelf(rect<"screen">(0, 0, 320, 400), null)).toStrictEqual(
-      rect(0, 12, 320, 376)
+  it("docks to the left when there is no room on the right", () => {
+    expect(dockShelf(rect<"screen">(500, 100, 900, 600), work)).toStrictEqual(
+      rect(152, 100, 340, 600)
     );
+  });
+
+  it("sits inside the right edge of a window that fills the screen", () => {
+    expect(dockShelf(rect<"screen">(0, 25, 1440, 850), work)).toStrictEqual(
+      rect(1092, 25, 340, 850)
+    );
+  });
+
+  it("keeps a short window's shelf tall enough and on screen", () => {
+    expect(dockShelf(rect<"screen">(100, 700, 400, 120), work)).toStrictEqual(
+      rect(508, 515, 340, 360)
+    );
+  });
+
+  it("opens at the top right without a window", () => {
+    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 33, 340, 560));
   });
 });

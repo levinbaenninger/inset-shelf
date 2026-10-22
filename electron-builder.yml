@@ -13,9 +13,10 @@ extraResources:
     filter:
       - "*.png"
 asar: true
-# The key monitor ships N-API prebuilds; a native module cannot load from inside the asar.
+# Native modules and helper binaries cannot load from inside the asar.
 asarUnpack:
   - "**/node_modules/uiohook-napi/**"
+  - "**/node_modules/get-windows/**"
 npmRebuild: false
 mac:
   category: public.app-category.productivity
@@ -27,7 +28,6 @@ mac:
   identity: "-"
   hardenedRuntime: false
   extendInfo:
-    LSUIElement: true
     NSAccessibilityUsageDescription: Inset Shelf reads your text selection when you tap Shift twice.
 dmg:
   writeUpdateInfo: false

@@ -4,7 +4,6 @@ import type { Point, Rect } from "@shared/geometry";
 import { useState } from "react";
 import type { PointerEvent } from "react";
 
-import { Kbd } from "@/components/ui/kbd";
 import { overlayBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
 import { usePushedView } from "@/shared/use-pushed-view";
@@ -40,15 +39,7 @@ const Selection = ({ area }: { readonly area: Rect<"screen"> }) => (
 );
 
 const Hint = () => (
-  <output className="overlay-hint">
-    <span>Drag to keep an area</span>
-    <span aria-hidden="true">·</span>
-    <span>Click to pin a spot</span>
-    <span aria-hidden="true">·</span>
-    <span>
-      <Kbd>Esc</Kbd> cancels
-    </span>
-  </output>
+  <output className="overlay-hint">Drag an area, or click a spot</output>
 );
 
 interface Drag {

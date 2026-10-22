@@ -1,14 +1,13 @@
 import { TEXT_MAX } from "@shared/shelf";
-import { shortcutLabels } from "@shared/shortcut";
-import { useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, Ref } from "react";
 
-import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
-import { isMac } from "@/shared/platform";
 
 export interface ComposerProps {
   readonly sectionName: string;
+  /** Held by the shelf, so a menu can start a section by filling in "# ". */
+  readonly text: string;
+  readonly onTextChange: (text: string) => void;
   readonly onSubmit: (text: string) => void;
   readonly onPasteImage: (bytes: Uint8Array<ArrayBuffer>) => void;
   /** ↑ in an empty composer moves into the list. */
@@ -17,8 +16,6 @@ export interface ComposerProps {
   readonly onEscape: () => void;
   readonly ref?: Ref<HTMLTextAreaElement>;
 }
-
-const labels = shortcutLabels(isMac);
 
 const imageFrom = (event: ClipboardEvent<HTMLTextAreaElement>): File | null => {
   for (const item of event.clipboardData.items) {
@@ -43,11 +40,11 @@ export const Composer = ({
   onLeaveUp,
   onPasteImage,
   onSubmit,
+  onTextChange,
   ref,
   sectionName,
+  text,
 }: ComposerProps) => {
-  const [text, setText] = useState("");
-
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.nativeEvent.isComposing) {
       return;
@@ -58,7 +55,7 @@ export const Composer = ({
 
       if (text.trim() !== "") {
         onSubmit(text);
-        setText("");
+        onTextChange("");
       }
     } else if (event.key === "ArrowUp" && text === "") {
       event.preventDefault();
@@ -70,19 +67,19 @@ export const Composer = ({
       if (text === "") {
         onEscape();
       } else {
-        setText("");
+        onTextChange("");
       }
     }
   };
 
   return (
-    <div className="flex flex-col gap-1.5 px-3 pt-2 pb-3">
+    <div className="px-3 pt-2 pb-3">
       <Textarea
         aria-label={`New note in ${sectionName}`}
         className="max-h-32 min-h-0 resize-none"
         maxLength={TEXT_MAX}
         onChange={(event) => {
-          setText(event.target.value);
+          onTextChange(event.target.value);
         }}
         onKeyDown={onKeyDown}
         onPaste={(event) => {
@@ -93,22 +90,11 @@ export const Composer = ({
             void pasteFile(file, onPasteImage);
           }
         }}
-        placeholder="Write a note or a prompt for later"
+        placeholder="Note or prompt"
         ref={ref}
         rows={1}
         value={text}
       />
-      <p className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span>
-          <Kbd>{labels.doubleShift}</Kbd> saves selected text
-        </span>
-        <span>
-          <Kbd>{labels.area}</Kbd> area or pin
-        </span>
-        <span>
-          <Kbd>#</Kbd> name starts a section
-        </span>
-      </p>
     </div>
   );
 };
