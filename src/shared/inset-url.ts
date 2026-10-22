@@ -3,7 +3,7 @@ import { ImageFileSchema } from "./shelf";
 export const INSET_SCHEME = "inset";
 export const APP_ORIGIN = "inset://app";
 
-export type PageName = "shelf" | "overlay" | "toast" | "drawing";
+export type PageName = "shelf" | "overlay" | "toast" | "drawing" | "settings";
 
 export type InsetRequest =
   | { readonly kind: "app"; readonly path: string }

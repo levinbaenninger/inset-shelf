@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { defineContract, event, invoke, out, send } from "./ipc";
+import { SettingsSchema } from "./settings";
+import type { SettingsView } from "./settings";
 import { ItemIdSchema, ShelfOpSchema } from "./shelf";
 import type { ItemId, ShelfDoc } from "./shelf";
 
@@ -154,6 +156,19 @@ export const drawingContract = defineContract({
 });
 
 export type DrawingContract = typeof drawingContract;
+
+export const settingsContract = defineContract({
+  events: { view: event<SettingsView>() },
+  global: "insetSettings",
+  methods: {
+    getView: invoke(z.void(), out<SettingsView>()),
+    setOpenAtLogin: send(z.boolean()),
+    update: send(SettingsSchema.partial()),
+  },
+  name: "settings",
+});
+
+export type SettingsContract = typeof settingsContract;
 
 export type ShelfContract = typeof shelfContract;
 
