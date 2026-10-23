@@ -30,6 +30,8 @@ mac:
   extendInfo:
     NSAccessibilityUsageDescription: Inset Shelf reads your text selection when you tap Shift twice.
     NSAppleEventsUsageDescription: Inset Shelf saves the address of the page you capture from, so you can open it again.
+    NSDesktopFolderUsageDescription: Inset Shelf shows new screenshots saved to your Desktop beside the shelf.
+    NSDocumentsFolderUsageDescription: Inset Shelf shows new screenshots saved to your Documents folder beside the shelf.
 dmg:
   writeUpdateInfo: false
 win:

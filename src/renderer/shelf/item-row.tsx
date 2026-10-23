@@ -1,8 +1,17 @@
 import {
+  ChatGptIcon,
+  ClaudeIcon,
+  FigmaIcon,
   File01Icon,
+  GithubIcon,
   Link01Icon,
   MoreHorizontalIcon,
+  NewTwitterIcon,
+  Notion01Icon,
+  SlackIcon,
+  SourceCodeIcon,
   Tick02Icon,
+  YoutubeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
@@ -15,8 +24,10 @@ import type {
   ShelfItem,
   TextItem,
 } from "@shared/shelf";
+import { desktopApp, sourceLabel } from "@shared/web-source";
+import type { Service } from "@shared/web-source";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -28,9 +39,14 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { PinMarker } from "@/shared/pin-marker";
+import { isMac } from "@/shared/platform";
 
 import { whenText } from "./format";
-import type { ItemMenuAnchor } from "./menus";
+import { Markdown } from "./markdown";
+import { MarkdownField } from "./markdown-field";
+import type { MenuAnchor } from "./menus";
+import type { ItemDrag } from "./use-item-drag";
+import { isTextField } from "./use-shelf-keys";
 
 /** A right-click on any part of an item opens its menu at the pointer. */
 const contextMenuAt =
@@ -46,7 +62,24 @@ const contextMenuAt =
     });
   };
 
-/** Where an item came from, in one quiet line; a page address opens in the browser. */
+const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
+  chatgpt: ChatGptIcon,
+  claude: ClaudeIcon,
+  figma: FigmaIcon,
+  github: GithubIcon,
+  linear: Link01Icon,
+  notion: Notion01Icon,
+  slack: SlackIcon,
+  t3code: SourceCodeIcon,
+  x: NewTwitterIcon,
+  youtube: YoutubeIcon,
+};
+
+/**
+ * Where an item came from, in one quiet line: the site and what on it for
+ * pages the shelf knows, else the app and window. A page address opens in the
+ * browser.
+ */
 const SourceLine = ({
   context,
   onOpenLink,
@@ -54,11 +87,19 @@ const SourceLine = ({
   readonly context: ItemContext;
   readonly onOpenLink: () => void;
 }) => {
-  const label = [context.app, context.title].filter(Boolean).join(" · ");
+  const { label, service } = sourceLabel(context);
+  const icon = service === null ? Link01Icon : SERVICE_ICON[service];
+  // A desktop app it came from opens again; elsewhere the page does (isMac: only macOS can).
+  const app = isMac ? desktopApp(context.app) : null;
 
-  if (context.url === null) {
+  if (context.url === null && app === null) {
     return label === "" ? null : (
-      <p className="text-muted-foreground truncate text-xs">{label}</p>
+      <p className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs">
+        {service === null ? null : (
+          <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
+        )}
+        <span className="truncate">{label}</span>
+      </p>
     );
   }
 
@@ -66,14 +107,52 @@ const SourceLine = ({
     <button
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
       onClick={onOpenLink}
-      title={context.url}
+      title={app === null ? (context.url ?? undefined) : `Open ${app}`}
       type="button"
     >
-      <HugeiconsIcon className="shrink-0" icon={Link01Icon} size={12} />
+      <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
       <span className="truncate">{label === "" ? context.url : label}</span>
     </button>
   );
 };
+
+const hostOf = (url: string): string =>
+  new URL(url).hostname.replace(/^www\./u, "");
+
+/** The links in a copied selection, listed while the item is open; each opens in the browser. */
+const LinkList = ({
+  links,
+  onOpenLink,
+}: {
+  readonly links: TextItem["links"];
+  readonly onOpenLink: (url: string) => void;
+}) => (
+  <div className="flex flex-col gap-0.5">
+    {links.map((link) => (
+      <button
+        className="hover:bg-foreground/5 focus-visible:ring-ring/50 -mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs outline-none focus-visible:ring-3"
+        key={link.url}
+        onClick={() => {
+          onOpenLink(link.url);
+        }}
+        title={link.url}
+        type="button"
+      >
+        <HugeiconsIcon
+          className="text-muted-foreground shrink-0"
+          icon={Link01Icon}
+          size={12}
+        />
+        <span className="truncate">{link.text}</span>
+        {link.text === link.url ? null : (
+          <span className="text-muted-foreground shrink-0">
+            {hostOf(link.url)}
+          </span>
+        )}
+      </button>
+    ))}
+  </div>
+);
 
 /** An attached file's name; it drags out like an image. */
 const FileName = ({
@@ -90,7 +169,9 @@ const FileName = ({
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDragStart={(event) => {
+      // A system drag of the file itself, not the card's move within the shelf.
       event.preventDefault();
+      event.stopPropagation();
       onDragImage();
     }}
     title="Drag into another app"
@@ -113,11 +194,11 @@ const FileName = ({
 );
 
 export interface RowHandlers {
-  /** Opens the page an item was captured from. */
-  readonly onOpenLink: () => void;
+  /** Opens the page an item was captured from, or a link in it. */
+  readonly onOpenLink: (url?: string) => void;
   readonly onSelect: () => void;
   /** Opens the item's menu: at the pointer for a right-click, under ⋯ for the button. */
-  readonly onContextMenu: (anchor: Omit<ItemMenuAnchor, "id">) => void;
+  readonly onContextMenu: (anchor: MenuAnchor) => void;
   /** Double-clicking an image opens it large, to look at or draw on. */
   readonly onOpen: () => void;
   /** Double-clicking a text item edits it. */
@@ -127,6 +208,8 @@ export interface RowHandlers {
   readonly onEditNote: (note: string) => void;
   readonly onStopEditing: () => void;
   readonly onDragImage: () => void;
+  /** Escape in a note, which saves as it is typed, hides the shelf. */
+  readonly onHide: () => void;
 }
 
 export interface ItemRowProps extends RowHandlers {
@@ -134,6 +217,14 @@ export interface ItemRowProps extends RowHandlers {
   readonly selected: boolean;
   readonly editing: boolean;
   readonly copied: boolean;
+  /** Lets the card be dragged to another section (use-item-drag.ts). */
+  readonly dragProps: ReturnType<ItemDrag["itemProps"]>;
+  /** The card is being dragged, so it shows faded. */
+  readonly dragging: boolean;
+  /** Picked along with others (⌘-click, ⇧-click, ⌘A): outlined, but not opened. */
+  readonly picked: boolean;
+  /** ⌘-click (Ctrl elsewhere) toggles the card in the picks; ⇧-click picks a range. */
+  readonly onPick: (mode: "toggle" | "range") => void;
 }
 
 /** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
@@ -147,6 +238,7 @@ const KIND_LABEL = {
   drawing: "Drawing",
   paste: "Pasted image",
   pin: "Pinned spot",
+  screenshot: "Screenshot",
 } as const;
 
 const FILE_SIZE = new Intl.NumberFormat(undefined, {
@@ -173,7 +265,10 @@ const metaText = (item: ShelfItem): string => {
   return `${when} · ${KIND_LABEL[item.via]}${where}`;
 };
 
-/** Edits a text item in place; ⌘↩ or Return saves, ⇧↩ adds a line, Escape keeps the old text. */
+/**
+ * Edits a text item in place, with its Markdown formatted as it is typed;
+ * ⌘↩ or Return saves, ⇧↩ adds a line or list item, Escape keeps the old text.
+ */
 const TextEditor = ({
   item,
   onDone,
@@ -184,48 +279,45 @@ const TextEditor = ({
   readonly onDone: () => void;
 }) => {
   const [text, setText] = useState(item.text);
+  // Escape throws the edit away; the blur that follows must not save it.
+  const cancelled = useRef(false);
 
-  const finish = (): void => {
-    if (text.trim() !== "" && text !== item.text) {
-      onSave(text.trim());
+  const finish = (markdown: string): void => {
+    if (cancelled.current) {
+      return;
+    }
+
+    cancelled.current = true;
+
+    const next = markdown.trim().slice(0, TEXT_MAX);
+
+    if (next !== "" && next !== item.text) {
+      onSave(next);
     }
 
     onDone();
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
-    ) {
-      event.preventDefault();
-      finish();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onDone();
-    }
-  };
-
   return (
-    <Textarea
-      aria-label="Edit item"
-      autoFocus
-      className="min-h-0"
-      maxLength={TEXT_MAX}
-      onBlur={finish}
-      onChange={(event) => {
-        setText(event.target.value);
-      }}
-      onFocus={(event) => {
-        const end = event.currentTarget.value.length;
-
-        event.currentTarget.setSelectionRange(end, end);
-      }}
-      onKeyDown={onKeyDown}
-      value={text}
-    />
+    <div className="border-input dark:bg-input/30 focus-within:border-ring focus-within:ring-ring/50 rounded-lg border px-2.5 py-2 focus-within:ring-3">
+      <MarkdownField
+        ariaLabel="Edit item"
+        autoFocus
+        keys={{
+          onEscape: () => {
+            cancelled.current = true;
+            onDone();
+          },
+          onSubmit: finish,
+        }}
+        onBlur={(markdown) => {
+          // An untouched note keeps its own Markdown, not the field's rewrite of it.
+          finish(markdown === text ? markdown : text);
+        }}
+        onChange={setText}
+        value={item.text}
+      />
+    </div>
   );
 };
 
@@ -235,11 +327,13 @@ const NoteField = ({
   item,
   onChange,
   onDone,
+  onHide,
 }: {
   readonly item: ImageItem | FileItem;
   readonly autoFocus: boolean;
   readonly onChange: (note: string) => void;
   readonly onDone: () => void;
+  readonly onHide: () => void;
 }) => {
   const [note, setNote] = useState(item.note);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -255,15 +349,17 @@ const NoteField = ({
       aria-label={
         item.kind === "image" ? "Note for this image" : "Note for this file"
       }
-      className="min-h-0"
+      className="min-h-0 resize-none"
       maxLength={TEXT_MAX}
       onChange={(event) => {
         setNote(event.target.value);
         onChange(event.target.value);
       }}
       onKeyDown={(event) => {
+        const escape = event.key === "Escape";
+
         if (
-          event.key === "Escape" ||
+          escape ||
           (event.key === "Enter" &&
             !event.shiftKey &&
             !event.nativeEvent.isComposing)
@@ -272,6 +368,10 @@ const NoteField = ({
           event.stopPropagation();
           event.currentTarget.blur();
           onDone();
+
+          if (escape) {
+            onHide();
+          }
         }
       }}
       placeholder="What matters here?"
@@ -281,6 +381,36 @@ const NoteField = ({
     />
   );
 };
+
+/**
+ * The note under an image or file as text: two lines until the item is
+ * selected. A double-click, Return or Edit Note opens it for typing.
+ */
+const NoteText = ({
+  item,
+  onContextMenu,
+  onEdit,
+  onSelect,
+  selected,
+}: {
+  readonly item: ImageItem | FileItem;
+  readonly selected: boolean;
+} & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) =>
+  item.note === "" ? null : (
+    <button
+      className={cn(
+        "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
+        item.done && "text-muted-foreground line-through",
+        !selected && "line-clamp-2"
+      )}
+      onClick={onSelect}
+      onContextMenu={contextMenuAt(onContextMenu)}
+      onDoubleClick={onEdit}
+      type="button"
+    >
+      {item.note}
+    </button>
+  );
 
 /** The picture, which selects on click, opens large on a double-click and drags out as a file. */
 const Picture = ({
@@ -308,7 +438,9 @@ const Picture = ({
     onContextMenu={contextMenuAt(onContextMenu)}
     onDoubleClick={onOpen}
     onDragStart={(event) => {
+      // A system drag of the file itself, not the card's move within the shelf.
       event.preventDefault();
+      event.stopPropagation();
       onDragImage();
     }}
     title="Double-click to open, or drag into another app"
@@ -335,13 +467,15 @@ const Picture = ({
   </button>
 );
 
-/** Unselected images are a thumbnail beside their note; the selected one opens full width with its note field. */
+/** Unselected images are a thumbnail beside their note; the selected one opens full width, with a field for its note only while it is edited. */
 const ImageBody = ({
   editing,
   item,
   onContextMenu,
   onDragImage,
+  onEdit,
   onEditNote,
+  onHide,
   onOpen,
   onSelect,
   onStopEditing,
@@ -354,7 +488,9 @@ const ImageBody = ({
   RowHandlers,
   | "onContextMenu"
   | "onDragImage"
+  | "onEdit"
   | "onEditNote"
+  | "onHide"
   | "onOpen"
   | "onSelect"
   | "onStopEditing"
@@ -372,7 +508,7 @@ const ImageBody = ({
         />
         <button
           className={cn(
-            "focus-visible:ring-ring/50 line-clamp-3 min-w-0 flex-1 rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
+            "focus-visible:ring-ring/50 line-clamp-2 min-w-0 flex-1 rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
             item.note === "" && "text-muted-foreground",
             item.done && "text-muted-foreground line-through"
           )}
@@ -387,7 +523,7 @@ const ImageBody = ({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2.5">
       <Picture
         compact={false}
         item={item}
@@ -396,13 +532,24 @@ const ImageBody = ({
         onOpen={onOpen}
         onSelect={onSelect}
       />
-      <NoteField
-        autoFocus={editing}
-        item={item}
-        key={item.id}
-        onChange={onEditNote}
-        onDone={onStopEditing}
-      />
+      {editing ? (
+        <NoteField
+          autoFocus
+          item={item}
+          key={item.id}
+          onChange={onEditNote}
+          onDone={onStopEditing}
+          onHide={onHide}
+        />
+      ) : (
+        <NoteText
+          item={item}
+          onContextMenu={onContextMenu}
+          onEdit={onEdit}
+          onSelect={onSelect}
+          selected={selected}
+        />
+      )}
     </div>
   );
 };
@@ -413,7 +560,9 @@ const FileBody = ({
   item,
   onContextMenu,
   onDragImage,
+  onEdit,
   onEditNote,
+  onHide,
   onSelect,
   onStopEditing,
   selected,
@@ -423,49 +572,122 @@ const FileBody = ({
   readonly editing: boolean;
 } & Pick<
   RowHandlers,
-  "onContextMenu" | "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
->) => {
-  const open = selected || editing;
-
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <FileName
+  | "onContextMenu"
+  | "onDragImage"
+  | "onEdit"
+  | "onEditNote"
+  | "onHide"
+  | "onSelect"
+  | "onStopEditing"
+>) => (
+  <div className="flex min-w-0 flex-col gap-2">
+    <FileName
+      item={item}
+      onContextMenu={onContextMenu}
+      onDragImage={onDragImage}
+      onSelect={onSelect}
+    />
+    {editing ? (
+      <NoteField
+        autoFocus
+        item={item}
+        key={item.id}
+        onChange={onEditNote}
+        onDone={onStopEditing}
+        onHide={onHide}
+      />
+    ) : (
+      <NoteText
         item={item}
         onContextMenu={onContextMenu}
-        onDragImage={onDragImage}
+        onEdit={onEdit}
         onSelect={onSelect}
+        selected={selected}
       />
-      {open ? (
-        <NoteField
-          autoFocus={editing}
-          item={item}
-          key={item.id}
-          onChange={onEditNote}
-          onDone={onStopEditing}
+    )}
+  </div>
+);
+
+/** A text item's words, clamped to two lines until it is selected, and its links while it is. */
+const TextBody = ({
+  editing,
+  item,
+  onContextMenu,
+  onEdit,
+  onEditText,
+  onOpenLink,
+  onSelect,
+  onStopEditing,
+  selected,
+}: {
+  readonly item: TextItem;
+  readonly selected: boolean;
+  readonly editing: boolean;
+} & Pick<
+  RowHandlers,
+  | "onContextMenu"
+  | "onEdit"
+  | "onEditText"
+  | "onOpenLink"
+  | "onSelect"
+  | "onStopEditing"
+>) => {
+  if (editing) {
+    return (
+      <TextEditor item={item} onDone={onStopEditing} onSave={onEditText} />
+    );
+  }
+
+  const words = cn(
+    "text-sm leading-snug break-words",
+    item.done && "text-muted-foreground line-through"
+  );
+
+  return (
+    <>
+      {/* Open, its links work; closed, the whole text selects the card and shows two lines. */}
+      {selected ? (
+        <Markdown
+          className={words}
+          interactive
+          onOpenLink={onOpenLink}
+          text={item.text}
         />
-      ) : null}
-      {!open && item.note !== "" ? (
+      ) : (
         <button
           className={cn(
-            "focus-visible:ring-ring/50 line-clamp-3 rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
-            item.done && "text-muted-foreground line-through"
+            "focus-visible:ring-ring/50 rounded-sm text-left outline-none focus-visible:ring-3",
+            words
           )}
           onClick={onSelect}
           onContextMenu={contextMenuAt(onContextMenu)}
+          onDoubleClick={onEdit}
           type="button"
         >
-          {item.note}
+          <Markdown
+            className="line-clamp-2"
+            interactive={false}
+            onOpenLink={onOpenLink}
+            text={item.text}
+          />
         </button>
+      )}
+      {selected && item.links.length > 0 ? (
+        <LinkList links={item.links} onOpenLink={onOpenLink} />
       ) : null}
-    </div>
+    </>
   );
 };
 
-/** A colour tag shows as a coloured left edge, drawn by [data-tagged] in styles.css. */
-const tagAttributes = (item: ShelfItem) =>
-  item.color === null
-    ? {}
-    : { "data-tagged": true, style: { "--tag": COLOR_HEX[item.color] } };
+/** A colour tag shows as a coloured bar along the card's left edge. */
+const TagStripe = ({ item }: { readonly item: ShelfItem }) =>
+  item.color === null ? null : (
+    <span
+      aria-hidden="true"
+      className="absolute top-2 bottom-2 left-0 w-[3px] rounded-r-full bg-(--tag)"
+      style={{ "--tag": COLOR_HEX[item.color] }}
+    />
+  );
 
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
@@ -474,42 +696,67 @@ export const ItemRow = (props: ItemRowProps) => {
     <li
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "group bg-background/60 relative flex items-start gap-2.5 rounded-lg border px-2.5 py-2",
-        selected
+        "group bg-background/60 relative flex items-start gap-3 rounded-lg border px-3 py-2.5",
+        selected || props.picked
           ? "border-primary"
-          : "border-foreground/10 hover:border-foreground/20"
+          : "border-foreground/10 hover:border-foreground/20",
+        props.picked && "bg-primary/10",
+        props.dragging && "opacity-40"
       )}
       data-item-id={item.id}
-      {...tagAttributes(item)}
+      // A modified click picks instead of opening; caught before the card's own buttons see it.
+      onClickCapture={(event) => {
+        const toggle = isMac ? event.metaKey : event.ctrlKey;
+
+        if (toggle || event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onPick(event.shiftKey ? "range" : "toggle");
+        }
+      }}
+      // A text field inside keeps ordinary text dragging.
+      {...(editing ? {} : props.dragProps)}
+      // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
+      onContextMenuCapture={(event) => {
+        if (!isTextField(event.target)) {
+          contextMenuAt(props.onContextMenu)(event);
+          event.stopPropagation();
+        }
+      }}
+      onDoubleClickCapture={(event) => {
+        if (
+          item.kind === "text" &&
+          selected &&
+          !editing &&
+          !(
+            event.target instanceof Element &&
+            event.target.closest("a") !== null
+          )
+        ) {
+          props.onEdit();
+        }
+      }}
     >
+      <TagStripe item={item} />
       <Checkbox
         aria-label={item.done ? "Mark as not done" : "Mark as done"}
         checked={item.done}
         className="mt-0.5"
         onCheckedChange={props.onToggle}
       />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        {item.kind === "text" && editing ? (
-          <TextEditor
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {item.kind === "text" ? (
+          <TextBody
+            editing={editing}
             item={item}
-            onDone={props.onStopEditing}
-            onSave={props.onEditText}
+            onContextMenu={props.onContextMenu}
+            onEdit={props.onEdit}
+            onEditText={props.onEditText}
+            onOpenLink={props.onOpenLink}
+            onSelect={props.onSelect}
+            onStopEditing={props.onStopEditing}
+            selected={selected}
           />
-        ) : null}
-        {item.kind === "text" && !editing ? (
-          <button
-            className={cn(
-              "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
-              item.done && "text-muted-foreground line-through",
-              !selected && "line-clamp-6"
-            )}
-            onClick={props.onSelect}
-            onContextMenu={contextMenuAt(props.onContextMenu)}
-            onDoubleClick={props.onEdit}
-            type="button"
-          >
-            {item.text}
-          </button>
         ) : null}
         {item.kind === "image" ? (
           <ImageBody
@@ -517,7 +764,9 @@ export const ItemRow = (props: ItemRowProps) => {
             item={item}
             onContextMenu={props.onContextMenu}
             onDragImage={props.onDragImage}
+            onEdit={props.onEdit}
             onEditNote={props.onEditNote}
+            onHide={props.onHide}
             onOpen={props.onOpen}
             onSelect={props.onSelect}
             onStopEditing={props.onStopEditing}
@@ -530,14 +779,21 @@ export const ItemRow = (props: ItemRowProps) => {
             item={item}
             onContextMenu={props.onContextMenu}
             onDragImage={props.onDragImage}
+            onEdit={props.onEdit}
             onEditNote={props.onEditNote}
+            onHide={props.onHide}
             onSelect={props.onSelect}
             onStopEditing={props.onStopEditing}
             selected={selected}
           />
         ) : null}
         {item.context === null ? null : (
-          <SourceLine context={item.context} onOpenLink={props.onOpenLink} />
+          <SourceLine
+            context={item.context}
+            onOpenLink={() => {
+              props.onOpenLink();
+            }}
+          />
         )}
         {selected ? (
           <p className="text-muted-foreground text-xs">{metaText(item)}</p>

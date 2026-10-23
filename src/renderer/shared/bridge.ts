@@ -1,6 +1,7 @@
 import type {
   DrawingContract,
   OverlayContract,
+  ScreenshotContract,
   SettingsContract,
   ShelfContract,
   ToastContract,
@@ -13,6 +14,7 @@ declare global {
     readonly insetShelf?: Client<ShelfContract>;
     readonly insetOverlay?: Client<OverlayContract>;
     readonly insetToast?: Client<ToastContract>;
+    readonly insetScreenshot?: Client<ScreenshotContract>;
     readonly insetDrawing?: Client<DrawingContract>;
     readonly insetSettings?: Client<SettingsContract>;
     readonly insetFiles?: { readonly pathFor: (file: File) => string };
@@ -32,6 +34,9 @@ export const shelfBridge = (): Client<ShelfContract> =>
 
 export const overlayBridge = (): Client<OverlayContract> =>
   require(window.insetOverlay, "area overlay");
+
+export const screenshotBridge = (): Client<ScreenshotContract> =>
+  require(window.insetScreenshot, "screenshot card");
 
 export const toastBridge = (): Client<ToastContract> =>
   require(window.insetToast, "toast");

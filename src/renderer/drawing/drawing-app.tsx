@@ -46,10 +46,11 @@ const subscribe = (listener: (view: DrawingView | null) => void) =>
 /** The marks drawn into the open image, or onto a fresh page; null when there is nothing to save. */
 const exportMarks = async (
   marks: readonly Mark[],
-  image: DrawingImage | null
+  image: DrawingImage | null,
+  dark: boolean
 ): Promise<Uint8Array<ArrayBuffer> | null> => {
   if (image === null) {
-    return await exportPng(marks);
+    return await exportPng(marks, dark);
   }
 
   const png = await api.getImage();
@@ -70,10 +71,11 @@ const exportMarks = async (
 const saveDrawing = async (
   copy: boolean,
   marks: readonly Mark[],
-  image: DrawingImage | null
+  image: DrawingImage | null,
+  dark: boolean
 ): Promise<string | null> => {
   try {
-    const png = await exportMarks(marks, image);
+    const png = await exportMarks(marks, image, dark);
 
     if (png === null) {
       return null;
@@ -148,7 +150,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
 
     setSaving(true);
     setProblem(null);
-    setProblem(await saveDrawing(copy, toSave, image));
+    setProblem(await saveDrawing(copy, toSave, image, dark));
     setSaving(false);
   };
 
@@ -210,17 +212,17 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
     <main className="bg-background flex h-svh flex-col overflow-hidden select-none">
       <header
         className={cn(
-          "drag-region caption-clear flex h-12 shrink-0 items-center justify-end gap-2 border-b",
+          "drag-region caption-clear relative flex h-12 shrink-0 items-center justify-end gap-1.5 border-b",
           // The window's buttons sit in this header: the traffic lights at its left on macOS, the caption buttons at its right on Windows.
           isMac ? "pl-20" : "pl-3"
         )}
       >
-        {problem === null && image !== null ? (
-          <p className="text-muted-foreground mr-auto min-w-0 truncate text-xs">
-            Draw on the image to mark it up. Saving replaces it on the shelf.
-          </p>
-        ) : null}
-        {problem === null ? null : (
+        {/* The window's title, centred like a Mac window's; a problem saving takes its place. */}
+        {problem === null ? (
+          <h1 className="pointer-events-none absolute inset-x-0 text-center text-sm font-medium">
+            {image === null ? "New Drawing" : "Annotate"}
+          </h1>
+        ) : (
           <p
             className="text-destructive mr-auto min-w-0 truncate text-xs"
             role="alert"
@@ -233,6 +235,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           onClick={() => {
             void save(true, marks);
           }}
+          size="sm"
           variant="secondary"
         >
           Copy and Save
@@ -242,6 +245,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           onClick={() => {
             void save(false, marks);
           }}
+          size="sm"
         >
           Save
           <Kbd>{SAVE_KEYS}</Kbd>

@@ -27,7 +27,9 @@ export interface ShelfWindow {
   readonly load: () => Promise<void>;
   readonly isVisible: () => boolean;
   readonly isFocused: () => boolean;
-  /** Docks to the given window, or opens at the top right without one. */
+  /** Where the shelf is on screen, or null while it is hidden. */
+  readonly bounds: () => Rectangle | null;
+  /** Docks to the given window, or opens at the right, centred, without one. */
   readonly show: (target: Rect<"screen"> | null) => void;
   /** Hides and hands focus back to the app that was in front. */
   readonly hide: () => void;
@@ -145,6 +147,7 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
     focus: () => {
       window.focus();
     },
+    bounds: () => (window.isVisible() ? window.getBounds() : null),
     isFocused: () => window.isVisible() && window.isFocused(),
     isVisible: () => window.isVisible(),
     load: async () => {

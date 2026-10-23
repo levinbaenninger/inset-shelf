@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+import {
+  isAppLink,
+  LINK_TEXT_MAX,
+  LINK_URL_MAX,
+  LINKS_MAX,
+  linksInHtml,
+} from "./web-source";
+
 const LOWER_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
@@ -58,6 +66,11 @@ const ItemBaseV1 = {
 /** Where an item came from: the app in front, its window title and, for a browser, the page. */
 export const ContextSchema = z.object({
   app: z.string().max(200).nullable(),
+  /**
+   * Opens the item where it was in its desktop app: a ChatGPT or T3 Code
+   * thread, a Claude chat, a Notion page. Only known app schemes.
+   */
+  appLink: z.string().refine(isAppLink).nullable().default(null),
   title: z.string().max(500).nullable(),
   url: z
     .url({ protocol: /^https?$/u })
@@ -87,8 +100,24 @@ const ItemBase = {
   context: ContextSchema.nullable(),
 };
 
+/** Copied HTML larger than this is not kept; its links still are. */
+export const HTML_MAX = 200_000;
+
+export const LinkSchema = z.object({
+  text: z.string().max(LINK_TEXT_MAX),
+  url: z.url({ protocol: /^https?$/u }).max(LINK_URL_MAX),
+});
+
 const TextFields = {
+  /**
+   * The selection as the app copied it, put back next to the text when the
+   * item is copied so links and formatting paste too. Never shown; dropped
+   * once the text is edited.
+   */
+  html: z.string().max(HTML_MAX).nullable().default(null),
   kind: z.literal("text"),
+  /** The web links in a copied selection, which the item lists when it is open. */
+  links: z.array(LinkSchema).max(LINKS_MAX).default([]),
   text: z.string().min(1).max(TEXT_MAX),
   via: z.enum(["typed", "selection"]),
 };
@@ -101,7 +130,7 @@ const ImageFields = {
   pin: PinSchema.nullable(),
   /** The display an area or pin was captured on. */
   source: z.string().max(200).nullable(),
-  via: z.enum(["area", "pin", "paste", "drawing"]),
+  via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
 };
 
 export const StoredFileSchema = z.object({
@@ -287,8 +316,21 @@ export const ShelfOpSchema = z.discriminatedUnion("type", [
   }),
   z.object({ id: ItemIdSchema, type: z.literal("toggleDone") }),
   z.object({ id: ItemIdSchema, type: z.literal("remove") }),
-  z.object({ type: z.literal("undoRemove") }),
+  /** Puts back a deleted item: the one asked for, else the last one deleted. */
+  z.object({ id: ItemIdSchema.optional(), type: z.literal("undoRemove") }),
   z.object({ id: SectionIdSchema, type: z.literal("selectSection") }),
+  /** Makes a section, or picks the one with that name, for new items. */
+  z.object({
+    name: z.string().min(1).max(SECTION_NAME_MAX),
+    type: z.literal("addSection"),
+  }),
+  z.object({
+    id: SectionIdSchema,
+    name: z.string().min(1).max(SECTION_NAME_MAX),
+    type: z.literal("renameSection"),
+  }),
+  /** Deletes a section with its items; the last section stays. */
+  z.object({ id: SectionIdSchema, type: z.literal("removeSection") }),
   z.object({
     id: ItemIdSchema,
     sectionId: SectionIdSchema,
@@ -299,7 +341,11 @@ export const ShelfOpSchema = z.discriminatedUnion("type", [
     id: ItemIdSchema,
     type: z.literal("setColor"),
   }),
-  z.object({ type: z.literal("clearDone") }),
+  /** Deletes the checked items of a section, the active one when none is given. */
+  z.object({
+    sectionId: SectionIdSchema.optional(),
+    type: z.literal("clearDone"),
+  }),
 ]);
 
 export type ShelfOp = z.output<typeof ShelfOpSchema>;
@@ -308,6 +354,8 @@ export type MainOp =
   | {
       readonly type: "addText";
       readonly text: string;
+      /** The HTML copied with a selection, if the app put any on the clipboard. */
+      readonly html: string | null;
       readonly via: TextItem["via"];
       readonly context: ItemContext | null;
     }
@@ -337,7 +385,10 @@ export interface OpEnv {
   readonly now: () => Date;
 }
 
-/** A removed item and where it stood, so one undo can put it back. */
+/** How many deleted items can still be put back; the oldest beyond it goes for good. */
+export const UNDO_MAX = 10;
+
+/** A removed item and where it stood, so an undo can put it back. */
 export interface Removed {
   readonly item: ShelfItem;
   readonly index: number;
@@ -379,6 +430,76 @@ const addItem = (doc: ShelfDoc, item: ShelfItem): OpResult => ({
   removed: null,
 });
 
+const sectionNamed = (doc: ShelfDoc, name: string): Section | undefined =>
+  doc.sections.find(
+    (section) => section.name.toLowerCase() === name.toLowerCase()
+  );
+
+/** New items go to the section with this name, made at the end if there is none. */
+const addSection = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
+  const name = raw.trim().slice(0, SECTION_NAME_MAX);
+
+  if (name === "") {
+    return unchanged(doc);
+  }
+
+  const existing = sectionNamed(doc, name);
+
+  if (existing !== undefined) {
+    return changed({ ...doc, activeSectionId: existing.id });
+  }
+
+  const section: Section = { id: env.newSectionId(), name };
+
+  return changed({
+    ...doc,
+    activeSectionId: section.id,
+    sections: [...doc.sections, section],
+  });
+};
+
+/** A section takes a new name, unless another section already has it. */
+const renameSection = (doc: ShelfDoc, id: SectionId, raw: string): OpResult => {
+  const name = raw.trim().slice(0, SECTION_NAME_MAX);
+  const taken = sectionNamed(doc, name);
+
+  if (name === "" || (taken !== undefined && taken.id !== id)) {
+    return unchanged(doc);
+  }
+
+  return changed({
+    ...doc,
+    sections: doc.sections.map((section) =>
+      section.id === id ? { ...section, name } : section
+    ),
+  });
+};
+
+/** Deletes a section and its items for good; new items then go to the first section left. */
+const removeSection = (doc: ShelfDoc, id: SectionId): OpResult => {
+  const sections = doc.sections.filter((section) => section.id !== id);
+  const [first] = sections;
+
+  if (first === undefined || sections.length === doc.sections.length) {
+    return unchanged(doc);
+  }
+
+  const discarded = doc.items.filter((item) => item.sectionId === id);
+
+  return {
+    addedId: null,
+    discarded,
+    doc: {
+      ...doc,
+      activeSectionId:
+        doc.activeSectionId === id ? first.id : doc.activeSectionId,
+      items: doc.items.filter((item) => item.sectionId !== id),
+      sections,
+    },
+    removed: null,
+  };
+};
+
 const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
   const entry = parseComposer(raw);
 
@@ -392,29 +513,17 @@ const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
       context: null,
       createdAt: env.now().toISOString(),
       done: false,
+      html: null,
       id: env.newItemId(),
       kind: "text",
+      links: [],
       sectionId: doc.activeSectionId,
       text: entry.text,
       via: "typed",
     });
   }
 
-  const existing = doc.sections.find(
-    (section) => section.name.toLowerCase() === entry.name.toLowerCase()
-  );
-
-  if (existing !== undefined) {
-    return changed({ ...doc, activeSectionId: existing.id });
-  }
-
-  const section: Section = { id: env.newSectionId(), name: entry.name };
-
-  return changed({
-    ...doc,
-    activeSectionId: section.id,
-    sections: [...doc.sections, section],
-  });
+  return addSection(doc, entry.name, env);
 };
 
 const remove = (doc: ShelfDoc, id: ItemId): OpResult => {
@@ -489,35 +598,148 @@ const replaceImage = (
   };
 };
 
+/** A selection or other text from main; blank text adds nothing. */
+const addText = (
+  doc: ShelfDoc,
+  op: Extract<MainOp, { readonly type: "addText" }>,
+  env: OpEnv
+): OpResult => {
+  if (op.text.trim() === "") {
+    return unchanged(doc);
+  }
+
+  return addItem(doc, {
+    color: null,
+    context: op.context,
+    createdAt: env.now().toISOString(),
+    done: false,
+    html: op.html !== null && op.html.length <= HTML_MAX ? op.html : null,
+    id: env.newItemId(),
+    kind: "text",
+    // Only links the stored shelf accepts, so one odd link never makes it unreadable.
+    links:
+      op.html === null
+        ? []
+        : linksInHtml(op.html).filter(
+            (link) => LinkSchema.safeParse(link).success
+          ),
+    sectionId: doc.activeSectionId,
+    text: op.text.slice(0, TEXT_MAX),
+    via: op.via,
+  });
+};
+
+/** Deletes a section's checked items for good. */
+const clearDone = (doc: ShelfDoc, sectionId: SectionId): OpResult => {
+  const discarded = doc.items.filter(
+    (item) => item.done && item.sectionId === sectionId
+  );
+
+  return {
+    addedId: null,
+    discarded,
+    doc: {
+      ...doc,
+      items: doc.items.filter((item) => !discarded.includes(item)),
+    },
+    removed: null,
+  };
+};
+
+/** A delete that can be undone; past UNDO_MAX the oldest pending one goes for good. */
+const removeUndoably = (
+  doc: ShelfDoc,
+  id: ItemId,
+  pending: readonly Removed[]
+): OpResult => {
+  const result = remove(doc, id);
+  const [oldest] = pending;
+
+  return oldest === undefined ||
+    pending.length < UNDO_MAX ||
+    result.removed === null
+    ? result
+    : { ...result, discarded: [oldest.item] };
+};
+
+/** The deletion an undo puts back: the one asked for, else the last. */
+const pendingFor = (
+  pending: readonly Removed[],
+  id: ItemId | undefined
+): Removed | null =>
+  (id === undefined
+    ? pending.at(-1)
+    : pending.find((removed) => removed.item.id === id)) ?? null;
+
+type SectionOp = Extract<
+  ShelfOp,
+  {
+    readonly type:
+      | "selectSection"
+      | "addSection"
+      | "renameSection"
+      | "removeSection";
+  }
+>;
+
+const SECTION_OPS: ReadonlySet<string> = new Set([
+  "selectSection",
+  "addSection",
+  "renameSection",
+  "removeSection",
+]);
+
+const isSectionOp = (op: ShelfOp | MainOp): op is SectionOp =>
+  SECTION_OPS.has(op.type);
+
+/** The operations on sections themselves: which takes new items, their names, deleting one. */
+const applySectionOp = (doc: ShelfDoc, op: SectionOp, env: OpEnv): OpResult => {
+  switch (op.type) {
+    case "selectSection": {
+      return doc.sections.some((section) => section.id === op.id)
+        ? changed({ ...doc, activeSectionId: op.id })
+        : unchanged(doc);
+    }
+
+    case "addSection": {
+      return addSection(doc, op.name, env);
+    }
+
+    case "renameSection": {
+      return renameSection(doc, op.id, op.name);
+    }
+
+    case "removeSection": {
+      return removeSection(doc, op.id);
+    }
+
+    default: {
+      return unchanged(doc);
+    }
+  }
+};
+
 /**
- * Applies one operation. `lastRemoved` is the pending undo; it stays undoable
- * until the next remove, which discards it for good.
+ * Applies one operation. `pending` holds the deleted items that can still be
+ * put back, oldest first; a delete past UNDO_MAX discards the oldest for good.
  */
 export const applyOp = (
   doc: ShelfDoc,
   op: ShelfOp | MainOp,
   env: OpEnv,
-  lastRemoved: Removed | null
+  pending: readonly Removed[]
 ): OpResult => {
+  if (isSectionOp(op)) {
+    return applySectionOp(doc, op, env);
+  }
+
   switch (op.type) {
     case "compose": {
       return compose(doc, op.text, env);
     }
 
     case "addText": {
-      return op.text.trim() === ""
-        ? unchanged(doc)
-        : addItem(doc, {
-            color: null,
-            context: op.context,
-            createdAt: env.now().toISOString(),
-            done: false,
-            id: env.newItemId(),
-            kind: "text",
-            sectionId: doc.activeSectionId,
-            text: op.text.slice(0, TEXT_MAX),
-            via: op.via,
-          });
+      return addText(doc, op, env);
     }
 
     case "addImage": {
@@ -554,7 +776,7 @@ export const applyOp = (
     case "editText": {
       return changed(
         mapItem(doc, op.id, (item) =>
-          item.kind === "text" ? { ...item, text: op.text } : null
+          item.kind === "text" ? { ...item, html: null, text: op.text } : null
         )
       );
     }
@@ -578,21 +800,11 @@ export const applyOp = (
     }
 
     case "remove": {
-      const result = remove(doc, op.id);
-
-      return lastRemoved === null || result.removed === null
-        ? result
-        : { ...result, discarded: [lastRemoved.item] };
+      return removeUndoably(doc, op.id, pending);
     }
 
     case "undoRemove": {
-      return restore(doc, lastRemoved);
-    }
-
-    case "selectSection": {
-      return doc.sections.some((section) => section.id === op.id)
-        ? changed({ ...doc, activeSectionId: op.id })
-        : unchanged(doc);
+      return restore(doc, pendingFor(pending, op.id));
     }
 
     case "setColor": {
@@ -606,19 +818,7 @@ export const applyOp = (
     }
 
     case "clearDone": {
-      const discarded = doc.items.filter(
-        (item) => item.done && item.sectionId === doc.activeSectionId
-      );
-
-      return {
-        addedId: null,
-        discarded,
-        doc: {
-          ...doc,
-          items: doc.items.filter((item) => !discarded.includes(item)),
-        },
-        removed: null,
-      };
+      return clearDone(doc, op.sectionId ?? doc.activeSectionId);
     }
 
     default: {
@@ -660,8 +860,8 @@ const searchableText = (item: ShelfItem): string =>
 
 /**
  * The shelf as one list grouped by section, in section order. Without a query
- * every section with items shows, and the active one even when empty. With a
- * query only matching items show, and sections without a match are left out.
+ * every section shows, empty ones too. With a query only matching items show,
+ * and sections without a match are left out.
  */
 export const groupItems = (
   doc: ShelfDoc,
@@ -682,7 +882,7 @@ export const groupItems = (
       (item) => item.sectionId === section.id && matches(item)
     );
 
-    const shown = items.length > 0 || (active && terms.length === 0);
+    const shown = items.length > 0 || terms.length === 0;
 
     return shown ? [{ active, items, section }] : [];
   });
@@ -707,22 +907,81 @@ export const itemTextWithLink = (item: ShelfItem): string =>
     ? itemText(item)
     : `${itemText(item)}\n${item.context.url}`;
 
+/** The words an item adds to a list: images and files only when they have a note or a name. */
+const listText = (item: ShelfItem): string | null => {
+  if (item.kind === "image") {
+    return item.note.trim() === "" ? null : item.note.trim();
+  }
+
+  return itemText(item).trim();
+};
+
+const HTML_ESCAPES = {
+  '"': "&quot;",
+  "&": "&amp;",
+  "'": "&#39;",
+  "<": "&lt;",
+  ">": "&gt;",
+} as const;
+
+const isEscaped = (char: string): char is keyof typeof HTML_ESCAPES =>
+  Object.hasOwn(HTML_ESCAPES, char);
+
+const escapeHtml = (text: string): string =>
+  text.replaceAll(/["&'<>]/gu, (char) =>
+    isEscaped(char) ? HTML_ESCAPES[char] : char
+  );
+
+export interface ItemList {
+  /** "1. First" with following lines indented under the number, and each page link in brackets. */
+  readonly text: string;
+  /** The same as an ordered list, for apps that paste formatting. */
+  readonly html: string;
+  /** How many items the list holds. */
+  readonly count: number;
+}
+
 /**
- * The open items, as a Markdown list in the order shown, each with its page
- * link when it has one. Checked items are left out: they are done.
+ * Items as a numbered list, in the order given, each with its page link.
+ * Images without a note add no line; they travel as the image itself.
  */
-export const itemsAsList = (items: readonly ShelfItem[]): string =>
-  items
-    .flatMap((item) => {
-      if (item.done) {
-        return [];
-      }
+export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
+  const entries = items.flatMap((item) => {
+    const text = listText(item);
 
-      const [first = "", ...rest] = itemText(item).trim().split("\n");
-      const more = rest.map((line) => `  ${line}`).join("\n");
-      const url = item.context?.url ?? null;
-      const link = url === null ? "" : ` (${url})`;
+    return text === null || text === ""
+      ? []
+      : [{ text, url: item.context?.url ?? null }];
+  });
 
-      return [`- ${first}${link}${more === "" ? "" : `\n${more}`}`];
+  const lines = entries.map(({ text, url }, index) => {
+    const marker = `${index + 1}. `;
+    const [first = "", ...rest] = text.split("\n");
+    const indent = " ".repeat(marker.length);
+    const link = url === null ? "" : ` (${url})`;
+
+    return [
+      `${marker}${first}${link}`,
+      ...rest.map((line) => `${indent}${line}`),
+    ].join("\n");
+  });
+
+  const html = entries
+    .map(({ text, url }) => {
+      const body = escapeHtml(text).replaceAll("\n", "<br>");
+
+      const link =
+        url === null
+          ? ""
+          : ` (<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>)`;
+
+      return `<li>${body}${link}</li>`;
     })
-    .join("\n");
+    .join("");
+
+  return {
+    count: entries.length,
+    html: entries.length === 0 ? "" : `<ol>${html}</ol>`,
+    text: lines.join("\n"),
+  };
+};

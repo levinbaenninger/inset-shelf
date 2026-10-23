@@ -9,6 +9,8 @@ export const SettingsSchema = z.object({
   iconIn: z.enum(ICON_PLACES),
   /** Copying an item checks it off, so capturing and clearing is one step. */
   markDoneOnCopy: z.boolean(),
+  /** A card with each new screenshot appears beside the shelf (macOS). */
+  screenshotCards: z.boolean(),
 });
 
 export type Settings = z.output<typeof SettingsSchema>;
@@ -16,6 +18,7 @@ export type Settings = z.output<typeof SettingsSchema>;
 export const DEFAULT_SETTINGS: Settings = {
   iconIn: "dockAndMenuBar",
   markDoneOnCopy: false,
+  screenshotCards: true,
 };
 
 const StoredSettingsSchema = z

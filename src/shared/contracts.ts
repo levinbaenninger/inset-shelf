@@ -29,8 +29,26 @@ export interface ShelfView {
 }
 
 /** App-menu choices the shelf window carries out itself, so its own state (editing, undo) stays in one place. */
+/** What the menu bar's Item menu asks of the selected item. */
+export type ItemAction =
+  | "copyList"
+  | "copyWithLink"
+  | "open"
+  | "edit"
+  | "toggleDone"
+  | "previousSection"
+  | "nextSection"
+  | "remove";
+
 export type ShelfCommand =
   | { readonly kind: "newSection" }
+  | { readonly kind: "item"; readonly action: ItemAction }
+  /** Edit › Redo, which a note field takes from its own history. */
+  | { readonly kind: "redo" }
+  /** Edit › Select All: a text field selects its text, the list all its items. */
+  | { readonly kind: "selectAll" }
+  /** Edit › Clear Checked Items: the shelf asks first. */
+  | { readonly kind: "clearDone" }
   | { readonly kind: "newNote" }
   | { readonly kind: "find" }
   /** Edit › Copy and Undo: a text field keeps its own, otherwise they act on items. */
@@ -44,7 +62,12 @@ export type ActionResult =
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
 export const shelfContract = defineContract({
-  events: { command: event<ShelfCommand>(), view: event<ShelfView>() },
+  events: {
+    command: event<ShelfCommand>(),
+    /** A short confirmation of something main did, shown as a toast. */
+    notice: event<{ readonly message: string }>(),
+    view: event<ShelfView>(),
+  },
   global: "insetShelf",
   methods: {
     /** Files dropped or pasted into the shelf, by path; main reads them. */
@@ -57,19 +80,29 @@ export const shelfContract = defineContract({
     attachFiles: send(z.void()),
     captureArea: send(z.void()),
     copy: invoke(ItemIdSchema, out<ActionResult>()),
+    /** Items as one numbered list, in the order given, with the first image beside it. */
+    copyList: invoke(
+      z.array(ItemIdSchema).min(1).max(1000),
+      out<ActionResult>()
+    ),
     /** The item's words and the page it came from, as text. */
     copyWithLink: send(ItemIdSchema),
     dismissProblem: send(z.void()),
     getView: invoke(z.void(), out<ShelfView>()),
     hide: send(z.void()),
     /** Copy and Undo inside a text field, done by the window's own edit commands. */
-    nativeEdit: send(z.enum(["copy", "undo"])),
+    nativeEdit: send(z.enum(["copy", "undo", "redo", "selectAll"])),
     newDrawing: send(z.void()),
     /** Shows an image large in the drawing window, to look at or draw on. */
     openImage: send(ItemIdSchema),
     openKeySettings: send(z.void()),
-    /** Opens the page an item was captured from; main checks it is http or https. */
-    openLink: send(ItemIdSchema),
+    /**
+     * Opens the page an item was captured from, or one of the links in it;
+     * main opens only an address the item holds, over http or https.
+     */
+    openLink: send(
+      z.object({ id: ItemIdSchema, url: z.string().max(2000).optional() })
+    ),
     openSettings: send(z.void()),
     pasteImage: invoke(
       z
@@ -130,6 +163,39 @@ export const toastContract = defineContract({
   name: "toast",
 });
 
+/** A new screenshot on its card beside the shelf. */
+export interface ScreenshotView {
+  /** Changes with every screenshot; actions name it, so they never reach a newer one. */
+  readonly seq: number;
+  readonly imageUrl: string;
+  readonly widthPx: number;
+  readonly heightPx: number;
+}
+
+const Seq = z.number().int().min(0);
+
+export const screenshotContract = defineContract({
+  events: { view: event<ScreenshotView | null>() },
+  global: "insetScreenshot",
+  methods: {
+    addToShelf: send(Seq),
+    /** Adds it to the shelf and opens it to draw on. */
+    annotate: send(Seq),
+    copy: send(Seq),
+    dismiss: send(Seq),
+    getView: invoke(z.void(), out<ScreenshotView | null>()),
+    /** Keeps the card on screen until it is used or dismissed. */
+    hold: send(Seq),
+    /** The pointer is on the card, which then stays. */
+    hover: send(z.boolean()),
+    /** Saves it as a PNG in the Downloads folder. */
+    saveToDownloads: send(Seq),
+    /** Drags the screenshot out as a file. */
+    startDrag: send(Seq),
+  },
+  name: "screenshot",
+});
+
 const DRAWING_MAX_BYTES = 30 * 1024 * 1024;
 
 /** An image item opened in the drawing window, to look at large or draw on. */
@@ -188,6 +254,8 @@ export const settingsContract = defineContract({
   global: "insetSettings",
   methods: {
     getView: invoke(z.void(), out<SettingsView>()),
+    /** The page's height, so the window fits it without empty space. */
+    fitHeight: send(z.number().int().min(120).max(1200)),
     setOpenAtLogin: send(z.boolean()),
     update: send(SettingsSchema.partial()),
   },
@@ -201,3 +269,5 @@ export type ShelfContract = typeof shelfContract;
 export type OverlayContract = typeof overlayContract;
 
 export type ToastContract = typeof toastContract;
+
+export type ScreenshotContract = typeof screenshotContract;

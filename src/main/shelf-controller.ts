@@ -1,5 +1,5 @@
 import type { ShelfStatus, ShelfView } from "@shared/contracts";
-import { applyOp, attachmentOf } from "@shared/shelf";
+import { applyOp, attachmentOf, UNDO_MAX } from "@shared/shelf";
 import type {
   ItemId,
   MainOp,
@@ -44,7 +44,7 @@ export const createShelfController = (
 ): ShelfController => {
   let doc = deps.initial;
   let { status } = deps;
-  let lastRemoved: Removed | null = null;
+  let pending: readonly Removed[] = [];
   let focus: ShelfView["focus"] = null;
   let focusSeq = 0;
   let cancelTimer: (() => void) | null = null;
@@ -112,7 +112,7 @@ export const createShelfController = (
 
   return {
     apply: (op) => {
-      const result = applyOp(doc, op, deps.env, lastRemoved);
+      const result = applyOp(doc, op, deps.env, pending);
 
       if (result.doc === doc) {
         return null;
@@ -122,9 +122,11 @@ export const createShelfController = (
       toDelete = [...toDelete, ...result.discarded];
 
       if (op.type === "undoRemove") {
-        lastRemoved = null;
+        const restored = op.id ?? pending.at(-1)?.item.id;
+
+        pending = pending.filter((removed) => removed.item.id !== restored);
       } else if (result.removed !== null) {
-        lastRemoved = result.removed;
+        pending = [...pending, result.removed].slice(-UNDO_MAX);
       }
 
       if (isEdit(op)) {
@@ -158,6 +160,6 @@ export const createShelfController = (
         listeners.delete(listener);
       };
     },
-    view: () => ({ canUndo: lastRemoved !== null, doc, focus, status }),
+    view: () => ({ canUndo: pending.length > 0, doc, focus, status }),
   };
 };

@@ -13,6 +13,8 @@ export type E2eEvent =
   | "overlayShown"
   | "overlayClosed"
   | "itemAdded"
+  | "drawingShown"
+  | "screenshotShown"
   | "saveFailed"
   | "copied";
 

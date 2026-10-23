@@ -20,7 +20,7 @@ type Context2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 export type Palette = Readonly<Record<Color, string>>;
 
-/** Also used for every export, which always has a white background. */
+/** Also used for marks drawn into an image, whatever the theme. */
 export const LIGHT_PALETTE: Palette = {
   blue: "#0284c7",
   green: "#16a34a",
@@ -39,6 +39,12 @@ export const DARK_PALETTE: Palette = {
 
 export const paletteFor = (dark: boolean): Palette =>
   dark ? DARK_PALETTE : LIGHT_PALETTE;
+
+/** A drawing's page in each theme, the colour of --background in styles.css; exports keep it. */
+const pageColor = (dark: boolean): string => (dark ? "#0a0a0a" : "#ffffff");
+
+/** Rectangles get the rounded corners the rest of the app has, in page pixels. */
+const RECT_RADIUS = 8;
 
 /** The colour a swatch or the text field shows for an ink, matching the canvas. */
 export const inkColor = (color: Color, dark: boolean): string =>
@@ -127,7 +133,18 @@ const drawSegment = (ctx: Context2D, mark: SegmentMark): void => {
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(to.x, to.y);
   } else if (mark.kind === "rect") {
-    ctx.rect(from.x, from.y, to.x - from.x, to.y - from.y);
+    const x = Math.min(from.x, to.x);
+    const y = Math.min(from.y, to.y);
+    const width = Math.abs(to.x - from.x);
+    const height = Math.abs(to.y - from.y);
+
+    ctx.roundRect(
+      x,
+      y,
+      width,
+      height,
+      Math.min(RECT_RADIUS, width / 2, height / 2)
+    );
   } else {
     ctx.ellipse(
       (from.x + to.x) / 2,
@@ -232,9 +249,13 @@ const loadFonts = async (marks: readonly Mark[]): Promise<void> => {
   );
 };
 
-/** A PNG of everything drawn, trimmed with padding, at twice the page's size on white; null when nothing is drawn. */
+/**
+ * A PNG of everything drawn, trimmed with padding, at twice the page's size
+ * on the page as it looked: dark in the dark theme. Null when nothing is drawn.
+ */
 export const exportPng = async (
-  marks: readonly Mark[]
+  marks: readonly Mark[],
+  dark: boolean
 ): Promise<Uint8Array<ArrayBuffer> | null> => {
   await loadFonts(marks);
 
@@ -252,9 +273,9 @@ export const exportPng = async (
   }
 
   renderSketch(ctx, marks, EXPORT_SCALE, {
-    background: "#ffffff",
+    background: pageColor(dark),
     origin: frame.origin,
-    palette: LIGHT_PALETTE,
+    palette: paletteFor(dark),
   });
 
   const blob = await canvas.convertToBlob({ type: "image/png" });

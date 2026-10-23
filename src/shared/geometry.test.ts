@@ -170,15 +170,21 @@ describe(dockShelf, () => {
     );
   });
 
+  it("centres a shelf at most 620 tall on a taller window", () => {
+    expect(dockShelf(rect<"screen">(100, 25, 800, 850), work)).toStrictEqual(
+      rect(908, 140, 340, 620)
+    );
+  });
+
   it("docks to the left when there is no room on the right", () => {
     expect(dockShelf(rect<"screen">(500, 100, 900, 600), work)).toStrictEqual(
       rect(152, 100, 340, 600)
     );
   });
 
-  it("sits inside the right edge of a window that fills the screen, gapped from the top, at most 620 tall", () => {
+  it("sits inside the right edge of a window that fills the screen, centred, at most 620 tall", () => {
     expect(dockShelf(rect<"screen">(0, 25, 1440, 850), work)).toStrictEqual(
-      rect(1092, 33, 340, 620)
+      rect(1092, 140, 340, 620)
     );
   });
 
@@ -201,7 +207,7 @@ describe(dockShelf, () => {
           desktop,
           WINDOWS_FRAME_INSET_DIP
         )
-      ).toStrictEqual(rect(1101, 120, 340, 620));
+      ).toStrictEqual(rect(1101, 127, 340, 620));
     });
 
     it("leaves the gap before the visible edge", () => {
@@ -221,7 +227,7 @@ describe(dockShelf, () => {
           desktop,
           WINDOWS_FRAME_INSET_DIP
         )
-      ).toStrictEqual(rect(1572, 8, 340, 620));
+      ).toStrictEqual(rect(1572, 206, 340, 620));
     });
   });
 
@@ -231,8 +237,8 @@ describe(dockShelf, () => {
     );
   });
 
-  it("opens at the top right without a window", () => {
-    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 33, 340, 560));
+  it("opens at the right without a window, centred on the screen's height", () => {
+    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 170, 340, 560));
   });
 });
 

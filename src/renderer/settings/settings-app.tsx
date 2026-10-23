@@ -1,5 +1,5 @@
 import type { SettingsView } from "@shared/settings";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { Label } from "@/components/ui/label";
@@ -32,7 +32,7 @@ const ICON_LABELS = {
 const isIconPlace = (value: string): value is keyof typeof ICON_LABELS =>
   Object.hasOwn(ICON_LABELS, value);
 
-/** A settings row: the label on the left, its control on the right, an optional note below. */
+/** A settings row, padded like an item on the shelf: the label on the left, its control on the right, an optional note below. */
 const Row = ({
   children,
   label,
@@ -44,13 +44,13 @@ const Row = ({
   readonly note?: string;
   readonly children: ReactNode;
 }) => (
-  <div className="flex flex-col gap-1 px-3 py-2.5">
+  <div className="flex min-h-12 flex-col justify-center gap-1 px-3 py-2.5">
     <div className="flex items-center justify-between gap-4">
       <Label htmlFor={labelFor}>{label}</Label>
       {children}
     </div>
     {note === undefined ? null : (
-      <p className="text-muted-foreground text-xs">{note}</p>
+      <p className="text-muted-foreground pr-12 text-xs leading-snug">{note}</p>
     )}
   </div>
 );
@@ -62,9 +62,11 @@ const Group = ({
   readonly title: string;
   readonly children: ReactNode;
 }) => (
-  <section className="flex flex-col gap-1.5">
-    <h2 className="text-muted-foreground px-1 text-xs font-medium">{title}</h2>
-    <div className="bg-foreground/5 divide-foreground/10 flex flex-col divide-y rounded-lg">
+  <section className="flex flex-col gap-1">
+    <h2 className="text-muted-foreground flex h-7 items-center px-1.5 text-xs font-medium">
+      {title}
+    </h2>
+    <div className="bg-background/60 border-foreground/10 divide-foreground/10 flex flex-col divide-y rounded-lg border">
       {children}
     </div>
   </section>
@@ -74,20 +76,52 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
   const loginId = useId();
   const iconId = useId();
   const copyId = useId();
+  const shotId = useId();
   const { settings } = view;
+  const page = useRef<HTMLElement>(null);
+
+  // The window takes the page's height, so it has no empty space below the last group.
+  useEffect(() => {
+    const element = page.current;
+
+    const observer = new ResizeObserver(() => {
+      if (element !== null) {
+        api.fitHeight(Math.ceil(element.getBoundingClientRect().height));
+      }
+    });
+
+    if (element !== null) {
+      observer.observe(element);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   return (
     <main
       className={cn(
-        "bg-background text-foreground flex min-h-svh flex-col gap-4 p-4",
+        "text-foreground flex flex-col gap-3 px-3 pb-3",
+        // On macOS the window's translucent material shows through, as in the shelf.
+        !isMac && "bg-background",
         // On Windows the window has no title bar: this strip moves it, under its close button.
-        isWindows && "pt-0"
+        isWindows && "pt-0",
+        !isMac && !isWindows && "pt-3"
       )}
+      ref={page}
     >
       {isWindows ? (
-        <div aria-hidden="true" className="drag-region -mx-4 -mb-2 h-9" />
+        <div aria-hidden="true" className="drag-region -mx-3 -mb-2 h-9" />
       ) : null}
-      <h1 className="sr-only">Settings</h1>
+      {/* macOS: the title strip under the traffic lights, which moves the window. */}
+      {isMac ? (
+        <h1 className="drag-region -mx-3 flex h-10 items-center justify-center text-sm font-semibold">
+          Settings
+        </h1>
+      ) : (
+        <h1 className="sr-only">Settings</h1>
+      )}
       <Group title="General">
         <Row label="Open at Login" labelFor={loginId}>
           <Switch
@@ -131,6 +165,24 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
           </Row>
         ) : null}
       </Group>
+      {/* Screenshots are only watched on macOS. */}
+      {isMac ? (
+        <Group title="Screenshots">
+          <Row
+            label="Show new screenshots"
+            labelFor={shotId}
+            note="A card beside the shelf lets you add, copy, annotate or drag each new screenshot."
+          >
+            <Switch
+              checked={settings.screenshotCards}
+              id={shotId}
+              onCheckedChange={(checked) => {
+                api.update({ screenshotCards: checked });
+              }}
+            />
+          </Row>
+        </Group>
+      ) : null}
       <Group title="Copying">
         <Row
           label="Mark as done when copied"

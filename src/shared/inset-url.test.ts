@@ -12,6 +12,14 @@ describe(parseInsetUrl, () => {
     });
   });
 
+  it("accepts a screenshot card's image by token", () => {
+    expect(parseInsetUrl(insetUrl.shot("k3x9"))).toStrictEqual({
+      kind: "shot",
+      token: "k3x9",
+    });
+    expect(parseInsetUrl("inset://shot/a-b")).toBeNull();
+  });
+
   it("accepts the frozen frame by token", () => {
     expect(parseInsetUrl(insetUrl.frame("k3x9"))).toStrictEqual({
       kind: "frame",

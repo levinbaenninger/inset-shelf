@@ -4,6 +4,8 @@ export interface SelectionDeps<S> {
   readonly restore: (snapshot: S) => Promise<void>;
   readonly clear: () => void;
   readonly readText: () => Promise<string>;
+  /** The HTML the app copied next to the text, or "" when it copied none. */
+  readonly readHtml: () => Promise<string>;
   /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
   readonly wait: (ms: number) => Promise<void>;
@@ -13,7 +15,13 @@ const POLL_MS = 25;
 const POLL_LIMIT = 20;
 
 export type SelectionResult =
-  | { readonly kind: "text"; readonly text: string; readonly restored: boolean }
+  | {
+      readonly kind: "text";
+      readonly text: string;
+      /** Null when the app put no HTML on the clipboard. */
+      readonly html: string | null;
+      readonly restored: boolean;
+    }
   | { readonly kind: "none"; readonly restored: boolean };
 
 /** Waits for the copied text to arrive, up to `attempts` short waits. */
@@ -44,6 +52,8 @@ export const captureSelection = async <S>(
   deps.copy();
 
   const text = await pollText(deps, POLL_LIMIT);
+  // Read with the text, before the clipboard goes back to what it held.
+  const html = text === "" ? "" : await deps.readHtml().catch(() => "");
 
   let restored = true;
 
@@ -56,5 +66,10 @@ export const captureSelection = async <S>(
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
   return text.trim() === ""
     ? { kind: "none", restored }
-    : { kind: "text", restored, text: text.replaceAll("\r\n", "\n") };
+    : {
+        html: html.trim() === "" ? null : html,
+        kind: "text",
+        restored,
+        text: text.replaceAll("\r\n", "\n"),
+      };
 };

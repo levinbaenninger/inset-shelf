@@ -32,3 +32,50 @@ export const selectionAfterRemoval = (
 
   return ids[index + 1] ?? ids[index - 1] ?? null;
 };
+
+/** Keeps ids in the order they are shown. */
+const inOrder = (
+  ids: readonly ItemId[],
+  wanted: ReadonlySet<ItemId>
+): readonly ItemId[] => ids.filter((id) => wanted.has(id));
+
+/**
+ * ⌘-click: adds or removes one item. The open item, if any, joins the picks
+ * first, so a ⌘-click next to it picks both.
+ */
+export const togglePick = (
+  ids: readonly ItemId[],
+  picked: readonly ItemId[],
+  open: ItemId | null,
+  id: ItemId
+): readonly ItemId[] => {
+  const next = new Set(picked.length === 0 && open !== null ? [open] : picked);
+
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+
+  return inOrder(ids, next);
+};
+
+/** ⇧-click: every item shown from the anchor to this one; just this one without an anchor. */
+export const rangePick = (
+  ids: readonly ItemId[],
+  anchor: ItemId | null,
+  id: ItemId
+): readonly ItemId[] => {
+  const from = anchor === null ? -1 : ids.indexOf(anchor);
+  const to = ids.indexOf(id);
+
+  if (to === -1) {
+    return [];
+  }
+
+  if (from === -1) {
+    return [id];
+  }
+
+  return ids.slice(Math.min(from, to), Math.max(from, to) + 1);
+};

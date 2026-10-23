@@ -3,12 +3,19 @@ import { ImageFileSchema } from "./shelf";
 export const INSET_SCHEME = "inset";
 export const APP_ORIGIN = "inset://app";
 
-export type PageName = "shelf" | "overlay" | "toast" | "drawing" | "settings";
+export type PageName =
+  | "shelf"
+  | "overlay"
+  | "toast"
+  | "drawing"
+  | "settings"
+  | "screenshot";
 
 export type InsetRequest =
   | { readonly kind: "app"; readonly path: string }
   | { readonly kind: "attachment"; readonly file: string }
-  | { readonly kind: "frame"; readonly token: string };
+  | { readonly kind: "frame"; readonly token: string }
+  | { readonly kind: "shot"; readonly token: string };
 
 const FRAME_TOKEN = /^[a-z0-9]{1,40}$/u;
 
@@ -20,6 +27,8 @@ export const insetUrl = {
   attachment: (file: string): string => `${INSET_SCHEME}://attachment/${file}`,
   /** The frozen screen behind the area overlay; the token changes with every capture. */
   frame: (token: string): string => `${INSET_SCHEME}://frame/${token}`,
+  /** A new screenshot shown on its card; the token changes with every screenshot. */
+  shot: (token: string): string => `${INSET_SCHEME}://shot/${token}`,
   page: (name: PageName): string => `${APP_ORIGIN}/${name}.html`,
 };
 
@@ -67,9 +76,15 @@ export const parseInsetUrl = (raw: string): InsetRequest | null => {
       : null;
   }
 
-  return url.host === "frame" && FRAME_TOKEN.test(name)
-    ? { kind: "frame", token: name }
-    : null;
+  if (!FRAME_TOKEN.test(name)) {
+    return null;
+  }
+
+  if (url.host === "frame") {
+    return { kind: "frame", token: name };
+  }
+
+  return url.host === "shot" ? { kind: "shot", token: name } : null;
 };
 
 /** Built by hand because the WHATWG origin of a custom scheme is "null". */
