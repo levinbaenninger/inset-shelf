@@ -25,7 +25,9 @@ const actions: AppMenuActions = {
   closeWindow: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),
   copyAsList: vi.fn<() => void>(),
+  selectAll: vi.fn<() => void>(),
   find: vi.fn<() => void>(),
+  item: vi.fn<(action: string) => void>(),
   newNote: vi.fn<() => void>(),
   newDrawing: vi.fn<() => void>(),
   newSection: vi.fn<() => void>(),
@@ -65,7 +67,15 @@ describe(appMenuTemplate, () => {
   it("has the menus of a regular Mac app", () => {
     expect(
       appMenuTemplate(state, actions).map((item) => item.label ?? item.role)
-    ).toStrictEqual(["Inset Shelf", "File", "Edit", "View", "Window", "help"]);
+    ).toStrictEqual([
+      "Inset Shelf",
+      "File",
+      "Edit",
+      "Item",
+      "View",
+      "Window",
+      "help",
+    ]);
   });
 
   it("lists the sections with numbered shortcuts and checks the current one", () => {
@@ -102,7 +112,9 @@ describe(appMenuTemplate, () => {
             createdAt: "2026-10-22T10:00:00.000Z",
             done: true,
             id: ItemIdSchema.parse(uuid(10)),
+            html: null,
             kind: "text",
+            links: [],
             sectionId: INBOX,
             text: "x",
             via: "typed",
@@ -118,6 +130,7 @@ describe(appMenuTemplate, () => {
     expect(template.map((item) => item.label ?? item.role)).toStrictEqual([
       "File",
       "Edit",
+      "Item",
       "View",
       "Window",
       "help",
@@ -136,6 +149,20 @@ describe(appMenuTemplate, () => {
     expect(submenu(template, "help")).toContainEqual(
       expect.objectContaining({ label: "About Inset Shelf" })
     );
+  });
+
+  it("lists the item shortcuts, leaving plain keys to the page", () => {
+    const items = submenu(appMenuTemplate(state, actions), "Item");
+
+    expect(items[0]).toMatchObject({
+      accelerator: "CommandOrControl+O",
+      label: "Open",
+      registerAccelerator: true,
+    });
+    expect(items.find((item) => item.label === "Check Off")).toMatchObject({
+      accelerator: "Space",
+      registerAccelerator: false,
+    });
   });
 
   it("shows Float on Top as a checkbox in the Window menu", () => {

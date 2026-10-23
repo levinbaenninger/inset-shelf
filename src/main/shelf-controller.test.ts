@@ -1,4 +1,9 @@
-import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
+import {
+  emptyShelf,
+  ItemIdSchema,
+  SectionIdSchema,
+  UNDO_MAX,
+} from "@shared/shelf";
 import type { ShelfDoc } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
@@ -91,7 +96,7 @@ describe(createShelfController, () => {
     expect(saved).toHaveLength(2);
   });
 
-  it("deletes an image file only after a later removal is saved", async () => {
+  it("deletes an image file only once it falls off the undo list", async () => {
     const { controller, deleted } = setup();
 
     const first = controller.apply({
@@ -103,18 +108,32 @@ describe(createShelfController, () => {
       via: "area",
     });
 
-    const second = controller.apply({ text: "note", type: "compose" });
+    const notes = Array.from({ length: UNDO_MAX }, (_, n) =>
+      controller.apply({ text: `note ${n}`, type: "compose" })
+    );
 
-    if (first === null || second === null) {
+    if (first === null || notes.includes(null)) {
       throw new Error("no id");
     }
 
     controller.apply({ id: first, type: "remove" });
+
+    for (const note of notes.slice(0, -1)) {
+      if (note !== null) {
+        controller.apply({ id: note, type: "remove" });
+      }
+    }
+
     await controller.flush();
     expect(deleted).toStrictEqual([]);
     expect(controller.view().canUndo).toBeTruthy();
 
-    controller.apply({ id: second, type: "remove" });
+    const last = notes.at(-1);
+
+    if (last !== null && last !== undefined) {
+      controller.apply({ id: last, type: "remove" });
+    }
+
     await controller.flush();
     expect(deleted).toStrictEqual([image.file]);
   });

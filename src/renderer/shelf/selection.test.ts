@@ -1,7 +1,12 @@
 import { ItemIdSchema } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
-import { selectionAfterRemoval, stepSelection } from "./selection";
+import {
+  rangePick,
+  selectionAfterRemoval,
+  stepSelection,
+  togglePick,
+} from "./selection";
 
 const id = (n: number) =>
   ItemIdSchema.parse(
@@ -32,5 +37,20 @@ describe(selectionAfterRemoval, () => {
     expect(selectionAfterRemoval(ids, id(2))).toBe(id(3));
     expect(selectionAfterRemoval(ids, id(3))).toBe(id(2));
     expect(selectionAfterRemoval([id(1)], id(1))).toBeNull();
+  });
+});
+
+describe(togglePick, () => {
+  it("adds the open item first, then toggles the clicked one, in shown order", () => {
+    expect(togglePick(ids, [], id(3), id(1))).toStrictEqual([id(1), id(3)]);
+    expect(togglePick(ids, [id(1), id(3)], null, id(1))).toStrictEqual([id(3)]);
+    expect(togglePick(ids, [], null, id(2))).toStrictEqual([id(2)]);
+  });
+});
+
+describe(rangePick, () => {
+  it("picks everything shown between the anchor and the clicked item", () => {
+    expect(rangePick(ids, id(3), id(1))).toStrictEqual(ids);
+    expect(rangePick(ids, null, id(2))).toStrictEqual([id(2)]);
   });
 });

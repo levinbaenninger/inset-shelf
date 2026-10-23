@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { itemMenu, sectionMenu } from "./menus";
+import { itemMenu, pickedMenu, sectionMenu, shelfMenu } from "./menus";
 import type { MenuEntry } from "./menus";
 import { emptyShelf, ItemIdSchema, SectionIdSchema } from "./shelf";
 import type { ImageItem, ShelfDoc } from "./shelf";
@@ -23,7 +23,9 @@ const doc: ShelfDoc = {
       createdAt: "2026-10-22T10:00:00.000Z",
       done: true,
       id: ItemIdSchema.parse(uuid(10)),
+      html: null,
       kind: "text",
+      links: [],
       sectionId: INBOX,
       text: "done here",
       via: "typed",
@@ -55,29 +57,57 @@ const image: ImageItem = {
   via: "area",
 };
 
-describe(sectionMenu, () => {
-  it("checks the current section and offers the section actions and Settings", () => {
-    const entries = sectionMenu(doc);
-
-    expect(labels(entries)).toStrictEqual([
-      "Inbox",
-      "Later",
+describe(shelfMenu, () => {
+  it("starts a section and opens Settings, without listing the sections", () => {
+    expect(labels(shelfMenu())).toStrictEqual([
+      "New Section",
       "---",
-      "New Section…",
-      "Clear Checked Items",
-      "---",
-      "Settings…",
+      "Settings",
     ]);
-    expect(entries[0]).toMatchObject({ checked: true });
-    expect(entries[1]).toMatchObject({ checked: false });
+  });
+});
+
+describe(sectionMenu, () => {
+  const [inbox, later] = doc.sections;
+
+  if (inbox === undefined || later === undefined) {
+    throw new Error("missing fixture");
+  }
+
+  it("offers new items here, renaming, clearing and deleting", () => {
+    expect(labels(sectionMenu(later, doc))).toStrictEqual([
+      "Add Items Here",
+      "Rename",
+      "Clear Checked",
+      "---",
+      "Delete Section",
+    ]);
   });
 
-  it("disables clearing when nothing here is checked", () => {
-    expect(
-      sectionMenu({ ...doc, activeSectionId: LATER }).find(
+  it("leaves out new items here for the section that already takes them", () => {
+    expect(labels(sectionMenu(inbox, doc))[0]).toBe("Rename");
+  });
+
+  it("marks deleting in red", () => {
+    expect(sectionMenu(later, doc).at(-1)).toMatchObject({
+      destructive: true,
+    });
+  });
+
+  it("clears only a section with checked items", () => {
+    const clear = (section: typeof inbox) =>
+      sectionMenu(section, doc).find(
         (entry) => entry.kind === "choice" && entry.label.startsWith("Clear")
-      )
-    ).toMatchObject({ enabled: false });
+      );
+
+    expect(clear(inbox)).toMatchObject({ enabled: true });
+    expect(clear(later)).toMatchObject({ enabled: false });
+  });
+
+  it("keeps the last section", () => {
+    expect(
+      sectionMenu(inbox, { ...doc, sections: [inbox] }).at(-1)
+    ).toMatchObject({ enabled: false, label: "Delete Section" });
   });
 });
 
@@ -91,9 +121,9 @@ describe(itemMenu, () => {
 
     expect(labels(itemMenu(item, doc))).toStrictEqual([
       "Copy",
-      "Edit",
-      "Mark as Not Done",
       "---",
+      "Edit",
+      "Uncheck",
       "Move to",
       "---",
       "Colour",
@@ -111,9 +141,10 @@ describe(itemMenu, () => {
   it("lets an image be opened and shows its colour in the swatch row", () => {
     const entries = itemMenu(image, { ...doc, items: [image] });
 
-    expect(labels(entries).slice(0, 3)).toStrictEqual([
+    expect(labels(entries).slice(0, 4)).toStrictEqual([
       "Copy",
-      "View and Annotate…",
+      "---",
+      "Annotate",
       "Edit Note",
     ]);
     expect(entries.find((entry) => entry.kind === "colors")).toStrictEqual({
@@ -121,6 +152,52 @@ describe(itemMenu, () => {
       id: image.id,
       kind: "colors",
       label: "Colour",
+    });
+  });
+
+  it("opens a text item where it came from: its desktop app, else its page", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const from = (app: string, url: string | null) =>
+      itemMenu(
+        { ...item, context: { app, appLink: null, title: "Chat", url } },
+        doc
+      ).find(
+        (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
+      );
+
+    expect(from("ChatGPT", null)).toMatchObject({
+      accelerator: "CommandOrControl+O",
+      label: "Open in ChatGPT",
+    });
+    expect(from("Zen", "https://example.com/")).toMatchObject({
+      label: "Open Page",
+    });
+    expect(from("Zen", null)).toBeUndefined();
+  });
+});
+
+describe(pickedMenu, () => {
+  it("acts on all picked items at once", () => {
+    const entries = pickedMenu([...doc.items, image], {
+      ...doc,
+      items: [...doc.items, image],
+    });
+
+    expect(labels(entries)).toStrictEqual([
+      "Copy as List",
+      "---",
+      "Check Off All",
+      "Move to",
+      "---",
+      "Delete 2 Items",
+    ]);
+    expect(entries[0]).toMatchObject({
+      choice: { ids: [doc.items[0]?.id, image.id], kind: "copyList" },
     });
   });
 });

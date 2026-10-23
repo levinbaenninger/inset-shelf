@@ -461,12 +461,14 @@ const checkShelfStaysInFront = async (): Promise<void> => {
   const bounds = shown?.bounds;
 
   record("tray opens the shelf", shown !== undefined, JSON.stringify(bounds));
+  const height = Math.min(target.height, SHELF_MAX_HEIGHT_DIP);
+
   record(
-    "the shelf docks beside the window in front, at its top",
+    "the shelf docks beside the window in front, centred on its height",
     bounds !== undefined &&
       bounds.x === target.x + target.width + 8 &&
-      bounds.y === target.y &&
-      bounds.height === Math.min(target.height, SHELF_MAX_HEIGHT_DIP),
+      Math.abs(bounds.y - (target.y + (target.height - height) / 2)) <= 1 &&
+      bounds.height === height,
     `window ${JSON.stringify(target)}`
   );
   await delay(500);
@@ -639,6 +641,37 @@ const checkToggle = async (): Promise<void> => {
   );
 };
 
+const ownWindow = (width: number, height: number) =>
+  windows().find(
+    (window) =>
+      window.owner === processName &&
+      window.width === width &&
+      window.height === height
+  );
+
+const menuItem = (menu: string, item: string): void => {
+  osa(
+    `tell application "System Events" to tell process "${processName}" to click menu item "${item}" of menu "${menu}" of menu bar 1`
+  );
+};
+
+/** A dragged area opens in the drawing window to draw on; File › Close puts it away. */
+const checkAreaOpensDrawing = async (
+  itemId: string | undefined,
+  mark: number
+): Promise<void> => {
+  const editing = await waitFor("drawingShown", mark);
+
+  record(
+    "the new area opens to draw on",
+    editing !== undefined && editing.itemId === itemId,
+    JSON.stringify(editing ?? null)
+  );
+  await delay(300);
+  menuItem("File", "Close");
+  await delay(300);
+};
+
 const checkArea = async (): Promise<void> => {
   // The source app stays in front behind the overlay, so Escape can only reach a test window.
   await showSource("Backdrop for the area test", "none");
@@ -681,6 +714,8 @@ const checkArea = async (): Promise<void> => {
     "the shelf shows the new area",
     (await waitFor("shelfShown", mark)) !== undefined
   );
+
+  await checkAreaOpensDrawing(added?.itemId, mark);
 
   mark = events().length;
   input("move", "700", "500");
@@ -750,20 +785,6 @@ const checkCopy = async (): Promise<void> => {
   );
 };
 
-const ownWindow = (width: number, height: number) =>
-  windows().find(
-    (window) =>
-      window.owner === processName &&
-      window.width === width &&
-      window.height === height
-  );
-
-const menuItem = (menu: string, item: string): void => {
-  osa(
-    `tell application "System Events" to tell process "${processName}" to click menu item "${item}" of menu "${menu}" of menu bar 1`
-  );
-};
-
 const checkDrawing = async (): Promise<void> => {
   const mark = events().length;
 
@@ -805,6 +826,9 @@ const checkDrawing = async (): Promise<void> => {
   record("the editor closes after saving", ownWindow(760, 560) === undefined);
 };
 
+/** The settings window's width (src/main/settings-window.ts). */
+const SETTINGS_WIDTH = 420;
+
 const checkSettings = async (): Promise<void> => {
   osa(
     `tell application "System Events" to tell process "${processName}" to click menu item "Settings…" of menu 1 of menu bar item 2 of menu bar 1`
@@ -812,7 +836,7 @@ const checkSettings = async (): Promise<void> => {
   await delay(1000);
 
   const settings = windows().find(
-    (window) => window.owner === processName && window.width === 460
+    (window) => window.owner === processName && window.width === SETTINGS_WIDTH
   );
 
   record(
@@ -829,7 +853,7 @@ const checkSettings = async (): Promise<void> => {
 
   record(
     "⌘W closes Settings and leaves the shelf open",
-    own.every((window) => window.width !== 460) &&
+    own.every((window) => window.width !== SETTINGS_WIDTH) &&
       own.some((window) => window.width === 340),
     own.map((window) => `${window.width}x${window.height}`).join(", ")
   );

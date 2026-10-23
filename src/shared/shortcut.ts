@@ -24,8 +24,10 @@ const MAC_KEYS = new Map([
   ["Backspace", "⌫"],
   ["CommandOrControl", "⌘"],
   ["Control", "⌃"],
+  ["Down", "↓"],
   ["Enter", "↩"],
   ["Shift", "⇧"],
+  ["Up", "↑"],
 ]);
 
 const OTHER_KEYS = new Map([

@@ -25,6 +25,8 @@ export interface ProtocolSources {
   readonly rendererRoot: string;
   /** Null for any token but the current overlay's. */
   readonly frame: (token: string) => Uint8Array | null;
+  /** Null for any token but the current screenshot card's. */
+  readonly shot: (token: string) => Uint8Array | null;
   readonly attachmentFile: (file: string) => string | null;
 }
 
@@ -93,6 +95,12 @@ export const handleInsetProtocol = (sources: ProtocolSources): void => {
       const frame = sources.frame(parsed.token);
 
       return frame === null ? notFound() : image(frame, "image/jpeg");
+    }
+
+    if (parsed.kind === "shot") {
+      const shot = sources.shot(parsed.token);
+
+      return shot === null ? notFound() : image(shot, "image/png");
     }
 
     const file = sources.attachmentFile(parsed.file);

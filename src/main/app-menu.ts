@@ -1,4 +1,4 @@
-import type { Permission } from "@shared/contracts";
+import type { ItemAction, Permission } from "@shared/contracts";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
 import { AREA_ACCELERATOR } from "@shared/shortcut";
 import type { MenuItemConstructorOptions } from "electron";
@@ -24,8 +24,11 @@ export interface AppMenuActions {
   readonly redo: () => void;
   readonly copy: () => void;
   readonly copyAsList: () => void;
+  readonly selectAll: () => void;
   readonly find: () => void;
   readonly clearDone: () => void;
+  /** An action on the item selected in the shelf. */
+  readonly item: (action: ItemAction) => void;
   readonly selectSection: (id: SectionId) => void;
   readonly setFloatOnTop: (on: boolean) => void;
   readonly turnOnKeys: () => void;
@@ -73,6 +76,42 @@ const sectionItems = (
     label: section.name,
     type: "radio" as const,
   }));
+
+/**
+ * The selected item's actions with their keys, so the shortcuts can be found.
+ * Return, Space and Backspace are shown but left to the page, where they
+ * also type into fields.
+ */
+const itemSubmenu = (actions: AppMenuActions): MenuItemConstructorOptions[] => {
+  const entry = (
+    action: ItemAction,
+    label: string,
+    accelerator: string,
+    registerAccelerator = true
+  ): MenuItemConstructorOptions => ({
+    accelerator,
+    click: () => {
+      actions.item(action);
+    },
+    label,
+    registerAccelerator,
+  });
+
+  return [
+    entry("open", "Open", "CommandOrControl+O"),
+    entry("edit", "Edit", "Enter", false),
+    entry("toggleDone", "Check Off", "Space", false),
+    SEPARATOR,
+    entry(
+      "previousSection",
+      "Move to Previous Section",
+      "Alt+CommandOrControl+Up"
+    ),
+    entry("nextSection", "Move to Next Section", "Alt+CommandOrControl+Down"),
+    SEPARATOR,
+    entry("remove", "Delete", "Backspace", false),
+  ];
+};
 
 const fileSubmenu = (
   actions: AppMenuActions,
@@ -148,12 +187,23 @@ export const appMenuTemplate = (
       { role: "cut" },
       { accelerator: "CommandOrControl+C", click: actions.copy, label: "Copy" },
       {
+        accelerator: "Alt+CommandOrControl+C",
+        click: () => {
+          actions.item("copyWithLink");
+        },
+        label: "Copy with Link",
+      },
+      {
         accelerator: "Shift+CommandOrControl+C",
         click: actions.copyAsList,
-        label: "Copy Section as List",
+        label: "Copy as List",
       },
       { role: "paste" },
-      { role: "selectAll" },
+      {
+        accelerator: "CommandOrControl+A",
+        click: actions.selectAll,
+        label: "Select All",
+      },
       SEPARATOR,
       { accelerator: "CommandOrControl+F", click: actions.find, label: "Find" },
       SEPARATOR,
@@ -166,6 +216,7 @@ export const appMenuTemplate = (
       },
     ],
   },
+  { label: "Item", submenu: itemSubmenu(actions) },
   { label: "View", submenu: sectionItems(state, actions) },
   {
     label: "Window",

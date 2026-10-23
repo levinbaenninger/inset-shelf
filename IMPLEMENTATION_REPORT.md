@@ -30,7 +30,7 @@ The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public 
 | Double Shift with nothing selected | Shows or hides the shelf. Inside the shelf it only hides it. | `onDoubleTap` in `src/main/index.ts` |
 | Selection capture on Windows | Sends `Ctrl+Insert`, not `Ctrl+C`, which would stop a program running in a terminal. Not on Linux. | `copy` in `src/main/key-monitor.ts`, `selectionCapture` |
 | Shortcuts | `Control+Alt+S` for the shelf, `Control+Alt+A` for an area. Control+Option leaves the macOS input-source keys alone. | `src/shared/shortcut.ts` |
-| Shelf window | 340 DIP wide. Beside the right edge of the window in front, else its left edge, else inside its right edge, at the window's top. Its height follows the window between 360 and 620 DIP. Floating level, all Spaces and full-screen apps, never hidden on blur. | `src/main/shelf-window.ts`, `dockShelf` |
+| Shelf window | 340 DIP wide. Beside the right edge of the window in front, else its left edge, else inside its right edge, centred on the window's height. Its height follows the window between 360 and 620 DIP. Without a window, at the right of the screen, centred. Floating level, all Spaces and full-screen apps, never hidden on blur. | `src/main/shelf-window.ts`, `dockShelf` |
 | App identity | A regular app with a Dock icon and a menu bar of File, Edit, View, Window and Help. Settings can drop the Dock icon, which makes the app an accessory without its own menu bar, or drop the status-bar icon. | `src/main/app-menu.ts`, `placeIcon` |
 | Click versus drag | Under 4 DIP of movement is a click and pins | `CLICK_SLOP_DIP` |
 | Pinned crop | 480 × 300 DIP around the point | `DEFAULT_CROP_DIP` |
@@ -40,7 +40,8 @@ The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public 
 | Undo | The last deletion only, with `⌘Z` or the undo bar | `applyOp`, `undoRemove` |
 | Copying an image | The PNG with the pin drawn in, plus the note as text | `copyItem` in `src/main/index.ts` |
 | Copying a file | A named copy of the file as a file URL, plus its name as text | same |
-| Copy Section as List | The section's open items as a Markdown list, each with its link | `itemsAsList` |
+| Copy as List | Picked items, else the section's open items, as a numbered list with links (text and HTML) and the first image | `itemsAsList`, `copyList` |
+| Screenshot card | macOS: a new screenshot (image-only clipboard, or a file macOS marks as a screen capture) shows on a card beside the shelf | `src/main/screenshot-watcher.ts`, `src/main/screenshot-window.ts` |
 | Drawing export | Trimmed to the marks with 24 px of padding, on white, at twice its size | `src/renderer/drawing/sketch.ts` |
 | Annotating an image | Opens in the drawing window at up to its own size. The marks are drawn into the image at its pixel size and replace it; the pin, note and source stay. | `exportAnnotated`, `replaceImage` |
 | Windows window chrome | The app menu holds the shortcuts but is never shown. The shelf's window is transparent and the page draws an 18 px rounded panel, concentric with the fields 8 px inside it (Windows rounds real windows by 8 px at most); it has no system shadow. Settings and the drawing window have no title bar, only the caption buttons over the page's header. Hiding a window hands the keyboard to the window below, or back to the shelf. | `appMenuTemplate`, `captionButtons`, `hideWindow`, `styles.css` |

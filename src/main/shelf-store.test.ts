@@ -40,7 +40,9 @@ const withNote = (doc: ShelfDoc, text: string): ShelfDoc => ({
       id: ItemIdSchema.parse(
         `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(doc.items.length + 10)}`
       ),
+      html: null,
       kind: "text",
+      links: [],
       sectionId: SECTION,
       text,
       via: "typed",

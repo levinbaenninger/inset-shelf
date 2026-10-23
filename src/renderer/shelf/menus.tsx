@@ -1,10 +1,36 @@
+import {
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  ArrowUpRight01Icon,
+  Attachment01Icon,
+  CheckmarkCircle02Icon,
+  CleanIcon,
+  Copy01Icon,
+  CropIcon,
+  Delete02Icon,
+  Edit02Icon,
+  FolderAddIcon,
+  FolderExportIcon,
+  InboxDownloadIcon,
+  Link01Icon,
+  PaintBrush01Icon,
+  PencilEdit02Icon,
+  Settings02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
-import { COLOR_NAMES, itemMenu, sectionMenu } from "@shared/menus";
-import type { MenuChoice, MenuEntry } from "@shared/menus";
+import {
+  COLOR_NAMES,
+  itemMenu,
+  pickedMenu,
+  sectionMenu,
+  shelfMenu,
+} from "@shared/menus";
+import type { MenuChoice, MenuEntry, MenuIcon } from "@shared/menus";
 import { COLORS } from "@shared/shelf";
-import type { ItemId, ShelfDoc } from "@shared/shelf";
+import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
 import { AREA_ACCELERATOR, keyText } from "@shared/shortcut";
-import { useRef } from "react";
+import { useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import {
@@ -13,8 +39,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuSwatchItem,
@@ -23,43 +47,34 @@ import {
 import { cn } from "@/lib/utils";
 import { isMac } from "@/shared/platform";
 
-type ChoiceEntry = Extract<MenuEntry, { readonly kind: "choice" }>;
-
 type ColorsEntry = Extract<MenuEntry, { readonly kind: "colors" }>;
 
-/** Runs of checked entries, such as the sections, become one radio group. */
-type Block =
-  | Exclude<MenuEntry, ChoiceEntry>
-  | ChoiceEntry
-  | { readonly kind: "radio"; readonly entries: readonly ChoiceEntry[] };
+type GroupEntry = Extract<MenuEntry, { readonly kind: "group" }>;
 
-const blocks = (entries: readonly MenuEntry[]): readonly Block[] => {
-  const result: Block[] = [];
-  let radio: ChoiceEntry[] | null = null;
-
-  for (const entry of entries) {
-    if (entry.kind === "choice" && entry.checked !== undefined) {
-      if (radio === null) {
-        radio = [];
-        result.push({ entries: radio, kind: "radio" });
-      }
-
-      radio.push(entry);
-    } else {
-      radio = null;
-      result.push(entry);
-    }
-  }
-
-  return result;
+const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
+  addHere: InboxDownloadIcon,
+  annotate: PaintBrush01Icon,
+  check: CheckmarkCircle02Icon,
+  clear: CleanIcon,
+  copy: Copy01Icon,
+  delete: Delete02Icon,
+  edit: PencilEdit02Icon,
+  link: Link01Icon,
+  move: FolderExportIcon,
+  newSection: FolderAddIcon,
+  open: ArrowUpRight01Icon,
+  settings: Settings02Icon,
 };
+
+const EntryIcon = ({ icon }: { readonly icon?: MenuIcon }) =>
+  icon === undefined ? null : <HugeiconsIcon icon={ICONS[icon]} />;
 
 const Shortcut = ({ accelerator }: { readonly accelerator?: string }) =>
   accelerator === undefined ? null : (
     <DropdownMenuShortcut>{keyText(accelerator, isMac)}</DropdownMenuShortcut>
   );
 
-/** The colours as one row of swatches; the item's own is ringed. */
+/** The colours as one row of swatches, without a heading; the item's own is ringed. */
 const ColorRow = ({
   entry,
   onChoose,
@@ -67,9 +82,9 @@ const ColorRow = ({
   readonly entry: ColorsEntry;
   readonly onChoose: (choice: MenuChoice) => void;
 }) => (
+  // The swatches speak for themselves; the label is for assistive technology.
   <DropdownMenuGroup aria-label={entry.label}>
-    <DropdownMenuLabel>{entry.label}</DropdownMenuLabel>
-    <div className="flex items-center gap-0.5 px-1 pb-1">
+    <div className="flex items-center justify-between px-1 py-0.5">
       {COLORS.map((color) => (
         <DropdownMenuSwatchItem
           aria-label={COLOR_NAMES[color]}
@@ -91,27 +106,38 @@ const ColorRow = ({
       ))}
       <DropdownMenuSwatchItem
         aria-label="No Colour"
-        disabled={entry.current === null}
         onSelect={() => {
           onChoose({ color: null, id: entry.id, kind: "setColor" });
         }}
         title="No Colour"
       >
-        <span className="border-muted-foreground size-3.5 rounded-full border border-dashed" />
+        <span
+          className={cn(
+            "border-muted-foreground size-3.5 rounded-full border border-dashed",
+            entry.current === null &&
+              "ring-foreground ring-offset-popover ring-2 ring-offset-1"
+          )}
+        />
       </DropdownMenuSwatchItem>
     </div>
   </DropdownMenuGroup>
 );
 
+/**
+ * A menu's entries. A group (the sections to move to) is one entry that
+ * turns the menu into its list, since a submenu has no room beside the shelf.
+ */
 const Entries = ({
   entries,
   onChoose,
+  onOpenGroup,
 }: {
   readonly entries: readonly MenuEntry[];
   readonly onChoose: (choice: MenuChoice) => void;
+  readonly onOpenGroup: (group: GroupEntry) => void;
 }): ReactNode =>
-  blocks(entries).map((block, index) => {
-    switch (block.kind) {
+  entries.map((entry, index) => {
+    switch (entry.kind) {
       case "separator": {
         // Separators have no identity of their own; their place is stable.
         // oxlint-disable-next-line react/no-array-index-key
@@ -120,60 +146,38 @@ const Entries = ({
 
       case "group": {
         return (
-          <DropdownMenuGroup aria-label={block.label} key={block.label}>
-            <DropdownMenuLabel>{block.label}</DropdownMenuLabel>
-            <Entries entries={block.entries} onChoose={onChoose} />
-          </DropdownMenuGroup>
+          <DropdownMenuItem
+            key={entry.label}
+            onSelect={(event) => {
+              // The menu stays open and shows the group's entries instead.
+              event.preventDefault();
+              onOpenGroup(entry);
+            }}
+          >
+            <EntryIcon icon={entry.icon} />
+            {entry.label}
+            <HugeiconsIcon className="ml-auto" icon={ArrowRight01Icon} />
+          </DropdownMenuItem>
         );
       }
 
       case "colors": {
-        return <ColorRow entry={block} key="colors" onChoose={onChoose} />;
-      }
-
-      case "radio": {
-        const current = block.entries.findIndex(
-          (entry) => entry.checked === true
-        );
-
-        return (
-          <DropdownMenuRadioGroup
-            key={`radio-${block.entries[0]?.label ?? ""}`}
-            onValueChange={(value) => {
-              const entry = block.entries[Number(value)];
-
-              if (entry !== undefined) {
-                onChoose(entry.choice);
-              }
-            }}
-            value={String(current)}
-          >
-            {block.entries.map((entry, position) => (
-              <DropdownMenuRadioItem
-                disabled={!entry.enabled}
-                // The position is the radio value; labels can repeat.
-                // oxlint-disable-next-line react/no-array-index-key
-                key={position}
-                value={String(position)}
-              >
-                <span className="truncate">{entry.label}</span>
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        );
+        return <ColorRow entry={entry} key="colors" onChoose={onChoose} />;
       }
 
       case "choice": {
         return (
           <DropdownMenuItem
-            disabled={!block.enabled}
-            key={block.label}
+            disabled={!entry.enabled}
+            key={entry.label}
             onSelect={() => {
-              onChoose(block.choice);
+              onChoose(entry.choice);
             }}
+            variant={entry.destructive === true ? "destructive" : "default"}
           >
-            {block.label}
-            <Shortcut accelerator={block.accelerator} />
+            <EntryIcon icon={entry.icon} />
+            <span className="truncate">{entry.label}</span>
+            <Shortcut accelerator={entry.accelerator} />
           </DropdownMenuItem>
         );
       }
@@ -184,10 +188,12 @@ const Entries = ({
     }
   });
 
-/**
- * A menu's content. After a choice, focus stays where the choice put it
- * (a note being edited, the note field) instead of going back to the button.
- */
+/** Focus stays where a choice put it (a note being edited, the note field), never back on the button with its ring. */
+const keepFocus = (event: Event): void => {
+  event.preventDefault();
+};
+
+/** A menu's content, showing one group's entries in place when it is opened. */
 const MenuContent = ({
   entries,
   onChoose,
@@ -196,32 +202,43 @@ const MenuContent = ({
   readonly entries: readonly MenuEntry[];
   readonly onChoose: (choice: MenuChoice) => void;
 } & Omit<ComponentProps<typeof DropdownMenuContent>, "children">) => {
-  const chose = useRef(false);
+  const [group, setGroup] = useState<GroupEntry | null>(null);
 
   return (
     <DropdownMenuContent
-      onCloseAutoFocus={(event) => {
-        if (chose.current) {
-          event.preventDefault();
-          chose.current = false;
-        }
-      }}
+      // Each page places itself again, so a taller page never ends up clipped.
+      key={group?.label ?? ""}
+      onCloseAutoFocus={keepFocus}
       {...props}
     >
-      <Entries
-        entries={entries}
-        onChoose={(choice) => {
-          chose.current = true;
-          onChoose(choice);
-        }}
-      />
+      {group === null ? (
+        <Entries entries={entries} onChoose={onChoose} onOpenGroup={setGroup} />
+      ) : (
+        <>
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              setGroup(null);
+            }}
+          >
+            <HugeiconsIcon icon={ArrowLeft01Icon} />
+            Back
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
+          <Entries
+            entries={group.entries}
+            onChoose={onChoose}
+            onOpenGroup={setGroup}
+          />
+        </>
+      )}
     </DropdownMenuContent>
   );
 };
 
-/** Where an item's menu opens: under its ⋯ button, or at the pointer for a right-click. */
-export interface ItemMenuAnchor {
-  readonly id: ItemId;
+/** Where a menu opens: under a ⋯ button, or at the pointer for a right-click (no size). */
+export interface MenuAnchor {
   readonly x: number;
   readonly y: number;
   readonly width: number;
@@ -229,74 +246,114 @@ export interface ItemMenuAnchor {
   readonly align: "start" | "end";
 }
 
-/** One menu for every item, opened at an anchor the row reports. */
-export const ItemMenu = ({
-  anchor,
+/** What a right-click was on. */
+export type MenuTarget =
+  | { readonly kind: "item"; readonly id: ItemId }
+  | { readonly kind: "items"; readonly ids: readonly ItemId[] }
+  | { readonly kind: "section"; readonly id: SectionId }
+  | { readonly kind: "shelf" };
+
+export interface OpenMenu extends MenuAnchor {
+  readonly target: MenuTarget;
+}
+
+/** The entries for a target, or null once it is gone. */
+const entriesFor = (
+  target: MenuTarget,
+  doc: ShelfDoc
+): readonly MenuEntry[] | null => {
+  if (target.kind === "shelf") {
+    return shelfMenu();
+  }
+
+  if (target.kind === "items") {
+    const items = doc.items.filter((item) => target.ids.includes(item.id));
+
+    return items.length === 0 ? null : pickedMenu(items, doc);
+  }
+
+  if (target.kind === "section") {
+    const section = doc.sections.find(
+      (candidate) => candidate.id === target.id
+    );
+
+    return section === undefined ? null : sectionMenu(section, doc);
+  }
+
+  const item = doc.items.find((candidate) => candidate.id === target.id);
+
+  return item === undefined ? null : itemMenu(item, doc);
+};
+
+/**
+ * One menu for every right-click and every item's ⋯, opened at an anchor the
+ * shelf reports. Not modal, so a dialog it opens (deleting a section) never
+ * leaves the page unclickable.
+ */
+export const PointerMenu = ({
   doc,
+  menu,
   onChoose,
   onClose,
 }: {
-  readonly anchor: ItemMenuAnchor | null;
+  readonly menu: OpenMenu | null;
   readonly doc: ShelfDoc;
   readonly onChoose: (choice: MenuChoice) => void;
   readonly onClose: () => void;
 }) => {
-  const item =
-    anchor === null
-      ? undefined
-      : doc.items.find((candidate) => candidate.id === anchor.id);
+  const entries = menu === null ? null : entriesFor(menu.target, doc);
 
   return (
     <DropdownMenu
+      modal={false}
       onOpenChange={(open) => {
         if (!open) {
           onClose();
         }
       }}
-      open={item !== undefined}
+      open={entries !== null}
     >
       <DropdownMenuTrigger asChild>
         <span
           aria-hidden="true"
           className="pointer-events-none fixed top-(--y) left-(--x) h-(--h) w-(--w)"
           style={{
-            "--h": `${anchor?.height ?? 0}px`,
-            "--w": `${anchor?.width ?? 0}px`,
-            "--x": `${anchor?.x ?? 0}px`,
-            "--y": `${anchor?.y ?? 0}px`,
+            "--h": `${menu?.height ?? 0}px`,
+            "--w": `${menu?.width ?? 0}px`,
+            "--x": `${menu?.x ?? 0}px`,
+            "--y": `${menu?.y ?? 0}px`,
           }}
         />
       </DropdownMenuTrigger>
-      {item === undefined ? null : (
+      {entries === null ? null : (
         <MenuContent
-          align={anchor?.align ?? "start"}
-          entries={itemMenu(item, doc)}
+          align={menu?.align ?? "start"}
+          entries={entries}
+          // A new target starts on the first page of its menu.
+          key={
+            menu === null
+              ? ""
+              : `${menu.target.kind}-${"id" in menu.target ? menu.target.id : ""}-${menu.x}-${menu.y}`
+          }
           onChoose={onChoose}
-          sideOffset={anchor?.height === 0 ? 2 : 4}
+          sideOffset={menu?.height === 0 ? 2 : 4}
         />
       )}
     </DropdownMenu>
   );
 };
 
-/** The ⋯ at the top: switch section, start one, clear checked items, Settings. */
-export const SectionMenu = ({
+/** The ⋯ at the top: start a section, Settings. */
+export const ShelfMenu = ({
   children,
-  doc,
   onChoose,
 }: {
   readonly children: ReactNode;
-  readonly doc: ShelfDoc;
   readonly onChoose: (choice: MenuChoice) => void;
 }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-    <MenuContent
-      align="end"
-      className="max-w-72"
-      entries={sectionMenu(doc)}
-      onChoose={onChoose}
-    />
+    <MenuContent align="end" entries={shelfMenu()} onChoose={onChoose} />
   </DropdownMenu>
 );
 
@@ -306,22 +363,32 @@ export interface AddActions {
   readonly newDrawing: () => void;
 }
 
-/** The "+" in the note field opens upward, above the field, so it never covers it. */
+/** The "+" in the note field opens upward, above the field, so it never covers it; closing it goes back to the field. */
 export const AddMenu = ({
   actions,
   children,
+  onClosed,
 }: {
   readonly actions: AddActions;
   readonly children: ReactNode;
+  readonly onClosed: () => void;
 }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-    <DropdownMenuContent align="start" side="top">
+    <DropdownMenuContent
+      align="start"
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        onClosed();
+      }}
+      side="top"
+    >
       <DropdownMenuItem
         onSelect={() => {
           actions.captureArea();
         }}
       >
+        <HugeiconsIcon icon={CropIcon} />
         Capture Area
         <Shortcut accelerator={AREA_ACCELERATOR} />
       </DropdownMenuItem>
@@ -330,14 +397,16 @@ export const AddMenu = ({
           actions.attachFiles();
         }}
       >
-        Attach Files…
+        <HugeiconsIcon icon={Attachment01Icon} />
+        Attach Files
       </DropdownMenuItem>
       <DropdownMenuItem
         onSelect={() => {
           actions.newDrawing();
         }}
       >
-        New Drawing…
+        <HugeiconsIcon icon={Edit02Icon} />
+        New Drawing
         <Shortcut accelerator="Alt+CommandOrControl+N" />
       </DropdownMenuItem>
     </DropdownMenuContent>

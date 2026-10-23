@@ -22,6 +22,7 @@ export default defineConfig({
         input: {
           drawing: path.resolve(preload, "drawing.ts"),
           overlay: path.resolve(preload, "overlay.ts"),
+          screenshot: path.resolve(preload, "screenshot.ts"),
           settings: path.resolve(preload, "settings.ts"),
           shelf: path.resolve(preload, "shelf.ts"),
           toast: path.resolve(preload, "toast.ts"),
@@ -38,6 +39,7 @@ export default defineConfig({
         input: {
           drawing: path.resolve(renderer, "drawing.html"),
           overlay: path.resolve(renderer, "overlay.html"),
+          screenshot: path.resolve(renderer, "screenshot.html"),
           settings: path.resolve(renderer, "settings.html"),
           shelf: path.resolve(renderer, "shelf.html"),
           toast: path.resolve(renderer, "toast.html"),

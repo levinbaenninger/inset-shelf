@@ -11,6 +11,7 @@ import {
   parseComposer,
   SectionIdSchema,
   ShelfDocSchema,
+  UNDO_MAX,
 } from "./shelf";
 import type { OpEnv, ShelfDoc, ShelfOp, MainOp, Removed } from "./shelf";
 
@@ -31,7 +32,7 @@ const INBOX = SectionIdSchema.parse(uuid(1));
 
 interface Applied {
   readonly doc: ShelfDoc;
-  readonly removed: Removed | null;
+  readonly pending: readonly Removed[];
   readonly discarded: number;
 }
 
@@ -41,18 +42,26 @@ const apply = (
   e = env()
 ): Applied => {
   let current = doc;
-  let removed: Removed | null = null;
+  let pending: readonly Removed[] = [];
   let discarded = 0;
 
+  // Keeps the undo list as the shelf controller does (src/main/shelf-controller.ts).
   for (const op of ops) {
-    const result = applyOp(current, op, e, removed);
+    const result = applyOp(current, op, e, pending);
 
     current = result.doc;
     discarded += result.discarded.length;
-    removed = op.type === "undoRemove" ? null : (result.removed ?? removed);
+
+    if (op.type === "undoRemove") {
+      const restored = op.id ?? pending.at(-1)?.item.id;
+
+      pending = pending.filter((removed) => removed.item.id !== restored);
+    } else if (result.removed !== null) {
+      pending = [...pending, result.removed].slice(-UNDO_MAX);
+    }
   }
 
-  return { discarded, doc: current, removed };
+  return { discarded, doc: current, pending };
 };
 
 describe(parseComposer, () => {
@@ -108,7 +117,7 @@ describe(applyOp, () => {
     expect(doc.items[0]?.sectionId).toBe(doc.sections[1]?.id);
   });
 
-  it("removes with one undo and discards the previous removal on the next one", () => {
+  it("puts back the last deletion, or any recent one asked for", () => {
     const added = apply(start, [
       { text: "one", type: "compose" },
       { text: "two", type: "compose" },
@@ -133,10 +142,35 @@ describe(applyOp, () => {
     const twice = apply(added, [
       { id: first.id, type: "remove" },
       { id: second.id, type: "remove" },
+      { id: first.id, type: "undoRemove" },
     ]);
 
-    expect(twice.discarded).toBe(1);
-    expect(twice.doc.items).toHaveLength(1);
+    expect(twice.discarded).toBe(0);
+    expect(twice.doc.items.map((item) => item.id)).toStrictEqual([
+      first.id,
+      added.items[2]?.id,
+    ]);
+    expect(twice.pending.map((removed) => removed.item.id)).toStrictEqual([
+      second.id,
+    ]);
+  });
+
+  it("discards the oldest deletion for good past the undo limit", () => {
+    const many = apply(
+      start,
+      Array.from({ length: UNDO_MAX + 1 }, (_, n) => ({
+        text: `note ${n}`,
+        type: "compose" as const,
+      }))
+    ).doc;
+
+    const removedAll = apply(
+      many,
+      many.items.map((item) => ({ id: item.id, type: "remove" as const }))
+    );
+
+    expect(removedAll.discarded).toBe(1);
+    expect(removedAll.pending).toHaveLength(UNDO_MAX);
   });
 
   it("toggles done and clears done items of the active section only", () => {
@@ -216,7 +250,13 @@ describe(applyOp, () => {
   it("ignores a blank selection and edits that target the wrong kind", () => {
     expect(
       apply(start, [
-        { context: null, text: "   ", type: "addText", via: "selection" },
+        {
+          context: null,
+          html: null,
+          text: "   ",
+          type: "addText",
+          via: "selection",
+        },
       ]).doc.items
     ).toHaveLength(0);
   });
@@ -264,7 +304,13 @@ describe(applyOp, () => {
         type: "addImage",
         via: "pin",
       },
-      { context: null, text: "after", type: "addText", via: "typed" },
+      {
+        context: null,
+        html: null,
+        text: "after",
+        type: "addText",
+        via: "typed",
+      },
     ]);
 
     const [first] = doc.items;
@@ -279,7 +325,7 @@ describe(applyOp, () => {
       doc,
       { id: first.id, image: annotated, type: "replaceImage" },
       env(),
-      null
+      []
     );
 
     expect(result.doc.items.map((item) => item.id)).toStrictEqual(
@@ -291,8 +337,7 @@ describe(applyOp, () => {
     });
     expect(result.discarded).toStrictEqual([first]);
     expect(
-      applyOp(doc, { id: first.id, image, type: "replaceImage" }, env(), null)
-        .doc
+      applyOp(doc, { id: first.id, image, type: "replaceImage" }, env(), []).doc
     ).toBe(doc);
   });
 });
@@ -312,7 +357,7 @@ describe(groupItems, () => {
     e
   ).doc;
 
-  it("lists sections with items in order and the active one even when empty", () => {
+  it("lists every section in order, empty ones too", () => {
     const groups = groupItems(
       { ...filled, activeSectionId: filled.sections[2]?.id ?? INBOX },
       ""
@@ -329,6 +374,9 @@ describe(groupItems, () => {
       ["Later", 1, false],
       ["Empty", 0, true],
     ]);
+    expect(
+      groupItems(filled, "").map((group) => group.section.name)
+    ).toStrictEqual(["Inbox", "Later", "Empty"]);
   });
 
   it("keeps only matching items and drops sections without a match", () => {
@@ -338,6 +386,148 @@ describe(groupItems, () => {
         group.items.length,
       ])
     ).toStrictEqual([["Later", 1]]);
+  });
+});
+
+describe("selections with links", () => {
+  it("keeps the links a stored shelf accepts, so it still loads", () => {
+    const long = `https://example.com/?q=${"a".repeat(2100)}`;
+
+    const { doc } = apply(emptyShelf(INBOX), [
+      {
+        context: null,
+        html: `<a href="https://github.com/a/b/pull/1">PR</a> <a href="${long}">long</a>`,
+        text: "PR long",
+        type: "addText",
+        via: "selection",
+      },
+    ]);
+
+    const [item] = doc.items;
+
+    expect(item?.kind === "text" ? item.links : null).toStrictEqual([
+      { text: "PR", url: "https://github.com/a/b/pull/1" },
+    ]);
+    expect(parseShelfDocument(JSON.stringify(doc))?.items[0]).toStrictEqual(
+      item
+    );
+  });
+
+  it("drops the copied HTML once the text is edited", () => {
+    const added = apply(emptyShelf(INBOX), [
+      {
+        context: null,
+        html: "<b>bold</b>",
+        text: "bold",
+        type: "addText",
+        via: "selection",
+      },
+    ]).doc;
+
+    const [item] = added.items;
+
+    if (item === undefined) {
+      throw new Error("missing item");
+    }
+
+    const [edited] = apply(added, [
+      { id: item.id, text: "plain", type: "editText" },
+    ]).doc.items;
+
+    expect(edited).toMatchObject({ html: null, text: "plain" });
+  });
+});
+
+describe("sections", () => {
+  const e = env();
+
+  const filled = apply(
+    emptyShelf(INBOX),
+    [
+      { text: "first", type: "compose" },
+      { name: "Later", type: "addSection" },
+      { text: "second", type: "compose" },
+      { text: "third", type: "compose" },
+    ],
+    e
+  ).doc;
+
+  const [, later] = filled.sections;
+
+  if (later === undefined) {
+    throw new Error("missing fixture");
+  }
+
+  it("adds a section for new items, or picks the one with that name", () => {
+    expect(filled.sections.map((section) => section.name)).toStrictEqual([
+      "Inbox",
+      "Later",
+    ]);
+    expect(filled.activeSectionId).toBe(later.id);
+    expect(
+      apply(filled, [{ name: " inbox ", type: "addSection" }], e).doc
+        .activeSectionId
+    ).toBe(INBOX);
+  });
+
+  it("renames a section, unless another one has the name", () => {
+    expect(
+      apply(
+        filled,
+        [{ id: later.id, name: " Soon ", type: "renameSection" }],
+        e
+      ).doc.sections[1]?.name
+    ).toBe("Soon");
+    expect(
+      apply(filled, [{ id: later.id, name: "Inbox", type: "renameSection" }], e)
+        .doc
+    ).toStrictEqual(filled);
+  });
+
+  it("deletes a section with its items and moves new items to the first section", () => {
+    const { discarded, doc } = apply(
+      filled,
+      [{ id: later.id, type: "removeSection" }],
+      e
+    );
+
+    expect(doc.sections.map((section) => section.name)).toStrictEqual([
+      "Inbox",
+    ]);
+    expect(
+      doc.items.map((item) => item.kind === "text" && item.text)
+    ).toStrictEqual(["first"]);
+    expect(doc.activeSectionId).toBe(INBOX);
+    expect(discarded).toBe(2);
+    expect(ShelfDocSchema.safeParse(doc).success).toBeTruthy();
+  });
+
+  it("keeps the last section", () => {
+    const only = emptyShelf(INBOX);
+
+    expect(
+      apply(only, [{ id: INBOX, type: "removeSection" }], e).doc
+    ).toStrictEqual(only);
+  });
+
+  it("clears the checked items of the section asked for", () => {
+    const [first] = filled.items;
+
+    if (first === undefined) {
+      throw new Error("missing fixture");
+    }
+
+    const { discarded, doc } = apply(
+      filled,
+      [
+        { id: first.id, type: "toggleDone" },
+        { sectionId: INBOX, type: "clearDone" },
+      ],
+      e
+    );
+
+    expect(discarded).toBe(1);
+    expect(doc.items).toHaveLength(2);
   });
 });
 
@@ -458,7 +648,7 @@ describe(parseShelfDocument, () => {
 });
 
 describe(itemsAsList, () => {
-  it("lists open items as Markdown with their links and leaves checked ones out", () => {
+  it("numbers items with their links, indenting the lines that follow", () => {
     const e = env();
 
     const { doc } = apply(
@@ -467,10 +657,12 @@ describe(itemsAsList, () => {
         {
           context: {
             app: "Chrome",
+            appLink: null,
             title: "Pricing",
             url: "https://example.com/pricing",
           },
           text: "Trial needs a card",
+          html: null,
           type: "addText",
           via: "selection",
         },
@@ -488,9 +680,14 @@ describe(itemsAsList, () => {
 
     const marked = apply(doc, [{ id: last.id, type: "toggleDone" }], e).doc;
 
-    expect(itemsAsList(marked.items)).toBe(
-      "- Trial needs a card (https://example.com/pricing)\n- Ask Nina\n  about Q3"
-    );
+    const open = marked.items.filter((item) => !item.done);
+
+    expect(itemsAsList(open)).toStrictEqual({
+      count: 2,
+      html: '<ol><li>Trial needs a card (<a href="https://example.com/pricing">https://example.com/pricing</a>)</li><li>Ask Nina<br>about Q3</li></ol>',
+      text: "1. Trial needs a card (https://example.com/pricing)\n2. Ask Nina\n   about Q3",
+    });
+    expect(itemsAsList(marked.items).count).toBe(3);
     expect(itemTextWithLink(marked.items[0] ?? last)).toBe(
       "Trial needs a card\nhttps://example.com/pricing"
     );

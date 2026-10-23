@@ -1,21 +1,23 @@
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { TEXT_MAX } from "@shared/shelf";
-import type { KeyboardEvent, Ref } from "react";
+import { useImperativeHandle, useRef } from "react";
+import type { Ref } from "react";
 
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
-  InputGroupTextarea,
 } from "@/components/ui/input-group";
 
+import { MarkdownField } from "./markdown-field";
+import type { MarkdownFieldHandle } from "./markdown-field";
 import { AddMenu } from "./menus";
 import type { AddActions } from "./menus";
 
 export interface ComposerProps {
   readonly sectionName: string;
-  /** Held by the shelf, so a menu can start a section by filling in "# ". */
+  /** Held by the shelf as Markdown, so it can clear the field once a note is added. */
   readonly text: string;
   readonly onTextChange: (text: string) => void;
   readonly onSubmit: (text: string) => void;
@@ -23,12 +25,15 @@ export interface ComposerProps {
   readonly onLeaveUp: () => void;
   /** Escape in an empty composer hides the shelf. */
   readonly onEscape: () => void;
-  readonly ref?: Ref<HTMLTextAreaElement>;
+  readonly ref?: Ref<MarkdownFieldHandle>;
   /** The other ways to add, behind the "+": an area, files, a drawing. */
   readonly addActions: AddActions;
 }
 
-/** Return adds the note, ⇧↩ adds a line, and "# Name" switches to (or makes) a section. */
+/**
+ * Return adds the note, ⇧↩ adds a line (or a list item), and "# Name"
+ * switches to (or makes) a section. Markdown is formatted as it is typed.
+ */
 export const Composer = ({
   addActions,
   onEscape,
@@ -39,54 +44,51 @@ export const Composer = ({
   sectionName,
   text,
 }: ComposerProps) => {
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.nativeEvent.isComposing) {
-      return;
-    }
+  const field = useRef<MarkdownFieldHandle>(null);
 
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-
-      if (text.trim() !== "") {
-        onSubmit(text);
-        onTextChange("");
-      }
-    } else if (event.key === "ArrowUp" && text === "") {
-      event.preventDefault();
-      onLeaveUp();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (text === "") {
-        onEscape();
-      } else {
-        onTextChange("");
-      }
-    }
-  };
+  useImperativeHandle<MarkdownFieldHandle | null, MarkdownFieldHandle | null>(
+    ref,
+    () => field.current
+  );
 
   return (
     <div className="px-2 pt-1 pb-2">
-      <InputGroup>
-        <InputGroupAddon>
-          <AddMenu actions={addActions}>
+      <InputGroup className="h-auto items-start">
+        <InputGroupAddon align="inline-start-top">
+          <AddMenu
+            actions={addActions}
+            onClosed={() => {
+              field.current?.focus();
+            }}
+          >
             <InputGroupButton aria-label="Add" size="icon-xs">
               <HugeiconsIcon icon={PlusSignIcon} />
             </InputGroupButton>
           </AddMenu>
         </InputGroupAddon>
-        <InputGroupTextarea
-          aria-label={`New note in ${sectionName}`}
-          className="max-h-32 min-h-0"
-          maxLength={TEXT_MAX}
-          onChange={(event) => {
-            onTextChange(event.target.value);
+        <MarkdownField
+          ariaLabel={`New note in ${sectionName}`}
+          className="max-h-32 overflow-y-auto py-1.25 pr-2.5 pl-1.5"
+          controlSlot
+          keys={{
+            onEscape: (markdown) => {
+              if (markdown.trim() === "") {
+                onEscape();
+              } else {
+                onTextChange("");
+              }
+            },
+            onLeaveUp,
+            onSubmit: (markdown) => {
+              if (markdown.trim() !== "") {
+                onSubmit(markdown.slice(0, TEXT_MAX));
+                onTextChange("");
+              }
+            },
           }}
-          onKeyDown={onKeyDown}
+          onChange={onTextChange}
           placeholder="Jot down a thought…"
-          ref={ref}
-          rows={1}
+          ref={field}
           value={text}
         />
       </InputGroup>

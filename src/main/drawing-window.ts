@@ -35,6 +35,7 @@ export interface DrawingWindow {
   readonly requestClose: () => void;
   readonly setDirty: (dirty: boolean) => void;
   readonly isFocused: () => boolean;
+  readonly isVisible: () => boolean;
   readonly view: () => DrawingView;
   readonly onView: (listener: (view: DrawingView) => void) => void;
   /** Closing with marks on the page: the page asks before throwing them away. */
@@ -106,6 +107,7 @@ export const createDrawingWindow = (options: {
       hideWindow(window, { handOff: options.handOff, raise });
     },
     isFocused: () => window.isVisible() && window.isFocused(),
+    isVisible: () => window.isVisible(),
     requestClose: () => {
       window.close();
     },
