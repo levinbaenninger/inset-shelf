@@ -1,18 +1,20 @@
-import { COLORS } from "@shared/shelf";
 import type {
   ItemColor,
   ItemId,
   SectionId,
   ShelfDoc,
   ShelfItem,
-} from "@shared/shelf";
+} from "./shelf";
 
 export type MenuChoice =
   | { readonly kind: "selectSection"; readonly id: SectionId }
   | { readonly kind: "clearDone" }
   | { readonly kind: "newSection" }
+  | { readonly kind: "openSettings" }
   | { readonly kind: "copy"; readonly id: ItemId }
   | { readonly kind: "copyWithLink"; readonly id: ItemId }
+  /** Opens an image large, ready to draw on. */
+  | { readonly kind: "open"; readonly id: ItemId }
   | {
       readonly kind: "setColor";
       readonly id: ItemId;
@@ -29,8 +31,9 @@ export type MenuChoice =
 
 export type MenuEntry =
   | { readonly kind: "separator" }
+  /** Entries under a heading, in the menu itself: the shelf is too narrow for submenus. */
   | {
-      readonly kind: "submenu";
+      readonly kind: "group";
       readonly label: string;
       readonly entries: readonly MenuEntry[];
     }
@@ -43,13 +46,18 @@ export type MenuEntry =
       readonly checked?: boolean;
       /** The shelf's own key for this action, shown at the right edge. */
       readonly accelerator?: string;
-      /** A colour swatch drawn before the label. */
-      readonly swatch?: ItemColor;
+    }
+  /** A row of colour swatches, the item's colour marked, and one to clear it. */
+  | {
+      readonly kind: "colors";
+      readonly label: string;
+      readonly id: ItemId;
+      readonly current: ItemColor | null;
     };
 
 const SEPARATOR: MenuEntry = { kind: "separator" };
 
-/** The section switcher: every section, then the actions on the current one. */
+/** The section switcher: every section, then the actions on the current one, then Settings. */
 export const sectionMenu = (doc: ShelfDoc): readonly MenuEntry[] => {
   const checkedHere = doc.items.some(
     (item) => item.sectionId === doc.activeSectionId && item.done
@@ -76,6 +84,14 @@ export const sectionMenu = (doc: ShelfDoc): readonly MenuEntry[] => {
       kind: "choice",
       label: "Clear Checked Items",
     },
+    SEPARATOR,
+    {
+      accelerator: "CommandOrControl+,",
+      choice: { kind: "openSettings" },
+      enabled: true,
+      kind: "choice",
+      label: "Settings…",
+    },
   ];
 };
 
@@ -87,6 +103,7 @@ const moveTo = (item: ShelfItem, doc: ShelfDoc): readonly MenuEntry[] => {
   return others.length === 0
     ? []
     : [
+        SEPARATOR,
         {
           entries: others.map((section): MenuEntry => ({
             choice: { id: item.id, kind: "moveTo", sectionId: section.id },
@@ -94,43 +111,21 @@ const moveTo = (item: ShelfItem, doc: ShelfDoc): readonly MenuEntry[] => {
             kind: "choice",
             label: section.name,
           })),
-          kind: "submenu",
+          kind: "group",
           label: "Move to",
         },
       ];
 };
 
-const COLOR_NAMES: Record<ItemColor, string> = {
+export const COLOR_NAMES: Readonly<Record<ItemColor, string>> = {
   blue: "Blue",
-  gray: "Gray",
+  gray: "Grey",
   green: "Green",
   orange: "Orange",
   purple: "Purple",
   red: "Red",
   yellow: "Yellow",
 };
-
-const colorMenu = (item: ShelfItem): MenuEntry => ({
-  entries: [
-    ...COLORS.map((color): MenuEntry => ({
-      checked: item.color === color,
-      choice: { color, id: item.id, kind: "setColor" },
-      enabled: true,
-      kind: "choice",
-      label: COLOR_NAMES[color],
-      swatch: color,
-    })),
-    SEPARATOR,
-    {
-      choice: { color: null, id: item.id, kind: "setColor" },
-      enabled: item.color !== null,
-      kind: "choice",
-      label: "No Colour",
-    },
-  ],
-  kind: "submenu",
-  label: "Colour",
-});
 
 const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
   item.context?.url === null || item.context === null
@@ -143,6 +138,18 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
           label: "Copy with Link",
         },
       ];
+
+const openImage = (item: ShelfItem): readonly MenuEntry[] =>
+  item.kind === "image"
+    ? [
+        {
+          choice: { id: item.id, kind: "open" },
+          enabled: true,
+          kind: "choice",
+          label: "View and Annotate…",
+        },
+      ]
+    : [];
 
 /** What a right-click on an item offers, with the keys that do the same in the list. */
 export const itemMenu = (
@@ -157,6 +164,7 @@ export const itemMenu = (
     label: "Copy",
   },
   ...copyWithLink(item),
+  ...openImage(item),
   {
     accelerator: "Enter",
     choice: { id: item.id, kind: "edit" },
@@ -172,7 +180,8 @@ export const itemMenu = (
     label: item.done ? "Mark as Not Done" : "Mark as Done",
   },
   ...moveTo(item, doc),
-  colorMenu(item),
+  SEPARATOR,
+  { current: item.color, id: item.id, kind: "colors", label: "Colour" },
   SEPARATOR,
   {
     accelerator: "Backspace",

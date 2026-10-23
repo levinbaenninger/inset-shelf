@@ -4,14 +4,14 @@ import { defineContract, event, invoke, out, send } from "./ipc";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import { ItemIdSchema, ShelfOpSchema } from "./shelf";
-import type { ItemId, ShelfDoc } from "./shelf";
+import type { ItemId, Pin, ShelfDoc } from "./shelf";
 
 export type Permission = "granted" | "missing" | "notNeeded";
 
 export interface ShelfStatus {
   /** Double Shift needs Accessibility on macOS; elsewhere it works without a grant. */
   readonly keys: Permission;
-  /** Copying the selection is macOS-only for now; Windows terminals treat Ctrl+C as an interrupt. */
+  /** Copying the selection works on macOS and Windows; elsewhere double Shift only toggles the shelf. */
   readonly selectionCapture: boolean;
   /** The last write failed; the shelf keeps working in memory. */
   readonly saveError: string | null;
@@ -28,21 +28,14 @@ export interface ShelfView {
   readonly canUndo: boolean;
 }
 
-/** Menu choices the shelf window carries out itself, so its own state (editing, undo) stays in one place. */
+/** App-menu choices the shelf window carries out itself, so its own state (editing, undo) stays in one place. */
 export type ShelfCommand =
-  | { readonly kind: "edit"; readonly id: ItemId }
-  | { readonly kind: "remove"; readonly id: ItemId }
   | { readonly kind: "newSection" }
   | { readonly kind: "newNote" }
   | { readonly kind: "find" }
   /** Edit › Copy and Undo: a text field keeps its own, otherwise they act on items. */
   | { readonly kind: "copy" }
   | { readonly kind: "undo" };
-
-const MenuPoint = z.object({
-  x: z.number().min(0).max(10_000),
-  y: z.number().min(0).max(10_000),
-});
 
 export type ActionResult =
   | { readonly ok: true }
@@ -60,20 +53,24 @@ export const shelfContract = defineContract({
       out<ActionResult>()
     ),
     apply: send(ShelfOpSchema),
+    /** The file dialog, from the "+" in the note field. */
+    attachFiles: send(z.void()),
     captureArea: send(z.void()),
     copy: invoke(ItemIdSchema, out<ActionResult>()),
+    /** The item's words and the page it came from, as text. */
+    copyWithLink: send(ItemIdSchema),
     dismissProblem: send(z.void()),
     getView: invoke(z.void(), out<ShelfView>()),
     hide: send(z.void()),
     /** Copy and Undo inside a text field, done by the window's own edit commands. */
     nativeEdit: send(z.enum(["copy", "undo"])),
+    newDrawing: send(z.void()),
+    /** Shows an image large in the drawing window, to look at or draw on. */
+    openImage: send(ItemIdSchema),
     openKeySettings: send(z.void()),
     /** Opens the page an item was captured from; main checks it is http or https. */
     openLink: send(ItemIdSchema),
-    /** The "+" in the note field: ways to add something other than typing. */
-    showAddMenu: send(MenuPoint),
-    showItemMenu: send(MenuPoint.extend({ id: ItemIdSchema })),
-    showSectionMenu: send(MenuPoint),
+    openSettings: send(z.void()),
     pasteImage: invoke(
       z
         .instanceof(Uint8Array)
@@ -135,16 +132,39 @@ export const toastContract = defineContract({
 
 const DRAWING_MAX_BYTES = 30 * 1024 * 1024;
 
-/** The drawing window: a blank canvas that saves one PNG to the shelf. */
+/** An image item opened in the drawing window, to look at large or draw on. */
+export interface DrawingImage {
+  /** For showing it; the pixels for the saved copy come from getImage. */
+  readonly url: string;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly pixelsPerDip: number;
+  /** Shown over the image as in the shelf; it is drawn into copies, not into the saved image. */
+  readonly pin: Pin | null;
+}
+
+export interface DrawingView {
+  /** Changes with every opening, so the page starts over. */
+  readonly seq: number;
+  /** Null for a new drawing on a blank page. */
+  readonly image: DrawingImage | null;
+}
+
+/** The drawing window: a blank canvas that saves one PNG to the shelf, or an image item drawn on. */
 export const drawingContract = defineContract({
   events: {
+    /** The window is closing with marks on the page: the page asks before throwing them away. */
+    confirmClose: event<null>(),
     /** Undo and Redo from the menu bar, which takes ⌘Z before the page sees it. */
     edit: event<"undo" | "redo">(),
-    reset: event<null>(),
+    view: event<DrawingView>(),
   },
   global: "insetDrawing",
   methods: {
     cancel: send(z.void()),
+    /** The open image's PNG, so the page can draw the marks into it without a cross-origin canvas. */
+    getImage: invoke(z.void(), out<Uint8Array | null>()),
+    getView: invoke(z.void(), out<DrawingView>()),
     /** Whether the page has marks, so closing it asks before throwing them away. */
     setDirty: send(z.boolean()),
     save: invoke(

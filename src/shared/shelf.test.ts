@@ -220,6 +220,81 @@ describe(applyOp, () => {
       ]).doc.items
     ).toHaveLength(0);
   });
+
+  it("keeps a note on an attached file", () => {
+    const { doc } = apply(start, [
+      {
+        context: null,
+        file: { bytes: 19, name: "Report.txt", stored: `${uuid(60)}.txt` },
+        type: "addFile",
+      },
+    ]);
+
+    const id = doc.items[0]?.id;
+
+    if (id === undefined) {
+      throw new Error("missing item");
+    }
+
+    const edited = apply(doc, [
+      { id, note: "Numbers for Friday", type: "editNote" },
+    ]).doc;
+
+    expect(edited.items[0]).toMatchObject({
+      kind: "file",
+      note: "Numbers for Friday",
+    });
+    expect(ShelfDocSchema.safeParse(edited).success).toBeTruthy();
+  });
+
+  it("replaces an image in place and discards the old file", () => {
+    const image = {
+      file: `${uuid(50)}.png`,
+      heightPx: 600,
+      pixelsPerDip: 2,
+      widthPx: 960,
+    };
+
+    const { doc } = apply(start, [
+      {
+        context: null,
+        image,
+        pin: { x: 480, y: 300 },
+        source: null,
+        type: "addImage",
+        via: "pin",
+      },
+      { context: null, text: "after", type: "addText", via: "typed" },
+    ]);
+
+    const [first] = doc.items;
+
+    if (first === undefined) {
+      throw new Error("missing item");
+    }
+
+    const annotated = { ...image, file: `${uuid(51)}.png` };
+
+    const result = applyOp(
+      doc,
+      { id: first.id, image: annotated, type: "replaceImage" },
+      env(),
+      null
+    );
+
+    expect(result.doc.items.map((item) => item.id)).toStrictEqual(
+      doc.items.map((item) => item.id)
+    );
+    expect(result.doc.items[0]).toMatchObject({
+      image: annotated,
+      pin: { x: 480, y: 300 },
+    });
+    expect(result.discarded).toStrictEqual([first]);
+    expect(
+      applyOp(doc, { id: first.id, image, type: "replaceImage" }, env(), null)
+        .doc
+    ).toBe(doc);
+  });
 });
 
 describe(groupItems, () => {

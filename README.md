@@ -30,9 +30,9 @@ macOS ties the grants to the app's signature. These builds have an ad-hoc signat
 
 1. Download `inset-shelf-<version>-win-x64.exe` for the installer, or `-win-x64.zip` to run it without installing. Use `-win-arm64.zip` on an Arm device.
 2. If SmartScreen shows **Windows protected your PC**, click **More info**, then **Run anyway**.
-3. Look for the Inset mark in the notification area of the taskbar.
+3. Look for the Inset mark in the notification area of the taskbar. Windows may put it behind the **^** (Show hidden icons) arrow; drag it onto the taskbar to keep it in view. Starting the app again from Start shows the shelf.
 
-The Windows build compiles and packages in CI. Nobody has run it on Windows yet. On Windows, double Shift only shows and hides the shelf: copying the selection would send `Ctrl+C`, which stops a running program in a terminal.
+The Windows build has been run on Windows 11; [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) lists what was checked. On Windows the shortcuts use `Ctrl` where the Mac uses `⌘`, and there is no menu bar: **Settings…** is in the tray icon's menu, in the shelf's top **⋯** menu and on `Ctrl+,`. Double Shift copies the selection with `Ctrl+Insert`, not `Ctrl+C`, which would stop a running program in a terminal.
 
 ## Use it
 
@@ -50,14 +50,15 @@ Inside the shelf:
 - Jot down a note or a prompt and press `Return`. `⇧↩` adds a line. The **+** in the note field captures an area, attaches files or opens a new drawing. You can also drop files on the shelf or paste an image.
 - The list shows every section as a group. Type `# Name` and press `Return` to make a section or switch to one. New items go to the current section. The **⋯** button at the top, the **View** menu and `⌘1` to `⌘9` switch sections.
 - The search field (`⌘F`) narrows the list by text, note, file name, app, window title or address.
-- Each item's **⋯** button, or a right-click, opens its menu: **Copy**, **Copy with Link**, **Edit**, **Mark as Done**, **Move to**, **Colour** and **Delete**.
+- Each item's **⋯** button, or a right-click, opens its menu: **Copy**, **Copy with Link**, **View and Annotate…** for an image, **Edit**, **Mark as Done**, **Move to**, **Colour** and **Delete**. Images and files take a note under them.
+- Double-click an image to see it large. Draw on it with the drawing tools and **Save** to replace it on the shelf; the pin stays where it was.
 - `↑` and `↓` move through the items. `Space` checks one off, `Return` edits it, `⌘C` copies it, and `⌫` deletes it. `⌘Z` brings back the last deleted item. `Esc` hides the shelf.
 - **Edit > Copy Section as List** (`⇧⌘C`) copies the open items of the current section as a Markdown list, with their links.
 - Copying an image puts the image, with its pin drawn in, and its note on the clipboard. Copying a file puts the file itself on the clipboard. Drag an image or a file out of the shelf to drop it into another app.
 
 **File > New Drawing…** (`⌥⌘N`) opens a drawing window with pen, line, arrow, rectangle, ellipse and text tools. **Save** (`⌘↩`) adds the drawing to the shelf. **Copy and Save** also puts it on the clipboard.
 
-**Settings…** (`⌘,`) turns on Open at Login, chooses whether the app's icon shows in the Dock, the menu bar or both, and can mark items as done when they are copied.
+**Settings…** (`⌘,`, or **⋯** at the top of the shelf) turns on Open at Login, chooses whether the app's icon shows in the Dock, the menu bar or both (macOS only), and can mark items as done when they are copied.
 
 The shelf is stored in one file, `shelf.json`, with images and files in an `attachments` folder and the settings in `settings.json` next to it:
 
@@ -66,8 +67,9 @@ The shelf is stored in one file, `shelf.json`, with images and files in an `atta
 
 ### Things to know about double Shift
 
-- The app copies your selection by sending `⌘C` to the app in front, then puts the clipboard back. Clipboard history tools may still record that copy.
-- In VS Code, Cursor and some other editors, `⌘C` with nothing selected copies the whole line. Double Shift then saves that line instead of showing the shelf.
+- The app copies your selection by sending `⌘C` (`Ctrl+Insert` on Windows) to the app in front, then puts the clipboard back. Clipboard history tools may still record that copy.
+- An app that ignores `Ctrl+Insert` copies nothing, so double Shift only shows or hides the shelf there.
+- In VS Code, Cursor and some other editors, copying with nothing selected copies the whole line. Double Shift then saves that line instead of showing the shelf.
 - Double Shift inside the shelf only hides it, so the shelf never saves its own text.
 
 ## Develop

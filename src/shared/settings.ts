@@ -40,8 +40,9 @@ export const readSettings = (raw: string | null): Settings => {
     : DEFAULT_SETTINGS;
 };
 
-/** What the settings window shows: the stored settings and the system's login item. */
+/** What the settings window shows: the stored settings, the system's login item and the app's version. */
 export interface SettingsView {
   readonly settings: Settings;
   readonly openAtLogin: boolean;
+  readonly version: string;
 }

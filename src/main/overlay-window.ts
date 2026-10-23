@@ -3,6 +3,7 @@ import type { DisplaySnapshot } from "@shared/geometry";
 import { app, BrowserWindow } from "electron";
 import type { WebContents } from "electron";
 
+import { hideWindow } from "./hide-window";
 import { harden, secureWebPreferences } from "./window-security";
 
 const isMac = process.platform === "darwin";
@@ -52,7 +53,11 @@ export const createOverlayWindow = (options: OverlayOptions): OverlayWindow => {
   });
 
   // Above the menu bar and the Dock, which a "floating" window stays below.
-  window.setAlwaysOnTop(true, "screen-saver");
+  const raise = (): void => {
+    window.setAlwaysOnTop(true, "screen-saver");
+  };
+
+  raise();
   window.setVisibleOnAllWorkspaces(true, {
     skipTransformProcessType: true,
     visibleOnFullScreen: true,
@@ -83,7 +88,7 @@ export const createOverlayWindow = (options: OverlayOptions): OverlayWindow => {
     },
     hide: () => {
       if (window.isVisible()) {
-        window.hide();
+        hideWindow(window, { raise });
       }
 
       setView(null);

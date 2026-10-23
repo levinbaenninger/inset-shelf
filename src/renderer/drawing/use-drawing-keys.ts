@@ -26,14 +26,18 @@ const toolForKey = new Map(
 
 export const UNDO_KEYS = isMac ? "⌘Z" : "Ctrl+Z";
 
-export const REDO_KEYS = isMac ? "⇧⌘Z" : "Ctrl+Shift+Z";
+export const REDO_KEYS = isMac ? "⇧⌘Z" : "Ctrl+Y";
 
 export const SAVE_KEYS = isMac ? "⌘↩" : "Ctrl+↩";
 
 const isTextField = (target: EventTarget | null): boolean =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
-/** ⌘Z and ⇧⌘Z step through the history; a plain letter picks a tool. A text field keeps its own keys. */
+/**
+ * ⌘Z and ⇧⌘Z step through the history, as do Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z
+ * elsewhere; a plain letter picks a tool. A text field keeps its own keys.
+ * The letter is read from the layout, so Z is found on QWERTZ keyboards too.
+ */
 export const useDrawingKeys = (actions: DrawingKeyActions): void => {
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.isComposing) {
@@ -44,9 +48,10 @@ export const useDrawingKeys = (actions: DrawingKeyActions): void => {
       return;
     }
 
-    const command = isMac ? event.metaKey : event.ctrlKey;
+    const command = (isMac ? event.metaKey : event.ctrlKey) && !event.altKey;
+    const letter = event.key.toLowerCase();
 
-    if (command && event.code === "KeyZ" && !event.altKey) {
+    if (command && letter === "z") {
       event.preventDefault();
 
       if (event.shiftKey) {
@@ -54,6 +59,13 @@ export const useDrawingKeys = (actions: DrawingKeyActions): void => {
       } else {
         actions.undo();
       }
+
+      return;
+    }
+
+    if (command && !isMac && letter === "y" && !event.shiftKey) {
+      event.preventDefault();
+      actions.redo();
 
       return;
     }

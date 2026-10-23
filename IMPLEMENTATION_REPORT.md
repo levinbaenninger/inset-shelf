@@ -28,7 +28,7 @@ The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public 
 | --- | --- | --- |
 | Double tap | Two presses of Shift alone, each at most 250 ms, released at most 400 ms apart. Either Shift key counts. | `TAP_MAX_MS`, `GAP_MAX_MS` |
 | Double Shift with nothing selected | Shows or hides the shelf. Inside the shelf it only hides it. | `onDoubleTap` in `src/main/index.ts` |
-| Selection capture on Windows | Off; double Shift only shows and hides the shelf | `selectionCapture` |
+| Selection capture on Windows | Sends `Ctrl+Insert`, not `Ctrl+C`, which would stop a program running in a terminal. Not on Linux. | `copy` in `src/main/key-monitor.ts`, `selectionCapture` |
 | Shortcuts | `Control+Alt+S` for the shelf, `Control+Alt+A` for an area. Control+Option leaves the macOS input-source keys alone. | `src/shared/shortcut.ts` |
 | Shelf window | 340 DIP wide. Beside the right edge of the window in front, else its left edge, else inside its right edge, at the window's top. Its height follows the window between 360 and 620 DIP. Floating level, all Spaces and full-screen apps, never hidden on blur. | `src/main/shelf-window.ts`, `dockShelf` |
 | App identity | A regular app with a Dock icon and a menu bar of File, Edit, View, Window and Help. Settings can drop the Dock icon, which makes the app an accessory without its own menu bar, or drop the status-bar icon. | `src/main/app-menu.ts`, `placeIcon` |
@@ -36,12 +36,15 @@ The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public 
 | Pinned crop | 480 × 300 DIP around the point | `DEFAULT_CROP_DIP` |
 | Item order | Oldest first, new items at the bottom next to the note field | `applyOp` |
 | Items in the list | One bordered card per item, with a round checkbox and a **⋯** menu. Images and drawings show a thumbnail. | `src/renderer/shelf/item-row.tsx` |
-| Item actions | A native menu: Copy, Copy with Link, Edit, Mark as Done, Move to, Colour, Delete | `itemMenu` in `src/main/shelf-menus.ts` |
+| Item actions | A menu drawn in the shelf: Copy, Copy with Link, View and Annotate… (images), Edit, Mark as Done, Move to (listed inline, the window is too narrow for a submenu), a row of colour swatches, Delete. The **+** menu opens above the note field. | `itemMenu` in `src/shared/menus.ts`, `src/renderer/shelf/menus.tsx` |
 | Undo | The last deletion only, with `⌘Z` or the undo bar | `applyOp`, `undoRemove` |
 | Copying an image | The PNG with the pin drawn in, plus the note as text | `copyItem` in `src/main/index.ts` |
 | Copying a file | A named copy of the file as a file URL, plus its name as text | same |
 | Copy Section as List | The section's open items as a Markdown list, each with its link | `itemsAsList` |
 | Drawing export | Trimmed to the marks with 24 px of padding, on white, at twice its size | `src/renderer/drawing/sketch.ts` |
+| Annotating an image | Opens in the drawing window at up to its own size. The marks are drawn into the image at its pixel size and replace it; the pin, note and source stay. | `exportAnnotated`, `replaceImage` |
+| Windows window chrome | The app menu holds the shortcuts but is never shown. The shelf's window is transparent and the page draws an 18 px rounded panel, concentric with the fields 8 px inside it (Windows rounds real windows by 8 px at most); it has no system shadow. Settings and the drawing window have no title bar, only the caption buttons over the page's header. Hiding a window hands the keyboard to the window below, or back to the shelf. | `appMenuTemplate`, `captionButtons`, `hideWindow`, `styles.css` |
+| Dialogs | Discarding a drawing asks in the page (an alert dialog in the app's theme). On Windows About is a line in Settings. The file picker and the start-up error stay native. | `drawing-app.tsx`, `settings-app.tsx` |
 
 ## What was tested
 
@@ -63,7 +66,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Automated tests
 
-`pnpm test` runs 136 Vitest tests in 20 files:
+`pnpm test` runs 153 Vitest tests in 20 files:
 
 - The double-tap state machine, including capitals, held keys, both Shift keys at once and a triple tap.
 - Every shelf operation, sections, moving and colouring items, undo, clearing checked items, grouping and search, the list export, the v1 to v2 migration, and that each result is a valid document.
@@ -96,13 +99,28 @@ Getting the suite stable took three changes to the test itself, not the app. Chr
 
 Screenshots of the real shelf, the area overlay and the capture notice were checked by eye on the external display. The light theme and the banners were checked in a browser preview with a stubbed bridge, because the test Mac was in dark mode.
 
+### Windows run
+
+The packaged `win-unpacked` build ran on Windows 11 Enterprise (26100), with a Swiss German keyboard, dark mode, 100% scaling and two to three displays. It was driven with real keyboard and mouse input from a small Win32 helper and inspected through Playwright. What was checked:
+
+- Double Shift (by hand and injected), `Ctrl+Alt+S` and `Esc` show and hide the shelf. Hiding hands the keyboard back to the app in front; closing Settings or a drawing hands it back to the shelf.
+- Double Shift over a selection, which sends `Ctrl+Insert`: a paragraph in Chrome and a line selected in Windows Terminal were saved with their app and window title, and the clipboard came back with the same text and formats. With nothing selected the shelf showed, and a `ping -t` in Windows Terminal kept running. With the shelf hidden, the notice appeared.
+- Docking: a 7 px visible gap beside a window (Windows reports an invisible 7 px border), inside the right edge of a maximized window with 8 px at the top and right, and back beside the last window after a capture or a drawing.
+- `Ctrl+C`, `Ctrl+Z` after a delete, `Ctrl+F`, `Ctrl+1`/`Ctrl+2`, `Ctrl+Shift+C`, `Ctrl+,`, `Ctrl+W` and `Ctrl+Alt+N`. `Ctrl+R` no longer reloads the page. `Ctrl+Z` and `Ctrl+C` in a text field still act on the text, once. AltGr types `#@€`.
+- The area overlay on the primary and the lower display, taskbar included: an exact drag crop, a 480 × 300 pin crop, `Esc` and blur cancel.
+- The pin is RGB(0, 132, 209) in an image pasted into Windows, and the colour swatches show the right colours.
+- Copying a file puts a file drop list on the clipboard; it pasted into an Explorer folder. Files and images dragged out to Explorer and a PNG dropped in from Explorer.
+- Notes on files are saved. An image opened by double-click, drawn on and saved replaced the item's image, deleted the old file and kept the pin.
+- The in-shelf menus, Settings (caption button only, no Dock choice, About line), the drawing window's caption buttons and in-page discard dialog, undo and redo in a drawing (`Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`, one step each, on a QWERTZ layout), annotating a 2× drawing and a capture shown at 0.78 scale (arrow and text land where drawn, at the image's own size), the file dialog opening above the shelf, the white tray icon in the hidden-icons flyout, a second launch showing the shelf, Open at Login writing and removing its `Run` entry, Exit from the tray, and the items surviving a restart.
+
 ## What was not tested
 
-- **Windows.** CI builds it, but nobody has started it on Windows. That leaves untested the key hook, the tray, the overlay over the taskbar, and the pin's colour in copied images (the drawing assumes the BGRA byte order measured on macOS).
+- **Windows, partly.** The NSIS installer, the Arm64 build, SmartScreen, displays above 100% scaling (bounds from `get-windows` are converted from physical pixels, but this was not observed), Copy with Link, and a capture on a display left of the primary.
+- **The in-shelf menus and the top gap on macOS.** The item, section and **+** menus moved from native menus into the page, and a shelf inside a full-screen window now keeps a gap from its top. Both were checked on Windows only.
 - **Intel Macs.** The x64 build is produced but was not run.
 - **The first-run permission grants.** Every run inherited Accessibility and Screen Recording from the terminal. The **Double Shift is off** banner, the polling that starts the key hook once access is granted, and the grant prompt of a downloaded app were not observed.
 - **Re-granting after an update.** That an ad-hoc signed update needs the permissions again is expected from how macOS ties grants to signatures, not observed.
-- **Other source apps.** Selection capture was tested with a native AppKit text view and a Chromium page. Safari, VS Code, Cursor, Terminal, Microsoft Office and password fields were not tried. Editors that copy the whole line when nothing is selected will save that line.
+- **Other source apps.** Selection capture was tested with a native AppKit text view and a Chromium page on macOS, and with Chrome and Windows Terminal on Windows. Safari, VS Code, Cursor, Terminal, Microsoft Office, the classic Windows console and password fields were not tried. Editors that copy the whole line when nothing is selected will save that line. PowerShell's line editor binds `Ctrl+Insert` to the same whole-line copy, so a typed but unsent command would be saved; this was not tried.
 - **Clipboard formats beyond text and images.** Files copied in Finder, rich text from Pages, and app-specific formats should come back through Electron's raw pasteboard types, but were not tested.
 - **Several displays.** The overlay was tested on one display. On a second display it should cover the display under the pointer, but that was not observed.
 - **Dragging an image out and pasting a copied image** into a real receiving app. The clipboard was checked; a drop into another app was not.
@@ -117,6 +135,6 @@ Screenshots of the real shelf, the area overlay and the capture notice were chec
 
 - **Unsigned builds.** macOS and Windows both warn on first launch, and macOS needs **Open Anyway**. Count this as setup effort in a session, separate from capture effort.
 - **Several permissions on macOS.** A session needs Accessibility and Screen Recording granted before it starts, plus Automation for each browser whose addresses should be kept. An updated build may need them again.
-- **Synthetic copy.** Double Shift works by pressing `⌘C` for the user. That is visible to clipboard history tools, and in some editors a missing selection saves the current line.
+- **Synthetic copy.** Double Shift works by pressing `⌘C` (`Ctrl+Insert` on Windows) for the user. That is visible to clipboard history tools, and in some editors a missing selection saves the current line.
 - **Partial source identity.** An item records the app, window title and page address only when the matching permission is granted. Without Screen Recording there is no title, and without Accessibility and Automation there is no address. Native apps give no document path.
 - **Not built.** Copper's multi-select with Merge Notes, Edit in New Window, Expand, custom shortcuts and Markdown rendering were left out of this prototype.

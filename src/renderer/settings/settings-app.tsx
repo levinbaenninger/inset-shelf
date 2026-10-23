@@ -11,7 +11,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { settingsBridge } from "@/shared/bridge";
+import { isMac, isWindows } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";
 
 const api = settingsBridge();
@@ -75,7 +77,16 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
   const { settings } = view;
 
   return (
-    <main className="bg-background text-foreground flex min-h-svh flex-col gap-4 p-4">
+    <main
+      className={cn(
+        "bg-background text-foreground flex min-h-svh flex-col gap-4 p-4",
+        // On Windows the window has no title bar: this strip moves it, under its close button.
+        isWindows && "pt-0"
+      )}
+    >
+      {isWindows ? (
+        <div aria-hidden="true" className="drag-region -mx-4 -mb-2 h-9" />
+      ) : null}
       <h1 className="sr-only">Settings</h1>
       <Group title="General">
         <Row label="Open at Login" labelFor={loginId}>
@@ -87,35 +98,38 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
             }}
           />
         </Row>
-        <Row
-          label="Show app icon in"
-          labelFor={iconId}
-          note={
-            settings.iconIn === "menuBar"
-              ? "Without a Dock icon, the app has no menu bar of its own; use the menu-bar icon instead."
-              : undefined
-          }
-        >
-          <Select
-            onValueChange={(value) => {
-              if (isIconPlace(value)) {
-                api.update({ iconIn: value });
-              }
-            }}
-            value={settings.iconIn}
+        {/* Elsewhere the notification-area icon is the app's only icon, so there is no choice. */}
+        {isMac ? (
+          <Row
+            label="Show app icon in"
+            labelFor={iconId}
+            note={
+              settings.iconIn === "menuBar"
+                ? "Without a Dock icon, the app has no menu bar of its own; use the menu-bar icon instead."
+                : undefined
+            }
           >
-            <SelectTrigger id={iconId} size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="dockAndMenuBar">
-                {ICON_LABELS.dockAndMenuBar}
-              </SelectItem>
-              <SelectItem value="dock">{ICON_LABELS.dock}</SelectItem>
-              <SelectItem value="menuBar">{ICON_LABELS.menuBar}</SelectItem>
-            </SelectContent>
-          </Select>
-        </Row>
+            <Select
+              onValueChange={(value) => {
+                if (isIconPlace(value)) {
+                  api.update({ iconIn: value });
+                }
+              }}
+              value={settings.iconIn}
+            >
+              <SelectTrigger id={iconId} size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dockAndMenuBar">
+                  {ICON_LABELS.dockAndMenuBar}
+                </SelectItem>
+                <SelectItem value="dock">{ICON_LABELS.dock}</SelectItem>
+                <SelectItem value="menuBar">{ICON_LABELS.menuBar}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+        ) : null}
       </Group>
       <Group title="Copying">
         <Row
@@ -132,6 +146,13 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
           />
         </Row>
       </Group>
+      {/* macOS has the app menu's About panel; elsewhere it is here. */}
+      {isMac ? null : (
+        <p className="text-muted-foreground px-1 text-xs">
+          Inset Shelf {view.version}. A prototype for the Inset capture
+          experiments.
+        </p>
+      )}
     </main>
   );
 };

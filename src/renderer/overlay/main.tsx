@@ -4,11 +4,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { markPlatform } from "@/shared/platform";
 import { followSystemTheme } from "@/shared/theme";
 
 import { OverlayApp } from "./overlay-app";
 
 followSystemTheme();
+
+markPlatform();
 
 const root = document.querySelector("#root");
 

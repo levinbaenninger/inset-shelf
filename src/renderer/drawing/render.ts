@@ -261,3 +261,46 @@ export const exportPng = async (
 
   return new Uint8Array(await blob.arrayBuffer());
 };
+
+export interface AnnotatedImage {
+  /** The image's PNG, as main has it. */
+  readonly png: Uint8Array<ArrayBuffer>;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly pixelsPerDip: number;
+}
+
+/**
+ * The image with the marks drawn into it, at its own size, so a pin stays
+ * where it was. Marks are in the image's DIP and keep the colours shown.
+ */
+export const exportAnnotated = async (
+  marks: readonly Mark[],
+  image: AnnotatedImage
+): Promise<Uint8Array<ArrayBuffer>> => {
+  await loadFonts(marks);
+
+  const picture = await createImageBitmap(
+    new Blob([image.png], { type: "image/png" })
+  );
+
+  const canvas = new OffscreenCanvas(image.widthPx, image.heightPx);
+  const layer = new OffscreenCanvas(image.widthPx, image.heightPx);
+  const ctx = canvas.getContext("2d");
+  const layerCtx = layer.getContext("2d");
+
+  if (ctx === null || layerCtx === null) {
+    throw new Error("The image could not be drawn on.");
+  }
+
+  ctx.drawImage(picture, 0, 0, image.widthPx, image.heightPx);
+  picture.close();
+  renderSketch(layerCtx, marks, image.pixelsPerDip, {
+    palette: LIGHT_PALETTE,
+  });
+  ctx.drawImage(layer, 0, 0);
+
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+
+  return new Uint8Array(await blob.arrayBuffer());
+};

@@ -1,11 +1,13 @@
-import { Menu, nativeImage, Tray } from "electron";
+import { Menu, nativeImage, nativeTheme, Tray } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 
+import { isWindows } from "./caption-buttons";
 import { trayMenu, trayTooltip } from "./tray-menu";
 import type { TrayAction, TrayItem, TrayModel } from "./tray-menu";
 
 export interface TrayOptions {
-  readonly iconPath: string;
+  /** Read again when the system theme changes, so the icon can suit the taskbar. */
+  readonly iconPath: () => string;
   readonly model: () => TrayModel;
   readonly run: (action: TrayAction) => void;
 }
@@ -23,6 +25,16 @@ const toMenuItem = (
     return { type: "separator" };
   }
 
+  // Windows shows About as a plain message box; Settings shows the same in the app's own look.
+  if (item.kind === "role" && item.role === "about" && isWindows) {
+    return {
+      click: () => {
+        run("openSettings");
+      },
+      label: "About Inset Shelf",
+    };
+  }
+
   if (item.kind === "role") {
     return { role: item.role };
   }
@@ -38,7 +50,11 @@ const toMenuItem = (
 };
 
 export const createTray = (options: TrayOptions): ShelfTray => {
-  const tray = new Tray(nativeImage.createFromPath(options.iconPath));
+  const tray = new Tray(nativeImage.createFromPath(options.iconPath()));
+
+  const updateIcon = (): void => {
+    tray.setImage(nativeImage.createFromPath(options.iconPath()));
+  };
 
   const refresh = (): void => {
     tray.setContextMenu(
@@ -50,6 +66,7 @@ export const createTray = (options: TrayOptions): ShelfTray => {
 
   tray.setToolTip(trayTooltip(process.platform === "darwin"));
   refresh();
+  nativeTheme.on("updated", updateIcon);
 
   if (process.platform === "win32") {
     tray.on("click", () => {
@@ -59,6 +76,7 @@ export const createTray = (options: TrayOptions): ShelfTray => {
 
   return {
     destroy: () => {
+      nativeTheme.off("updated", updateIcon);
       tray.destroy();
     },
     refresh,

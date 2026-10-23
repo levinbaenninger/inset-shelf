@@ -2,17 +2,26 @@ import { rect } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
 import { ContextSchema } from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
-import { systemPreferences } from "electron";
+import { screen, systemPreferences } from "electron";
+import type { Rectangle } from "electron";
 import { activeWindow } from "get-windows";
 
 export interface FrontWindow {
   readonly bounds: Rect<"screen"> | null;
   readonly context: ItemContext | null;
+  /** One of Inset's own windows is in front, so there is nothing new to dock to. */
+  readonly own: boolean;
 }
 
-const NOTHING: FrontWindow = { bounds: null, context: null };
+const NOTHING: FrontWindow = { bounds: null, context: null, own: false };
+
+const OWN: FrontWindow = { ...NOTHING, own: true };
 
 const isMac = process.platform === "darwin";
+
+/** Windows reports physical pixels; the shelf is placed in DIP. Elsewhere they are DIP already. */
+const toDip = (bounds: Rectangle): Rectangle =>
+  process.platform === "win32" ? screen.screenToDipRect(null, bounds) : bounds;
 
 const orNull = (text: string | undefined): string | null =>
   text === undefined || text.trim() === "" ? null : text.trim();
@@ -30,7 +39,7 @@ const pageUrl = (url: string | undefined): string | null => {
  * only for what is already granted, so it never prompts: the title needs
  * Screen Recording, the page address needs Accessibility. A browser's page
  * address also needs the user's one-time consent to Automation. Null parts
- * when it is Inset's own window or cannot be read.
+ * when it cannot be read, and `own` when it is one of Inset's windows.
  */
 export const frontWindow = async (): Promise<FrontWindow> => {
   try {
@@ -42,11 +51,15 @@ export const frontWindow = async (): Promise<FrontWindow> => {
         systemPreferences.getMediaAccessStatus("screen") === "granted",
     });
 
-    if (front === undefined || front.owner.processId === process.pid) {
+    if (front === undefined) {
       return NOTHING;
     }
 
-    const { height, width, x, y } = front.bounds;
+    if (front.owner.processId === process.pid) {
+      return OWN;
+    }
+
+    const { height, width, x, y } = toDip(front.bounds);
 
     return {
       bounds: width > 0 && height > 0 ? rect(x, y, width, height) : null,
@@ -55,6 +68,7 @@ export const frontWindow = async (): Promise<FrontWindow> => {
         title: orNull(front.title),
         url: "url" in front ? pageUrl(front.url) : null,
       },
+      own: false,
     };
   } catch {
     return NOTHING;

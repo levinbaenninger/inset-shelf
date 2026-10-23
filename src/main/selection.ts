@@ -4,7 +4,7 @@ export interface SelectionDeps<S> {
   readonly restore: (snapshot: S) => Promise<void>;
   readonly clear: () => void;
   readonly readText: () => Promise<string>;
-  /** Sends Cmd+C to the app in front. */
+  /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
   readonly wait: (ms: number) => Promise<void>;
 }
@@ -53,7 +53,8 @@ export const captureSelection = async <S>(
     restored = false;
   }
 
+  // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
   return text.trim() === ""
     ? { kind: "none", restored }
-    : { kind: "text", restored, text };
+    : { kind: "text", restored, text: text.replaceAll("\r\n", "\n") };
 };
