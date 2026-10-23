@@ -1,5 +1,6 @@
+import { viewerImageRect } from "@shared/geometry";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, PointerEvent, RefObject } from "react";
+import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from "react";
 
 import { isMac } from "@/shared/platform";
 
@@ -7,13 +8,17 @@ import { inkColor, paletteFor, renderSketch } from "./render";
 import {
   fontFor,
   isVisible,
+  PLAIN_VIEW,
   STROKE_WIDTH,
   TEXT_LEADING,
   TEXT_SIZE,
+  toDrawing,
+  toPage,
 } from "./sketch";
 import type {
   Color,
   Mark,
+  PageView,
   PenMark,
   Point,
   SegmentMark,
@@ -22,12 +27,21 @@ import type {
   Tool,
 } from "./sketch";
 
+/** An image under the page, in DIP; the marks are drawn over it, in its coordinates. */
+export interface PageImage {
+  readonly width: number;
+  readonly height: number;
+  /** The picture itself, laid out over the image's place on the page. */
+  readonly underlay: ReactNode;
+}
+
 export interface PageProps {
   readonly marks: readonly Mark[];
   readonly tool: Tool;
   readonly color: Color;
   readonly stroke: Stroke;
   readonly dark: boolean;
+  readonly image: PageImage | null;
   readonly onAdd: (mark: Mark) => void;
   /** ⌘↩ in the text field: keep the text, if any, and save. */
   readonly onSubmit: (mark: Mark | null) => void;
@@ -152,9 +166,11 @@ const TextField = ({
   onChange,
   onCommit,
   onSubmit,
+  view,
 }: {
   readonly draft: TextDraft;
   readonly dark: boolean;
+  readonly view: PageView;
   readonly onChange: (value: string) => void;
   readonly onCommit: () => void;
   readonly onSubmit: () => void;
@@ -180,6 +196,8 @@ const TextField = ({
     }
   };
 
+  const at = toPage(view, draft.at);
+
   return (
     <input
       aria-label="Text"
@@ -195,9 +213,9 @@ const TextField = ({
       spellCheck={false}
       style={{
         "--ink": inkColor(draft.color, dark),
-        "--size": `${draft.size}px`,
-        "--x": `${draft.at.x}px`,
-        "--y": `${draft.at.y}px`,
+        "--size": `${draft.size * view.scale}px`,
+        "--x": `${at.x}px`,
+        "--y": `${at.y}px`,
       }}
       value={draft.value}
     />
@@ -208,6 +226,7 @@ const TextField = ({
 export const Page = ({
   color,
   dark,
+  image,
   marks,
   onAdd,
   onSubmit,
@@ -221,6 +240,29 @@ export const Page = ({
   const [text, setText] = useState<TextDraft | null>(null);
   // Removing a focused field can also blur it; the text must only be added once.
   const textClosed = useRef(false);
+
+  const placed =
+    image === null || size === null ? null : viewerImageRect(size, image);
+
+  const view: PageView =
+    placed === null
+      ? PLAIN_VIEW
+      : { origin: { x: placed.x, y: placed.y }, scale: placed.scale };
+
+  /** A pointer position as a point of the drawing; on an image, kept on the image. */
+  const drawingPoint = (
+    event: { readonly clientX: number; readonly clientY: number },
+    box: DOMRect
+  ): Point => {
+    const point = toDrawing(view, pagePoint(event, box));
+
+    return image === null
+      ? point
+      : {
+          x: clamp(point.x, 0, image.width),
+          y: clamp(point.y, 0, image.height),
+        };
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -244,12 +286,30 @@ export const Page = ({
       canvas.height = size.pixelHeight;
     }
 
-    const scale = size.width > 0 ? size.pixelWidth / size.width : 1;
+    const deviceScale = size.width > 0 ? size.pixelWidth / size.width : 1;
 
-    renderSketch(context, drag === null ? marks : [...marks, drag], scale, {
-      palette: paletteFor(dark),
-    });
-  }, [dark, drag, fontsLoaded, marks, size]);
+    renderSketch(
+      context,
+      drag === null ? marks : [...marks, drag],
+      deviceScale * view.scale,
+      {
+        origin: {
+          x: -view.origin.x / view.scale,
+          y: -view.origin.y / view.scale,
+        },
+        palette: paletteFor(dark),
+      }
+    );
+  }, [
+    dark,
+    drag,
+    fontsLoaded,
+    marks,
+    size,
+    view.origin.x,
+    view.origin.y,
+    view.scale,
+  ]);
 
   const closeText = (): TextMark | null => {
     if (text === null || textClosed.current) {
@@ -285,7 +345,7 @@ export const Page = ({
       return;
     }
 
-    const at = pagePoint(event, event.currentTarget.getBoundingClientRect());
+    const at = drawingPoint(event, event.currentTarget.getBoundingClientRect());
 
     // A click away from open text finishes it; with the Text tool that is all it does.
     if (text !== null) {
@@ -297,7 +357,8 @@ export const Page = ({
     }
 
     if (tool === "text") {
-      const textSize = TEXT_SIZE[stroke];
+      // Sizes are in the drawing's units, so text looks the same size however large the image shows.
+      const textSize = TEXT_SIZE[stroke] / view.scale;
 
       textClosed.current = false;
       setText({
@@ -316,7 +377,7 @@ export const Page = ({
     }
 
     event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag(startDrag(tool, at, color, STROKE_WIDTH[stroke]));
+    setDrag(startDrag(tool, at, color, STROKE_WIDTH[stroke] / view.scale));
   };
 
   const onPointerMove = (event: PointerEvent<HTMLCanvasElement>): void => {
@@ -328,7 +389,7 @@ export const Page = ({
     const samples = event.nativeEvent.getCoalescedEvents();
 
     const points = (samples.length > 0 ? samples : [event]).map((sample) =>
-      pagePoint(sample, box)
+      drawingPoint(sample, box)
     );
 
     // Several moves can arrive before a render, so each one extends the latest drag.
@@ -339,6 +400,19 @@ export const Page = ({
 
   return (
     <div className="absolute inset-0">
+      {placed === null || image === null ? null : (
+        <div
+          className="absolute top-(--y) left-(--x) h-(--h) w-(--w)"
+          style={{
+            "--h": `${placed.height}px`,
+            "--w": `${placed.width}px`,
+            "--x": `${placed.x}px`,
+            "--y": `${placed.y}px`,
+          }}
+        >
+          {image.underlay}
+        </div>
+      )}
       <canvas
         aria-label="Drawing"
         className="absolute inset-0 size-full cursor-crosshair touch-none data-[tool=text]:cursor-text"
@@ -368,6 +442,7 @@ export const Page = ({
           onSubmit={() => {
             onSubmit(closeText());
           }}
+          view={view}
         />
       )}
     </div>

@@ -11,10 +11,13 @@ import {
   EXPORT_SCALE,
   exportFrame,
   isVisible,
+  PLAIN_VIEW,
   redo,
   markBounds,
   sketchBounds,
   TEXT_LEADING,
+  toDrawing,
+  toPage,
   undo,
 } from "./sketch";
 import type { Mark, Point, SegmentMark } from "./sketch";
@@ -230,5 +233,21 @@ describe(exportFrame, () => {
       pixelHeight: (4 + 2 * EXPORT_PADDING) * EXPORT_SCALE,
       pixelWidth: (4 + 2 * EXPORT_PADDING) * EXPORT_SCALE,
     });
+  });
+});
+
+describe(toDrawing, () => {
+  const view = { origin: { x: 40, y: 24 }, scale: 0.5 };
+
+  it("maps a page point onto an image shown at half size, and back", () => {
+    expect(toDrawing(view, { x: 140, y: 74 })).toStrictEqual({
+      x: 200,
+      y: 100,
+    });
+    expect(toPage(view, { x: 200, y: 100 })).toStrictEqual({ x: 140, y: 74 });
+  });
+
+  it("leaves a blank page as it is", () => {
+    expect(toDrawing(PLAIN_VIEW, { x: 3, y: 4 })).toStrictEqual({ x: 3, y: 4 });
   });
 });

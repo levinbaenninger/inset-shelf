@@ -30,13 +30,20 @@ import { cn } from "@/lib/utils";
 import { PinMarker } from "@/shared/pin-marker";
 
 import { whenText } from "./format";
+import type { ItemMenuAnchor } from "./menus";
 
-/** A right-click on any part of an item opens its native menu. */
+/** A right-click on any part of an item opens its menu at the pointer. */
 const contextMenuAt =
   (open: RowHandlers["onContextMenu"]) =>
   (event: MouseEvent): void => {
     event.preventDefault();
-    open({ x: event.clientX, y: event.clientY });
+    open({
+      align: "start",
+      height: 0,
+      width: 0,
+      x: event.clientX,
+      y: event.clientY,
+    });
   };
 
 /** Where an item came from, in one quiet line; a page address opens in the browser. */
@@ -68,8 +75,8 @@ const SourceLine = ({
   );
 };
 
-/** An attached file: its name and size; it drags out like an image. */
-const FileBody = ({
+/** An attached file's name; it drags out like an image. */
+const FileName = ({
   item,
   onContextMenu,
   onDragImage,
@@ -100,7 +107,7 @@ const FileBody = ({
         item.done && "text-muted-foreground line-through"
       )}
     >
-      {item.note === "" ? item.file.name : item.note}
+      {item.file.name}
     </span>
   </button>
 );
@@ -109,11 +116,10 @@ export interface RowHandlers {
   /** Opens the page an item was captured from. */
   readonly onOpenLink: () => void;
   readonly onSelect: () => void;
-  /** A right-click opens the native item menu at that point. */
-  readonly onContextMenu: (point: {
-    readonly x: number;
-    readonly y: number;
-  }) => void;
+  /** Opens the item's menu: at the pointer for a right-click, under ⋯ for the button. */
+  readonly onContextMenu: (anchor: Omit<ItemMenuAnchor, "id">) => void;
+  /** Double-clicking an image opens it large, to look at or draw on. */
+  readonly onOpen: () => void;
   /** Double-clicking a text item edits it. */
   readonly onEdit: () => void;
   readonly onToggle: () => void;
@@ -223,14 +229,14 @@ const TextEditor = ({
   );
 };
 
-/** The note under an image saves as you type; the main process waits for a pause before writing. */
+/** The note under an image or a file saves as you type; the main process waits for a pause before writing. */
 const NoteField = ({
   autoFocus,
   item,
   onChange,
   onDone,
 }: {
-  readonly item: ImageItem;
+  readonly item: ImageItem | FileItem;
   readonly autoFocus: boolean;
   readonly onChange: (note: string) => void;
   readonly onDone: () => void;
@@ -246,7 +252,9 @@ const NoteField = ({
 
   return (
     <Textarea
-      aria-label="Note for this image"
+      aria-label={
+        item.kind === "image" ? "Note for this image" : "Note for this file"
+      }
       className="min-h-0"
       maxLength={TEXT_MAX}
       onChange={(event) => {
@@ -274,17 +282,21 @@ const NoteField = ({
   );
 };
 
-/** The picture, which selects on click and drags out as a file. */
+/** The picture, which selects on click, opens large on a double-click and drags out as a file. */
 const Picture = ({
   compact,
   item,
   onContextMenu,
   onDragImage,
+  onOpen,
   onSelect,
 }: {
   readonly item: ImageItem;
   readonly compact: boolean;
-} & Pick<RowHandlers, "onContextMenu" | "onDragImage" | "onSelect">) => (
+} & Pick<
+  RowHandlers,
+  "onContextMenu" | "onDragImage" | "onOpen" | "onSelect"
+>) => (
   <button
     aria-label={item.note === "" ? "Select this image" : `Select: ${item.note}`}
     className={cn(
@@ -294,11 +306,12 @@ const Picture = ({
     draggable
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
+    onDoubleClick={onOpen}
     onDragStart={(event) => {
       event.preventDefault();
       onDragImage();
     }}
-    title="Drag into another app"
+    title="Double-click to open, or drag into another app"
     type="button"
   >
     <img
@@ -329,6 +342,7 @@ const ImageBody = ({
   onContextMenu,
   onDragImage,
   onEditNote,
+  onOpen,
   onSelect,
   onStopEditing,
   selected,
@@ -338,7 +352,12 @@ const ImageBody = ({
   readonly editing: boolean;
 } & Pick<
   RowHandlers,
-  "onContextMenu" | "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
+  | "onContextMenu"
+  | "onDragImage"
+  | "onEditNote"
+  | "onOpen"
+  | "onSelect"
+  | "onStopEditing"
 >) => {
   if (!selected && !editing) {
     return (
@@ -348,6 +367,7 @@ const ImageBody = ({
           item={item}
           onContextMenu={onContextMenu}
           onDragImage={onDragImage}
+          onOpen={onOpen}
           onSelect={onSelect}
         />
         <button
@@ -373,6 +393,7 @@ const ImageBody = ({
         item={item}
         onContextMenu={onContextMenu}
         onDragImage={onDragImage}
+        onOpen={onOpen}
         onSelect={onSelect}
       />
       <NoteField
@@ -382,6 +403,60 @@ const ImageBody = ({
         onChange={onEditNote}
         onDone={onStopEditing}
       />
+    </div>
+  );
+};
+
+/** An attached file's name with its note: a field while the file is selected, else the note as text. */
+const FileBody = ({
+  editing,
+  item,
+  onContextMenu,
+  onDragImage,
+  onEditNote,
+  onSelect,
+  onStopEditing,
+  selected,
+}: {
+  readonly item: FileItem;
+  readonly selected: boolean;
+  readonly editing: boolean;
+} & Pick<
+  RowHandlers,
+  "onContextMenu" | "onDragImage" | "onEditNote" | "onSelect" | "onStopEditing"
+>) => {
+  const open = selected || editing;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <FileName
+        item={item}
+        onContextMenu={onContextMenu}
+        onDragImage={onDragImage}
+        onSelect={onSelect}
+      />
+      {open ? (
+        <NoteField
+          autoFocus={editing}
+          item={item}
+          key={item.id}
+          onChange={onEditNote}
+          onDone={onStopEditing}
+        />
+      ) : null}
+      {!open && item.note !== "" ? (
+        <button
+          className={cn(
+            "focus-visible:ring-ring/50 line-clamp-3 rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
+            item.done && "text-muted-foreground line-through"
+          )}
+          onClick={onSelect}
+          onContextMenu={contextMenuAt(onContextMenu)}
+          type="button"
+        >
+          {item.note}
+        </button>
+      ) : null}
     </div>
   );
 };
@@ -443,6 +518,7 @@ export const ItemRow = (props: ItemRowProps) => {
             onContextMenu={props.onContextMenu}
             onDragImage={props.onDragImage}
             onEditNote={props.onEditNote}
+            onOpen={props.onOpen}
             onSelect={props.onSelect}
             onStopEditing={props.onStopEditing}
             selected={selected}
@@ -450,10 +526,14 @@ export const ItemRow = (props: ItemRowProps) => {
         ) : null}
         {item.kind === "file" ? (
           <FileBody
+            editing={editing}
             item={item}
             onContextMenu={props.onContextMenu}
             onDragImage={props.onDragImage}
+            onEditNote={props.onEditNote}
             onSelect={props.onSelect}
+            onStopEditing={props.onStopEditing}
+            selected={selected}
           />
         ) : null}
         {item.context === null ? null : (
@@ -478,7 +558,13 @@ export const ItemRow = (props: ItemRowProps) => {
               onClick={(event) => {
                 const box = event.currentTarget.getBoundingClientRect();
 
-                props.onContextMenu({ x: box.left, y: box.bottom + 2 });
+                props.onContextMenu({
+                  align: "end",
+                  height: box.height,
+                  width: box.width,
+                  x: box.left,
+                  y: box.top,
+                });
               }}
               size="icon-xs"
               variant="ghost"

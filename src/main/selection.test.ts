@@ -57,6 +57,14 @@ describe(captureSelection, () => {
     expect(clip.content()).toBe("earlier");
   });
 
+  it("keeps Windows line breaks as plain line feeds", async () => {
+    const clip = fakeClipboard("earlier", "Selection test\r\nThe second line");
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      text: "Selection test\nThe second line",
+    });
+  });
+
   it("says when the clipboard could not be put back", async () => {
     const clip = fakeClipboard("earlier", "x");
 

@@ -112,6 +112,32 @@ describe(appMenuTemplate, () => {
     ).toMatchObject({ enabled: true });
   });
 
+  it("puts Settings and Exit in File and uses Ctrl+Y for Redo without an app menu", () => {
+    const template = appMenuTemplate(state, actions, false);
+
+    expect(template.map((item) => item.label ?? item.role)).toStrictEqual([
+      "File",
+      "Edit",
+      "View",
+      "Window",
+      "help",
+    ]);
+    expect(submenu(template, "File")).toContainEqual(
+      expect.objectContaining({
+        accelerator: "CommandOrControl+,",
+        label: "Settings…",
+      })
+    );
+    expect(submenu(template, "File").at(-1)).toStrictEqual({ role: "quit" });
+    expect(submenu(template, "Edit")[1]).toMatchObject({
+      accelerator: "Control+Y",
+      label: "Redo",
+    });
+    expect(submenu(template, "help")).toContainEqual(
+      expect.objectContaining({ label: "About Inset Shelf" })
+    );
+  });
+
   it("shows Float on Top as a checkbox in the Window menu", () => {
     expect(
       submenu(

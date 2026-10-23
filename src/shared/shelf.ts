@@ -323,6 +323,12 @@ export type MainOp =
       readonly type: "addFile";
       readonly file: StoredFile;
       readonly context: ItemContext | null;
+    }
+  /** An annotated image takes the place of the old one; the old file goes once this is saved. */
+  | {
+      readonly type: "replaceImage";
+      readonly id: ItemId;
+      readonly image: ShelfImage;
     };
 
 export interface OpEnv {
@@ -465,6 +471,24 @@ const moveItem = (
       });
 };
 
+/** The item keeps its place, note, pin and source; only its picture changes. */
+const replaceImage = (
+  doc: ShelfDoc,
+  id: ItemId,
+  image: ShelfImage
+): OpResult => {
+  const item = doc.items.find((candidate) => candidate.id === id);
+
+  if (item?.kind !== "image" || item.image.file === image.file) {
+    return unchanged(doc);
+  }
+
+  return {
+    ...changed(mapItem(doc, id, () => ({ ...item, image }))),
+    discarded: [item],
+  };
+};
+
 /**
  * Applies one operation. `lastRemoved` is the pending undo; it stays undoable
  * until the next remove, which discards it for good.
@@ -538,9 +562,13 @@ export const applyOp = (
     case "editNote": {
       return changed(
         mapItem(doc, op.id, (item) =>
-          item.kind === "image" ? { ...item, note: op.note } : null
+          item.kind === "text" ? null : { ...item, note: op.note }
         )
       );
+    }
+
+    case "replaceImage": {
+      return replaceImage(doc, op.id, op.image);
     }
 
     case "toggleDone": {

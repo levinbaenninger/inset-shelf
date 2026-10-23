@@ -301,3 +301,27 @@ export const exportFrame = (
     pixelWidth: (right - left) * EXPORT_SCALE,
   };
 };
+
+// The page's view
+
+/**
+ * Where the page shows the drawing: a drawing point p appears at
+ * origin + p × scale. A blank page shows it as is; an image is drawn on in
+ * its own DIP, so the marks stay on it when the window changes size.
+ */
+export interface PageView {
+  readonly origin: Point;
+  readonly scale: number;
+}
+
+export const PLAIN_VIEW: PageView = { origin: { x: 0, y: 0 }, scale: 1 };
+
+export const toDrawing = (view: PageView, point: Point): Point => ({
+  x: (point.x - view.origin.x) / view.scale,
+  y: (point.y - view.origin.y) / view.scale,
+});
+
+export const toPage = (view: PageView, point: Point): Point => ({
+  x: view.origin.x + point.x * view.scale,
+  y: view.origin.y + point.y * view.scale,
+});

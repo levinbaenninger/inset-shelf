@@ -74,55 +74,73 @@ const sectionItems = (
     type: "radio" as const,
   }));
 
+const fileSubmenu = (
+  actions: AppMenuActions,
+  mac: boolean
+): MenuItemConstructorOptions[] => [
+  {
+    accelerator: "CommandOrControl+N",
+    click: actions.newNote,
+    label: "New Note",
+  },
+  {
+    accelerator: "Shift+CommandOrControl+N",
+    click: actions.newSection,
+    label: "New Section…",
+  },
+  {
+    accelerator: "Alt+CommandOrControl+N",
+    click: actions.newDrawing,
+    label: "New Drawing…",
+  },
+  SEPARATOR,
+  {
+    accelerator: AREA_ACCELERATOR,
+    click: actions.captureArea,
+    label: "Capture Area",
+    registerAccelerator: false,
+  },
+  SEPARATOR,
+  // Without an app menu, Settings and Exit live here.
+  ...(mac
+    ? []
+    : [
+        {
+          accelerator: "CommandOrControl+,",
+          click: actions.openSettings,
+          label: "Settings…",
+        },
+        SEPARATOR,
+      ]),
+  {
+    accelerator: "CommandOrControl+W",
+    click: actions.closeWindow,
+    label: "Close",
+  },
+  ...(mac ? [] : [{ role: "quit" } as const]),
+];
+
 /**
  * The menu bar of a regular Mac app. Copy and Undo are the shelf's own: in a
  * text field they behave as usual, on an item they copy it or bring back the
- * last deletion.
+ * last deletion. Elsewhere the same menu has no app menu and is never shown:
+ * it is there for its shortcuts.
  */
 export const appMenuTemplate = (
   state: AppMenuState,
-  actions: AppMenuActions
+  actions: AppMenuActions,
+  mac = true
 ): MenuItemConstructorOptions[] => [
-  { label: "Inset Shelf", submenu: appSubmenu(state, actions) },
-  {
-    label: "File",
-    submenu: [
-      {
-        accelerator: "CommandOrControl+N",
-        click: actions.newNote,
-        label: "New Note",
-      },
-      {
-        accelerator: "Shift+CommandOrControl+N",
-        click: actions.newSection,
-        label: "New Section…",
-      },
-      {
-        accelerator: "Alt+CommandOrControl+N",
-        click: actions.newDrawing,
-        label: "New Drawing…",
-      },
-      SEPARATOR,
-      {
-        accelerator: AREA_ACCELERATOR,
-        click: actions.captureArea,
-        label: "Capture Area",
-        registerAccelerator: false,
-      },
-      SEPARATOR,
-      {
-        accelerator: "CommandOrControl+W",
-        click: actions.closeWindow,
-        label: "Close",
-      },
-    ],
-  },
+  ...(mac
+    ? [{ label: "Inset Shelf", submenu: appSubmenu(state, actions) }]
+    : []),
+  { label: "File", submenu: fileSubmenu(actions, mac) },
   {
     label: "Edit",
     submenu: [
       { accelerator: "CommandOrControl+Z", click: actions.undo, label: "Undo" },
       {
-        accelerator: "Shift+CommandOrControl+Z",
+        accelerator: mac ? "Shift+CommandOrControl+Z" : "Control+Y",
         click: actions.redo,
         label: "Redo",
       },
@@ -160,12 +178,17 @@ export const appMenuTemplate = (
         label: "Float on Top",
         type: "checkbox",
       },
-      SEPARATOR,
-      { role: "front" },
+      ...(mac ? [SEPARATOR, { role: "front" } as const] : []),
     ],
   },
   {
     role: "help",
-    submenu: [{ click: actions.openHelp, label: "Inset Shelf Help" }],
+    submenu: [
+      { click: actions.openHelp, label: "Inset Shelf Help" },
+      // Elsewhere About is part of Settings instead of a system message box.
+      ...(mac
+        ? []
+        : [{ click: actions.openSettings, label: "About Inset Shelf" }]),
+    ],
   },
 ];

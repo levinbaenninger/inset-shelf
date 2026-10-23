@@ -22,6 +22,9 @@ const outputs: [svg: string, size: number, file: string][] = [
   [traySvg("#000000"), 32, "resources/trayTemplate@2x.png"],
   [traySvg(BRAND), 16, "resources/tray.png"],
   [traySvg(BRAND), 32, "resources/tray@2x.png"],
+  // A dark Windows taskbar hides the brand blue; its icons are white there.
+  [traySvg("#ffffff"), 16, "resources/tray-on-dark.png"],
+  [traySvg("#ffffff"), 32, "resources/tray-on-dark@2x.png"],
   [appSvg, 1024, "build/icon.png"],
 ];
 

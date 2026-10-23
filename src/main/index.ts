@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
-import { COLOR_HEX } from "@shared/colors";
 import {
   drawingContract,
   overlayContract,
@@ -35,13 +34,7 @@ import {
   itemsAsList,
   itemTextWithLink,
 } from "@shared/shelf";
-import type {
-  ImageItem,
-  ItemColor,
-  ItemContext,
-  ItemId,
-  MainOp,
-} from "@shared/shelf";
+import type { ImageItem, ItemContext, ItemId, MainOp } from "@shared/shelf";
 import { AREA_ACCELERATOR, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
   app,
@@ -53,10 +46,11 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   shell,
   systemPreferences,
 } from "electron";
-import type { MenuItemConstructorOptions, NativeImage } from "electron";
+import type { NativeImage } from "electron";
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
@@ -75,11 +69,8 @@ import { captureSelection } from "./selection";
 import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
-import { itemMenu, sectionMenu } from "./shelf-menus";
-import type { MenuChoice, MenuEntry } from "./shelf-menus";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
 import { createShelfWindow } from "./shelf-window";
-import { swatchBitmap } from "./swatch";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
@@ -137,7 +128,16 @@ const trayIconPath = (): string => {
     ? path.join(process.resourcesPath, "resources")
     : path.join(app.getAppPath(), "resources");
 
-  return path.join(base, isMac ? "trayTemplate.png" : "tray.png");
+  if (isMac) {
+    return path.join(base, "trayTemplate.png");
+  }
+
+  return path.join(
+    base,
+    nativeTheme.shouldUseDarkColorsForSystemIntegratedUI
+      ? "tray-on-dark.png"
+      : "tray.png"
+  );
 };
 
 const problemText = (problem: CaptureProblem): string => {
@@ -191,15 +191,6 @@ const restoreClipboard = async (saved: ClipboardSnapshot): Promise<void> => {
   await clipboard.write(saved.map((data) => new ClipboardItem(data)));
 };
 
-const SWATCH_POINTS = 12;
-
-/** A colour dot for a native menu, drawn at twice its size for Retina. */
-const swatchIcon = (color: ItemColor): NativeImage =>
-  nativeImage.createFromBitmap(
-    Buffer.from(swatchBitmap(COLOR_HEX[color], SWATCH_POINTS * 2)),
-    { height: SWATCH_POINTS * 2, scaleFactor: 2, width: SWATCH_POINTS * 2 }
-  );
-
 const start = async (): Promise<void> => {
   await app.whenReady();
 
@@ -223,7 +214,8 @@ const start = async (): Promise<void> => {
 
   const settings = await openSettingsStore(dataDir, nodeStoreFs);
 
-  const selectionCapture = isMac;
+  // Not on Linux, where the synthetic copy has never been tried.
+  const selectionCapture = isMac || process.platform === "win32";
 
   const trusted = (): boolean =>
     !isMac || systemPreferences.isTrustedAccessibilityClient(false);
@@ -269,11 +261,22 @@ const start = async (): Promise<void> => {
     url: pageUrl("shelf"),
   });
 
-  /** Docks to the window in front, read before the shelf takes any focus. */
+  // The window the shelf last docked to, kept for when Inset itself is in front.
+  let lastTarget: Rect<"screen"> | null = null;
+
+  /**
+   * Docks to the window in front, read before the shelf takes any focus.
+   * After a capture or a drawing, Inset's own window is in front: the shelf
+   * goes back beside the window it was docked to.
+   */
   const showShelf = async (): Promise<void> => {
     const front = await frontWindow();
 
-    shelf.show(front.bounds);
+    if (front.bounds !== null) {
+      lastTarget = front.bounds;
+    }
+
+    shelf.show(front.own ? lastTarget : front.bounds);
   };
 
   const toggleShelf = async (): Promise<void> => {
@@ -289,7 +292,19 @@ const start = async (): Promise<void> => {
     url: pageUrl("overlay"),
   });
 
+  /** A window closing over the open shelf gives it the keyboard back. */
+  const focusShelf = (): boolean => {
+    if (!shelf.isVisible()) {
+      return false;
+    }
+
+    shelf.focus();
+
+    return true;
+  };
+
   const drawing = createDrawingWindow({
+    handOff: focusShelf,
     preload: preloadPath("drawing"),
     url: pageUrl("drawing"),
   });
@@ -300,6 +315,7 @@ const start = async (): Promise<void> => {
   });
 
   const settingsWindow = createSettingsWindow({
+    handOff: focusShelf,
     preload: preloadPath("settings"),
     url: pageUrl("settings"),
   });
@@ -383,6 +399,10 @@ const start = async (): Promise<void> => {
     controller.setStatus({ problem: null });
 
     const sampled = await front;
+
+    if (sampled.bounds !== null) {
+      lastTarget = sampled.bounds;
+    }
 
     frame = {
       anchor,
@@ -711,7 +731,7 @@ const start = async (): Promise<void> => {
   };
 
   const pickFiles = async (): Promise<void> => {
-    const picked = await dialog.showOpenDialog({
+    const picked = await dialog.showOpenDialog(shelf.dialogParent, {
       properties: ["openFile", "multiSelections"],
       title: "Attach Files",
     });
@@ -742,12 +762,18 @@ const start = async (): Promise<void> => {
           return { message: "The file can't be read.", ok: false };
         }
 
-        // A named copy goes on the clipboard as a file, so it pastes into Finder or Mail as itself.
+        // A named copy goes on the clipboard as a file, so it pastes into Finder, Explorer or Mail as itself.
         const file = staging.copy(id, item.file.name, stored);
+        const url = pathToFileURL(file).href;
 
         await clipboard.write([
           new ClipboardItem({
-            [MAC_FILE_URL]: new Blob([pathToFileURL(file).href]),
+            // On Windows a URI list becomes a file drop list (CF_HDROP).
+            ...(isMac
+              ? { [MAC_FILE_URL]: new Blob([url]) }
+              : {
+                  "text/uri-list": new Blob([url], { type: "text/uri-list" }),
+                }),
             "text/plain": new Blob([item.file.name], { type: "text/plain" }),
           }),
         ]);
@@ -786,95 +812,30 @@ const start = async (): Promise<void> => {
   // Set once the shelf's IPC server exists; menus built before then only reach it later.
   let sendCommand: ((command: ShelfCommand) => void) | null = null;
 
-  const runChoice = (choice: MenuChoice): void => {
-    switch (choice.kind) {
-      case "selectSection": {
-        controller.apply({ id: choice.id, type: "selectSection" });
-        break;
-      }
+  // The image item open in the drawing window; null for a new drawing.
+  let drawingItem: ItemId | null = null;
 
-      case "clearDone": {
-        controller.apply({ type: "clearDone" });
-        break;
-      }
-
-      case "toggleDone": {
-        controller.apply({ id: choice.id, type: "toggleDone" });
-        break;
-      }
-
-      case "copy": {
-        void copyItem(choice.id);
-        break;
-      }
-
-      case "copyWithLink": {
-        const item = controller.item(choice.id);
-
-        if (item !== undefined) {
-          void clipboard.writeText(itemTextWithLink(item));
-        }
-
-        break;
-      }
-
-      case "setColor": {
-        controller.apply({
-          color: choice.color,
-          id: choice.id,
-          type: "setColor",
-        });
-        break;
-      }
-
-      case "moveTo": {
-        controller.apply({
-          id: choice.id,
-          sectionId: choice.sectionId,
-          type: "moveItem",
-        });
-        break;
-      }
-
-      case "edit":
-      case "remove":
-      case "newSection": {
-        // Editing, deleting with undo and starting a section live in the shelf window.
-        sendCommand?.(choice);
-        break;
-      }
-
-      default: {
-        break;
-      }
-    }
+  const newDrawing = (): void => {
+    drawingItem = null;
+    drawing.open(null);
   };
 
-  const menuItem = (entry: MenuEntry): MenuItemConstructorOptions => {
-    if (entry.kind === "separator") {
-      return { type: "separator" };
+  const openImage = (id: ItemId): void => {
+    const item = controller.item(id);
+
+    if (item?.kind !== "image") {
+      return;
     }
 
-    if (entry.kind === "submenu") {
-      return { label: entry.label, submenu: entry.entries.map(menuItem) };
-    }
-
-    return {
-      accelerator: entry.accelerator,
-      checked: entry.checked,
-      icon: entry.swatch === undefined ? undefined : swatchIcon(entry.swatch),
-      click: () => {
-        runChoice(entry.choice);
-      },
-      enabled: entry.enabled,
-      label: entry.label,
-      registerAccelerator: false,
-      type: entry.checked === undefined ? "normal" : "checkbox",
-    };
+    drawingItem = id;
+    drawing.open({
+      heightPx: item.image.heightPx,
+      pin: item.pin,
+      pixelsPerDip: item.image.pixelsPerDip,
+      url: insetUrl.attachment(item.image.file),
+      widthPx: item.image.widthPx,
+    });
   };
-
-  const nativeMenu = (entries: readonly MenuEntry[]): Menu =>
-    Menu.buildFromTemplate(entries.map(menuItem));
 
   const shelfServer = serveContract(
     shelfContract,
@@ -887,10 +848,20 @@ const start = async (): Promise<void> => {
           staging.clear(op.id);
         }
       },
+      attachFiles: () => {
+        void pickFiles();
+      },
       captureArea: () => {
         void captureArea();
       },
       copy: copyItem,
+      copyWithLink: (id) => {
+        const item = controller.item(id);
+
+        if (item !== undefined) {
+          void clipboard.writeText(itemTextWithLink(item));
+        }
+      },
       dismissProblem: () => {
         controller.setStatus({ problem: null });
       },
@@ -905,6 +876,8 @@ const start = async (): Promise<void> => {
           shelf.webContents.undo();
         }
       },
+      newDrawing,
+      openImage,
       openKeySettings,
       openLink: (id) => {
         const url = controller.item(id)?.context?.url;
@@ -913,43 +886,8 @@ const start = async (): Promise<void> => {
           void shell.openExternal(url);
         }
       },
-      showAddMenu: ({ x, y }) => {
-        shelf.popup(
-          Menu.buildFromTemplate([
-            {
-              accelerator: AREA_ACCELERATOR,
-              click: () => {
-                void captureArea();
-              },
-              label: "Capture Area",
-              registerAccelerator: false,
-            },
-            {
-              click: () => {
-                void pickFiles();
-              },
-              label: "Attach Files…",
-            },
-            {
-              click: () => {
-                drawing.open();
-              },
-              label: "Create Drawing…",
-            },
-          ]),
-          x,
-          y
-        );
-      },
-      showItemMenu: ({ id, x, y }) => {
-        const item = controller.item(id);
-
-        if (item !== undefined) {
-          shelf.popup(nativeMenu(itemMenu(item, controller.view().doc)), x, y);
-        }
-      },
-      showSectionMenu: ({ x, y }) => {
-        shelf.popup(nativeMenu(sectionMenu(controller.view().doc)), x, y);
+      openSettings: () => {
+        settingsWindow.open();
       },
       pasteImage: async (bytes) => {
         const image = nativeImage.createFromBuffer(Buffer.from(bytes));
@@ -1012,18 +950,71 @@ const start = async (): Promise<void> => {
   /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
   const DRAWING_PIXELS_PER_DIP = 2;
 
+  /** Puts the annotated image in place of the old one, which is deleted once the shelf is saved. */
+  const saveAnnotation = async (
+    id: ItemId,
+    image: NativeImage,
+    copy: boolean
+  ): Promise<ActionResult> => {
+    const item = controller.item(id);
+
+    if (item?.kind !== "image") {
+      return { message: "This image is no longer on the shelf.", ok: false };
+    }
+
+    const { height, width } = image.getSize();
+
+    controller.apply({
+      id,
+      image: {
+        file: await store.writeAttachment(image.toPNG()),
+        heightPx: height,
+        pixelsPerDip: item.image.pixelsPerDip,
+        widthPx: width,
+      },
+      type: "replaceImage",
+    });
+    // Copies dragged out earlier show the old picture.
+    staging.clear(id);
+
+    if (copy) {
+      await copyItem(id);
+    }
+
+    drawing.close();
+    e2eLog("itemAdded", { itemId: id, kind: "image", via: "annotation" });
+    controller.focus(id);
+    void showShelf();
+
+    return { ok: true };
+  };
+
   const drawingServer = serveContract(
     drawingContract,
     {
       cancel: () => {
         drawing.close();
       },
+      getImage: async () => {
+        const item =
+          drawingItem === null ? undefined : controller.item(drawingItem);
+
+        const file =
+          item?.kind === "image" ? store.attachmentPath(item.image.file) : null;
+
+        return file === null ? null : new Uint8Array(await readFile(file));
+      },
+      getView: () => drawing.view(),
       setDirty: drawing.setDirty,
       save: async ({ copy, png }) => {
         const image = nativeImage.createFromBuffer(Buffer.from(png));
 
         if (image.isEmpty()) {
           return { message: "The drawing could not be read.", ok: false };
+        }
+
+        if (drawingItem !== null) {
+          return await saveAnnotation(drawingItem, image, copy);
         }
 
         const { height, width } = image.getSize();
@@ -1065,8 +1056,11 @@ const start = async (): Promise<void> => {
     }
   );
 
-  drawing.onReset(() => {
-    drawingServer.emit("reset", null);
+  drawing.onView((view) => {
+    drawingServer.emit("view", view);
+  });
+  drawing.onCloseRequest(() => {
+    drawingServer.emit("confirmClose", null);
   });
 
   const toastServer = serveContract(
@@ -1095,12 +1089,27 @@ const start = async (): Promise<void> => {
     sendCommand(command);
   };
 
+  // What the menu shows; a note being typed changes the document but not this.
+  let builtMenu = "";
+
   const refreshAppMenu = (): void => {
-    if (!isMac) {
+    const { doc, status } = controller.view();
+
+    const shown = JSON.stringify([
+      doc.sections,
+      doc.activeSectionId,
+      doc.items.some(
+        (item) => item.done && item.sectionId === doc.activeSectionId
+      ),
+      status.keys,
+      floatOnTop,
+    ]);
+
+    if (shown === builtMenu) {
       return;
     }
 
-    const { doc, status } = controller.view();
+    builtMenu = shown;
 
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
@@ -1139,7 +1148,7 @@ const start = async (): Promise<void> => {
             find: () => {
               void commandShelf({ kind: "find" });
             },
-            newDrawing: drawing.open,
+            newDrawing,
             newNote: () => {
               void commandShelf({ kind: "newNote" });
             },
@@ -1173,10 +1182,18 @@ const start = async (): Promise<void> => {
                 sendCommand?.({ kind: "undo" });
               }
             },
-          }
+          },
+          isMac
         )
       )
     );
+
+    // Windows gives every window this menu; its shortcuts work with the bar hidden.
+    if (!isMac) {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.setMenuBarVisibility(false);
+      }
+    }
   };
 
   refreshAppMenu();
@@ -1188,6 +1205,12 @@ const start = async (): Promise<void> => {
   // A click on the Dock icon brings the shelf back.
   app.on("activate", () => {
     if (!shelf.isVisible() && !overlayOpen) {
+      void showShelf();
+    }
+  });
+  // So does opening the app again from Start or a shortcut while it runs.
+  app.on("second-instance", () => {
+    if (!overlayOpen) {
       void showShelf();
     }
   });
@@ -1254,7 +1277,7 @@ const start = async (): Promise<void> => {
 
     if (wantsTray && tray === null) {
       tray = createTray({
-        iconPath: trayIconPath(),
+        iconPath: trayIconPath,
         model: () => ({
           keys: controller.view().status.keys,
           shelfVisible: shelf.isVisible(),
@@ -1277,6 +1300,7 @@ const start = async (): Promise<void> => {
   const settingsView = (): SettingsView => ({
     openAtLogin: app.getLoginItemSettings().openAtLogin,
     settings: settings.current(),
+    version: app.getVersion(),
   });
 
   const settingsServer = serveContract(

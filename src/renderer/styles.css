@@ -117,6 +117,7 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -245,10 +246,70 @@
   }
 }
 
+/* Windows draws wide light scrollbars; these are thin and follow the theme. */
+@layer base {
+  [data-platform="windows"] ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  [data-platform="windows"] ::-webkit-scrollbar-track,
+  [data-platform="windows"] ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  [data-platform="windows"] ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+    background-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+
+  [data-platform="windows"] ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  }
+
+  [data-platform="windows"] ::-webkit-scrollbar-button {
+    display: none;
+  }
+}
+
 /* The shelf on macOS: the window's vibrancy shows through the page. */
 @layer base {
   [data-platform="mac"] body {
     background: transparent;
+  }
+}
+
+/*
+ * The shelf on Windows: the window is transparent and the page draws the
+ * panel, rounded so its corners run parallel to the fields 8 px inside it.
+ * Outside any layer, so it wins over the panel's macOS rounding.
+ */
+[data-platform="windows"] body:has(.shelf-panel) {
+  background: transparent;
+}
+
+[data-platform="windows"] .shelf-panel {
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--foreground) 16%, transparent);
+  border-radius: calc(var(--radius-lg) + 0.5rem);
+  background: var(--background);
+}
+
+/*
+ * Windows draws its caption buttons over the right end of a header; the
+ * header keeps clear of them. Without them the env() values fall back to 0.
+ */
+@layer components {
+  .caption-clear {
+    padding-right: max(
+      0.75rem,
+      calc(
+        100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) +
+          0.5rem
+      )
+    );
   }
 }
 

@@ -5,7 +5,7 @@ import { uIOhook, UiohookKey } from "uiohook-napi";
 export interface KeyMonitor {
   readonly onDoubleTap: (listener: () => void) => void;
   readonly start: () => boolean;
-  /** Sends Cmd+C (Ctrl+C elsewhere) to the app in front. */
+  /** Sends Cmd+C (Ctrl+Insert on Windows) to the app in front. */
   readonly copy: () => void;
   readonly stop: () => void;
 }
@@ -53,9 +53,12 @@ export const createKeyMonitor = (): KeyMonitor => {
       onDoubleTap = listener;
     },
     copy: () => {
-      uIOhook.keyTap(UiohookKey.C, [
-        process.platform === "darwin" ? UiohookKey.Meta : UiohookKey.Ctrl,
-      ]);
+      // Windows' other copy shortcut: Ctrl+C would stop a program running in a terminal.
+      if (process.platform === "darwin") {
+        uIOhook.keyTap(UiohookKey.C, [UiohookKey.Meta]);
+      } else {
+        uIOhook.keyTap(UiohookKey.Insert, [UiohookKey.Ctrl]);
+      }
     },
     start: () => {
       if (running) {

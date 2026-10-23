@@ -10,6 +10,9 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 
+import { AddMenu } from "./menus";
+import type { AddActions } from "./menus";
+
 export interface ComposerProps {
   readonly sectionName: string;
   /** Held by the shelf, so a menu can start a section by filling in "# ". */
@@ -21,16 +24,13 @@ export interface ComposerProps {
   /** Escape in an empty composer hides the shelf. */
   readonly onEscape: () => void;
   readonly ref?: Ref<HTMLTextAreaElement>;
-  /** Opens the native menu of other ways to add: an area, files, a drawing. */
-  readonly onAddMenu: (point: {
-    readonly x: number;
-    readonly y: number;
-  }) => void;
+  /** The other ways to add, behind the "+": an area, files, a drawing. */
+  readonly addActions: AddActions;
 }
 
 /** Return adds the note, ⇧↩ adds a line, and "# Name" switches to (or makes) a section. */
 export const Composer = ({
-  onAddMenu,
+  addActions,
   onEscape,
   onLeaveUp,
   onSubmit,
@@ -70,17 +70,11 @@ export const Composer = ({
     <div className="px-2 pt-1 pb-2">
       <InputGroup>
         <InputGroupAddon>
-          <InputGroupButton
-            aria-label="Add"
-            onClick={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-
-              onAddMenu({ x: box.left, y: box.top - 4 });
-            }}
-            size="icon-xs"
-          >
-            <HugeiconsIcon icon={PlusSignIcon} />
-          </InputGroupButton>
+          <AddMenu actions={addActions}>
+            <InputGroupButton aria-label="Add" size="icon-xs">
+              <HugeiconsIcon icon={PlusSignIcon} />
+            </InputGroupButton>
+          </AddMenu>
         </InputGroupAddon>
         <InputGroupTextarea
           aria-label={`New note in ${sectionName}`}

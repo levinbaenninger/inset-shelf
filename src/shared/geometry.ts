@@ -161,14 +161,23 @@ export const SHELF_MAX_HEIGHT_DIP = 620;
 export const SHELF_GAP_DIP = 8;
 
 /**
+ * Windows 11 reports a window's bounds with an invisible resize border on its
+ * left, right and bottom edges; the visible edge is this far inside.
+ */
+export const WINDOWS_FRAME_INSET_DIP = 7;
+
+/**
  * Docks the shelf to the window in front: beside its right edge, else beside
- * its left edge, else inside its right edge when it fills the screen. The
- * shelf takes the window's top and height. Without a window it opens at the
- * top right of the work area.
+ * its left edge, else inside its right edge when it fills the screen. Beside
+ * the window the shelf takes its top and height; inside it, it keeps a gap
+ * from the top as it does from the right. Without a window it opens at the
+ * top right of the work area. `frameInset` is the invisible border included
+ * in the target's bounds, so the visible gap stays SHELF_GAP_DIP.
  */
 export const dockShelf = (
   target: Rect<"screen"> | null,
-  workArea: Rect<"screen">
+  workArea: Rect<"screen">,
+  frameInset = 0
 ): Rect<"screen"> => {
   const width = Math.min(SHELF_WIDTH_DIP, workArea.width);
   const right = workArea.x + workArea.width;
@@ -183,15 +192,12 @@ export const dockShelf = (
     );
   }
 
-  const height = clamp(
-    target.height,
-    Math.min(SHELF_MIN_HEIGHT_DIP, workArea.height),
-    Math.min(SHELF_MAX_HEIGHT_DIP, workArea.height)
-  );
-
+  const minHeight = Math.min(SHELF_MIN_HEIGHT_DIP, workArea.height);
+  const maxHeight = Math.min(SHELF_MAX_HEIGHT_DIP, workArea.height);
+  const height = clamp(target.height - frameInset, minHeight, maxHeight);
   const y = clamp(target.y, workArea.y, bottom - height);
-  const beside = target.x + target.width + SHELF_GAP_DIP;
-  const before = target.x - width - SHELF_GAP_DIP;
+  const beside = target.x + target.width - frameInset + SHELF_GAP_DIP;
+  const before = target.x + frameInset - width - SHELF_GAP_DIP;
 
   if (beside + width <= right) {
     return rect(beside, y, width, height);
@@ -204,7 +210,15 @@ export const dockShelf = (
   const inside =
     Math.min(target.x + target.width, right) - width - SHELF_GAP_DIP;
 
-  return rect(clamp(inside, workArea.x, right - width), y, width, height);
+  const top = Math.max(target.y, workArea.y) + SHELF_GAP_DIP;
+  const insideHeight = clamp(bottom - top - SHELF_GAP_DIP, minHeight, height);
+
+  return rect(
+    clamp(inside, workArea.x, right - width),
+    clamp(top, workArea.y, bottom - insideHeight),
+    width,
+    insideHeight
+  );
 };
 
 /** True when the rectangle overlaps the area at all. */
@@ -213,3 +227,62 @@ export const intersects = (a: Rect<"screen">, b: Rect<"screen">): boolean =>
   b.x < a.x + a.width &&
   a.y < b.y + b.height &&
   b.y < a.y + a.height;
+
+/** Room around an image on the drawing page; the bottom leaves space for the toolbar. */
+export const VIEWER_MARGIN = { bottom: 76, side: 24, top: 24 } as const;
+
+/** The drawing window's header with Save, above the page. */
+export const VIEWER_HEADER_DIP = 48;
+
+/** The smallest drawing window, which still fits the toolbar. */
+export const VIEWER_MIN = { height: 360, width: 560 } as const;
+
+/** Where an image sits on the drawing page: centred, as large as fits, never above its own size. */
+export const viewerImageRect = (
+  page: Size<"preview">,
+  image: Size<"preview">
+): Rect<"preview"> & { readonly scale: number } => {
+  const roomWidth = Math.max(1, page.width - 2 * VIEWER_MARGIN.side);
+
+  const roomHeight = Math.max(
+    1,
+    page.height - VIEWER_MARGIN.top - VIEWER_MARGIN.bottom
+  );
+
+  const scale = Math.min(1, roomWidth / image.width, roomHeight / image.height);
+
+  const width = image.width * scale;
+  const height = image.height * scale;
+
+  return {
+    height,
+    scale,
+    width,
+    x: (page.width - width) / 2,
+    y: VIEWER_MARGIN.top + (roomHeight - height) / 2,
+  };
+};
+
+/** The drawing window's content size for an image: room for it at its own size, within 90% of the work area. */
+export const viewerWindowSize = (
+  image: Size<"preview">,
+  workArea: Rect<"screen">
+): Size<"screen"> => ({
+  height: Math.round(
+    clamp(
+      image.height +
+        VIEWER_HEADER_DIP +
+        VIEWER_MARGIN.top +
+        VIEWER_MARGIN.bottom,
+      Math.min(VIEWER_MIN.height, workArea.height),
+      workArea.height * 0.9
+    )
+  ),
+  width: Math.round(
+    clamp(
+      image.width + 2 * VIEWER_MARGIN.side,
+      Math.min(VIEWER_MIN.width, workArea.width),
+      workArea.width * 0.9
+    )
+  ),
+});

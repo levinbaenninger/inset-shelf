@@ -1,10 +1,11 @@
 import { MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ShelfCommand, ShelfView } from "@shared/contracts";
+import type { MenuChoice } from "@shared/menus";
 import { groupItems } from "@shared/shelf";
 import type { ItemId, ShelfOp } from "@shared/shelf";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { ComponentProps, PointerEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,12 +20,15 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { filePath, shelfBridge } from "@/shared/bridge";
+import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 
 import { Banners } from "./banners";
 import { Composer } from "./composer";
 import { ItemRow } from "./item-row";
+import { ItemMenu, SectionMenu } from "./menus";
+import type { ItemMenuAnchor } from "./menus";
 import { selectionAfterRemoval, stepSelection } from "./selection";
 import { isTextField, useShelfKeys } from "./use-shelf-keys";
 
@@ -55,23 +59,18 @@ const inTextContext = (): boolean =>
   isTextField(document.activeElement) ||
   window.getSelection()?.isCollapsed === false;
 
+/** Takes the props of a menu trigger wrapped around it. */
 const HeaderButton = ({
   icon,
   label,
-  onClick,
+  ...props
 }: {
   readonly label: string;
   readonly icon: typeof Search01Icon;
-  readonly onClick: (event: MouseEvent<HTMLButtonElement>) => void;
-}) => (
+} & ComponentProps<typeof Button>) => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <Button
-        aria-label={label}
-        onClick={onClick}
-        size="icon-sm"
-        variant="ghost"
-      >
+      <Button aria-label={label} size="icon-sm" variant="ghost" {...props}>
         <HugeiconsIcon icon={icon} />
       </Button>
     </TooltipTrigger>
@@ -87,12 +86,6 @@ const UndoBar = ({ onUndo }: { readonly onUndo: () => void }) => (
     </Button>
   </output>
 );
-
-const showSectionMenu = (event: MouseEvent<HTMLElement>): void => {
-  const box = event.currentTarget.getBoundingClientRect();
-
-  api.showSectionMenu({ x: box.left, y: box.bottom + 4 });
-};
 
 /** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). */
 const addDataFiles = async (files: readonly File[]): Promise<void> => {
@@ -197,6 +190,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const [handledFocus, setHandledFocus] = useState(0);
   const [copiedId, setCopiedId] = useExpiringState<ItemId>(COPIED_MS);
   const [undoShown, setUndoShown] = useExpiringState<true>(UNDO_VISIBLE_MS);
+  const [menuAnchor, setMenuAnchor] = useState<ItemMenuAnchor | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   // A capture asks main to show its item: select it, and open an image's note for typing.
@@ -286,19 +280,99 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }),
   });
 
-  const onCommand = useEffectEvent((command: ShelfCommand) => {
-    switch (command.kind) {
+  // A click on empty space in the list lets go of the selection and any note being edited.
+  const onListPointerDown = (event: PointerEvent<HTMLElement>): void => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest("li, button, input, textarea") !== null
+    ) {
+      return;
+    }
+
+    setSelectedId(null);
+    setEditingId(null);
+
+    if (
+      document.activeElement instanceof HTMLElement &&
+      isTextField(document.activeElement) &&
+      document.activeElement !== composerRef.current
+    ) {
+      document.activeElement.blur();
+    }
+  };
+
+  const choose = (choice: MenuChoice): void => {
+    switch (choice.kind) {
+      case "selectSection": {
+        apply({ id: choice.id, type: "selectSection" });
+        break;
+      }
+
+      case "clearDone": {
+        apply({ type: "clearDone" });
+        break;
+      }
+
+      case "newSection": {
+        setDraft("# ");
+        focusComposer();
+        break;
+      }
+
+      case "openSettings": {
+        api.openSettings();
+        break;
+      }
+
+      case "copy": {
+        void copy(choice.id);
+        break;
+      }
+
+      case "copyWithLink": {
+        api.copyWithLink(choice.id);
+        break;
+      }
+
+      case "open": {
+        api.openImage(choice.id);
+        break;
+      }
+
+      case "setColor": {
+        apply({ color: choice.color, id: choice.id, type: "setColor" });
+        break;
+      }
+
       case "edit": {
-        setSelectedId(command.id);
-        setEditingId(command.id);
+        setSelectedId(choice.id);
+        setEditingId(choice.id);
+        break;
+      }
+
+      case "toggleDone": {
+        apply({ id: choice.id, type: "toggleDone" });
         break;
       }
 
       case "remove": {
-        remove(command.id);
+        remove(choice.id);
         break;
       }
 
+      case "moveTo": {
+        apply({ id: choice.id, sectionId: choice.sectionId, type: "moveItem" });
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  };
+
+  const onCommand = useEffectEvent((command: ShelfCommand) => {
+    switch (command.kind) {
       case "find": {
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -344,10 +418,39 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   useEffect(() => api.on("command", onCommand), []);
 
+  // Elsewhere than macOS, Chromium takes Ctrl+C and Ctrl+Z as its own edit
+  // commands, so the menu never sees them: outside text the page answers them.
+  const onEditKey = useEffectEvent((event: KeyboardEvent) => {
+    const key = event.key.toLowerCase();
+
+    if (
+      isMac ||
+      event.defaultPrevented ||
+      !event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      (key !== "c" && key !== "z") ||
+      inTextContext()
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    onCommand({ kind: key === "c" ? "copy" : "undo" });
+  });
+
+  useEffect(() => {
+    window.addEventListener("keydown", onEditKey);
+
+    return () => {
+      window.removeEventListener("keydown", onEditKey);
+    };
+  }, []);
+
   return (
     <div
       className={cn(
-        "text-foreground flex h-svh flex-col rounded-xl",
+        "shelf-panel text-foreground flex h-svh flex-col rounded-xl",
         dropping && "ring-pin ring-2 ring-inset"
       )}
     >
@@ -376,13 +479,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             value={query}
           />
         </InputGroup>
-        <HeaderButton
-          icon={MoreHorizontalIcon}
-          label="Sections"
-          onClick={(event) => {
-            showSectionMenu(event);
-          }}
-        />
+        <SectionMenu doc={doc} onChoose={choose}>
+          <HeaderButton icon={MoreHorizontalIcon} label="Sections" />
+        </SectionMenu>
       </header>
       <Banners
         onDismissProblem={() => {
@@ -393,7 +492,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         }}
         status={status}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-1">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-2 pb-1"
+        onPointerDown={onListPointerDown}
+      >
         {groups.length === 0 ? (
           <p className="text-muted-foreground px-3 py-8 text-center text-sm">
             {query === "" ? "Nothing here yet" : "No matches"}
@@ -429,9 +531,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   editing={editingId === item.id}
                   item={item}
                   key={item.id}
-                  onContextMenu={(point) => {
+                  onContextMenu={(anchor) => {
                     setSelectedId(item.id);
-                    api.showItemMenu({ id: item.id, ...point });
+                    setMenuAnchor({ ...anchor, id: item.id });
                   }}
                   onDragImage={() => {
                     api.startDrag(item.id);
@@ -442,6 +544,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   }}
                   onEditNote={(note) => {
                     apply({ id: item.id, note, type: "editNote" });
+                  }}
+                  onOpen={() => {
+                    api.openImage(item.id);
                   }}
                   onOpenLink={() => {
                     api.openLink(item.id);
@@ -476,10 +581,26 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           </section>
         ))}
       </div>
+      <ItemMenu
+        anchor={menuAnchor}
+        doc={doc}
+        onChoose={choose}
+        onClose={() => {
+          setMenuAnchor(null);
+        }}
+      />
       {undoShown !== null && canUndo ? <UndoBar onUndo={undo} /> : null}
       <Composer
-        onAddMenu={(point) => {
-          api.showAddMenu(point);
+        addActions={{
+          attachFiles: () => {
+            api.attachFiles();
+          },
+          captureArea: () => {
+            api.captureArea();
+          },
+          newDrawing: () => {
+            api.newDrawing();
+          },
         }}
         onEscape={() => {
           api.hide();
