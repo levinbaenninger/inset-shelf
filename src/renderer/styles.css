@@ -1,0 +1,417 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Inter Variable", sans-serif;
+  /* The pin keeps one colour in both themes and in copied images (src/main/pin-mark.ts). */
+  --color-pin: oklch(0.588 0.158 241.966);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.5 0.134 242.749);
+  --primary-foreground: oklch(0.977 0.013 236.62);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.828 0.111 230.318);
+  --chart-2: oklch(0.685 0.169 237.323);
+  --chart-3: oklch(0.588 0.158 241.966);
+  --chart-4: oklch(0.5 0.134 242.749);
+  --chart-5: oklch(0.443 0.11 240.79);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.588 0.158 241.966);
+  --sidebar-primary-foreground: oklch(0.977 0.013 236.62);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.443 0.11 240.79);
+  --primary-foreground: oklch(0.977 0.013 236.62);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.828 0.111 230.318);
+  --chart-2: oklch(0.685 0.169 237.323);
+  --chart-3: oklch(0.588 0.158 241.966);
+  --chart-4: oklch(0.5 0.134 242.749);
+  --chart-5: oklch(0.443 0.11 240.79);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.685 0.169 237.323);
+  --sidebar-primary-foreground: oklch(0.293 0.066 243.157);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* Matches LAYERS in src/main/pin-mark.ts, so the panel, the library and copied images show one mark. */
+@layer components {
+  .pin-marker {
+    pointer-events: none;
+    position: absolute;
+    top: var(--pin-y);
+    left: var(--pin-x);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: clamp(12px, var(--pin-w), 28px);
+    aspect-ratio: 1;
+    translate: -50% -50%;
+    border: 2px solid var(--color-pin);
+    border-radius: 9999px;
+    box-shadow:
+      0 0 0 1px white,
+      0 0 0 1.5px rgb(0 0 0 / 0.3),
+      inset 0 0 0 1px white,
+      inset 0 0 0 1.5px rgb(0 0 0 / 0.3);
+  }
+
+  .pin-marker::after {
+    content: "";
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--color-pin);
+    box-shadow:
+      0 0 0 1px white,
+      0 0 0 1.5px rgb(0 0 0 / 0.3);
+  }
+}
+
+/* The area overlay: the frozen screen fills the window, which covers the whole display. */
+@layer components {
+  .overlay-stage {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    cursor: crosshair;
+    user-select: none;
+    background: black;
+  }
+
+  .overlay-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .overlay-dim {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 0.18);
+    pointer-events: none;
+  }
+
+  /* The outer shadow dims everything but the area being dragged. */
+  .overlay-selection {
+    position: absolute;
+    top: var(--area-y);
+    left: var(--area-x);
+    width: var(--area-w);
+    height: var(--area-h);
+    outline: 1px solid white;
+    box-shadow: 0 0 0 100000px rgb(0 0 0 / 0.4);
+    pointer-events: none;
+  }
+
+  .overlay-size {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgb(0 0 0 / 0.75);
+    color: white;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .overlay-hint {
+    position: absolute;
+    top: 48px;
+    left: 50%;
+    translate: -50% 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 9999px;
+    background: rgb(10 10 10 / 0.85);
+    color: white;
+    font-size: 13px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+}
+
+/* The shelf has no title bar; its header moves the window. */
+@layer components {
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .drag-region :is(button, a, input, [role="button"]) {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/*
+ * Thin scrollbars that follow the theme, on every platform: Windows draws wide
+ * light ones, and macOS draws a boxed track when scroll bars always show. The
+ * thumb shows while the pointer is over the scrolling area.
+ */
+@layer base {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+    background-color: transparent;
+  }
+
+  :hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  }
+
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+}
+
+/* The shelf on macOS: the window's vibrancy shows through the page. */
+@layer base {
+  [data-platform="mac"] body {
+    background: transparent;
+  }
+}
+
+/*
+ * The shelf on Windows: the window is transparent and the page draws the
+ * panel, rounded so its corners run parallel to the fields 8 px inside it.
+ * Outside any layer, so it wins over the panel's macOS rounding.
+ */
+[data-platform="windows"] body:has(.shelf-panel) {
+  background: transparent;
+}
+
+[data-platform="windows"] .shelf-panel {
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--foreground) 16%, transparent);
+  border-radius: calc(var(--radius-lg) + 0.5rem);
+  background: var(--background);
+}
+
+/*
+ * Windows draws its caption buttons over the right end of a header; the
+ * header keeps clear of them. Without them the env() values fall back to 0.
+ */
+@layer components {
+  .caption-clear {
+    padding-right: max(
+      0.75rem,
+      calc(
+        100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) +
+          0.5rem
+      )
+    );
+  }
+}
+
+/* The list keeps room for its scrollbar, so nothing shifts when a long section opens. */
+@layer components {
+  .shelf-list {
+    scrollbar-gutter: stable;
+  }
+}
+
+/*
+ * The note fields (markdown-field.tsx): Markdown formatted as it is typed,
+ * small and tight like the cards it becomes (markdown.tsx).
+ */
+@layer components {
+  .shelf-editor {
+    min-height: 1.25rem;
+    font-size: var(--text-sm);
+    line-height: 1.25rem;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .shelf-editor > * + * {
+    margin-top: 0.375rem;
+  }
+
+  .shelf-editor :is(h1, h2, h3, strong) {
+    font-weight: 600;
+  }
+
+  .shelf-editor :is(h1, h2, h3) {
+    font-size: inherit;
+  }
+
+  .shelf-editor em {
+    font-style: italic;
+  }
+
+  .shelf-editor s {
+    text-decoration: line-through;
+  }
+
+  .shelf-editor a {
+    color: var(--color-pin);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .shelf-editor :not(pre) > code {
+    border-radius: calc(var(--radius) * 0.6);
+    background: color-mix(in oklab, var(--foreground) 10%, transparent);
+    padding: 0 0.25rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .shelf-editor pre {
+    overflow-x: auto;
+    border-radius: calc(var(--radius) * 0.8);
+    background: color-mix(in oklab, var(--foreground) 5%, transparent);
+    padding: 0.375rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .shelf-editor ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+  }
+
+  .shelf-editor ol {
+    list-style: decimal;
+    padding-left: 1.25rem;
+  }
+
+  .shelf-editor blockquote {
+    border-left: 2px solid
+      color-mix(in oklab, var(--foreground) 20%, transparent);
+    padding-left: 0.5rem;
+    color: var(--muted-foreground);
+  }
+
+  .shelf-editor hr {
+    border-top: 1px solid
+      color-mix(in oklab, var(--foreground) 15%, transparent);
+  }
+
+  /* The placeholder, while the field is empty. */
+  .shelf-editor p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--muted-foreground);
+    pointer-events: none;
+  }
+}

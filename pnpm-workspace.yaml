@@ -1,0 +1,8 @@
+minimumReleaseAgeExclude:
+  - electron@45.0.0
+  - vite@8.3.5
+allowBuilds:
+  electron-winstaller: false
+  # Both install scripts only pick the bundled prebuilds.
+  get-windows: true
+  uiohook-napi: true
