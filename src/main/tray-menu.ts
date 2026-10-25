@@ -1,15 +1,7 @@
 import type { Permission } from "@shared/contracts";
-import {
-  AREA_ACCELERATOR,
-  shortcutLabels,
-  TOGGLE_ACCELERATOR,
-} from "@shared/shortcut";
+import { shortcutLabels, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 
-export type TrayAction =
-  | "toggleShelf"
-  | "captureArea"
-  | "turnOnKeys"
-  | "openSettings";
+export type TrayAction = "toggleShelf" | "turnOnKeys" | "openSettings";
 
 export type TrayItem =
   | { readonly kind: "separator" }
@@ -53,12 +45,6 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
       kind: "item",
       label: model.shelfVisible ? "Hide Inset Shelf" : "Show Inset Shelf",
       ...accelerator(TOGGLE_ACCELERATOR),
-    },
-    {
-      action: "captureArea",
-      kind: "item",
-      label: "Capture Area",
-      ...accelerator(AREA_ACCELERATOR),
     },
     ...permission,
     SEPARATOR,

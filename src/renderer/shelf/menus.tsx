@@ -6,7 +6,6 @@ import {
   CheckmarkCircle02Icon,
   CleanIcon,
   Copy01Icon,
-  CropIcon,
   Delete02Icon,
   Edit02Icon,
   FolderAddIcon,
@@ -29,7 +28,7 @@ import {
 import type { MenuChoice, MenuEntry, MenuIcon } from "@shared/menus";
 import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
-import { AREA_ACCELERATOR, keyText } from "@shared/shortcut";
+import { keyText } from "@shared/shortcut";
 import { useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
@@ -358,7 +357,6 @@ export const ShelfMenu = ({
 );
 
 export interface AddActions {
-  readonly captureArea: () => void;
   readonly attachFiles: () => void;
   readonly newDrawing: () => void;
 }
@@ -383,15 +381,6 @@ export const AddMenu = ({
       }}
       side="top"
     >
-      <DropdownMenuItem
-        onSelect={() => {
-          actions.captureArea();
-        }}
-      >
-        <HugeiconsIcon icon={CropIcon} />
-        Capture Area
-        <Shortcut accelerator={AREA_ACCELERATOR} />
-      </DropdownMenuItem>
       <DropdownMenuItem
         onSelect={() => {
           actions.attachFiles();

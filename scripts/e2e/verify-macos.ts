@@ -655,102 +655,6 @@ const menuItem = (menu: string, item: string): void => {
   );
 };
 
-/** A dragged area opens in the drawing window to draw on; File › Close puts it away. */
-const checkAreaOpensDrawing = async (
-  itemId: string | undefined,
-  mark: number
-): Promise<void> => {
-  const editing = await waitFor("drawingShown", mark);
-
-  record(
-    "the new area opens to draw on",
-    editing !== undefined && editing.itemId === itemId,
-    JSON.stringify(editing ?? null)
-  );
-  await delay(300);
-  menuItem("File", "Close");
-  await delay(300);
-};
-
-const checkArea = async (): Promise<void> => {
-  // The source app stays in front behind the overlay, so Escape can only reach a test window.
-  await showSource("Backdrop for the area test", "none");
-  input("move", "700", "500");
-
-  let mark = events().length;
-
-  trayItem("Capture Area");
-
-  const shown = await waitFor("overlayShown", mark);
-
-  record(
-    "area overlay covers the whole display",
-    shown?.bounds?.y === 0 && shown.bounds.x === 0,
-    JSON.stringify(shown?.bounds)
-  );
-
-  if (shown === undefined) {
-    return;
-  }
-
-  mark = events().length;
-  input("drag", "600", "400", "1080", "700");
-
-  const added = await waitFor("itemAdded", mark);
-  const item = items().find((candidate) => candidate.id === added?.itemId);
-  const ppd = item?.kind === "image" ? item.image.pixelsPerDip : 0;
-
-  record(
-    "dragging keeps that area",
-    item?.kind === "image" &&
-      item.pin === null &&
-      Math.abs(item.image.widthPx - 480 * ppd) <= 2 * ppd &&
-      Math.abs(item.image.heightPx - 300 * ppd) <= 2 * ppd,
-    item?.kind === "image"
-      ? `${item.image.widthPx}x${item.image.heightPx} @ ${ppd}x`
-      : "none"
-  );
-  record(
-    "the shelf shows the new area",
-    (await waitFor("shelfShown", mark)) !== undefined
-  );
-
-  await checkAreaOpensDrawing(added?.itemId, mark);
-
-  mark = events().length;
-  input("move", "700", "500");
-  trayItem("Capture Area");
-  await waitFor("overlayShown", mark);
-  input("click", "900", "600");
-
-  const pinned = await waitFor("itemAdded", mark);
-  const pinItem = items().find((candidate) => candidate.id === pinned?.itemId);
-
-  record(
-    "a click pins a spot with context around it",
-    pinItem?.kind === "image" && pinItem.pin !== null,
-    JSON.stringify(pinItem?.kind === "image" ? pinItem.pin : null)
-  );
-
-  mark = events().length;
-  trayItem("Capture Area");
-  await waitFor("overlayShown", mark);
-  // The overlay is Inset's own window, so Escape may go to it while Inset is in front.
-  guardedKeys(() => {
-    osa('tell application "System Events" to key code 53');
-  }, ["source", processName]);
-
-  const closed = await waitFor("overlayClosed", mark);
-
-  record(
-    "Escape cancels without adding",
-    closed !== undefined &&
-      !events()
-        .slice(mark)
-        .some((event) => event.event === "itemAdded")
-  );
-};
-
 /** Finds the typed note with search, selects it, then copies it with Edit › Copy from the menu bar. */
 const checkCopy = async (): Promise<void> => {
   enableWebAccessibility();
@@ -943,7 +847,6 @@ const main = async (): Promise<void> => {
     await checkSelection();
     await checkNoFalseTaps();
     await checkToggle();
-    await checkArea();
     await checkCopy();
     await checkDrawing();
     await checkSettings();

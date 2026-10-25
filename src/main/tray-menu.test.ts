@@ -22,7 +22,6 @@ describe(trayMenu, () => {
   it("lists the app's actions, then About and Quit", () => {
     expect(names(trayMenu(base))).toStrictEqual([
       "Show Inset Shelf",
-      "Capture Area",
       "---",
       "Settings…",
       "[about]",

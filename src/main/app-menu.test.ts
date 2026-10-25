@@ -20,7 +20,6 @@ const doc: ShelfDoc = {
 };
 
 const actions: AppMenuActions = {
-  captureArea: vi.fn<() => void>(),
   clearDone: vi.fn<() => void>(),
   closeWindow: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),

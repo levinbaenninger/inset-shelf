@@ -1,6 +1,5 @@
 import type { ItemAction, Permission } from "@shared/contracts";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
-import { AREA_ACCELERATOR } from "@shared/shortcut";
 import type { MenuItemConstructorOptions } from "electron";
 
 export const HELP_URL = "https://github.com/levinbaenninger/inset-shelf#readme";
@@ -18,7 +17,6 @@ export interface AppMenuActions {
   readonly newNote: () => void;
   readonly newSection: () => void;
   readonly newDrawing: () => void;
-  readonly captureArea: () => void;
   readonly closeWindow: () => void;
   readonly undo: () => void;
   readonly redo: () => void;
@@ -131,13 +129,6 @@ const fileSubmenu = (
     accelerator: "Alt+CommandOrControl+N",
     click: actions.newDrawing,
     label: "New Drawing…",
-  },
-  SEPARATOR,
-  {
-    accelerator: AREA_ACCELERATOR,
-    click: actions.captureArea,
-    label: "Capture Area",
-    registerAccelerator: false,
   },
   SEPARATOR,
   // Without an app menu, Settings and Exit live here.

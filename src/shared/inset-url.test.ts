@@ -20,13 +20,6 @@ describe(parseInsetUrl, () => {
     expect(parseInsetUrl("inset://shot/a-b")).toBeNull();
   });
 
-  it("accepts the frozen frame by token", () => {
-    expect(parseInsetUrl(insetUrl.frame("k3x9"))).toStrictEqual({
-      kind: "frame",
-      token: "k3x9",
-    });
-  });
-
   it.each([
     ["dot segments", `inset://attachment/../${FILE}`],
     ["an upper-case name", `inset://attachment/${FILE.toUpperCase()}`],
@@ -43,7 +36,7 @@ describe(parseInsetUrl, () => {
     ["another scheme", `file://attachment/${FILE}`],
     ["an empty app path", "inset://app/"],
     ["a port", "inset://app:80/shelf.html"],
-    ["a frame token with symbols", "inset://frame/a-b"],
+    ["the old area overlay's frame", "inset://frame/k3x9"],
   ])("rejects %s", (_label, url) => {
     expect(parseInsetUrl(url)).toBeNull();
   });

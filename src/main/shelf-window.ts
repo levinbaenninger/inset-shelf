@@ -47,8 +47,6 @@ export interface ShelfWindow {
 export interface ShelfWindowOptions {
   readonly preload: string;
   readonly url: string;
-  /** Another Inset window is on screen, so app.hide() would hide it too. */
-  readonly otherWindowVisible: () => boolean;
 }
 
 const ignore = (): void => undefined;
@@ -118,7 +116,7 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
 
     hideWindow(window, { raise });
 
-    if (isMac && !options.otherWindowVisible()) {
+    if (isMac) {
       app.hide();
     }
 

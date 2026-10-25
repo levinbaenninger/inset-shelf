@@ -19,7 +19,7 @@ The builds are not signed with a developer certificate, so each system warns onc
 3. Open the app. macOS blocks it the first time. Open **System Settings > Privacy & Security** and click **Open Anyway**. If you prefer the terminal, run `xattr -dr com.apple.quarantine "/Applications/Inset Shelf.app"` and open the app again.
 4. Grant the permissions you want:
    - **Accessibility**, for double Shift and for a browser page's address. The shelf shows **Double Shift is off** with a button that opens the right settings page. Turn on **Inset Shelf** there. The app checks again every few seconds, so it should start listening without a restart.
-   - **Screen & System Audio Recording**, for area capture and for the title of the window an item came from. Press `⌃⌥A` once. If capture is refused, turn on **Inset Shelf** in that settings page, then quit and reopen the app.
+   - **Screen & System Audio Recording**, for the title of the window an item came from. The app never asks for it. Turn on **Inset Shelf** in that settings page (add it with **+** if it isn't listed), then quit and reopen the app.
    - **Automation**, once per browser, the first time an item is saved from Safari, Chrome, Edge, Brave, Arc or another Chromium browser. It lets the app read the address of the page in front. Firefox, Zen and apps built on web views are read through Accessibility instead and don't ask.
 
 The app has a Dock icon, a menu bar and an Inset mark in the menu bar's status area. **Settings…** (`⌘,`) can hide either icon.
@@ -41,13 +41,12 @@ The Windows build has been run on Windows 11; [IMPLEMENTATION_REPORT.md](IMPLEME
 | `⇧ ⇧` (tap Shift twice) with text selected | Saves the selection, with the app, window and page it came from, and the links inside it. A short notice confirms it when the shelf is hidden. Your clipboard is put back as it was. |
 | `⇧ ⇧` with nothing selected | Shows or hides the shelf. |
 | `⌃⌥S` (`Ctrl+Alt+S` on Windows) | Shows the shelf, or hides it when it is already in front. |
-| `⌃⌥A` (`Ctrl+Alt+A`) | Freezes the screen under the pointer. Drag to keep an area, which then opens to draw on, or click once to pin a spot with some context around it. `Esc` cancels. |
 
 The shelf opens beside the window in front, centred on its height and up to 620 points tall. When there is no room beside it, it opens inside the window's right edge. Without a window it opens at the right of the screen, centred. It floats above other windows, on every Space and over full-screen apps, until you hide it with `Esc`, the **×** at the top or the shortcut.
 
-Inside the shelf (an empty shelf lists the three ways to start):
+Inside the shelf (an empty shelf lists the ways to start):
 
-- Jot down a note or a prompt and press `Return`. Notes are Markdown, formatted as you type: `**bold**`, `*italic*`, `` `code` ``, `- ` or `1. ` lists, `> ` quotes and links turn into their formatting at once, and pasted formatting is kept. `⇧↩` starts a new line or list item (twice leaves a list), and `⌘↩` adds the note too. Notes are still stored as Markdown, and links in them open in the browser. A single line starting with `# ` still makes a section. The **+** in the note field captures an area, attaches files or opens a new drawing. You can also drop files on the shelf or paste an image.
+- Jot down a note or a prompt and press `Return`. Notes are Markdown, formatted as you type: `**bold**`, `*italic*`, `` `code` ``, `- ` or `1. ` lists, `> ` quotes and links turn into their formatting at once, and pasted formatting is kept. `⇧↩` starts a new line or list item (twice leaves a list), and `⌘↩` adds the note too. Notes are still stored as Markdown, and links in them open in the browser. A single line starting with `# ` still makes a section. The **+** in the note field attaches files or opens a new drawing. You can also drop files on the shelf or paste an image.
 - The list shows every section as a group, empty ones too. Click a section's name to fold it away. The dots at the right of the section names show where new items go: the filled one. Click another section's dot to send new items there. A section's **⋯**, or a right-click on its name, renames it, clears its checked items or deletes it; both ask first when items would be deleted. **New Section** in the **⋯** at the top (or a right-click on empty space), or `# Name` and `Return` in the note field, makes a section. The **View** menu and `⌘1` to `⌘9` also pick the section for new items.
 - Drag an item onto another section to move it there. Dragging a text item into another app drops its words; dragging an image or file out drops the file.
 - The search field (`⌘F`) narrows the list by text, note, file name, app, window title or address.
