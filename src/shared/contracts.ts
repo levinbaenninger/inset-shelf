@@ -78,7 +78,6 @@ export const shelfContract = defineContract({
     apply: send(ShelfOpSchema),
     /** The file dialog, from the "+" in the note field. */
     attachFiles: send(z.void()),
-    captureArea: send(z.void()),
     copy: invoke(ItemIdSchema, out<ActionResult>()),
     /** Items as one numbered list, in the order given, with the first image beside it. */
     copyList: invoke(
@@ -113,39 +112,6 @@ export const shelfContract = defineContract({
     startDrag: send(ItemIdSchema),
   },
   name: "shelf",
-});
-
-export interface OverlayView {
-  readonly frameUrl: string;
-  readonly display: { readonly width: number; readonly height: number };
-}
-
-const Dip = z.number().min(-100_000).max(100_000);
-
-export const OverlayCommitSchema = z.discriminatedUnion("kind", [
-  z.object({
-    area: z.object({
-      height: z.number().min(0).max(100_000),
-      width: z.number().min(0).max(100_000),
-      x: Dip,
-      y: Dip,
-    }),
-    kind: z.literal("area"),
-  }),
-  z.object({ kind: z.literal("pin"), point: z.object({ x: Dip, y: Dip }) }),
-]);
-
-export type OverlayCommit = z.output<typeof OverlayCommitSchema>;
-
-export const overlayContract = defineContract({
-  events: { view: event<OverlayView | null>() },
-  global: "insetOverlay",
-  methods: {
-    cancel: send(z.void()),
-    commit: send(OverlayCommitSchema),
-    getView: invoke(z.void(), out<OverlayView | null>()),
-  },
-  name: "overlay",
 });
 
 export interface ToastView {
@@ -265,8 +231,6 @@ export const settingsContract = defineContract({
 export type SettingsContract = typeof settingsContract;
 
 export type ShelfContract = typeof shelfContract;
-
-export type OverlayContract = typeof overlayContract;
 
 export type ToastContract = typeof toastContract;
 

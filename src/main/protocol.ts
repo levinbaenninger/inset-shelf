@@ -23,8 +23,6 @@ export const registerInsetScheme = (): void => {
 
 export interface ProtocolSources {
   readonly rendererRoot: string;
-  /** Null for any token but the current overlay's. */
-  readonly frame: (token: string) => Uint8Array | null;
   /** Null for any token but the current screenshot card's. */
   readonly shot: (token: string) => Uint8Array | null;
   readonly attachmentFile: (file: string) => string | null;
@@ -89,12 +87,6 @@ export const handleInsetProtocol = (sources: ProtocolSources): void => {
 
     if (parsed.kind === "app") {
       return await serveAppFile(root, parsed.path);
-    }
-
-    if (parsed.kind === "frame") {
-      const frame = sources.frame(parsed.token);
-
-      return frame === null ? notFound() : image(frame, "image/jpeg");
     }
 
     if (parsed.kind === "shot") {

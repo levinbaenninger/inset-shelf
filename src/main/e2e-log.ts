@@ -10,8 +10,6 @@ export type E2eEvent =
   | "shelfHidden"
   | "doubleTap"
   | "selection"
-  | "overlayShown"
-  | "overlayClosed"
   | "itemAdded"
   | "drawingShown"
   | "screenshotShown"

@@ -6,26 +6,12 @@ import { pathToFileURL } from "node:url";
 
 import {
   drawingContract,
-  overlayContract,
   screenshotContract,
   settingsContract,
   shelfContract,
   toastContract,
 } from "@shared/contracts";
-import type {
-  ActionResult,
-  OverlayCommit,
-  Permission,
-  ShelfCommand,
-} from "@shared/contracts";
-import {
-  areaToImage,
-  defaultCrop,
-  pinInCrop,
-  rect,
-  screenToImage,
-  size,
-} from "@shared/geometry";
+import type { ActionResult, Permission, ShelfCommand } from "@shared/contracts";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { IconPlace, SettingsView } from "@shared/settings";
@@ -35,14 +21,8 @@ import {
   itemsAsList,
   itemTextWithLink,
 } from "@shared/shelf";
-import type {
-  ImageItem,
-  ItemContext,
-  ItemId,
-  MainOp,
-  ShelfItem,
-} from "@shared/shelf";
-import { AREA_ACCELERATOR, TOGGLE_ACCELERATOR } from "@shared/shortcut";
+import type { ItemContext, ItemId, MainOp, ShelfItem } from "@shared/shelf";
+import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import { desktopApp, desktopLink, isAppLink } from "@shared/web-source";
 import {
   app,
@@ -63,8 +43,6 @@ import type { NativeImage } from "electron";
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
-import { captureDisplay, sampleAnchor } from "./capture";
-import type { Anchor, CapturedFrame, CaptureProblem } from "./capture";
 import { chatGptThreadLink } from "./codex-threads";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
@@ -74,7 +52,6 @@ import { frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import { openApp } from "./open-app";
-import { createOverlayWindow } from "./overlay-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
@@ -103,10 +80,7 @@ const APP_ID = "ch.inset.prototype.shelf";
 const MAC_ACCESSIBILITY_SETTINGS =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
-/** Lets the compositor drop hidden Inset windows before the screen is captured; not measured. */
-const HIDE_SETTLE_MS = 150;
 const KEYS_POLL_MS = 3000;
-const FRAME_JPEG_QUALITY = 90;
 
 /** The macOS pasteboard type for a file, which Electron reaches through its raw formats. */
 const MAC_FILE_URL =
@@ -151,18 +125,6 @@ const trayIconPath = (): string => {
       ? "tray-on-dark.png"
       : "tray.png"
   );
-};
-
-const problemText = (problem: CaptureProblem): string => {
-  if (problem.kind === "screenPermission") {
-    return problem.status === "granted-but-empty"
-      ? "The screen image came back empty. In System Settings › Privacy & Security › Screen & System Audio Recording, turn Inset Shelf off and on again."
-      : "Inset Shelf needs Screen & System Audio Recording access to capture an area. Turn it on in System Settings › Privacy & Security, then quit and reopen Inset Shelf.";
-  }
-
-  return problem.kind === "displayNotMatched"
-    ? "Couldn't tell which screen is under the pointer. Try again."
-    : `The screen couldn't be captured: ${problem.message}`;
 };
 
 const excerpt = (text: string): string => {
@@ -352,7 +314,6 @@ const start = async (): Promise<void> => {
 
   staging.clear();
 
-  let overlayOpen = false;
   let tray: ShelfTray | null = null;
 
   const refreshTray = (): void => {
@@ -360,7 +321,6 @@ const start = async (): Promise<void> => {
   };
 
   const shelf = createShelfWindow({
-    otherWindowVisible: () => overlayOpen,
     preload: preloadPath("shelf"),
     url: pageUrl("shelf"),
   });
@@ -390,11 +350,6 @@ const start = async (): Promise<void> => {
       await showShelf();
     }
   };
-
-  const overlay = createOverlayWindow({
-    preload: preloadPath("overlay"),
-    url: pageUrl("overlay"),
-  });
 
   /** A window closing over the open shelf gives it the keyboard back. */
   const focusShelf = (): boolean => {
@@ -467,7 +422,7 @@ const start = async (): Promise<void> => {
   let shotSeq = 0;
 
   const screenshots = createScreenshotWatcher((image, file) => {
-    if (!settings.current().screenshotCards || overlayOpen) {
+    if (!settings.current().screenshotCards) {
       return;
     }
 
@@ -494,192 +449,13 @@ const start = async (): Promise<void> => {
     e2eLog("screenshotShown");
   });
 
-  // The frozen frame behind the overlay, kept only while the overlay is open.
-  let frame: {
-    readonly token: string;
-    readonly anchor: Anchor;
-    readonly captured: CapturedFrame;
-    readonly context: ItemContext | null;
-    jpeg: Uint8Array | null;
-  } | null = null;
-
-  let shelfWasVisible = false;
-
   handleInsetProtocol({
     // Only images are shown in the shelf; other attached files are never served to a page.
     attachmentFile: (file) =>
       file.endsWith(".png") ? store.attachmentPath(file) : null,
     shot: (token) => (shot !== null && shot.token === token ? shot.png : null),
-    frame: (token) => {
-      if (frame === null || frame.token !== token) {
-        return null;
-      }
-
-      frame.jpeg ??= frame.captured.image.toJPEG(FRAME_JPEG_QUALITY);
-
-      return frame.jpeg;
-    },
     rendererRoot: rendererRoot(),
   });
-
-  const showItem = (id: ItemId): void => {
-    controller.focus(id);
-    void showShelf();
-  };
-
-  const closeOverlay = (): void => {
-    overlayOpen = false;
-    frame = null;
-    overlay.hide();
-    e2eLog("overlayClosed");
-  };
-
-  const cancelArea = (): void => {
-    if (!overlayOpen) {
-      return;
-    }
-
-    closeOverlay();
-
-    if (shelfWasVisible) {
-      void showShelf();
-    }
-  };
-
-  const captureArea = async (): Promise<void> => {
-    if (overlayOpen) {
-      return;
-    }
-
-    const anchor = sampleAnchor();
-    // Read before Inset hides or shows anything, while the user's app is still in front.
-    const front = frontWindow({ page: true });
-
-    overlayOpen = true;
-    shelfWasVisible = shelf.isVisible();
-    shelf.hide();
-    toast.hide();
-    await delay(HIDE_SETTLE_MS);
-
-    const result = await captureDisplay(anchor.display);
-
-    if (!result.ok) {
-      overlayOpen = false;
-      controller.setStatus({ problem: problemText(result.problem) });
-      void showShelf();
-
-      return;
-    }
-
-    controller.setStatus({ problem: null });
-
-    const sampled = await front;
-
-    if (sampled.bounds !== null) {
-      lastTarget = sampled.bounds;
-    }
-
-    frame = {
-      anchor,
-      captured: result.frame,
-      context: sampled.context,
-      jpeg: null,
-      token: randomUUID().replaceAll("-", ""),
-    };
-    overlay.show(anchor.display, {
-      display: {
-        height: anchor.display.bounds.height,
-        width: anchor.display.bounds.width,
-      },
-      frameUrl: insetUrl.frame(frame.token),
-    });
-    e2eLog("overlayShown", { bounds: anchor.display.bounds });
-  };
-
-  const commitArea = async (commit: OverlayCommit): Promise<void> => {
-    const current = frame;
-
-    if (current === null) {
-      return;
-    }
-
-    closeOverlay();
-
-    const { anchor, captured, context } = current;
-
-    const displaySize = size<"screen">(
-      anchor.display.bounds.width,
-      anchor.display.bounds.height
-    );
-
-    let crop: Rect<"image">;
-    let pin: ImageItem["pin"] = null;
-
-    if (commit.kind === "area") {
-      crop = areaToImage(
-        rect(
-          commit.area.x,
-          commit.area.y,
-          commit.area.width,
-          commit.area.height
-        ),
-        displaySize,
-        captured.size
-      );
-    } else {
-      const point = screenToImage(
-        {
-          x: anchor.display.bounds.x + commit.point.x,
-          y: anchor.display.bounds.y + commit.point.y,
-        },
-        anchor.display.bounds,
-        captured.size
-      );
-
-      crop = defaultCrop(point, captured.size, captured.ppd);
-      pin = pinInCrop(point, crop);
-    }
-
-    try {
-      const png = captured.image.crop(crop).toPNG();
-      const file = await store.writeAttachment(png);
-
-      const id = controller.apply({
-        image: {
-          file,
-          heightPx: crop.height,
-          pixelsPerDip: captured.ppd,
-          widthPx: crop.width,
-        },
-        pin,
-        source: anchor.display.label,
-        type: "addImage",
-        via: commit.kind,
-        context,
-      });
-
-      if (id === null) {
-        return;
-      }
-
-      e2eLog("itemAdded", { itemId: id, kind: "image", via: commit.kind });
-
-      // An area opens straight away to draw on, over the shelf that shows it
-      // saved, unless a drawing is open: its marks would be thrown away.
-      if (commit.kind === "area" && !drawing.isVisible()) {
-        controller.focus(id);
-        await showShelf();
-        openImage(id);
-      } else {
-        showItem(id);
-      }
-    } catch (error) {
-      controller.setStatus({
-        problem: `The area couldn't be saved: ${errorMessage(error)}`,
-      });
-      void showShelf();
-    }
-  };
 
   const keyMonitor = createKeyMonitor();
 
@@ -688,7 +464,7 @@ const start = async (): Promise<void> => {
   const onDoubleTap = async (): Promise<void> => {
     e2eLog("doubleTap");
 
-    if (overlayOpen || capturingSelection) {
+    if (capturingSelection) {
       return;
     }
 
@@ -1094,9 +870,6 @@ const start = async (): Promise<void> => {
       attachFiles: () => {
         void pickFiles();
       },
-      captureArea: () => {
-        void captureArea();
-      },
       copy: copyItem,
       copyList,
       copyWithLink: (id) => {
@@ -1195,23 +968,6 @@ const start = async (): Promise<void> => {
       ipc: ipcMain,
       onRejected: logRejected,
       target: () => shelf.webContents,
-    }
-  );
-
-  const overlayServer = serveContract(
-    overlayContract,
-    {
-      cancel: cancelArea,
-      commit: (commit) => {
-        void commitArea(commit);
-      },
-      getView: () => overlay.view(),
-    },
-    {
-      appOrigin: appOrigin(),
-      ipc: ipcMain,
-      onRejected: logRejected,
-      target: () => overlay.webContents,
     }
   );
 
@@ -1563,9 +1319,6 @@ const start = async (): Promise<void> => {
         appMenuTemplate(
           { doc, floatOnTop, keys: status.keys },
           {
-            captureArea: () => {
-              void captureArea();
-            },
             clearDone: () => {
               void commandShelf({ kind: "clearDone" });
             },
@@ -1657,20 +1410,14 @@ const start = async (): Promise<void> => {
   });
   // A click on the Dock icon brings the shelf back.
   app.on("activate", () => {
-    if (!shelf.isVisible() && !overlayOpen) {
+    if (!shelf.isVisible()) {
       void showShelf();
     }
   });
   // So does opening the app again from Start or a shortcut while it runs.
   app.on("second-instance", () => {
-    if (!overlayOpen) {
-      void showShelf();
-    }
+    void showShelf();
   });
-  overlay.onView((view) => {
-    overlayServer.emit("view", view);
-  });
-  overlay.onBlur(cancelArea);
   toast.onView((view) => {
     toastServer.emit("view", view);
   });
@@ -1684,23 +1431,17 @@ const start = async (): Promise<void> => {
     refreshTray();
   });
 
-  const shortcutsRegistered =
-    globalShortcut.register(TOGGLE_ACCELERATOR, () => {
+  const shortcutsRegistered = globalShortcut.register(
+    TOGGLE_ACCELERATOR,
+    () => {
       void toggleShelf();
-    }) &&
-    globalShortcut.register(AREA_ACCELERATOR, () => {
-      void captureArea();
-    });
+    }
+  );
 
   const run = (action: TrayAction): void => {
     switch (action) {
       case "toggleShelf": {
         void toggleShelf();
-        break;
-      }
-
-      case "captureArea": {
-        void captureArea();
         break;
       }
 
@@ -1802,7 +1543,6 @@ const start = async (): Promise<void> => {
 
   await Promise.all([
     shelf.load(),
-    overlay.load(),
     toast.load(),
     screenshotCard.load(),
     drawing.load(),

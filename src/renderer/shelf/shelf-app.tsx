@@ -1260,9 +1260,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           attachFiles: () => {
             api.attachFiles();
           },
-          captureArea: () => {
-            api.captureArea();
-          },
           newDrawing: () => {
             api.newDrawing();
           },

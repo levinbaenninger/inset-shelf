@@ -2,15 +2,15 @@
 
 ## What the prototype does
 
-Inset Shelf is a regular app with a Dock icon, a menu bar and a status-bar icon. Its main window, the shelf, opens at launch beside the window in front and floats above other windows until it is hidden. The shelf is one list of items grouped by section: notes and prompts typed into it, text saved from a selection in another app, screen areas, pinned spots, pasted images, drawings and attached files. Each captured item keeps the app, window title and web page it came from, where the system lets the app read them.
+Inset Shelf is a regular app with a Dock icon, a menu bar and a status-bar icon. Its main window, the shelf, opens at launch beside the window in front and floats above other windows until it is hidden. The shelf is one list of items grouped by section: notes and prompts typed into it, text saved from a selection in another app, screenshots, pasted images, drawings and attached files. Each captured item keeps the app, window title and web page it came from, where the system lets the app read them.
 
 - **Double Shift** with text selected copies the selection of the app in front, puts the clipboard back, and adds the text to the current section. With nothing selected it shows or hides the shelf.
-- **`Control+Alt+A`** captures the display under the pointer and shows it frozen over the whole display. A drag keeps that area. A click keeps a 480 × 300 DIP crop around the point, with a pin on it, like Inset Context Pin.
+- **Screenshots** taken with the system's own keys show on a card beside the shelf, to copy, keep, annotate or add to the shelf. This replaced an earlier `Control+Alt+A` area capture with its own screen overlay and pin; items captured with it still show their pin.
 - **`Control+Alt+S`** shows the shelf, or hides it when it is in front.
 - **File > New Drawing…** opens a drawing window whose result is saved as an image item.
 - **Settings…** sets Open at Login, where the app's icon shows, and whether copying an item checks it off.
 
-The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public page and settings, shadcn's posts about it on X, and Stash, a community re-creation built from Copper's demos, were the references. They describe double Shift for selections, a prompt queue that is copied with `⌘C` and checked off, `# Name` sections in one grouped list, search, colour tags, Copy as List, attachments, drawings, local storage and focus returning to the last app when the window hides. Inset Shelf adds area capture, the pin, and the source of each item. One video shadcn posted on X could not be opened, so it was not used.
+The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public page and settings, shadcn's posts about it on X, and Stash, a community re-creation built from Copper's demos, were the references. They describe double Shift for selections, a prompt queue that is copied with `⌘C` and checked off, `# Name` sections in one grouped list, search, colour tags, Copy as List, attachments, drawings, local storage and focus returning to the last app when the window hides. Inset Shelf adds the source of each item. One video shadcn posted on X could not be opened, so it was not used.
 
 ## Architecture in brief
 
@@ -29,11 +29,9 @@ The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public 
 | Double tap | Two presses of Shift alone, each at most 250 ms, released at most 400 ms apart. Either Shift key counts. | `TAP_MAX_MS`, `GAP_MAX_MS` |
 | Double Shift with nothing selected | Shows or hides the shelf. Inside the shelf it only hides it. | `onDoubleTap` in `src/main/index.ts` |
 | Selection capture on Windows | Sends `Ctrl+Insert`, not `Ctrl+C`, which would stop a program running in a terminal. Not on Linux. | `copy` in `src/main/key-monitor.ts`, `selectionCapture` |
-| Shortcuts | `Control+Alt+S` for the shelf, `Control+Alt+A` for an area. Control+Option leaves the macOS input-source keys alone. | `src/shared/shortcut.ts` |
+| Shortcuts | `Control+Alt+S` for the shelf. Control+Option leaves the macOS input-source keys alone. | `src/shared/shortcut.ts` |
 | Shelf window | 340 DIP wide. Beside the right edge of the window in front, else its left edge, else inside its right edge, centred on the window's height. Its height follows the window between 360 and 620 DIP. Without a window, at the right of the screen, centred. Floating level, all Spaces and full-screen apps, never hidden on blur. | `src/main/shelf-window.ts`, `dockShelf` |
 | App identity | A regular app with a Dock icon and a menu bar of File, Edit, View, Window and Help. Settings can drop the Dock icon, which makes the app an accessory without its own menu bar, or drop the status-bar icon. | `src/main/app-menu.ts`, `placeIcon` |
-| Click versus drag | Under 4 DIP of movement is a click and pins | `CLICK_SLOP_DIP` |
-| Pinned crop | 480 × 300 DIP around the point | `DEFAULT_CROP_DIP` |
 | Item order | Oldest first, new items at the bottom next to the note field | `applyOp` |
 | Items in the list | One bordered card per item, with a round checkbox and a **⋯** menu. Images and drawings show a thumbnail. | `src/renderer/shelf/item-row.tsx` |
 | Item actions | A menu drawn in the shelf: Copy, Copy with Link, View and Annotate… (images), Edit, Mark as Done, Move to (listed inline, the window is too narrow for a submenu), a row of colour swatches, Delete. The **+** menu opens above the note field. | `itemMenu` in `src/shared/menus.ts`, `src/renderer/shelf/menus.tsx` |
@@ -76,7 +74,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 - Docking the shelf beside, before or inside the window in front.
 - The drawing model: undo history, arrowheads, bounds of each mark and the export trim.
 - Settings with missing, unknown or damaged values, and the settings file.
-- Selection capture against a fake clipboard, area and pin geometry, URL parsing, the IPC kit, the app, tray and item menus, colour swatches, added-file checks, export file names and drawing the pin into an exported image.
+- Selection capture against a fake clipboard, docking geometry, URL parsing, the IPC kit, the app, tray and item menus, colour swatches, added-file checks, export file names and drawing the pin into an exported image.
 
 ### Real desktop runs
 
@@ -87,7 +85,6 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 - In the note field, `Return` adds a typed note and `# Prompts` makes that section active.
 - Double Shift saves the selected text of the test app with its app and window title, and the clipboard holds the test's own text again afterwards. Right Shift works the same way.
 - Typing capitals is not taken for a double Shift. With nothing selected, double Shift toggles the shelf and adds nothing.
-- The area overlay covers the whole display from (0, 0), menu bar included. A drag keeps that area, and a click keeps a crop with the pin at its centre. `Esc` closes the overlay without adding anything.
 - Search narrows the list, and **Edit > Copy** puts the selected item on the clipboard.
 - **File > New Drawing…** opens the editor above the shelf; a stroke and `⌘↩` save it as a drawing item and close the editor.
 - **Settings…** opens above the shelf, and `⌘W` closes it while the shelf stays open.
@@ -98,7 +95,7 @@ Some things were checked by hand against a test data folder: switching the icon 
 
 Getting the suite stable took three changes to the test itself, not the app. Chromium's accessibility tree is now enabled once per launch, because setting it again rebuilds the tree. The test clicks the last matching button, which is in view. It retries reads while the tree fills in after a restart.
 
-Screenshots of the real shelf, the area overlay and the capture notice were checked by eye on the external display. The light theme and the banners were checked in a browser preview with a stubbed bridge, because the test Mac was in dark mode.
+Screenshots of the real shelf and the capture notice were checked by eye on the external display. The light theme and the banners were checked in a browser preview with a stubbed bridge, because the test Mac was in dark mode.
 
 ### Windows run
 
@@ -108,7 +105,6 @@ The packaged `win-unpacked` build ran on Windows 11 Enterprise (26100), with a S
 - Double Shift over a selection, which sends `Ctrl+Insert`: a paragraph in Chrome and a line selected in Windows Terminal were saved with their app and window title, and the clipboard came back with the same text and formats. With nothing selected the shelf showed, and a `ping -t` in Windows Terminal kept running. With the shelf hidden, the notice appeared.
 - Docking: a 7 px visible gap beside a window (Windows reports an invisible 7 px border), inside the right edge of a maximized window with 8 px at the top and right, and back beside the last window after a capture or a drawing.
 - `Ctrl+C`, `Ctrl+Z` after a delete, `Ctrl+F`, `Ctrl+1`/`Ctrl+2`, `Ctrl+Shift+C`, `Ctrl+,`, `Ctrl+W` and `Ctrl+Alt+N`. `Ctrl+R` no longer reloads the page. `Ctrl+Z` and `Ctrl+C` in a text field still act on the text, once. AltGr types `#@€`.
-- The area overlay on the primary and the lower display, taskbar included: an exact drag crop, a 480 × 300 pin crop, `Esc` and blur cancel.
 - The pin is RGB(0, 132, 209) in an image pasted into Windows, and the colour swatches show the right colours.
 - Copying a file puts a file drop list on the clipboard; it pasted into an Explorer folder. Files and images dragged out to Explorer and a PNG dropped in from Explorer.
 - Notes on files are saved. An image opened by double-click, drawn on and saved replaced the item's image, deleted the old file and kept the pin.
@@ -123,7 +119,6 @@ The packaged `win-unpacked` build ran on Windows 11 Enterprise (26100), with a S
 - **Re-granting after an update.** That an ad-hoc signed update needs the permissions again is expected from how macOS ties grants to signatures, not observed.
 - **Other source apps.** Selection capture was tested with a native AppKit text view and a Chromium page on macOS, and with Chrome and Windows Terminal on Windows. Safari, VS Code, Cursor, Terminal, Microsoft Office, the classic Windows console and password fields were not tried. Editors that copy the whole line when nothing is selected will save that line. PowerShell's line editor binds `Ctrl+Insert` to the same whole-line copy, so a typed but unsent command would be saved; this was not tried.
 - **Clipboard formats beyond text and images.** Files copied in Finder, rich text from Pages, and app-specific formats should come back through Electron's raw pasteboard types, but were not tested.
-- **Several displays.** The overlay was tested on one display. On a second display it should cover the display under the pointer, but that was not observed.
 - **Dragging an image out and pasting a copied image** into a real receiving app. The clipboard was checked; a drop into another app was not.
 - **Pasting an image into the note field, keyboard navigation in the list, undo and Clear Checked Items** in the real app. They were exercised only in a browser preview, or not at all.
 - **Browser addresses.** Reading the page address needs the Automation consent for each browser. No browser was used in the tests, so no item with an address and no Automation prompt was observed. Saved selections from ChatGPT or another web app should carry the chat's title and address, but that was not observed either.

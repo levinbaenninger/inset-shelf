@@ -14,11 +14,14 @@ import { isMac } from "@/shared/platform";
 
 const keys = shortcutLabels(isMac);
 
-/** The two ways in from another app, each with its key; the note field speaks for itself. */
+/**
+ * The ways in from another app, each with its key; the note field speaks for
+ * itself. A screenshot taken with macOS's own keys shows a card to keep it.
+ */
 const STEPS = [
   { keys: keys.doubleShift, text: "Save selected text" },
-  { keys: keys.area, text: "Capture an area" },
-] as const;
+  ...(isMac ? [{ keys: "⇧⌘4", text: "Take a screenshot" }] : []),
+];
 
 /** A first-run guide in place of an empty list. */
 export const EmptyShelf = () => (
