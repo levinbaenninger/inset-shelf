@@ -34,10 +34,18 @@ export interface ItemDrag {
   readonly draggingOut: () => boolean;
 }
 
-/** `move` gets the dragged item's id as the drag carried it, to be checked against the shelf. */
-export const useItemDrag = (
-  move: (id: string, sectionId: SectionId) => void
-): ItemDrag => {
+/**
+ * `move` gets the dragged item's id as the drag carried it, to be checked
+ * against the shelf. `canMove` tells whether a drop on a section would move
+ * anything; a section the items are already in is no target.
+ */
+export const useItemDrag = ({
+  canMove,
+  move,
+}: {
+  readonly canMove: (id: string, sectionId: SectionId) => boolean;
+  readonly move: (id: string, sectionId: SectionId) => void;
+}): ItemDrag => {
   const [draggingId, setDraggingId] = useState<ItemId | null>(null);
   const [overSectionId, setOverSectionId] = useState<SectionId | null>(null);
   const outRef = useRef<ItemId | null>(null);
@@ -98,6 +106,16 @@ export const useItemDrag = (
         }
 
         event.preventDefault();
+
+        const id = draggingId ?? outRef.current;
+
+        if (id !== null && !canMove(id, sectionId)) {
+          event.dataTransfer.dropEffect = "none";
+          setOverSectionId(null);
+
+          return;
+        }
+
         event.dataTransfer.dropEffect = event.dataTransfer.types.includes(
           ITEM_TYPE
         )
@@ -116,7 +134,7 @@ export const useItemDrag = (
 
         const id = event.dataTransfer.getData(ITEM_TYPE) || outRef.current;
 
-        if (id !== null && id !== "") {
+        if (id !== null && id !== "" && canMove(id, sectionId)) {
           move(id, sectionId);
         }
 

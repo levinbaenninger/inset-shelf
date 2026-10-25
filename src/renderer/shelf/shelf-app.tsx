@@ -306,13 +306,30 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }
   };
 
-  // A card dropped on a section moves there, to its end; a picked card takes the other picks along.
-  const drag = useItemDrag((id, sectionId) => {
-    const moved = doc.items.find((item) => item.id === id);
+  /** A picked card takes the other picks along. */
+  const carriedWith = (id: ItemId): readonly ItemId[] =>
+    picked.includes(id) ? picked : [id];
 
-    if (moved !== undefined) {
-      moveItems(picked.includes(moved.id) ? picked : [moved.id], sectionId);
-    }
+  // A card dropped on a section moves there, to its end.
+  const drag = useItemDrag({
+    canMove: (id, sectionId) => {
+      const dragged = doc.items.find((item) => item.id === id);
+
+      return (
+        dragged !== undefined &&
+        carriedWith(dragged.id).some(
+          (other) =>
+            doc.items.find((item) => item.id === other)?.sectionId !== sectionId
+        )
+      );
+    },
+    move: (id, sectionId) => {
+      const moved = doc.items.find((item) => item.id === id);
+
+      if (moved !== undefined) {
+        moveItems(carriedWith(moved.id), sectionId);
+      }
+    },
   });
 
   const dropping = useFileDrops(drag.draggingOut);
