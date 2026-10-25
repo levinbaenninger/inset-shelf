@@ -37,6 +37,7 @@ import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
 import { EmptyShelf } from "./empty-shelf";
 import { ItemRow } from "./item-row";
+import { Markdown } from "./markdown";
 import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
 import { PointerMenu, ShelfMenu } from "./menus";
@@ -101,8 +102,6 @@ const HeaderButton = ({
   </Tooltip>
 );
 
-const EXCERPT_MAX = 80;
-
 /** How long a confirmation toast stays: long enough to read, short enough to forget. */
 const NOTICE_MS = 1800;
 
@@ -110,14 +109,20 @@ const noticeToast = (message: string): void => {
   toast.success(message, { duration: NOTICE_MS });
 };
 
-/** An item's words on one line, shortened, for a toast. */
-const excerpt = (item: ShelfItem): string => {
-  const line = itemText(item).replaceAll(/\s+/gu, " ").trim();
+const ignoreLink = (): void => undefined;
 
-  return line.length > EXCERPT_MAX
-    ? `${line.slice(0, EXCERPT_MAX - 1)}…`
-    : line;
-};
+/** An item's words for a toast: a note formatted as on its card, cut to two lines. */
+const Excerpt = ({ item }: { readonly item: ShelfItem }) =>
+  item.kind === "text" ? (
+    <Markdown
+      className="line-clamp-2 break-words"
+      interactive={false}
+      onOpenLink={ignoreLink}
+      text={item.text}
+    />
+  ) : (
+    <span className="line-clamp-2 break-words">{itemText(item)}</span>
+  );
 
 const deletedToast = (id: ItemId): string => `deleted-${id}`;
 
@@ -474,7 +479,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           restore(id);
         },
       },
-      description: item === undefined ? undefined : excerpt(item),
+      description: item === undefined ? undefined : <Excerpt item={item} />,
       duration: UNDO_VISIBLE_MS,
       id: deletedToast(id),
       onAutoClose: () => {
