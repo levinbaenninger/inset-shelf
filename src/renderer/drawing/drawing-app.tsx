@@ -11,14 +11,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
-import { cn } from "@/lib/utils";
 import { drawingBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
 import { PinMarker } from "@/shared/pin-marker";
-import { isMac } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";
+import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 import { Page } from "./page";
 import type { PageImage } from "./page";
@@ -34,7 +31,7 @@ import {
 } from "./sketch";
 import type { Color, History, Mark, Stroke, Tool } from "./sketch";
 import { Toolbar } from "./toolbar";
-import { SAVE_KEYS, useDark, useDrawingKeys } from "./use-drawing-keys";
+import { useDark, useDrawingKeys } from "./use-drawing-keys";
 
 const api = drawingBridge();
 
@@ -210,18 +207,12 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
 
   return (
     <main className="bg-background flex h-svh flex-col overflow-hidden select-none">
-      <header
-        className={cn(
-          "drag-region caption-clear relative flex h-12 shrink-0 items-center justify-end gap-1.5 border-b",
-          // The window's buttons sit in this header: the traffic lights at its left on macOS, the caption buttons at its right on Windows.
-          isMac ? "pl-20" : "pl-3"
-        )}
-      >
-        {/* The window's title, centred like a Mac window's; a problem saving takes its place. */}
+      {/* A problem saving takes the title's place; saving itself is in the toolbar. */}
+      <WindowHeader>
         {problem === null ? (
-          <h1 className="pointer-events-none absolute inset-x-0 text-center text-sm font-medium">
+          <WindowTitle>
             {image === null ? "New Drawing" : "Annotate"}
-          </h1>
+          </WindowTitle>
         ) : (
           <p
             className="text-destructive mr-auto min-w-0 truncate text-xs"
@@ -230,27 +221,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
             {problem}
           </p>
         )}
-        <Button
-          disabled={empty || saving}
-          onClick={() => {
-            void save(true, marks);
-          }}
-          size="sm"
-          variant="secondary"
-        >
-          Copy and Save
-        </Button>
-        <Button
-          disabled={empty || saving}
-          onClick={() => {
-            void save(false, marks);
-          }}
-          size="sm"
-        >
-          Save
-          <Kbd>{SAVE_KEYS}</Kbd>
-        </Button>
-      </header>
+      </WindowHeader>
       <div className="relative min-h-0 flex-1">
         <Page
           color={color}
@@ -272,6 +243,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           <Toolbar
             canClear={!empty}
             canRedo={canRedo(history)}
+            canSave={!empty && !saving}
             canUndo={canUndo(history)}
             color={color}
             dark={dark}
@@ -279,8 +251,14 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
               setHistory(clearMarks(history));
             }}
             onColor={setColor}
+            onCopyAndSave={() => {
+              void save(true, marks);
+            }}
             onRedo={() => {
               setHistory(redo(history));
+            }}
+            onSave={() => {
+              void save(false, marks);
             }}
             onStroke={setStroke}
             onTool={setTool}

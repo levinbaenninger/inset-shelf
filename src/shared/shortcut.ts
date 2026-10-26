@@ -28,7 +28,7 @@ const MAC_KEYS = new Map([
 ]);
 
 const OTHER_KEYS = new Map([
-  ["Backspace", "Delete"],
+  ["Backspace", "Del"],
   ["CommandOrControl", "Ctrl"],
   ["Control", "Ctrl"],
 ]);

@@ -48,6 +48,7 @@ const setup = (results: WriteResult[] = []) => {
       };
     },
     status: {
+      floatOnTop: true,
       keys: "granted",
       problem: null,
       saveError: null,

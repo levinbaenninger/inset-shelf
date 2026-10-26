@@ -985,3 +985,19 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
     text: lines.join("\n"),
   };
 };
+
+/**
+ * A list's HTML with a picture after it, inside the HTML itself: apps that
+ * paste formatting (Teams, Outlook) then show both. A separate image file
+ * would not help, since apps that take files (T3 Code) take it in place of
+ * the words.
+ */
+export const listHtmlWithImage = (
+  html: string,
+  image: {
+    readonly base64: string;
+    readonly width: number;
+    readonly alt: string;
+  }
+): string =>
+  `${html}<p><img src="data:image/png;base64,${image.base64}" width="${Math.round(image.width)}" alt="${escapeHtml(image.alt)}"></p>`;

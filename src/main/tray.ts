@@ -68,9 +68,10 @@ export const createTray = (options: TrayOptions): ShelfTray => {
   refresh();
   nativeTheme.on("updated", updateIcon);
 
+  // On Windows a click on a notification-area icon opens its app; the menu is on a right-click.
   if (process.platform === "win32") {
     tray.on("click", () => {
-      tray.popUpContextMenu();
+      options.run("toggleShelf");
     });
   }
 

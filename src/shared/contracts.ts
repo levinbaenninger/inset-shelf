@@ -17,6 +17,8 @@ export interface ShelfStatus {
   readonly saveError: string | null;
   /** A capture or paste could not be completed. */
   readonly problem: string | null;
+  /** The shelf floats above other windows; Window › Float on Top, or the shelf's ⋯ on Windows. */
+  readonly floatOnTop: boolean;
 }
 
 export interface ShelfView {
@@ -92,6 +94,8 @@ export const shelfContract = defineContract({
     /** Copy and Undo inside a text field, done by the window's own edit commands. */
     nativeEdit: send(z.enum(["copy", "undo", "redo", "selectAll"])),
     newDrawing: send(z.void()),
+    /** The README, in the browser; Help › Inset Shelf Help. */
+    openHelp: send(z.void()),
     /** Shows an image large in the drawing window, to look at or draw on. */
     openImage: send(ItemIdSchema),
     openKeySettings: send(z.void()),
@@ -103,6 +107,8 @@ export const shelfContract = defineContract({
       z.object({ id: ItemIdSchema, url: z.string().max(2000).optional() })
     ),
     openSettings: send(z.void()),
+    /** Window › Float on Top. */
+    setFloatOnTop: send(z.boolean()),
     pasteImage: invoke(
       z
         .instanceof(Uint8Array)

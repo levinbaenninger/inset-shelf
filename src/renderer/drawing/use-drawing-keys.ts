@@ -28,7 +28,7 @@ export const UNDO_KEYS = isMac ? "⌘Z" : "Ctrl+Z";
 
 export const REDO_KEYS = isMac ? "⇧⌘Z" : "Ctrl+Y";
 
-export const SAVE_KEYS = isMac ? "⌘↩" : "Ctrl+↩";
+export const SAVE_KEYS = isMac ? "⌘↩" : "Ctrl+Enter";
 
 const isTextField = (target: EventTarget | null): boolean =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;

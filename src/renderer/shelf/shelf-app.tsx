@@ -78,6 +78,44 @@ const reveal = (id: ItemId): void => {
   });
 };
 
+/** The menu choices main carries out alone: Settings, and where there is no menu bar, Float on Top and Help. */
+type MainChoice = Extract<
+  MenuChoice,
+  { readonly kind: "openSettings" | "setFloatOnTop" | "openHelp" }
+>;
+
+const MAIN_CHOICES = new Set<MenuChoice["kind"]>([
+  "openHelp",
+  "openSettings",
+  "setFloatOnTop",
+]);
+
+const isMainChoice = (choice: MenuChoice): choice is MainChoice =>
+  MAIN_CHOICES.has(choice.kind);
+
+const chooseInMain = (choice: MainChoice): void => {
+  switch (choice.kind) {
+    case "openSettings": {
+      api.openSettings();
+      break;
+    }
+
+    case "setFloatOnTop": {
+      api.setFloatOnTop(choice.on);
+      break;
+    }
+
+    case "openHelp": {
+      api.openHelp();
+      break;
+    }
+
+    default: {
+      break;
+    }
+  }
+};
+
 /** A text field, or a text selection anywhere, keeps the normal Copy and Undo. */
 const inTextContext = (): boolean =>
   isTextField(document.activeElement) ||
@@ -669,6 +707,12 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   };
 
   const choose = (choice: MenuChoice): void => {
+    if (isMainChoice(choice)) {
+      chooseInMain(choice);
+
+      return;
+    }
+
     switch (choice.kind) {
       case "selectSection": {
         apply({ id: choice.id, type: "selectSection" });
@@ -692,11 +736,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
       case "newSection": {
         setNamingSection(true);
-        break;
-      }
-
-      case "openSettings": {
-        api.openSettings();
         break;
       }
 
@@ -1039,7 +1078,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             </InputGroupAddon>
           )}
         </InputGroup>
-        <ShelfMenu onChoose={choose}>
+        <ShelfMenu floatOnTop={status.floatOnTop} onChoose={choose}>
           <HeaderButton icon={MoreHorizontalIcon} label="More" />
         </ShelfMenu>
         <HeaderButton
@@ -1237,6 +1276,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       </div>
       <PointerMenu
         doc={doc}
+        floatOnTop={status.floatOnTop}
         menu={openMenu}
         onChoose={choose}
         onClose={() => {

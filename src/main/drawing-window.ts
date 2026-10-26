@@ -1,26 +1,17 @@
 import type { DrawingImage, DrawingView } from "@shared/contracts";
-import { rect, size, viewerWindowSize } from "@shared/geometry";
+import { rect, size, VIEWER_MIN, viewerWindowSize } from "@shared/geometry";
 import { app, BrowserWindow, nativeTheme, screen } from "electron";
 import type { WebContents } from "electron";
 
-import {
-  captionButtons,
-  followThemeInCaption,
-  isWindows,
-} from "./caption-buttons";
+import { followThemeInCaption, headerChrome } from "./caption-buttons";
 import { hideWindow } from "./hide-window";
+import { keepOnTop } from "./keep-on-top";
 import { harden, secureWebPreferences } from "./window-security";
 
 const WIDTH = 760;
 const HEIGHT = 560;
 
 const isMac = process.platform === "darwin";
-
-/** The page's header, which holds Save and, on macOS and Windows, the window's buttons. */
-const HEADER_DIP = 48;
-
-/** The caption buttons stop above the header's 1 px bottom border, which stays visible. */
-const CAPTION_DIP = HEADER_DIP - 1;
 
 export interface DrawingWindow {
   readonly webContents: WebContents;
@@ -62,15 +53,13 @@ export const createDrawingWindow = (options: {
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
     fullscreenable: false,
     height: HEIGHT,
-    minHeight: 360,
-    minWidth: 480,
+    minHeight: VIEWER_MIN.height,
+    // The toolbar, with Save at its end, needs this much.
+    minWidth: VIEWER_MIN.width,
     show: false,
     title: "New Drawing",
-    // The page's own header holds the window's buttons: the traffic lights,
-    // centred in its 48 points, or the Windows caption buttons at its right.
-    titleBarStyle: isMac || isWindows ? "hidden" : "default",
-    ...captionButtons(CAPTION_DIP),
-    trafficLightPosition: { x: 18, y: 18 },
+    // The page's own header holds the window's buttons, as in Settings.
+    ...headerChrome(),
     useContentSize: true,
     webPreferences: secureWebPreferences(options.preload),
     width: WIDTH,
@@ -82,8 +71,9 @@ export const createDrawingWindow = (options: {
   };
 
   raise();
+  keepOnTop(window, { raise, wanted: () => true });
   harden(window.webContents, "drawing");
-  followThemeInCaption(window, CAPTION_DIP);
+  followThemeInCaption(window);
 
   window.on("close", (event) => {
     if (closable) {

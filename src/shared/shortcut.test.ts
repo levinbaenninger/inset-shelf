@@ -18,7 +18,7 @@ describe(keyText, () => {
   });
 
   it("names plain keys elsewhere", () => {
-    expect(keyText("Backspace", false)).toBe("Delete");
+    expect(keyText("Backspace", false)).toBe("Del");
     expect(keyText("Space", false)).toBe("Space");
   });
 });

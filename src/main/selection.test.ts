@@ -8,10 +8,12 @@ type Snapshot = readonly Record<string, Blob>[];
 const fakeClipboard = (
   initial: string,
   copied: string | null,
-  copiedHtml = ""
+  copiedHtml = "",
+  copiedSource = ""
 ) => {
   let content = initial;
   let html = "";
+  let source = "";
   const restoredWith: Snapshot[] = [];
   const snapshot: Snapshot = [{ "text/plain": new Blob([initial]) }];
 
@@ -19,19 +21,23 @@ const fakeClipboard = (
     clear: () => {
       content = "";
       html = "";
+      source = "";
     },
     copy: () => {
       if (copied !== null) {
         content = copied;
         html = copiedHtml;
+        source = copiedSource;
       }
     },
     readHtml: async () => await Promise.resolve(html),
+    readSource: async () => await Promise.resolve(source),
     readText: async () => await Promise.resolve(content),
     restore: async (saved) => {
       restoredWith.push(saved);
       content = initial;
       html = "";
+      source = "";
       await Promise.resolve();
     },
     snapshot: async () => await Promise.resolve(snapshot),
@@ -51,6 +57,7 @@ describe(captureSelection, () => {
       html: null,
       kind: "text",
       restored: true,
+      source: null,
       text: "Total ignores the discount",
     });
     expect(clip.restoredWith).toStrictEqual([clip.snapshot]);
@@ -78,6 +85,20 @@ describe(captureSelection, () => {
       html: '<a href="https://github.com/a/b/pull/1">See the PR</a>',
       text: "See the PR",
     });
+  });
+
+  it("keeps the page the browser noted it copied from", async () => {
+    const clip = fakeClipboard(
+      "earlier",
+      "See the PR",
+      "",
+      "https://github.com/a/b/pull/1"
+    );
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      source: "https://github.com/a/b/pull/1",
+    });
+    expect(clip.content()).toBe("earlier");
   });
 
   it("keeps Windows line breaks as plain line feeds", async () => {

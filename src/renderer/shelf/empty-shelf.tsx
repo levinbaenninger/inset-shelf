@@ -10,17 +10,25 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Kbd } from "@/components/ui/kbd";
-import { isMac } from "@/shared/platform";
+import { isMac, isWindows } from "@/shared/platform";
 
 const keys = shortcutLabels(isMac);
 
-/**
- * The ways in from another app, each with its key; the note field speaks for
- * itself. A screenshot taken with macOS's own keys shows a card to keep it.
- */
+/** The system's own screenshot keys; a screenshot taken with them shows a card to keep it. */
+const screenshotKeys = (): string | null => {
+  if (isMac) {
+    return "⇧⌘4";
+  }
+
+  return isWindows ? "Win+Shift+S" : null;
+};
+
+const shot = screenshotKeys();
+
+/** The ways in from another app, each with its key; the note field speaks for itself. */
 const STEPS = [
   { keys: keys.doubleShift, text: "Save selected text" },
-  ...(isMac ? [{ keys: "⇧⌘4", text: "Take a screenshot" }] : []),
+  ...(shot === null ? [] : [{ keys: shot, text: "Take a screenshot" }]),
 ];
 
 /** A first-run guide in place of an empty list. */

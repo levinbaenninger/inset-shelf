@@ -292,9 +292,12 @@
 /*
  * The shelf on Windows: the window is transparent and the page draws the
  * panel, rounded so its corners run parallel to the fields 8 px inside it.
- * Outside any layer, so it wins over the panel's macOS rounding.
+ * Outside any layer, so it wins over the panel's macOS rounding. The
+ * screenshot card's window is transparent too, around its rounded card,
+ * and stays so between cards.
  */
-[data-platform="windows"] body:has(.shelf-panel) {
+[data-platform="windows"] body:has(.shelf-panel),
+[data-platform="windows"] body.screenshot-page {
   background: transparent;
 }
 

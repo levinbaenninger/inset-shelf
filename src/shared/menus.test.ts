@@ -65,6 +65,23 @@ describe(shelfMenu, () => {
       "Settings",
     ]);
   });
+
+  it("holds Float on Top and Help where there is no menu bar", () => {
+    const entries = shelfMenu({ floatOnTop: true });
+
+    expect(labels(entries)).toStrictEqual([
+      "New Section",
+      "---",
+      "Float on Top",
+      "---",
+      "Settings",
+      "Inset Shelf Help",
+    ]);
+    expect(entries[2]).toMatchObject({
+      checked: true,
+      choice: { kind: "setFloatOnTop", on: false },
+    });
+  });
 });
 
 describe(sectionMenu, () => {
@@ -178,6 +195,45 @@ describe(itemMenu, () => {
       label: "Open Page",
     });
     expect(from("Zen", null)).toBeUndefined();
+  });
+
+  it("offers a desktop app elsewhere than macOS only with a link to open at", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const label = (
+      app: string,
+      url: string | null,
+      appLink: string | null = null
+    ) =>
+      itemMenu(
+        { ...item, context: { app, appLink, title: "Chat", url } },
+        doc,
+        false
+      ).find(
+        (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
+      );
+
+    expect(label("Slack", null)).toBeUndefined();
+    expect(label("Slack", "https://acme.slack.com/archives/C1")).toMatchObject({
+      label: "Open Page",
+    });
+    expect(
+      label(
+        "Claude",
+        "https://claude.ai/chat/3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b01"
+      )
+    ).toMatchObject({ label: "Open in Claude" });
+    expect(
+      label(
+        "T3 Code",
+        null,
+        "t3code://threads/local/3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b01"
+      )
+    ).toMatchObject({ label: "Open in T3 Code" });
   });
 });
 

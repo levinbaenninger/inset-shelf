@@ -1,3 +1,5 @@
+import { withoutAppName } from "./window-title";
+
 /** A link inside copied text: the words it was on and where it points. */
 export interface PageLink {
   readonly text: string;
@@ -196,6 +198,36 @@ export const desktopLink = (
   return notion === undefined ? null : `notion://www.notion.so/${notion.rest}`;
 };
 
+interface AppSource {
+  readonly app: string | null;
+  readonly appLink: string | null;
+  readonly url: string | null;
+}
+
+/**
+ * The desktop app an item opens in again, or null when its page opens in the
+ * browser instead. macOS brings any of these apps forward by name; elsewhere
+ * an app needs a link to open at: a Claude chat, a Notion page, a T3 Code
+ * thread.
+ */
+export const openingApp = (
+  source: AppSource | null,
+  anyApp: boolean
+): string | null => {
+  const app = desktopApp(source?.app ?? null);
+
+  if (app === null || anyApp) {
+    return app;
+  }
+
+  const stored = source?.appLink ?? null;
+
+  return (stored !== null && isAppLink(stored)) ||
+    desktopLink(app, source?.url ?? null) !== null
+    ? app
+    : null;
+};
+
 export interface SourceLabel {
   /** A site the shelf knows, shown with its mark. */
   readonly service: Service | null;
@@ -391,9 +423,13 @@ const fromTitle = (app: string | null, title: string | null): SourceLabel => {
 /**
  * Where an item came from, in a few words: the site and what on it for pages
  * the shelf knows (GitHub, ChatGPT, Claude, X, YouTube), else the site or app
- * and the window's title.
+ * and the window's title, without the app's name Windows adds to it.
  */
-export const sourceLabel = (source: SourceParts): SourceLabel =>
-  source.url === null || webUrl(source.url) === null
-    ? fromTitle(source.app, source.title)
-    : fromUrl(source.url, source.title);
+export const sourceLabel = (source: SourceParts): SourceLabel => {
+  const title =
+    source.title === null ? null : withoutAppName(source.title, source.app);
+
+  return source.url === null || webUrl(source.url) === null
+    ? fromTitle(source.app, title)
+    : fromUrl(source.url, title);
+};

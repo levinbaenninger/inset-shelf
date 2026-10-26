@@ -9,6 +9,7 @@ import { app, BrowserWindow, screen } from "electron";
 import type { Rectangle, WebContents } from "electron";
 
 import { hideWindow } from "./hide-window";
+import { keepOnTop } from "./keep-on-top";
 import { harden, secureWebPreferences } from "./window-security";
 
 const MIN_WIDTH = 300;
@@ -75,6 +76,7 @@ const placement = (target: Rect<"screen"> | null): Rectangle => {
  */
 export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
   let closable = false;
+  let floating = true;
   let onShown: (bounds: Rectangle) => void = ignore;
   let onHidden: () => void = ignore;
 
@@ -103,6 +105,7 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
   };
 
   raise();
+  keepOnTop(window, { raise, wanted: () => floating });
   window.setVisibleOnAllWorkspaces(true, {
     skipTransformProcessType: true,
     visibleOnFullScreen: true,
@@ -158,6 +161,7 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
       onShown = listener;
     },
     setFloatOnTop: (on) => {
+      floating = on;
       window.setAlwaysOnTop(on, "floating");
     },
     show: (target) => {

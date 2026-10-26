@@ -6,6 +6,8 @@ export interface SelectionDeps<S> {
   readonly readText: () => Promise<string>;
   /** The HTML the app copied next to the text, or "" when it copied none. */
   readonly readHtml: () => Promise<string>;
+  /** The address of the page the text was copied from, as browsers note it beside the text, or "". */
+  readonly readSource: () => Promise<string>;
   /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
   readonly wait: (ms: number) => Promise<void>;
@@ -20,6 +22,8 @@ export type SelectionResult =
       readonly text: string;
       /** Null when the app put no HTML on the clipboard. */
       readonly html: string | null;
+      /** Null when the app noted no page. */
+      readonly source: string | null;
       readonly restored: boolean;
     }
   | { readonly kind: "none"; readonly restored: boolean };
@@ -54,6 +58,7 @@ export const captureSelection = async <S>(
   const text = await pollText(deps, POLL_LIMIT);
   // Read with the text, before the clipboard goes back to what it held.
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
+  const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
   let restored = true;
 
@@ -70,6 +75,7 @@ export const captureSelection = async <S>(
         html: html.trim() === "" ? null : html,
         kind: "text",
         restored,
+        source: source.trim() === "" ? null : source.trim(),
         text: text.replaceAll("\r\n", "\n"),
       };
 };
