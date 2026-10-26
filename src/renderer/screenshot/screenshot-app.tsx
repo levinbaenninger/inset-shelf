@@ -58,8 +58,8 @@ const CornerButton = ({
 );
 
 /**
- * A new screenshot beside the shelf, after Copper's: on hover the picture
- * dims behind its actions. Dragged, it drops into another app as a file.
+ * A screenshot card beside the shelf. On hover the picture dims behind its
+ * actions. Dragging it into another app drops it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { seq } = view;

@@ -722,7 +722,7 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /** Items as one numbered list, with the first image (pin drawn in) beside the words, as Copper does. */
+  /** Items as one numbered list, with the first image (pin drawn in) beside the words. */
   const copyList = async (ids: readonly ItemId[]): Promise<ActionResult> => {
     screenshots.ignoreClipboard();
 

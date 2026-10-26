@@ -10,8 +10,6 @@ Inset Shelf is a regular app with a Dock icon, a menu bar and a status-bar icon.
 - **File > New Drawing…** opens a drawing window whose result is saved as an image item.
 - **Settings…** sets Open at Login, where the app's icon shows, and whether copying an item checks it off.
 
-The idea follows [Copper](https://shadcn.com/copper) by shadcn. Copper's public page and settings, shadcn's posts about it on X, and Stash, a community re-creation built from Copper's demos, were the references. They describe double Shift for selections, a prompt queue that is copied with `⌘C` and checked off, `# Name` sections in one grouped list, search, colour tags, Copy as List, attachments, drawings, local storage and focus returning to the last app when the window hides. Inset Shelf adds the source of each item. One video shadcn posted on X could not be opened, so it was not used.
-
 ## Architecture in brief
 
 - The main process owns the shelf document. The window sends validated operations, and a pure function, `applyOp` in `src/shared/shelf.ts`, applies them. The same function is unit-tested.
@@ -133,4 +131,3 @@ The packaged `win-unpacked` build ran on Windows 11 Enterprise (26100), with a S
 - **Several permissions on macOS.** A session needs Accessibility and Screen Recording granted before it starts, plus Automation for each browser whose addresses should be kept. An updated build may need them again.
 - **Synthetic copy.** Double Shift works by pressing `⌘C` (`Ctrl+Insert` on Windows) for the user. That is visible to clipboard history tools, and in some editors a missing selection saves the current line.
 - **Partial source identity.** An item records the app, window title and page address only when the matching permission is granted. Without Screen Recording there is no title, and without Accessibility and Automation there is no address. Native apps give no document path.
-- **Not built.** Copper's multi-select with Merge Notes, Edit in New Window, Expand, custom shortcuts and Markdown rendering were left out of this prototype.
