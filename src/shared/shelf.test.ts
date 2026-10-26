@@ -4,6 +4,7 @@ import {
   applyOp,
   groupItems,
   itemsAsList,
+  listHtmlWithImage,
   itemTextWithLink,
   parseShelfDocument,
   emptyShelf,
@@ -690,6 +691,20 @@ describe(itemsAsList, () => {
     expect(itemsAsList(marked.items).count).toBe(3);
     expect(itemTextWithLink(marked.items[0] ?? last)).toBe(
       "Trial needs a card\nhttps://example.com/pricing"
+    );
+  });
+});
+
+describe(listHtmlWithImage, () => {
+  it("puts the picture after the list, in the HTML", () => {
+    expect(
+      listHtmlWithImage("<ol><li>Fix the &lt;nav&gt;</li></ol>", {
+        alt: 'The "nav" bar',
+        base64: "iVBORw0KGgo=",
+        width: 480.4,
+      })
+    ).toBe(
+      '<ol><li>Fix the &lt;nav&gt;</li></ol><p><img src="data:image/png;base64,iVBORw0KGgo=" width="480" alt="The &quot;nav&quot; bar"></p>'
     );
   });
 });

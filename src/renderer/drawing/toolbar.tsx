@@ -1,12 +1,14 @@
 import {
   ArrowUpRight01Icon,
   CircleIcon,
+  Copy01Icon,
   Delete02Icon,
   SlashIcon,
   PencilIcon,
   Redo02Icon,
   SquareIcon,
   TextIcon,
+  Tick02Icon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -23,7 +25,7 @@ import {
 import { inkColor } from "./render";
 import { COLORS, TOOLS } from "./sketch";
 import type { Color, Stroke, Tool } from "./sketch";
-import { REDO_KEYS, TOOL_KEYS, UNDO_KEYS } from "./use-drawing-keys";
+import { REDO_KEYS, SAVE_KEYS, TOOL_KEYS, UNDO_KEYS } from "./use-drawing-keys";
 
 const TOOL_LABEL: Readonly<Record<Tool, string>> = {
   arrow: "Arrow",
@@ -59,12 +61,16 @@ export interface ToolbarProps {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly canClear: boolean;
+  /** There is something to save, and no save is under way. */
+  readonly canSave: boolean;
   readonly onTool: (tool: Tool) => void;
   readonly onColor: (color: Color) => void;
   readonly onStroke: (stroke: Stroke) => void;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onClear: () => void;
+  readonly onSave: () => void;
+  readonly onCopyAndSave: () => void;
 }
 
 const Tip = ({
@@ -87,16 +93,19 @@ const Tip = ({
 
 const Divider = () => <div aria-hidden className="bg-border mx-1 h-5 w-px" />;
 
-/** The floating pill under the page: tools, inks, stroke, and history. */
+/** The floating pill under the page: tools, inks, stroke, history, and saving to the shelf. */
 export const Toolbar = ({
   canClear,
   canRedo,
+  canSave,
   canUndo,
   color,
   dark,
   onClear,
   onColor,
+  onCopyAndSave,
   onRedo,
+  onSave,
   onStroke,
   onTool,
   onUndo,
@@ -187,6 +196,28 @@ export const Toolbar = ({
         variant="ghost"
       >
         <HugeiconsIcon icon={Delete02Icon} />
+      </Button>
+    </Tip>
+    <Divider />
+    <Tip label="Copy and Save">
+      <Button
+        aria-label="Copy and Save"
+        disabled={!canSave}
+        onClick={onCopyAndSave}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <HugeiconsIcon icon={Copy01Icon} />
+      </Button>
+    </Tip>
+    <Tip keys={SAVE_KEYS} label="Save">
+      <Button
+        aria-label="Save"
+        disabled={!canSave}
+        onClick={onSave}
+        size="icon-sm"
+      >
+        <HugeiconsIcon icon={Tick02Icon} />
       </Button>
     </Tip>
   </div>

@@ -93,6 +93,36 @@ describe(sourceLabel, () => {
     });
   });
 
+  it("reads a Windows browser's title without the browser's name", () => {
+    expect(
+      page(
+        null,
+        "feat: Inset Shelf prototype by levinbaenninger · Pull Request #1 · levinbaenninger/inset-shelf - Google Chrome",
+        "Google Chrome"
+      )
+    ).toStrictEqual({
+      label: "GitHub · levinbaenninger/inset-shelf #1",
+      service: "github",
+    });
+    expect(
+      page(
+        "https://chatgpt.com/c/123",
+        "Plakat mit PDF-Daten - ChatGPT — Mozilla Firefox",
+        "Firefox"
+      )
+    ).toStrictEqual({
+      label: "ChatGPT · Plakat mit PDF-Daten",
+      service: "chatgpt",
+    });
+    expect(
+      page(
+        "https://example.com/",
+        "Example Domain - Google Chrome",
+        "Google Chrome"
+      )
+    ).toStrictEqual({ label: "example.com · Example Domain", service: null });
+  });
+
   it("names a post on X by its author", () => {
     expect(
       page("https://x.com/example/status/123", 'example on X: "A new note" / X')

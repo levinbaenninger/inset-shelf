@@ -143,11 +143,11 @@ export const intersects = (a: Rect<"screen">, b: Rect<"screen">): boolean =>
 /** Room around an image on the drawing page; the bottom leaves space for the toolbar. */
 export const VIEWER_MARGIN = { bottom: 76, side: 24, top: 24 } as const;
 
-/** The drawing window's header with Save, above the page. */
-export const VIEWER_HEADER_DIP = 48;
+/** The header of Inset's titled windows, the drawing window's and Settings', with the title and the window's buttons. */
+export const WINDOW_HEADER_DIP = 48;
 
 /** The smallest drawing window, which still fits the toolbar. */
-export const VIEWER_MIN = { height: 360, width: 560 } as const;
+export const VIEWER_MIN = { height: 360, width: 600 } as const;
 
 /** Where an image sits on the drawing page: centred, as large as fits, never above its own size. */
 export const viewerImageRect = (
@@ -183,7 +183,7 @@ export const viewerWindowSize = (
   height: Math.round(
     clamp(
       image.height +
-        VIEWER_HEADER_DIP +
+        WINDOW_HEADER_DIP +
         VIEWER_MARGIN.top +
         VIEWER_MARGIN.bottom,
       Math.min(VIEWER_MIN.height, workArea.height),

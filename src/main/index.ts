@@ -20,10 +20,11 @@ import {
   SectionIdSchema,
   itemsAsList,
   itemTextWithLink,
+  listHtmlWithImage,
 } from "@shared/shelf";
 import type { ItemContext, ItemId, MainOp, ShelfItem } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
-import { desktopApp, desktopLink, isAppLink } from "@shared/web-source";
+import { desktopLink, isAppLink, openingApp } from "@shared/web-source";
 import {
   app,
   BrowserWindow,
@@ -44,6 +45,7 @@ import type { NativeImage } from "electron";
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { chatGptThreadLink } from "./codex-threads";
+import { copySource } from "./copy-source";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
@@ -89,6 +91,10 @@ const MAC_FILE_URL =
 const TOAST_EXCERPT = 80;
 
 const isMac = process.platform === "darwin";
+
+const openHelp = (): void => {
+  void shell.openExternal(HELP_URL);
+};
 
 const delay = async (ms: number): Promise<void> => {
   await sleep(ms);
@@ -180,7 +186,7 @@ const restoreClipboard = async (saved: ClipboardSnapshot): Promise<void> => {
   await clipboard.write(saved.map((data) => new ClipboardItem(data)));
 };
 
-/** Opens the chat or page an item came from in its desktop app, else just brings the app forward. */
+/** Opens the chat or page an item came from in its desktop app, else (macOS only) just brings the app forward. */
 const openInApp = async (
   name: string,
   context: ItemContext | null
@@ -194,10 +200,10 @@ const openInApp = async (
       ? await chatGptThreadLink(context?.title ?? null)
       : null);
 
-  if (link === null) {
-    openApp(name);
-  } else {
+  if (link !== null) {
     await shell.openExternal(link);
+  } else if (isMac) {
+    openApp(name);
   }
 };
 
@@ -232,9 +238,15 @@ const itemAddresses = (
 
 const pad = (value: number): string => String(value).padStart(2, "0");
 
-/** Named like macOS names its own: "Screenshot 2026-10-23 at 21.03.46.png". */
-const screenshotFileName = (when: Date): string =>
-  `Screenshot ${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} at ${pad(when.getHours())}.${pad(when.getMinutes())}.${pad(when.getSeconds())}.png`;
+/** Named like the system names its own: "Screenshot 2026-10-23 at 21.03.46.png" on macOS, "Screenshot 2026-10-23 210346.png" on Windows. */
+const screenshotFileName = (when: Date): string => {
+  const day = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
+  const time = [when.getHours(), when.getMinutes(), when.getSeconds()].map(pad);
+
+  return isMac
+    ? `Screenshot ${day} at ${time.join(".")}.png`
+    : `Screenshot ${day} ${time.join("")}.png`;
+};
 
 /** A path in the folder that no file has yet: " 2", " 3"… before the extension when the name is taken. */
 const freePath = async (folder: string, name: string): Promise<string> => {
@@ -303,6 +315,7 @@ const start = async (): Promise<void> => {
       };
     },
     status: {
+      floatOnTop: true,
       keys: keyPermission(true, trusted()),
       problem: store.recovered,
       saveError: null,
@@ -333,7 +346,16 @@ const start = async (): Promise<void> => {
    * After a capture or a drawing, Inset's own window is in front: the shelf
    * goes back beside the window it was docked to.
    */
-  const showShelf = async (): Promise<void> => {
+  const showShelf = async (
+    options: { readonly dock?: boolean } = {}
+  ): Promise<void> => {
+    // From the notification area, the window in front is a part of the taskbar.
+    if (options.dock === false) {
+      shelf.show(null);
+
+      return;
+    }
+
     const front = await frontWindow();
 
     if (front.bounds !== null) {
@@ -478,16 +500,14 @@ const start = async (): Promise<void> => {
     capturingSelection = true;
 
     try {
-      // Sampled alongside the copy, while the app with the selection is in front.
-      const front = frontWindow({ page: true });
-
-      const result = await captureSelection({
+      const capture = captureSelection({
         clear: () => {
           screenshots.ignoreClipboard();
           clipboard.clear();
         },
         copy: keyMonitor.copy,
         readHtml: readClipboardHtml,
+        readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),
         restore: async (saved) => {
           screenshots.ignoreClipboard();
@@ -496,6 +516,21 @@ const start = async (): Promise<void> => {
         snapshot: snapshotClipboard,
         wait: delay,
       });
+
+      const copiedFrom = async (): Promise<string | null> => {
+        try {
+          const copied = await capture;
+
+          return copied.kind === "text" ? copied.source : null;
+        } catch {
+          return null;
+        }
+      };
+
+      // Sampled alongside the copy, while the app with the selection is in front.
+      const front = frontWindow({ copiedFrom: copiedFrom(), page: true });
+
+      const result = await capture;
 
       e2eLog("selection", {
         restored: result.restored,
@@ -722,7 +757,11 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /** Items as one numbered list, with the first image (pin drawn in) beside the words. */
+  /**
+   * Items as one numbered list, with the first image (pin drawn in) in its
+   * HTML, so apps that paste formatting show the picture with the words and
+   * the rest keep the words. Without any words, the image alone.
+   */
   const copyList = async (ids: readonly ItemId[]): Promise<ActionResult> => {
     screenshots.ignoreClipboard();
 
@@ -753,11 +792,20 @@ const start = async (): Promise<void> => {
       const data: ClipboardData = {};
 
       if (list.count > 0) {
-        data["text/plain"] = new Blob([list.text], { type: "text/plain" });
-        data["text/html"] = new Blob([list.html], { type: "text/html" });
-      }
+        const html =
+          exported === null || firstImage?.kind !== "image"
+            ? list.html
+            : listHtmlWithImage(list.html, {
+                alt: firstImage.note.trim() === "" ? "Image" : firstImage.note,
+                base64: Buffer.from(exported.png).toString("base64"),
+                width:
+                  exported.image.getSize().width /
+                  firstImage.image.pixelsPerDip,
+              });
 
-      if (exported !== null) {
+        data["text/plain"] = new Blob([list.text], { type: "text/plain" });
+        data["text/html"] = new Blob([html], { type: "text/html" });
+      } else if (exported !== null) {
         data["image/png"] = new Blob([exported.png], { type: "image/png" });
       }
 
@@ -856,6 +904,12 @@ const start = async (): Promise<void> => {
   // Set once the shelf's IPC server exists; menus built before then only reach it later.
   let sendCommand: ((command: ShelfCommand) => void) | null = null;
 
+  /** Window › Float on Top; the menu bar and the shelf's ⋯ show the status. */
+  const setFloatOnTop = (on: boolean): void => {
+    shelf.setFloatOnTop(on);
+    controller.setStatus({ floatOnTop: on });
+  };
+
   const shelfServer = serveContract(
     shelfContract,
     {
@@ -900,11 +954,12 @@ const start = async (): Promise<void> => {
         }
       },
       newDrawing,
+      openHelp,
       openImage,
       openKeySettings,
       openLink: ({ id, url }) => {
         const item = controller.item(id);
-        const fromApp = isMac ? desktopApp(item?.context?.app ?? null) : null;
+        const fromApp = openingApp(item?.context ?? null, isMac);
 
         // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
         if (url === undefined && fromApp !== null) {
@@ -959,6 +1014,7 @@ const start = async (): Promise<void> => {
 
         return { ok: true };
       },
+      setFloatOnTop,
       startDrag: (id) => {
         void dragOut(id);
       },
@@ -1281,8 +1337,6 @@ const start = async (): Promise<void> => {
     }
   };
 
-  let floatOnTop = true;
-
   /** Sends a menu choice to the shelf, showing it first, since it acts on the shelf's own state. */
   const commandShelf = async (command: ShelfCommand): Promise<void> => {
     if (!shelf.isFocused()) {
@@ -1305,7 +1359,7 @@ const start = async (): Promise<void> => {
         (item) => item.done && item.sectionId === doc.activeSectionId
       ),
       status.keys,
-      floatOnTop,
+      status.floatOnTop,
     ]);
 
     if (shown === builtMenu) {
@@ -1317,7 +1371,7 @@ const start = async (): Promise<void> => {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
         appMenuTemplate(
-          { doc, floatOnTop, keys: status.keys },
+          { doc, floatOnTop: status.floatOnTop, keys: status.keys },
           {
             clearDone: () => {
               void commandShelf({ kind: "clearDone" });
@@ -1359,17 +1413,11 @@ const start = async (): Promise<void> => {
             newSection: () => {
               void commandShelf({ kind: "newSection" });
             },
-            openHelp: () => {
-              void shell.openExternal(HELP_URL);
-            },
+            openHelp,
             selectSection: (id) => {
               controller.apply({ id, type: "selectSection" });
             },
-            setFloatOnTop: (on) => {
-              floatOnTop = on;
-              shelf.setFloatOnTop(on);
-              refreshAppMenu();
-            },
+            setFloatOnTop,
             openSettings: settingsWindow.open,
             redo: () => {
               if (drawing.isFocused()) {
@@ -1440,8 +1488,14 @@ const start = async (): Promise<void> => {
 
   const run = (action: TrayAction): void => {
     switch (action) {
+      // The tray's menu takes the keyboard while it is open, so the shelf is never in front then: Hide goes by what is on screen.
       case "toggleShelf": {
-        void toggleShelf();
+        if (shelf.isVisible()) {
+          shelf.hide();
+        } else {
+          void showShelf({ dock: isMac });
+        }
+
         break;
       }
 

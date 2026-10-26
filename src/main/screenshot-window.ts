@@ -83,6 +83,8 @@ export const createScreenshotWindow = (options: {
   const window = new BrowserWindow({
     acceptFirstMouse: true,
     backgroundColor: "#00000000",
+    // Windows' counterpart of the panel: clicks and drags work, the app in front keeps the keyboard.
+    focusable: process.platform !== "win32",
     frame: false,
     fullscreenable: false,
     hasShadow: true,

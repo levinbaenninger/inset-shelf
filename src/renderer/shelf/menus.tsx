@@ -10,11 +10,14 @@ import {
   Edit02Icon,
   FolderAddIcon,
   FolderExportIcon,
+  HelpCircleIcon,
   InboxDownloadIcon,
   Link01Icon,
   PaintBrush01Icon,
   PencilEdit02Icon,
+  PinIcon,
   Settings02Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
@@ -58,6 +61,8 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
   copy: Copy01Icon,
   delete: Delete02Icon,
   edit: PencilEdit02Icon,
+  float: PinIcon,
+  help: HelpCircleIcon,
   link: Link01Icon,
   move: FolderExportIcon,
   newSection: FolderAddIcon,
@@ -177,6 +182,9 @@ const Entries = ({
             <EntryIcon icon={entry.icon} />
             <span className="truncate">{entry.label}</span>
             <Shortcut accelerator={entry.accelerator} />
+            {entry.checked === true ? (
+              <HugeiconsIcon className="ml-auto" icon={Tick02Icon} />
+            ) : null}
           </DropdownMenuItem>
         );
       }
@@ -256,13 +264,17 @@ export interface OpenMenu extends MenuAnchor {
   readonly target: MenuTarget;
 }
 
+/** Without a menu bar, the shelf's own menu holds Float on Top and Help. */
+const windowMenu = (floatOnTop: boolean) => (isMac ? null : { floatOnTop });
+
 /** The entries for a target, or null once it is gone. */
 const entriesFor = (
   target: MenuTarget,
-  doc: ShelfDoc
+  doc: ShelfDoc,
+  floatOnTop: boolean
 ): readonly MenuEntry[] | null => {
   if (target.kind === "shelf") {
-    return shelfMenu();
+    return shelfMenu(windowMenu(floatOnTop));
   }
 
   if (target.kind === "items") {
@@ -281,7 +293,7 @@ const entriesFor = (
 
   const item = doc.items.find((candidate) => candidate.id === target.id);
 
-  return item === undefined ? null : itemMenu(item, doc);
+  return item === undefined ? null : itemMenu(item, doc, isMac);
 };
 
 /**
@@ -291,16 +303,19 @@ const entriesFor = (
  */
 export const PointerMenu = ({
   doc,
+  floatOnTop,
   menu,
   onChoose,
   onClose,
 }: {
   readonly menu: OpenMenu | null;
   readonly doc: ShelfDoc;
+  readonly floatOnTop: boolean;
   readonly onChoose: (choice: MenuChoice) => void;
   readonly onClose: () => void;
 }) => {
-  const entries = menu === null ? null : entriesFor(menu.target, doc);
+  const entries =
+    menu === null ? null : entriesFor(menu.target, doc, floatOnTop);
 
   return (
     <DropdownMenu
@@ -342,17 +357,27 @@ export const PointerMenu = ({
   );
 };
 
-/** The ⋯ at the top: start a section, Settings. */
+/**
+ * The ⋯ at the top: start a section, Settings, and on Windows Float on Top
+ * and Help. Not modal, like the right-click menu, so the new section's name
+ * field takes the keyboard while the menu fades out.
+ */
 export const ShelfMenu = ({
   children,
+  floatOnTop,
   onChoose,
 }: {
   readonly children: ReactNode;
+  readonly floatOnTop: boolean;
   readonly onChoose: (choice: MenuChoice) => void;
 }) => (
-  <DropdownMenu>
+  <DropdownMenu modal={false}>
     <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-    <MenuContent align="end" entries={shelfMenu()} onChoose={onChoose} />
+    <MenuContent
+      align="end"
+      entries={shelfMenu(windowMenu(floatOnTop))}
+      onChoose={onChoose}
+    />
   </DropdownMenu>
 );
 

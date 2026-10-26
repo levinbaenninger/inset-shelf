@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { settingsBridge } from "@/shared/bridge";
 import { isMac, isWindows } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";
+import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 const api = settingsBridge();
 
@@ -102,109 +103,105 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
   return (
     <main
       className={cn(
-        "text-foreground flex flex-col gap-3 px-3 pb-3",
+        "text-foreground flex flex-col",
         // On macOS the window's translucent material shows through, as in the shelf.
-        !isMac && "bg-background",
-        // On Windows the window has no title bar: this strip moves it, under its close button.
-        isWindows && "pt-0",
-        !isMac && !isWindows && "pt-3"
+        !isMac && "bg-background"
       )}
       ref={page}
     >
-      {isWindows ? (
-        <div aria-hidden="true" className="drag-region -mx-3 -mb-2 h-9" />
-      ) : null}
-      {/* macOS: the title strip under the traffic lights, which moves the window. */}
-      {isMac ? (
-        <h1 className="drag-region -mx-3 flex h-10 items-center justify-center text-sm font-semibold">
-          Settings
-        </h1>
+      {/* macOS and Windows draw no title bar: the header names and moves the window, as in the drawing window. */}
+      {isMac || isWindows ? (
+        <WindowHeader>
+          <WindowTitle>Settings</WindowTitle>
+        </WindowHeader>
       ) : (
         <h1 className="sr-only">Settings</h1>
       )}
-      <Group title="General">
-        <Row label="Open at Login" labelFor={loginId}>
-          <Switch
-            checked={view.openAtLogin}
-            id={loginId}
-            onCheckedChange={(checked) => {
-              api.setOpenAtLogin(checked);
-            }}
-          />
-        </Row>
-        {/* Elsewhere the notification-area icon is the app's only icon, so there is no choice. */}
-        {isMac ? (
-          <Row
-            label="Show app icon in"
-            labelFor={iconId}
-            note={
-              settings.iconIn === "menuBar"
-                ? "Without a Dock icon, the app has no menu bar of its own; use the menu-bar icon instead."
-                : undefined
-            }
-          >
-            <Select
-              onValueChange={(value) => {
-                if (isIconPlace(value)) {
-                  api.update({ iconIn: value });
-                }
+      <div className="flex flex-col gap-3 p-3">
+        <Group title="General">
+          <Row label="Open at Login" labelFor={loginId}>
+            <Switch
+              checked={view.openAtLogin}
+              id={loginId}
+              onCheckedChange={(checked) => {
+                api.setOpenAtLogin(checked);
               }}
-              value={settings.iconIn}
-            >
-              <SelectTrigger id={iconId} size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="dockAndMenuBar">
-                  {ICON_LABELS.dockAndMenuBar}
-                </SelectItem>
-                <SelectItem value="dock">{ICON_LABELS.dock}</SelectItem>
-                <SelectItem value="menuBar">{ICON_LABELS.menuBar}</SelectItem>
-              </SelectContent>
-            </Select>
+            />
           </Row>
+          {/* Elsewhere the notification-area icon is the app's only icon, so there is no choice. */}
+          {isMac ? (
+            <Row
+              label="Show app icon in"
+              labelFor={iconId}
+              note={
+                settings.iconIn === "menuBar"
+                  ? "Without a Dock icon, the app has no menu bar of its own; use the menu-bar icon instead."
+                  : undefined
+              }
+            >
+              <Select
+                onValueChange={(value) => {
+                  if (isIconPlace(value)) {
+                    api.update({ iconIn: value });
+                  }
+                }}
+                value={settings.iconIn}
+              >
+                <SelectTrigger id={iconId} size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dockAndMenuBar">
+                    {ICON_LABELS.dockAndMenuBar}
+                  </SelectItem>
+                  <SelectItem value="dock">{ICON_LABELS.dock}</SelectItem>
+                  <SelectItem value="menuBar">{ICON_LABELS.menuBar}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Row>
+          ) : null}
+        </Group>
+        {/* Screenshots are watched on macOS and Windows. */}
+        {isMac || isWindows ? (
+          <Group title="Screenshots">
+            <Row
+              label="Show new screenshots"
+              labelFor={shotId}
+              note="A card beside the shelf lets you add, copy, annotate or drag each new screenshot."
+            >
+              <Switch
+                checked={settings.screenshotCards}
+                id={shotId}
+                onCheckedChange={(checked) => {
+                  api.update({ screenshotCards: checked });
+                }}
+              />
+            </Row>
+          </Group>
         ) : null}
-      </Group>
-      {/* Screenshots are only watched on macOS. */}
-      {isMac ? (
-        <Group title="Screenshots">
+        <Group title="Copying">
           <Row
-            label="Show new screenshots"
-            labelFor={shotId}
-            note="A card beside the shelf lets you add, copy, annotate or drag each new screenshot."
+            label="Mark as done when copied"
+            labelFor={copyId}
+            note="Copying an item checks it off, so using it and clearing it is one step."
           >
             <Switch
-              checked={settings.screenshotCards}
-              id={shotId}
+              checked={settings.markDoneOnCopy}
+              id={copyId}
               onCheckedChange={(checked) => {
-                api.update({ screenshotCards: checked });
+                api.update({ markDoneOnCopy: checked });
               }}
             />
           </Row>
         </Group>
-      ) : null}
-      <Group title="Copying">
-        <Row
-          label="Mark as done when copied"
-          labelFor={copyId}
-          note="Copying an item checks it off, so using it and clearing it is one step."
-        >
-          <Switch
-            checked={settings.markDoneOnCopy}
-            id={copyId}
-            onCheckedChange={(checked) => {
-              api.update({ markDoneOnCopy: checked });
-            }}
-          />
-        </Row>
-      </Group>
-      {/* macOS has the app menu's About panel; elsewhere it is here. */}
-      {isMac ? null : (
-        <p className="text-muted-foreground px-1 text-xs">
-          Inset Shelf {view.version}. A prototype for the Inset capture
-          experiments.
-        </p>
-      )}
+        {/* macOS has the app menu's About panel; elsewhere it is here. */}
+        {isMac ? null : (
+          <p className="text-muted-foreground px-1 text-xs">
+            Inset Shelf {view.version}. A prototype for the Inset capture
+            experiments.
+          </p>
+        )}
+      </div>
     </main>
   );
 };

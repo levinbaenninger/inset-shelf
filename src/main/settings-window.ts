@@ -1,18 +1,12 @@
 import { app, BrowserWindow, nativeTheme } from "electron";
 import type { WebContents } from "electron";
 
-import {
-  captionButtons,
-  followThemeInCaption,
-  isWindows,
-} from "./caption-buttons";
+import { followThemeInCaption, headerChrome } from "./caption-buttons";
 import { hideWindow } from "./hide-window";
+import { keepOnTop } from "./keep-on-top";
 import { harden, secureWebPreferences } from "./window-security";
 
 const WIDTH = 420;
-
-/** The strip at the top of the page under the Windows close button (settings-app.tsx). */
-const CAPTION_DIP = 36;
 
 /** Until the page reports its own height (fitHeight). */
 const FIRST_HEIGHT = 280;
@@ -26,15 +20,6 @@ const background = (): string => {
   }
 
   return nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
-};
-
-/** On macOS the page draws the title under the traffic lights; on Windows only the caption buttons stay. */
-const titleBar = (): "hiddenInset" | "hidden" | "default" => {
-  if (isMac) {
-    return "hiddenInset";
-  }
-
-  return isWindows ? "hidden" : "default";
 };
 
 export interface SettingsWindow {
@@ -69,10 +54,8 @@ export const createSettingsWindow = (options: {
     resizable: false,
     show: false,
     title: "Settings",
-    titleBarStyle: titleBar(),
-    ...captionButtons(CAPTION_DIP),
-    // Centred in the page's 40-point title strip (settings-app.tsx).
-    trafficLightPosition: { x: 14, y: 13 },
+    // The page's own header holds the window's buttons, as in the drawing window.
+    ...headerChrome(),
     useContentSize: true,
     vibrancy: isMac ? "sidebar" : undefined,
     webPreferences: secureWebPreferences(options.preload),
@@ -80,7 +63,7 @@ export const createSettingsWindow = (options: {
   });
 
   harden(window.webContents, "settings");
-  followThemeInCaption(window, CAPTION_DIP);
+  followThemeInCaption(window);
 
   // One level above the floating shelf, which would otherwise cover it.
   const raise = (): void => {
@@ -88,6 +71,7 @@ export const createSettingsWindow = (options: {
   };
 
   raise();
+  keepOnTop(window, { raise, wanted: () => true });
 
   window.on("close", (event) => {
     event.preventDefault();

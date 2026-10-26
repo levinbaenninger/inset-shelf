@@ -123,7 +123,7 @@ describe(viewerWindowSize, () => {
   it("stays between the smallest window and 90% of the work area", () => {
     expect(viewerWindowSize(size(100, 50), work)).toStrictEqual({
       height: 360,
-      width: 560,
+      width: 600,
     });
     expect(viewerWindowSize(size(4000, 3000), work)).toStrictEqual({
       height: 929,

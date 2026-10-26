@@ -6,7 +6,7 @@ import type {
   ShelfDoc,
   ShelfItem,
 } from "./shelf";
-import { desktopApp } from "./web-source";
+import { openingApp } from "./web-source";
 
 export type MenuChoice =
   | { readonly kind: "selectSection"; readonly id: SectionId }
@@ -24,6 +24,8 @@ export type MenuChoice =
   | { readonly kind: "removeSection"; readonly id: SectionId }
   | { readonly kind: "newSection" }
   | { readonly kind: "openSettings" }
+  | { readonly kind: "setFloatOnTop"; readonly on: boolean }
+  | { readonly kind: "openHelp" }
   | { readonly kind: "copy"; readonly id: ItemId }
   | { readonly kind: "copyWithLink"; readonly id: ItemId }
   /** Opens an image large, ready to draw on. */
@@ -53,6 +55,8 @@ export type MenuIcon =
   | "clear"
   | "newSection"
   | "settings"
+  | "float"
+  | "help"
   | "copy"
   | "link"
   | "open"
@@ -81,6 +85,8 @@ export type MenuEntry =
       readonly destructive?: boolean;
       /** The shelf's own key for this action, shown at the right edge. */
       readonly accelerator?: string;
+      /** A setting that is on, ticked at the right edge. */
+      readonly checked?: boolean;
     }
   /** A row of colour swatches, the item's colour marked, and one to clear it. */
   | {
@@ -92,9 +98,16 @@ export type MenuEntry =
 
 const SEPARATOR: MenuEntry = { kind: "separator" };
 
-/** The ⋯ at the top of the shelf, and a right-click on empty space: start a section, open Settings. */
-export const shelfMenu = (): readonly MenuEntry[] => [
+/**
+ * The ⋯ at the top of the shelf, and a right-click on empty space: start a
+ * section, open Settings. Without a menu bar (`windowMenu`, on Windows) it
+ * also holds what the Window and Help menus would: Float on Top and Help.
+ */
+export const shelfMenu = (
+  windowMenu: { readonly floatOnTop: boolean } | null = null
+): readonly MenuEntry[] => [
   {
+    accelerator: "Shift+CommandOrControl+N",
     choice: { kind: "newSection" },
     enabled: true,
     icon: "newSection",
@@ -102,6 +115,19 @@ export const shelfMenu = (): readonly MenuEntry[] => [
     label: "New Section",
   },
   SEPARATOR,
+  ...(windowMenu === null
+    ? []
+    : [
+        {
+          checked: windowMenu.floatOnTop,
+          choice: { kind: "setFloatOnTop", on: !windowMenu.floatOnTop },
+          enabled: true,
+          icon: "float",
+          kind: "choice",
+          label: "Float on Top",
+        } as const,
+        SEPARATOR,
+      ]),
   {
     accelerator: "CommandOrControl+,",
     choice: { kind: "openSettings" },
@@ -110,6 +136,17 @@ export const shelfMenu = (): readonly MenuEntry[] => [
     kind: "choice",
     label: "Settings",
   },
+  ...(windowMenu === null
+    ? []
+    : [
+        {
+          choice: { kind: "openHelp" },
+          enabled: true,
+          icon: "help",
+          kind: "choice",
+          label: "Inset Shelf Help",
+        } as const,
+      ]),
 ];
 
 /** A section's ⋯ and right-click: new items here, rename, clear checked items, delete. */
@@ -202,7 +239,7 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
       ];
 
 /** ⌘O: an image opens to draw on; anything else opens where it came from, if the shelf knows. */
-const open = (item: ShelfItem): readonly MenuEntry[] => {
+const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
   if (item.kind === "image") {
     return [
       {
@@ -216,7 +253,7 @@ const open = (item: ShelfItem): readonly MenuEntry[] => {
     ];
   }
 
-  const app = desktopApp(item.context?.app ?? null);
+  const app = openingApp(item.context, mac);
 
   if (app === null && (item.context?.url ?? null) === null) {
     return [];
@@ -237,7 +274,8 @@ const open = (item: ShelfItem): readonly MenuEntry[] => {
 /** What a right-click on an item offers, with the keys that do the same in the list. */
 export const itemMenu = (
   item: ShelfItem,
-  doc: ShelfDoc
+  doc: ShelfDoc,
+  mac = true
 ): readonly MenuEntry[] => [
   {
     accelerator: "CommandOrControl+C",
@@ -249,7 +287,7 @@ export const itemMenu = (
   },
   ...copyWithLink(item),
   SEPARATOR,
-  ...open(item),
+  ...open(item, mac),
   {
     accelerator: "Enter",
     choice: { id: item.id, kind: "edit" },

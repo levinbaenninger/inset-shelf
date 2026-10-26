@@ -24,7 +24,7 @@ import type {
   ShelfItem,
   TextItem,
 } from "@shared/shelf";
-import { desktopApp, sourceLabel } from "@shared/web-source";
+import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
@@ -89,8 +89,8 @@ const SourceLine = ({
 }) => {
   const { label, service } = sourceLabel(context);
   const icon = service === null ? Link01Icon : SERVICE_ICON[service];
-  // A desktop app it came from opens again; elsewhere the page does (isMac: only macOS can).
-  const app = isMac ? desktopApp(context.app) : null;
+  // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
+  const app = openingApp(context, isMac);
 
   if (context.url === null && app === null) {
     return label === "" ? null : (
