@@ -95,8 +95,8 @@ describe(sourceLabel, () => {
 
   it("names a post on X by its author", () => {
     expect(
-      page("https://x.com/shadcn/status/123", 'shadcn on X: "Copper" / X')
-    ).toStrictEqual({ label: "X · @shadcn", service: "x" });
+      page("https://x.com/example/status/123", 'example on X: "A new note" / X')
+    ).toStrictEqual({ label: "X · @example", service: "x" });
   });
 
   it("knows workspace tools by their sites and desktop apps", () => {
