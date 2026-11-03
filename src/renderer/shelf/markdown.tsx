@@ -78,11 +78,30 @@ const Code = ({ children }: Children) => (
   </code>
 );
 
-const CodeBlock = ({ children }: Children) => (
-  <Block className="bg-foreground/5 overflow-x-auto rounded-md px-2 py-1.5 font-mono text-xs whitespace-pre [&_code]:bg-transparent [&_code]:p-0">
-    {children}
-  </Block>
-);
+/**
+ * Code and tables scroll sideways in an open card. A closed one clips them
+ * instead: a scroller starts its own layout, which a two-line clamp cannot
+ * see into.
+ */
+const useScrollsSideways = (): string | false =>
+  use(Mode).interactive && "overflow-x-auto";
+
+const CodeBlock = ({ children }: Children) => {
+  const { interactive } = use(Mode);
+
+  return (
+    <Block
+      className={cn(
+        "bg-foreground/5 rounded-md px-2 font-mono text-xs whitespace-pre [&_code]:bg-transparent [&_code]:p-0",
+        // Padding under a clamped block would show a sliver of the line after the cut.
+        interactive && "py-1.5",
+        useScrollsSideways()
+      )}
+    >
+      {children}
+    </Block>
+  );
+};
 
 const List = ({ children }: Children) => (
   <Block className="list-disc pl-5">{children}</Block>
@@ -99,7 +118,7 @@ const ListItem = ({ children }: Children) => (
 const Rule = () => <Block className="border-foreground/15 my-1 border-t" />;
 
 const Table = ({ children }: Children) => (
-  <Block className="overflow-x-auto">{children}</Block>
+  <Block className={cn(useScrollsSideways())}>{children}</Block>
 );
 
 /** Pictures from the web are not fetched; their words stand in. */
@@ -145,7 +164,15 @@ export const Markdown = ({
 
   return (
     <Mode value={mode}>
-      <Root className={cn("block space-y-1.5", className)}>
+      <Root
+        className={cn(
+          "block space-y-1.5",
+          // Closed, a table reads as lines of text, so a clamp can count them.
+          !interactive &&
+            "[&_:is(td,th)]:inline [&_:is(td,th)]:pr-3 [&_:is(thead,tbody,tr)]:block",
+          className
+        )}
+      >
         <ReactMarkdown components={COMPONENTS} remarkPlugins={PLUGINS} skipHtml>
           {text}
         </ReactMarkdown>
