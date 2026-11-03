@@ -400,15 +400,17 @@ const NoteText = ({
     <button
       className={cn(
         "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
-        item.done && "text-muted-foreground line-through",
-        !selected && "line-clamp-2"
+        item.done && "text-muted-foreground line-through"
       )}
       onClick={onSelect}
       onContextMenu={contextMenuAt(onContextMenu)}
       onDoubleClick={onEdit}
       type="button"
     >
-      {item.note}
+      {/* A clamp has no effect on a button itself, only on a box inside it. */}
+      <span className={cn("block", !selected && "line-clamp-2")}>
+        {item.note}
+      </span>
     </button>
   );
 
@@ -508,7 +510,7 @@ const ImageBody = ({
         />
         <button
           className={cn(
-            "focus-visible:ring-ring/50 line-clamp-2 min-w-0 flex-1 rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
+            "focus-visible:ring-ring/50 flex min-w-0 flex-1 items-start rounded-sm text-left text-sm leading-snug break-words outline-none focus-visible:ring-3",
             item.note === "" && "text-muted-foreground",
             item.done && "text-muted-foreground line-through"
           )}
@@ -516,7 +518,10 @@ const ImageBody = ({
           onContextMenu={contextMenuAt(onContextMenu)}
           type="button"
         >
-          {item.note === "" ? KIND_LABEL[item.via] : item.note}
+          {/* A clamp has no effect on a button itself, only on a box inside it. */}
+          <span className="line-clamp-2 min-w-0">
+            {item.note === "" ? KIND_LABEL[item.via] : item.note}
+          </span>
         </button>
       </div>
     );
