@@ -18,6 +18,7 @@ asarUnpack:
   - "**/node_modules/uiohook-napi/**"
   - "**/node_modules/get-windows/**"
 npmRebuild: false
+afterSign: scripts/sign-mac.ts
 mac:
   category: public.app-category.productivity
   target:
@@ -25,7 +26,8 @@ mac:
       arch: [arm64, x64]
     - target: zip
       arch: [arm64, x64]
-  identity: "-"
+  # scripts/sign-mac.ts signs with the shared self-signed identity, which electron-builder refuses.
+  identity: null
   hardenedRuntime: false
   extendInfo:
     NSAccessibilityUsageDescription: Inset Shelf reads your text selection when you tap Shift twice.
@@ -44,4 +46,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-publish: null
+# Writes latest*.yml and the app's feed; CI uploads them to the rolling preview release.
+publish:
+  provider: generic
+  url: https://github.com/levinbaenninger/inset-shelf/releases/download/preview
