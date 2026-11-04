@@ -154,3 +154,20 @@ export const updateNotice = (
     }
   }
 };
+
+interface CheckResult {
+  readonly downloadPromise?: Promise<readonly string[]> | null;
+}
+
+/** Waits for a check and the download it starts. Both report failures as "error" events, so here they are only consumed. */
+export const settleCheck = async (
+  check: () => Promise<CheckResult | null>
+): Promise<void> => {
+  try {
+    const result = await check();
+
+    await result?.downloadPromise;
+  } catch {
+    // Reported through the "error" event.
+  }
+};

@@ -4,7 +4,11 @@ import path from "node:path";
 import { app, autoUpdater as squirrel, BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
 
-import { INITIAL_UPDATE_STATE, updateTransition } from "./update-state";
+import {
+  INITIAL_UPDATE_STATE,
+  settleCheck,
+  updateTransition,
+} from "./update-state";
 import type { UpdateEvent, UpdateState } from "./update-state";
 
 const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -99,13 +103,7 @@ export const createUpdater = (): Updater => {
       return;
     }
 
-    void (async () => {
-      try {
-        await autoUpdater.checkForUpdates();
-      } catch {
-        // The "error" event has already reported it.
-      }
-    })();
+    void settleCheck(async () => await autoUpdater.checkForUpdates());
   };
 
   const start = (): void => {

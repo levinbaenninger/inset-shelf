@@ -1,7 +1,10 @@
+import { setImmediate as tick } from "node:timers/promises";
+
 import { describe, expect, it } from "vitest";
 
 import {
   INITIAL_UPDATE_STATE,
+  settleCheck,
   updateMenuItem,
   updateNotice,
   updateTransition,
@@ -143,5 +146,28 @@ describe(updateNotice, () => {
     expect(
       updateNotice(checking(false), { kind: "error", message: "offline" })
     ).toBeNull();
+  });
+});
+
+describe(settleCheck, () => {
+  it("consumes a download that fails after the check succeeds", async () => {
+    const unhandled: Error[] = [];
+
+    const record = (reason: Error): void => {
+      unhandled.push(reason);
+    };
+
+    process.on("unhandledRejection", record);
+    await settleCheck(async () => {
+      await tick();
+
+      return {
+        downloadPromise: Promise.reject(new Error("download connection reset")),
+      };
+    });
+    await tick();
+    process.off("unhandledRejection", record);
+
+    expect(unhandled).toStrictEqual([]);
   });
 });
