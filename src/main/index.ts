@@ -67,6 +67,8 @@ import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
 import type { TrayAction } from "./tray-menu";
+import { updateNotice } from "./update-state";
+import { createUpdater } from "./updater";
 import {
   appOrigin,
   pageUrl,
@@ -1346,6 +1348,8 @@ const start = async (): Promise<void> => {
     sendCommand(command);
   };
 
+  const updater = createUpdater();
+
   // What the menu shows; a note being typed changes the document but not this.
   let builtMenu = "";
 
@@ -1360,6 +1364,7 @@ const start = async (): Promise<void> => {
       ),
       status.keys,
       status.floatOnTop,
+      updater.state(),
     ]);
 
     if (shown === builtMenu) {
@@ -1371,8 +1376,14 @@ const start = async (): Promise<void> => {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
         appMenuTemplate(
-          { doc, floatOnTop: status.floatOnTop, keys: status.keys },
           {
+            doc,
+            floatOnTop: status.floatOnTop,
+            keys: status.keys,
+            update: updater.state(),
+          },
+          {
+            checkForUpdates: updater.check,
             clearDone: () => {
               void commandShelf({ kind: "clearDone" });
             },
@@ -1419,6 +1430,7 @@ const start = async (): Promise<void> => {
             },
             setFloatOnTop,
             openSettings: settingsWindow.open,
+            restartToUpdate: updater.restart,
             redo: () => {
               if (drawing.isFocused()) {
                 drawingServer.emit("edit", "redo");
@@ -1451,6 +1463,16 @@ const start = async (): Promise<void> => {
   };
 
   refreshAppMenu();
+  updater.subscribe((next, previous) => {
+    refreshTray();
+    refreshAppMenu();
+
+    const notice = updateNotice(previous, next);
+
+    if (notice !== null) {
+      notify(notice);
+    }
+  });
   controller.subscribe(() => {
     shelfServer.emit("view", controller.view());
     refreshTray();
@@ -1509,6 +1531,16 @@ const start = async (): Promise<void> => {
         break;
       }
 
+      case "checkForUpdates": {
+        updater.check();
+        break;
+      }
+
+      case "restartToUpdate": {
+        updater.restart();
+        break;
+      }
+
       default: {
         break;
       }
@@ -1530,6 +1562,8 @@ const start = async (): Promise<void> => {
           keys: controller.view().status.keys,
           shelfVisible: shelf.isVisible(),
           shortcutsRegistered,
+          update: updater.state(),
+          version: app.getVersion(),
         }),
         run,
       });
@@ -1637,6 +1671,7 @@ const start = async (): Promise<void> => {
     screenshots.start();
   }
 
+  updater.start();
   e2eLog("launch");
   // Like any app's window, the shelf opens when the app starts.
   await showShelf();
