@@ -96,7 +96,8 @@ jobs:
             --notes-file .github/release-notes.md \
             --verify-tag
       # Installed apps read latest*.yml from this release, so it is updated in
-      # place: new files first, the feed files next, old files last.
+      # place: new files first, then the feed files. The files the previous feed
+      # named stay one more build, for apps that read it just before the switch.
       - name: Publish rolling preview from main
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
@@ -112,6 +113,11 @@ jobs:
             exit 0
           fi
 
+          previous="$(mktemp)"
+          for feed in latest-mac.yml latest.yml; do
+            gh release download preview --pattern "$feed" --output - 2> /dev/null || true
+          done | sed -n -e 's/^ *- url: //p' > "$previous"
+
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/preview" \
             -f sha="$GITHUB_SHA" -F force=true > /dev/null
           find dist -type f ! -name 'latest*.yml' -print0 \
@@ -119,7 +125,8 @@ jobs:
           gh release upload preview dist/latest*.yml --clobber
           gh release view preview --json assets --jq '.assets[].name' \
             | while read -r name; do
-                [ -e "dist/$name" ] || gh release delete-asset preview "$name" --yes
+                [ -e "dist/$name" ] || grep -qxF "${name%.blockmap}" "$previous" \
+                  || gh release delete-asset preview "$name" --yes
               done
           gh release edit preview \
             --title "$title" \

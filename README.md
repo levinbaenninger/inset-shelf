@@ -116,7 +116,7 @@ The script takes over the mouse and keyboard for about three minutes and overwri
 
 `.github/workflows/release.yml` publishes builds to GitHub Releases.
 
-A push to `main` updates the **Preview build** prerelease in place, and installed apps update from it. Each preview build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `package.json`, the last number from the workflow's run number, so every build is newer than the one before. The new files are uploaded first, then `latest-mac.yml` and `latest.yml`, which tell the apps what is new, then the files of the previous build are removed.
+A push to `main` updates the **Preview build** prerelease in place, and installed apps update from it. Each preview build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `package.json`, the last number from the workflow's run number, so every build is newer than the one before. The new files are uploaded first, then `latest-mac.yml` and `latest.yml`, which tell the apps what is new. The update files the previous `latest*.yml` named stay for one more build, so an app that read it just before the switch can still download them. Older files are removed.
 
 To cut a versioned release, set `version` in `package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release. Raising the minor or major number also moves the preview builds that follow to `0.2.<run number>`.
 
