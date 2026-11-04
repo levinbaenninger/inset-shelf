@@ -26,15 +26,21 @@ jobs:
             files: |
               release/*.dmg
               release/*.zip
+              release/*.blockmap
+              release/latest*.yml
           - name: Windows
             os: windows-latest
             script: package:win
             files: |
               release/*.exe
               release/*.zip
+              release/*.blockmap
+              release/latest*.yml
     runs-on: ${{ matrix.os }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # An ad-hoc build in the feed could never install over a signed one.
+      INSET_REQUIRE_SIGNING: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -47,7 +53,22 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
-      - run: pnpm ${{ matrix.script }}
+      - name: Stamp the preview version
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          base="$(node -p 'require("./package.json").version')"
+          echo "VERSION_ARGS=-c.extraMetadata.version=${base%.*}.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+      - name: Import the signing identity
+        if: runner.os == 'macOS'
+        env:
+          MAC_SIGNING_P12_BASE64: ${{ secrets.MAC_SIGNING_P12_BASE64 }}
+          MAC_SIGNING_P12_PASSWORD: ${{ secrets.MAC_SIGNING_P12_PASSWORD }}
+        run: |
+          keychain="$(ADD_TO_SEARCH_LIST=1 scripts/import-signing-key.sh "$RUNNER_TEMP")"
+          echo "INSET_SIGN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+      - shell: bash
+        run: pnpm ${{ matrix.script }} $VERSION_ARGS
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
@@ -74,12 +95,33 @@ jobs:
             --title "Inset Shelf $GITHUB_REF_NAME" \
             --notes-file .github/release-notes.md \
             --verify-tag
+      # Installed apps read latest*.yml from this release, so it is updated in
+      # place: new files first, the feed files next, old files last.
       - name: Publish rolling preview from main
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
-          gh release delete preview --cleanup-tag --yes || true
-          gh release create preview dist/* \
-            --target "$GITHUB_SHA" \
-            --title "Preview build (main, ${GITHUB_SHA::7})" \
+          set -euo pipefail
+          title="Preview build (main, ${GITHUB_SHA::7})"
+
+          if ! gh release view preview > /dev/null 2>&1; then
+            gh release create preview dist/* \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes-file .github/release-notes.md \
+              --prerelease
+            exit 0
+          fi
+
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/preview" \
+            -f sha="$GITHUB_SHA" -F force=true > /dev/null
+          find dist -type f ! -name 'latest*.yml' -print0 \
+            | xargs -0 gh release upload preview --clobber
+          gh release upload preview dist/latest*.yml --clobber
+          gh release view preview --json assets --jq '.assets[].name' \
+            | while read -r name; do
+                [ -e "dist/$name" ] || gh release delete-asset preview "$name" --yes
+              done
+          gh release edit preview \
+            --title "$title" \
             --notes-file .github/release-notes.md \
             --prerelease
