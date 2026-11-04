@@ -25,6 +25,10 @@ const toMenuItem = (
     return { type: "separator" };
   }
 
+  if (item.kind === "label") {
+    return { enabled: false, label: item.label };
+  }
+
   // Windows shows About as a plain message box; Settings shows the same in the app's own look.
   if (item.kind === "role" && item.role === "about" && isWindows) {
     return {

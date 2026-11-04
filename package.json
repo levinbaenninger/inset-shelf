@@ -21,6 +21,7 @@
     "icons": "node scripts/generate-icons.ts"
   },
   "dependencies": {
+    "electron-updater": "6.8.11",
     "get-windows": "10.0.0",
     "uiohook-napi": "1.5.5"
   },

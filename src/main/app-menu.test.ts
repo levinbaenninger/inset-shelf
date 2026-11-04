@@ -20,6 +20,7 @@ const doc: ShelfDoc = {
 };
 
 const actions: AppMenuActions = {
+  checkForUpdates: vi.fn<() => void>(),
   clearDone: vi.fn<() => void>(),
   closeWindow: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),
@@ -36,10 +37,16 @@ const actions: AppMenuActions = {
   setFloatOnTop: vi.fn<(on: boolean) => void>(),
   turnOnKeys: vi.fn<() => void>(),
   redo: vi.fn<() => void>(),
+  restartToUpdate: vi.fn<() => void>(),
   undo: vi.fn<() => void>(),
 };
 
-const state: AppMenuState = { doc, floatOnTop: true, keys: "granted" };
+const state: AppMenuState = {
+  doc,
+  floatOnTop: true,
+  keys: "granted",
+  update: { kind: "idle" },
+};
 
 const submenu = (
   template: ReturnType<typeof appMenuTemplate>,
@@ -97,6 +104,24 @@ describe(appMenuTemplate, () => {
   it("offers the permission in the app menu only while it is missing", () => {
     expect(appMenuLabels("missing")).toContain("Turn On Double Shift…");
     expect(appMenuLabels("granted")).not.toContain("Turn On Double Shift…");
+  });
+
+  it("puts the update after About, as a restart once it is ready", () => {
+    const appMenu = (update: AppMenuState["update"]) =>
+      submenu(appMenuTemplate({ ...state, update }, actions), "Inset Shelf");
+
+    expect(appMenu({ kind: "idle" })[1]).toStrictEqual({
+      click: actions.checkForUpdates,
+      label: "Check for Updates…",
+    });
+    expect(appMenu({ kind: "checking", manual: true })[1]).toStrictEqual({
+      enabled: false,
+      label: "Checking for Updates…",
+    });
+    expect(appMenu({ kind: "ready", version: "0.1.901" })[1]).toStrictEqual({
+      click: actions.restartToUpdate,
+      label: "Restart to Update to v0.1.901",
+    });
   });
 
   it("enables clearing only when the current section has checked items", () => {

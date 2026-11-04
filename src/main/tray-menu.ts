@@ -1,11 +1,19 @@
 import type { Permission } from "@shared/contracts";
 import { shortcutLabels, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 
-export type TrayAction = "toggleShelf" | "turnOnKeys" | "openSettings";
+import { updateMenuItem } from "./update-state";
+import type { UpdateAction, UpdateState } from "./update-state";
+
+export type TrayAction =
+  | "toggleShelf"
+  | "turnOnKeys"
+  | "openSettings"
+  | UpdateAction;
 
 export type TrayItem =
   | { readonly kind: "separator" }
   | { readonly kind: "role"; readonly role: "about" | "quit" }
+  | { readonly kind: "label"; readonly label: string }
   | {
       readonly kind: "item";
       readonly label: string;
@@ -18,11 +26,21 @@ export interface TrayModel {
   readonly shelfVisible: boolean;
   readonly keys: Permission;
   readonly shortcutsRegistered: boolean;
+  readonly version: string;
+  readonly update: UpdateState;
 }
 
 const SEPARATOR: TrayItem = { kind: "separator" };
 
-/** A plain macOS menu-bar menu: the app's actions, then About and Quit. */
+const updateItem = (update: UpdateState): TrayItem => {
+  const { action, label } = updateMenuItem(update);
+
+  return action === null
+    ? { kind: "label", label }
+    : { action, kind: "item", label };
+};
+
+/** A plain macOS menu-bar menu: the app's actions, the version and its update, then About and Quit. */
 export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
   const accelerator = (value: string): { accelerator?: string } =>
     model.shortcutsRegistered ? { accelerator: value } : {};
@@ -54,6 +72,10 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
       label: "Settings…",
       ...accelerator("CommandOrControl+,"),
     },
+    SEPARATOR,
+    { kind: "label", label: `Version ${model.version}` },
+    updateItem(model.update),
+    SEPARATOR,
     { kind: "role", role: "about" },
     { kind: "role", role: "quit" },
   ];

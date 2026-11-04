@@ -2,6 +2,9 @@ import type { ItemAction, Permission } from "@shared/contracts";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
 import type { MenuItemConstructorOptions } from "electron";
 
+import { updateMenuItem } from "./update-state";
+import type { UpdateState } from "./update-state";
+
 export const HELP_URL = "https://github.com/levinbaenninger/inset-shelf#readme";
 
 /** Sections past the ninth have no shortcut. */
@@ -11,6 +14,7 @@ export interface AppMenuState {
   readonly doc: ShelfDoc;
   readonly keys: Permission;
   readonly floatOnTop: boolean;
+  readonly update: UpdateState;
 }
 
 export interface AppMenuActions {
@@ -32,15 +36,29 @@ export interface AppMenuActions {
   readonly turnOnKeys: () => void;
   readonly openSettings: () => void;
   readonly openHelp: () => void;
+  readonly checkForUpdates: () => void;
+  readonly restartToUpdate: () => void;
 }
 
 const SEPARATOR: MenuItemConstructorOptions = { type: "separator" };
+
+const updateItem = (
+  update: UpdateState,
+  actions: AppMenuActions
+): MenuItemConstructorOptions => {
+  const { action, label } = updateMenuItem(update);
+
+  return action === null
+    ? { enabled: false, label }
+    : { click: actions[action], label };
+};
 
 const appSubmenu = (
   state: AppMenuState,
   actions: AppMenuActions
 ): MenuItemConstructorOptions[] => [
   { role: "about" },
+  updateItem(state.update, actions),
   SEPARATOR,
   {
     accelerator: "CommandOrControl+,",

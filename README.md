@@ -8,9 +8,9 @@ It is the third Inset prototype. [Inset Context Pin](https://github.com/levinbae
 
 ## Install a test build
 
-Download a build from the [Releases page](https://github.com/levinbaenninger/inset-shelf/releases). The **Preview build** release holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
+Install once, then the app updates itself. Download a build from the [Releases page](https://github.com/levinbaenninger/inset-shelf/releases). The **Preview build** release holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
 
-The builds are not signed with a developer certificate, so each system warns once.
+The builds are not signed with a developer certificate, so each system warns once, at the first install.
 
 ### macOS
 
@@ -24,7 +24,13 @@ The builds are not signed with a developer certificate, so each system warns onc
 
 The app has a Dock icon, a menu bar and an Inset mark in the menu bar's status area. **Settings…** (`⌘,`) can hide either icon.
 
-macOS ties the grants to the app's signature. These builds have an ad-hoc signature that changes with every build, so after installing a newer build you may have to turn the permissions off and on again.
+### Updates
+
+The app checks the **Preview build** release when it starts and every four hours, and downloads a newer build in the background. When the download is ready, it says so once, and the menu bar icon's menu and the **Inset Shelf** menu offer **Restart to Update to v…**. If you don't restart, the update installs when you quit. The menu bar icon's menu always shows the running version and **Check for Updates…**.
+
+On macOS every build is signed with the same self-signed certificate, so the update keeps your permissions and macOS checks that the new build comes from the same signer. A build that shows version 0.1.0 has an ad-hoc signature that can't accept a signed update. Install the current build by hand once, as above, and grant the permissions again. After that it updates itself.
+
+On Windows only the installer (`.exe`) updates itself. The portable `.zip` copies can't. To update one, download the new zip.
 
 ### Windows
 
@@ -108,4 +114,10 @@ The script takes over the mouse and keyboard for about three minutes and overwri
 
 ## Release
 
-`.github/workflows/release.yml` publishes builds to GitHub Releases. It has not run yet. A push to `main` replaces the **Preview build** prerelease with fresh macOS and Windows builds. A tag such as `v0.2.0` publishes a versioned release; the tag must match `version` in `package.json`.
+`.github/workflows/release.yml` publishes builds to GitHub Releases.
+
+A push to `main` updates the **Preview build** prerelease in place, and installed apps update from it. Each preview build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `package.json`, the last number from the workflow's run number, so every build is newer than the one before. The new files are uploaded first, then `latest-mac.yml` and `latest.yml`, which tell the apps what is new. The update files the previous `latest*.yml` named stay for one more build, so an app that read it just before the switch can still download them. Older files are removed.
+
+To cut a versioned release, set `version` in `package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release. Raising the minor or major number also moves the preview builds that follow to `0.2.<run number>`.
+
+The macOS job signs with the shared certificate from the `MAC_SIGNING_P12_BASE64` and `MAC_SIGNING_P12_PASSWORD` secrets, through `scripts/import-signing-key.sh` and the `scripts/sign-mac.ts` hook, and fails without them. The CI workflow has no secrets and signs ad hoc. A local `pnpm package:mac` signs with the certificate when its keychain (`~/Library/Keychains/inset-signing.keychain-db`) is on the machine, and ad hoc otherwise.
