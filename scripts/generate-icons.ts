@@ -5,16 +5,23 @@ import { Resvg } from "@resvg/resvg-js";
 
 const root = path.resolve(import.meta.dirname, "..");
 
-/** The Inset mark from the brand folder (brand/inset/inset-mark.svg), on a 64-unit grid. */
-const MARK = `<path d="M20 8H44C50.627 8 56 13.373 56 20V29H50V20C50 16.686 47.314 14 44 14H20C16.686 14 14 16.686 14 20V44C14 47.314 16.686 50 20 50H29V56H20C13.373 56 8 50.627 8 44V20C8 13.373 13.373 8 20 8Z"/><rect x="36" y="36" width="20" height="20" rx="6"/>`;
+/**
+ * The Shelf mark on a 64-unit grid: the Inset mark (a frame with its bottom-right corner open)
+ * with a running list set into that corner. The 4-unit stroke is 1 px in the 16 px tray icon
+ * (4 units a pixel) and 2 px at @2x; the list lines and straight edges sit on whole pixels at both.
+ * The frame ends stop one stroke short of the list, the same gap as between the list lines.
+ */
+const MARK = `<path d="M26 58H14A8 8 0 0 1 6 50V14A8 8 0 0 1 14 6H50A8 8 0 0 1 58 14V34"/><path d="M34 42H58M34 50H58M34 58H58"/>`;
+const STROKE = `fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"`;
 const BRAND = "#0069a8";
 
 const traySvg = (color: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 4 56 56"><g fill="${color}">${MARK}</g></svg>`;
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g ${STROKE} stroke="${color}">${MARK}</g></svg>`;
 
+// The mark spans 4–60 on both axes; scaled by 8 it is centred on the tile.
 const appSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
 <rect x="64" y="64" width="896" height="896" rx="200" fill="${BRAND}"/>
-<g transform="translate(224 224) scale(9)" fill="#ffffff">${MARK}</g>
+<g transform="translate(256 256) scale(8)" ${STROKE} stroke="#ffffff">${MARK}</g>
 </svg>`;
 
 const outputs: [svg: string, size: number, file: string][] = [

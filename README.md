@@ -22,7 +22,7 @@ The builds are not signed with a developer certificate, so each system warns onc
    - **Screen & System Audio Recording**, for the title of the window an item came from. The app never asks for it. Turn on **Inset Shelf** in that settings page (add it with **+** if it isn't listed), then quit and reopen the app.
    - **Automation**, once per browser, the first time an item is saved from Safari, Chrome, Edge, Brave, Arc or another Chromium browser. It lets the app read the address of the page in front. Firefox, Zen and apps built on web views are read through Accessibility instead and don't ask.
 
-The app has a Dock icon, a menu bar and an Inset mark in the menu bar's status area. **Settings…** (`⌘,`) can hide either icon.
+The app has a Dock icon, a menu bar and the Shelf mark (a rounded frame with a list in its open corner) in the menu bar's status area. **Settings…** (`⌘,`) can hide either icon.
 
 ### Updates
 
@@ -36,7 +36,7 @@ On Windows only the installer (`.exe`) updates itself. The portable `.zip` copie
 
 1. Download `inset-shelf-<version>-win-x64.exe` for the installer, or `-win-x64.zip` to run it without installing. Use `-win-arm64.zip` on an Arm device.
 2. If SmartScreen shows **Windows protected your PC**, click **More info**, then **Run anyway**.
-3. Look for the Inset mark in the notification area of the taskbar. Windows may put it behind the **^** (Show hidden icons) arrow; drag it onto the taskbar to keep it in view. Click it to show or hide the shelf, and right-click it for its menu. Starting the app again from Start shows the shelf.
+3. Look for the Shelf mark (a rounded frame with a list in its open corner) in the notification area of the taskbar. Windows may put it behind the **^** (Show hidden icons) arrow; drag it onto the taskbar to keep it in view. Click it to show or hide the shelf, and right-click it for its menu. Starting the app again from Start shows the shelf.
 
 The Windows build has been run on Windows 11; [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) lists what was checked. On Windows the shortcuts use `Ctrl` where the Mac uses `⌘`, and there is no menu bar: **Settings…** is in the tray icon's menu, in the shelf's top **⋯** menu and on `Ctrl+,`, and that **⋯** menu also holds **Float on Top** and **Inset Shelf Help**. Double Shift copies the selection with `Ctrl+Insert`, not `Ctrl+C`, which would stop a running program in a terminal.
 
