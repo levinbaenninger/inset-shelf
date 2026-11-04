@@ -1,4 +1,4 @@
-Unsigned test build of Inset Shelf. See the README section "Install a test build" for the macOS Gatekeeper and Windows SmartScreen steps.
+Test build of Inset Shelf, without a developer certificate. See the README section "Install a test build" for the macOS Gatekeeper and Windows SmartScreen steps. Install once. After that the app updates itself from the Preview build, except for the portable Windows zips.
 
 | Platform | File |
 | --- | --- |
