@@ -80,9 +80,23 @@ const isMachO = (file: string): boolean => {
   }
 };
 
+const BUNDLE = /\.(?:app|framework)$/u;
+
 /**
- * Every Mach-O file and nested bundle below the app, each listed after what it
- * contains. Symlinks are skipped: they point at code listed anyway.
+ * Signing a bundle's main executable signs the bundle, which needs all its
+ * nested code signed first. So it is left out and signed with the bundle.
+ */
+const mainExecutable = (bundle: string): string => {
+  const name = path.basename(bundle).replace(BUNDLE, "");
+
+  return bundle.endsWith(".app")
+    ? path.join(bundle, "Contents", "MacOS", name)
+    : path.join(bundle, "Versions", "A", name);
+};
+
+/**
+ * Every Mach-O file and nested bundle below a directory, each listed after what
+ * it contains. Symlinks are skipped: they point at code listed anyway.
  */
 const nestedCode = (dir: string): string[] =>
   readdirSync(dir).flatMap((name) => {
@@ -93,13 +107,17 @@ const nestedCode = (dir: string): string[] =>
       return [];
     }
 
-    if (stat.isDirectory()) {
-      const inner = nestedCode(entry);
-
-      return /\.(?:app|framework)$/u.test(name) ? [...inner, entry] : inner;
+    if (!stat.isDirectory()) {
+      return stat.size >= 4 && isMachO(entry) ? [entry] : [];
     }
 
-    return stat.size >= 4 && isMachO(entry) ? [entry] : [];
+    if (!BUNDLE.test(name)) {
+      return nestedCode(entry);
+    }
+
+    const main = mainExecutable(entry);
+
+    return [...nestedCode(entry).filter((file) => file !== main), entry];
   });
 
 export default function signMac(context: AfterPackContext): void {
@@ -130,7 +148,7 @@ export default function signMac(context: AfterPackContext): void {
   );
 
   // Inside out: a bundle's seal covers the signatures of the code it contains.
-  for (const target of [...nestedCode(path.join(app, "Contents")), app]) {
+  for (const target of nestedCode(context.appOutDir)) {
     run("codesign", ["--force", "--timestamp=none", ...identity, target]);
   }
 
