@@ -122,24 +122,27 @@ export const dueBucket = (due: string, now: Date): DueBucket => {
   return days < WEEK ? "week" : "later";
 };
 
-const WEEKDAY = new Intl.DateTimeFormat("en", { weekday: "short" });
-
-const SHORT_DATE = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-});
-
-const LONG_DATE = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-  weekday: "short",
-});
+/**
+ * A calendar date in the system's own format ("5 Nov", "Nov 5"), the year
+ * only when it isn't this year. `locale` is left out except in tests.
+ */
+export const dateText = (
+  date: Date,
+  now: Date,
+  options: { readonly weekday?: boolean; readonly locale?: string } = {}
+): string =>
+  new Intl.DateTimeFormat(options.locale, {
+    day: "numeric",
+    month: "short",
+    weekday: options.weekday === true ? "short" : undefined,
+    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  }).format(date);
 
 /**
- * A due day as the chip shows it: Today, Tomorrow, Yesterday, a weekday in
- * the coming week, else the date. `long` adds the date to a weekday.
+ * A due day as a chip says it: Today, Tomorrow, Yesterday, the weekday in
+ * the next six days, else the date.
  */
-export const dueText = (due: string, now: Date, long = false): string => {
+export const dueText = (due: string, now: Date, locale?: string): string => {
   const day = parseDay(due);
   const days = daysUntil(due, now);
 
@@ -147,24 +150,26 @@ export const dueText = (due: string, now: Date, long = false): string => {
     return due;
   }
 
-  if (days === 0) {
-    return "Today";
+  const near = new Map([
+    [-1, "Yesterday"],
+    [0, "Today"],
+    [1, "Tomorrow"],
+  ]);
+
+  if (near.has(days)) {
+    return near.get(days) ?? due;
   }
 
-  if (days === 1) {
-    return "Tomorrow";
-  }
-
-  if (days === -1) {
-    return "Yesterday";
-  }
-
-  if (days > 1 && days < WEEK) {
-    return long ? LONG_DATE.format(day) : WEEKDAY.format(day);
-  }
-
-  return long ? LONG_DATE.format(day) : SHORT_DATE.format(day);
+  return days > 1 && days < WEEK
+    ? new Intl.DateTimeFormat(locale, { weekday: "short" }).format(day)
+    : dateText(day, now, { locale });
 };
+
+/** What the Due chip reads: an overdue day says so in words, not by colour alone. */
+export const dueChipText = (due: string, now: Date, locale?: string): string =>
+  dueBucket(due, now) === "overdue"
+    ? `Overdue · ${dueText(due, now, locale)}`
+    : dueText(due, now, locale);
 
 /** A due filter typed into search: `due:today`, `due:overdue`, `due:week`, or `due:any` / `due:none`. */
 export type DueFilter = "today" | "overdue" | "week" | "any" | "none";
@@ -211,14 +216,20 @@ export interface SearchQuery {
   /** Lower-case words that must all appear. */
   readonly terms: readonly string[];
   readonly due: DueFilter | null;
+  /** What follows a `due:` still being typed, which filters nothing yet. */
+  readonly pendingDue: string | null;
 }
 
 const SEARCH_TERM = /\s+/u;
-const DUE_TOKEN = /^due:(?<filter>[a-z]*)$/u;
+const DUE_TOKEN = /^due:(?<filter>\S*)$/u;
 
-/** Splits a search into words and an optional due filter; an unknown `due:` word is searched as text. */
+/**
+ * Splits a search into words and an optional due filter. A `due:` word that
+ * names no filter yet is held back, so it never empties the list while typed.
+ */
 export const parseSearch = (query: string): SearchQuery => {
   let due: DueFilter | null = null;
+  let pendingDue: string | null = null;
   const terms: string[] = [];
 
   for (const word of query.toLocaleLowerCase().split(SEARCH_TERM)) {
@@ -226,18 +237,29 @@ export const parseSearch = (query: string): SearchQuery => {
 
     if (filter !== undefined && isDueFilter(filter)) {
       due = filter;
-    } else if (word !== "") {
-      terms.push(word);
+    } else if (filter === undefined) {
+      if (word !== "") {
+        terms.push(word);
+      }
+    } else {
+      pendingDue = filter;
     }
   }
 
-  return { due, terms };
+  return { due, pendingDue, terms };
+};
+
+/** The filters a `due:` being typed may become; all of them when none starts with it. */
+export const dueSuggestions = (pending: string): readonly DueFilter[] => {
+  const started = DUE_FILTERS.filter((filter) => filter.startsWith(pending));
+
+  return started.length === 0 ? DUE_FILTERS : started;
 };
 
 export const DUE_FILTER_LABEL: Readonly<Record<DueFilter, string>> = {
-  any: "Has a due date",
-  none: "No due date",
+  any: "Has a Due",
+  none: "No Due",
   overdue: "Overdue",
   today: "Due today",
-  week: "Due this week",
+  week: "Due this week (incl. overdue)",
 };

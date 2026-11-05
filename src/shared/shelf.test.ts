@@ -13,6 +13,8 @@ import {
   SectionIdSchema,
   ShelfDocSchema,
   UNDO_MAX,
+  fitText,
+  withStepBack,
 } from "./shelf";
 import type { OpEnv, ShelfDoc, ShelfOp, MainOp, Removed } from "./shelf";
 
@@ -741,5 +743,46 @@ describe("setColor", () => {
       apply(tagged, [{ color: null, id: item.id, type: "setColor" }], e).doc
         .items[0]?.color
     ).toBeNull();
+  });
+});
+
+const step = (n: number, done = false) => ({
+  done,
+  id: `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1d${String(n).padStart(2, "0")}`,
+  text: `Step ${n}`,
+});
+
+describe(withStepBack, () => {
+  it("puts a removed step back where it was, keeping ticks made since", () => {
+    const now = [step(1, true), step(3)];
+
+    expect(withStepBack(now, { index: 1, step: step(2) })).toStrictEqual([
+      step(1, true),
+      step(2),
+      step(3),
+    ]);
+  });
+
+  it("puts it at the end when the list has since got shorter", () => {
+    expect(withStepBack([step(1)], { index: 4, step: step(5) })).toStrictEqual([
+      step(1),
+      step(5),
+    ]);
+  });
+
+  it("does nothing when the step is already back", () => {
+    expect(
+      withStepBack([step(1), step(2)], { index: 0, step: step(2) })
+    ).toStrictEqual([step(1), step(2)]);
+  });
+});
+
+describe(fitText, () => {
+  it("keeps text that fits", () => {
+    expect(fitText("Quote", 5)).toBe("Quote");
+  });
+
+  it("cuts longer text to the limit, ending in an ellipsis", () => {
+    expect(fitText("Quotes", 5)).toBe("Quot…");
   });
 });

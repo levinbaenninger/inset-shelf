@@ -73,6 +73,11 @@ export const ShortcutSheet = ({
             </section>
           ))}
         </div>
+        {/* A fade at the foot says the list goes on below. */}
+        <div
+          aria-hidden="true"
+          className="from-popover pointer-events-none sticky bottom-0 -mt-8 h-8 shrink-0 bg-linear-to-t to-transparent"
+        />
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>

@@ -1,7 +1,9 @@
 import type { DetailField } from "@shared/contracts";
+import { withStepBack } from "@shared/shelf";
 import type { ItemId, ShelfDoc, ShelfItem, ShelfOp } from "@shared/shelf";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
+import { toast } from "sonner";
 
 import type { DetailsUndo, FieldRequest, StepsReset } from "./details-view";
 
@@ -51,6 +53,12 @@ export const useDetails = ({
   const openId = useRef<ItemId | null>(null);
   const listScroll = useRef(0);
   const item = doc.items.find((candidate) => candidate.id === id);
+  // The steps as they are now, for an Undo pressed in a toast long after this render.
+  const currentItem = useRef(item);
+
+  useEffect(() => {
+    currentItem.current = item;
+  }, [item]);
 
   // An item deleted while its details are open takes them with it.
   if (id !== null && item === undefined) {
@@ -65,6 +73,8 @@ export const useDetails = ({
 
       openId.current = null;
       undoable.current = [];
+      // Its Undo can't reach details once they are closed.
+      toast.dismiss("details-undo");
       setId(null);
       setRequest(null);
       requestAnimationFrame(() => {
@@ -72,12 +82,12 @@ export const useDetails = ({
           listRef.current.scrollTop = listScroll.current;
         }
 
-        // Back on the row's Details button, where → or a click came from.
+        // Back on the row itself, so Return edits and Space checks off again.
         const row = document.querySelector(`[data-item-id="${id}"]`);
 
         (
-          row?.querySelector<HTMLElement>("[data-details-button]") ??
-          row?.querySelector<HTMLElement>("button:not([role=checkbox])")
+          row?.querySelector<HTMLElement>("[data-row-keys]") ??
+          row?.querySelector<HTMLElement>("[data-details-button]")
         )?.focus({ preventScroll: true });
       });
     },
@@ -113,9 +123,11 @@ export const useDetails = ({
 
       undoable.current = undoable.current.slice(0, -1);
 
-      if (last.kind === "steps") {
-        apply({ id: itemId, steps: [...last.steps], type: "setSteps" });
-        setStepsReset({ seq: nextSeq(), steps: last.steps });
+      if (last.kind === "step") {
+        const steps = withStepBack(currentItem.current?.steps ?? [], last);
+
+        apply({ id: itemId, steps: [...steps], type: "setSteps" });
+        setStepsReset({ seq: nextSeq(), steps });
       } else {
         apply({ id: itemId, type: "restoreWindow", windowId: last.windowId });
       }

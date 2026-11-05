@@ -1,4 +1,4 @@
-import { FolderAddIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { parseComposer, TEXT_MAX } from "@shared/shelf";
 import { useImperativeHandle, useRef } from "react";
@@ -69,24 +69,6 @@ export const Composer = ({
 
   return (
     <div className={cn("px-2 pt-1 pb-2", hidden && "hidden")}>
-      {entry.kind === "section" ? (
-        <p
-          aria-live="polite"
-          className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-1 pb-1.5 text-xs"
-        >
-          <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 min-w-0 items-center gap-1 rounded-md px-1.5 font-medium">
-            <HugeiconsIcon
-              className="shrink-0"
-              icon={FolderAddIcon}
-              size={12}
-            />
-            <span className="shrink-0">↩</span>
-            <span className="truncate">
-              {existing ? "Go to section" : "New section"} ‘{entry.name}’
-            </span>
-          </span>
-        </p>
-      ) : null}
       <InputGroup className="h-auto items-start">
         <InputGroupAddon align="inline-start-top">
           <AddMenu
@@ -126,6 +108,17 @@ export const Composer = ({
           ref={field}
           value={text}
         />
+        {/* Inline at the field's end, so "# Name" reads as a command, not a heading. */}
+        <InputGroupAddon align="inline-end" aria-live="polite">
+          {entry.kind === "section" ? (
+            <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-56 min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
+              <span className="shrink-0">↩</span>
+              <span className="truncate">
+                {existing ? "Go to section" : "New section"} ‘{entry.name}’
+              </span>
+            </span>
+          ) : null}
+        </InputGroupAddon>
       </InputGroup>
     </div>
   );

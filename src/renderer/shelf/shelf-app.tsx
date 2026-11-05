@@ -6,6 +6,7 @@ import type {
   ShelfCommand,
   ShelfView,
 } from "@shared/contracts";
+import { parseSearch } from "@shared/due";
 import type { MenuChoice } from "@shared/menus";
 import { groupItems, itemText, UNDO_MAX } from "@shared/shelf";
 import type {
@@ -45,7 +46,12 @@ import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
 import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
-import { NoMatches, SearchBar } from "./search-bar";
+import {
+  DueSuggestions,
+  NoMatches,
+  SearchBar,
+  withDueFilter,
+} from "./search-bar";
 import {
   SectionHeader,
   SectionNameField,
@@ -292,6 +298,23 @@ const useFileDrops = (ownDrag: () => boolean): boolean => {
   }, []);
 
   return over;
+};
+
+/**
+ * Ends a text edit still open in a row or in details, so a copy, export or
+ * drag that follows takes the words the field shows: the editor saves on
+ * blur, before the next message to main.
+ */
+const flushEdits = (): void => {
+  const active = document.activeElement;
+
+  if (
+    active instanceof HTMLElement &&
+    active.isContentEditable &&
+    active.closest("[data-item-id], [data-details-view]") !== null
+  ) {
+    active.blur();
+  }
 };
 
 /** Several items as one numbered list. */
@@ -606,6 +629,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   /** ⇧⌘C: the picked items, else the open items of the section new items go to. */
   const copyAsList = (): void => {
+    flushEdits();
     void copyList(
       chosen.length > 0
         ? chosen
@@ -847,6 +871,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   /** A choice in an item's menu. */
   const chooseForItem = (choice: ItemChoice): void => {
+    flushEdits();
+
     switch (choice.kind) {
       case "details": {
         openDetails(choice.id);
@@ -1009,6 +1035,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }
 
     const { id } = selected;
+
+    flushEdits();
 
     switch (action) {
       case "copyWithLink": {
@@ -1300,7 +1328,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           onUndoable={(entry) => {
             details.pushUndo(entry);
             undoableToast(
-              entry.kind === "steps" ? "Step removed" : "Window removed",
+              entry.kind === "step" ? "Step removed" : "Window removed",
               details.undo
             );
           }}
@@ -1357,7 +1385,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           }}
           onPointerDown={onListPointerDown}
         >
-          {groups.length === 0 ? (
+          <DueSuggestions
+            onChoose={(filter) => {
+              setQuery(withDueFilter(query, filter));
+              searchRef.current?.focus();
+            }}
+            query={query}
+          />
+          {groups.length === 0 && parseSearch(query).pendingDue === null ? (
             <NoMatches
               onClear={() => {
                 setQuery("");
@@ -1452,6 +1487,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                           });
                         }}
                         onDragImage={() => {
+                          flushEdits();
                           drag.startDragOut(item.id);
                           api.startDrag(item.id);
                         }}

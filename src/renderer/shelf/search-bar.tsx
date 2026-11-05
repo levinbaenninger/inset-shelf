@@ -1,12 +1,19 @@
 import {
   Calendar03Icon,
   Cancel01Icon,
+  FilterHorizontalIcon,
   Search01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { DUE_FILTER_LABEL, DUE_FILTERS, parseSearch } from "@shared/due";
+import {
+  DUE_FILTER_LABEL,
+  DUE_FILTERS,
+  dueSuggestions,
+  parseSearch,
+} from "@shared/due";
 import type { DueFilter } from "@shared/due";
+import { keyText } from "@shared/shortcut";
 import type { RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -31,6 +38,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { isMac } from "@/shared/platform";
 
 const DUE_WORD = /(?:^|\s)due:\S*/gu;
 
@@ -48,7 +56,7 @@ export const withDueFilter = (
   return words === "" ? `due:${filter}` : `${words} due:${filter}`;
 };
 
-/** The calendar in the search field: the due filters, so `due:` can be found without knowing it. */
+/** The filter button in the search field: the due filters, so `due:` can be found without knowing it. */
 const DueFilterMenu = ({
   current,
   onChoose,
@@ -61,34 +69,40 @@ const DueFilterMenu = ({
       <TooltipTrigger asChild>
         <DropdownMenuTrigger asChild>
           <InputGroupButton
-            aria-label="Filter by due date"
+            aria-label="Filter by Due"
             aria-pressed={current !== null}
             size="icon-xs"
           >
             <HugeiconsIcon
-              className={cn(current !== null && "text-pin-ink")}
-              icon={Calendar03Icon}
+              className={cn(current !== null && "text-primary")}
+              icon={FilterHorizontalIcon}
             />
           </InputGroupButton>
         </DropdownMenuTrigger>
       </TooltipTrigger>
-      <TooltipContent side="bottom">Filter by due date</TooltipContent>
+      <TooltipContent side="bottom">Filter by Due</TooltipContent>
     </Tooltip>
-    <DropdownMenuContent align="end" className="min-w-52">
+    <DropdownMenuContent align="end" className="min-w-60">
       <DropdownMenuLabel>Show items</DropdownMenuLabel>
       {DUE_FILTERS.map((filter) => (
         <DropdownMenuItem
+          aria-current={current === filter ? "true" : undefined}
           key={filter}
           onSelect={() => {
             onChoose(current === filter ? null : filter);
           }}
         >
-          <HugeiconsIcon
-            className={cn(current !== filter && "invisible")}
-            icon={Tick02Icon}
-          />
           {DUE_FILTER_LABEL[filter]}
-          <DropdownMenuShortcut>due:{filter}</DropdownMenuShortcut>
+          <DropdownMenuShortcut>
+            {current === filter ? (
+              <HugeiconsIcon
+                aria-label="On"
+                className="text-primary mr-1 inline size-3.5"
+                icon={Tick02Icon}
+              />
+            ) : null}
+            due:{filter}
+          </DropdownMenuShortcut>
         </DropdownMenuItem>
       ))}
       {current === null ? null : (
@@ -108,6 +122,50 @@ const DueFilterMenu = ({
 );
 
 /**
+ * Under the search field while `due:` is typed: the filters it may become,
+ * so a half-typed word never reads as "no matches".
+ */
+export const DueSuggestions = ({
+  onChoose,
+  query,
+}: {
+  readonly query: string;
+  readonly onChoose: (filter: DueFilter) => void;
+}) => {
+  const { pendingDue } = parseSearch(query);
+
+  if (pendingDue === null) {
+    return null;
+  }
+
+  return (
+    <fieldset
+      className="flex flex-wrap items-center gap-1 px-3 pb-2"
+      data-no-highlight
+    >
+      <legend className="sr-only">Due filters</legend>
+      <span aria-hidden="true" className="text-muted-foreground mr-1 text-xs">
+        Filter:
+      </span>
+      {dueSuggestions(pendingDue).map((filter, index) => (
+        <Button
+          aria-label={`${DUE_FILTER_LABEL[filter]} (due:${filter})`}
+          key={filter}
+          onClick={() => {
+            onChoose(filter);
+          }}
+          size="xs"
+          title={index === 0 ? "Return picks this one" : undefined}
+          variant={index === 0 ? "secondary" : "ghost"}
+        >
+          due:{filter}
+        </Button>
+      ))}
+    </fieldset>
+  );
+};
+
+/**
  * The search field: words, and `due:` filters typed or picked from the
  * calendar. Escape clears a search, and hides the shelf when there is none.
  */
@@ -122,7 +180,7 @@ export const SearchBar = ({
   readonly onHide: () => void;
   readonly inputRef: RefObject<HTMLInputElement | null>;
 }) => (
-  <InputGroup>
+  <InputGroup brand>
     <InputGroupAddon>
       <HugeiconsIcon icon={Search01Icon} />
     </InputGroupAddon>
@@ -132,6 +190,16 @@ export const SearchBar = ({
         onChange(event.target.value);
       }}
       onKeyDown={(event) => {
+        const { pendingDue } = parseSearch(query);
+
+        const [first] = pendingDue === null ? [] : dueSuggestions(pendingDue);
+
+        // Return finishes a due: being typed with the first filter it may become.
+        if (event.key === "Enter" && first !== undefined) {
+          event.preventDefault();
+          onChange(withDueFilter(query, first));
+        }
+
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
@@ -145,6 +213,7 @@ export const SearchBar = ({
       }}
       placeholder="Search, or due:today"
       ref={inputRef}
+      title={`Search (${keyText("CommandOrControl+F", isMac)})`}
       type="text"
       value={query}
     />
@@ -171,14 +240,20 @@ export const SearchBar = ({
   </InputGroup>
 );
 
+const NOTHING_DUE: Readonly<Record<DueFilter, string>> = {
+  any: "Nothing has a Due",
+  none: "Every item has a Due",
+  overdue: "Nothing is overdue",
+  today: "Nothing is due today",
+  week: "Nothing is due this week or overdue",
+};
+
 /** What an empty search says, so a filter reads as one. */
 const noMatchesText = (query: string): string => {
   const { due, terms } = parseSearch(query);
 
   if (due !== null && terms.length === 0) {
-    return due === "none"
-      ? "Every item has a due date"
-      : `Nothing ${DUE_FILTER_LABEL[due].toLowerCase()}`;
+    return NOTHING_DUE[due];
   }
 
   return `No matches for “${query.trim()}”`;

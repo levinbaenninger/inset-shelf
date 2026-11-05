@@ -73,6 +73,25 @@ export const nudgePin = (
 };
 
 /**
+ * An arrow key's step in the drawing's units: `pixels` of the saved image
+ * (1, or 10 with Shift), however many image pixels make one drawing unit.
+ */
+export const nudgeStep = (pixels: number, pixelsPerDip: number): number =>
+  pixels / pixelsPerDip;
+
+/** Where the pointer took hold of a pin: the pin and the pointer then. */
+export interface PinGrab {
+  readonly pin: Point;
+  readonly pointer: Point;
+}
+
+/** Where a dragged pin is: it moves with the pointer, so grabbing it by the head never jumps its tip to the pointer. */
+export const draggedTo = (grab: PinGrab, pointer: Point): Point => ({
+  x: grab.pin.x + pointer.x - grab.pointer.x,
+  y: grab.pin.y + pointer.y - grab.pointer.y,
+});
+
+/**
  * The pin under a point, the topmost (highest number) first: the head is a
  * circle `radius` across, centred `headY` above the tip.
  */

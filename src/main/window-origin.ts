@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 
 import { systemPreferences } from "electron";
 import { z } from "zod";
+
+import { AX_PRELUDE, runAutomation } from "./page-address";
 
 /**
  * Reads the file (AXDocument) and the web page (the first AXWebArea's AXURL)
@@ -12,18 +12,11 @@ import { z } from "zod";
  * the given title; when none or two match, it answers nothing. Runs as
  * JavaScript for Automation, needs Accessibility, and never asks for it.
  */
-const SCRIPT = `
-ObjC.import("AppKit");
-ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["int"]]);
-ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id *"]]);
+const SCRIPT = `${AX_PRELUDE}
 function run(argv) {
   var root = $.AXUIElementCreateApplication(Number(argv[0]));
   var wanted = argv[1] || "";
   var matches = 0;
-  function attr(element, name) {
-    var out = Ref();
-    return $.AXUIElementCopyAttributeValue(element, $(name), out) === 0 ? out[0] : null;
-  }
   function text(value) {
     if (!value) return "";
     var unwrapped = ObjC.unwrap(value);
@@ -55,7 +48,6 @@ function run(argv) {
 }
 `;
 
-const TIMEOUT_MS = 1500;
 const MAX_URL = 2000;
 const MAX_PATH = 1024;
 
@@ -73,7 +65,9 @@ export const webPage = (raw: string | undefined | null): string | null => {
   try {
     const url = new URL(raw.trim());
 
-    return url.protocol === "http:" || url.protocol === "https:"
+    // The address as kept can grow (encoding, a trailing slash); one cut short is no link.
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      url.href.length <= MAX_URL
       ? url.href
       : null;
   } catch {
@@ -115,28 +109,14 @@ const ask = async (
   pid: number,
   title: string
 ): Promise<z.infer<typeof AnswerSchema> | null> => {
+  const output = await runAutomation(SCRIPT, [String(pid), title]);
+
+  if (output === null) {
+    return null;
+  }
+
   try {
-    const child = spawn(
-      "/usr/bin/osascript",
-      ["-l", "JavaScript", "-e", SCRIPT, String(pid), title],
-      { stdio: ["ignore", "pipe", "ignore"], timeout: TIMEOUT_MS }
-    );
-
-    child.stdout.setEncoding("utf-8");
-
-    let output = "";
-
-    for await (const chunk of child.stdout) {
-      output += String(chunk);
-    }
-
-    await once(child, "close");
-
-    if (child.exitCode !== 0) {
-      return null;
-    }
-
-    const parsed = AnswerSchema.safeParse(JSON.parse(output.trim()));
+    const parsed = AnswerSchema.safeParse(JSON.parse(output));
 
     return parsed.success ? parsed.data : null;
   } catch {

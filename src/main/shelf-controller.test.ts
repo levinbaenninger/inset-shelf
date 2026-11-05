@@ -1,5 +1,6 @@
 import {
   emptyShelf,
+  itemDetailsText,
   ItemIdSchema,
   SectionIdSchema,
   UNDO_MAX,
@@ -109,6 +110,37 @@ describe(createShelfController, () => {
     await controller.flush();
     expect(saved.at(-1)?.items[0]).toMatchObject({ note: "ab" });
     expect(saved).toHaveLength(2);
+  });
+
+  it("copies what was just typed while its save still waits for a pause", () => {
+    const { controller, timers } = setup();
+
+    const id = controller.apply({
+      image,
+      pins: [],
+      source: null,
+      context: null,
+      type: "addImage",
+      via: "area",
+    });
+
+    if (id === null) {
+      throw new Error("no id");
+    }
+
+    controller.apply({ id, note: "Call Rieder", type: "editNote" });
+    controller.apply({
+      description: "Before Friday",
+      id,
+      type: "setDescription",
+    });
+
+    const item = controller.item(id);
+
+    expect(timers).toHaveLength(1);
+    expect(item === undefined ? null : itemDetailsText(item)).toBe(
+      "Call Rieder\n\nBefore Friday"
+    );
   });
 
   it("deletes an image file only once it falls off the undo list", async () => {

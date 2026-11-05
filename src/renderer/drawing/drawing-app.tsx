@@ -19,7 +19,7 @@ import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 import { Page } from "./page";
 import type { PageImage } from "./page";
-import { nudgePin, movePin, pinsOf, removePin } from "./pins";
+import { nudgePin, nudgeStep, movePin, pinsOf, removePin } from "./pins";
 import { exportAnnotated, exportPng, measureText } from "./render";
 import {
   addMark,
@@ -194,6 +194,19 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   const [lastTool, setLastTool] = useState<Tool>("pen");
   const [selectedPin, setSelectedPin] = useState<number | null>(null);
   const pointerRef = useRef<Point | null>(null);
+
+  // Leaving the window lets go of the pin, so digits and ⌫ typed on return never touch it unasked.
+  useEffect(() => {
+    const letGo = (): void => {
+      setSelectedPin(null);
+    };
+
+    window.addEventListener("blur", letGo);
+
+    return () => {
+      window.removeEventListener("blur", letGo);
+    };
+  }, []);
   // Marks on a picture stand out in red; a blank page starts in ink.
   const [color, setColor] = useState<Color>(image === null ? "ink" : "red");
   const [stroke, setStroke] = useState<Stroke>("thin");
@@ -314,7 +327,17 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
         return false;
       }
 
-      change(nudgePin(marks, selectedPin, { x: dx, y: dy }, bounds));
+      // dx and dy are pixels of the saved image, whatever the screen's scale.
+      const scale = image?.pixelsPerDip ?? EXPORT_SCALE;
+
+      change(
+        nudgePin(
+          marks,
+          selectedPin,
+          { x: nudgeStep(dx, scale), y: nudgeStep(dy, scale) },
+          bounds
+        )
+      );
 
       return true;
     },

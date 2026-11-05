@@ -3,6 +3,17 @@ import { once } from "node:events";
 
 import { z } from "zod";
 
+/** What every accessibility script starts with: the AX calls and a reader for one attribute. */
+export const AX_PRELUDE = `
+ObjC.import("AppKit");
+ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["int"]]);
+ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id *"]]);
+function attr(element, name) {
+  var out = Ref();
+  return $.AXUIElementCopyAttributeValue(element, $(name), out) === 0 ? out[0] : null;
+}
+`;
+
 /**
  * Reads the web areas in an app's focused window from its accessibility
  * tree: each one's address (AXURL) and title. This finds pages that
@@ -12,16 +23,9 @@ import { z } from "zod";
  * Runs as JavaScript for Automation, so it needs no helper binary; it only
  * works once Inset Shelf has Accessibility access, which double Shift needs too.
  */
-const SCRIPT = `
-ObjC.import("AppKit");
-ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["int"]]);
-ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id *"]]);
+const SCRIPT = `${AX_PRELUDE}
 function run(argv) {
   var root = $.AXUIElementCreateApplication(Number(argv[0]));
-  function attr(element, name) {
-    var out = Ref();
-    return $.AXUIElementCopyAttributeValue(element, $(name), out) === 0 ? out[0] : null;
-  }
   function text(value) {
     return value ? String(ObjC.unwrap(value)) : "";
   }
@@ -60,14 +64,15 @@ const parseAreas = (output: string): readonly WebArea[] => {
   }
 };
 
-/** The web areas in the app's focused window, or none. macOS only. */
-export const readWebAreas = async (
-  pid: number
-): Promise<readonly WebArea[]> => {
+/** Runs a JavaScript for Automation script and gives what it printed, or null when it failed or timed out. */
+export const runAutomation = async (
+  script: string,
+  args: readonly string[]
+): Promise<string | null> => {
   try {
     const child = spawn(
       "/usr/bin/osascript",
-      ["-l", "JavaScript", "-e", SCRIPT, String(pid)],
+      ["-l", "JavaScript", "-e", script, ...args],
       { stdio: ["ignore", "pipe", "ignore"], timeout: TIMEOUT_MS }
     );
 
@@ -81,8 +86,17 @@ export const readWebAreas = async (
 
     await once(child, "close");
 
-    return child.exitCode === 0 ? parseAreas(output.trim()) : [];
+    return child.exitCode === 0 ? output.trim() : null;
   } catch {
-    return [];
+    return null;
   }
+};
+
+/** The web areas in the app's focused window, or none. macOS only. */
+export const readWebAreas = async (
+  pid: number
+): Promise<readonly WebArea[]> => {
+  const output = await runAutomation(SCRIPT, [String(pid)]);
+
+  return output === null ? [] : parseAreas(output);
 };

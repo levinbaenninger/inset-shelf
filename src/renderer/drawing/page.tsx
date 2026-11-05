@@ -6,7 +6,8 @@ import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from "react";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
-import { pinAt, pinsOf } from "./pins";
+import { draggedTo, pinAt, pinsOf } from "./pins";
+import type { PinGrab } from "./pins";
 import { inkColor, paletteFor, renderSketch } from "./render";
 import {
   fontFor,
@@ -255,6 +256,7 @@ export const Page = ({
   const [pinDrag, setPinDrag] = useState<{
     readonly index: number;
     readonly at: Point;
+    readonly grab: PinGrab;
     readonly moved: boolean;
   } | null>(null);
 
@@ -396,8 +398,15 @@ export const Page = ({
       onAdd({ at, kind: "pin" });
       onSelectPin(pinsOf(marks).length);
     } else {
+      const pin = pinsOf(marks)[hit]?.at ?? at;
+
       onSelectPin(hit);
-      setPinDrag({ at, index: hit, moved: false });
+      setPinDrag({
+        at: pin,
+        grab: { pin, pointer: at },
+        index: hit,
+        moved: false,
+      });
     }
   };
 
@@ -454,7 +463,11 @@ export const Page = ({
     pointerRef.current = here;
 
     if (pinDrag !== null) {
-      setPinDrag({ ...pinDrag, at: here, moved: true });
+      setPinDrag({
+        ...pinDrag,
+        at: draggedTo(pinDrag.grab, here),
+        moved: true,
+      });
 
       return;
     }

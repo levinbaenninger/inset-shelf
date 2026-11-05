@@ -33,6 +33,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@shadcn/lint": "^0.2.4",
     "@tailwindcss/vite": "4.3.3",
+    "@tiptap/extension-strike": "3.32.2",
     "@tiptap/extensions": "^3.32.2",
     "@tiptap/markdown": "^3.32.2",
     "@tiptap/pm": "^3.32.2",

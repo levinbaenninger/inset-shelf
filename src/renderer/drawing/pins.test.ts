@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { addPin, movePin, nudgePin, pinAt, pinsOf, removePin } from "./pins";
+import {
+  addPin,
+  draggedTo,
+  movePin,
+  nudgePin,
+  nudgeStep,
+  pinAt,
+  pinsOf,
+  removePin,
+} from "./pins";
 import type { Mark } from "./sketch";
 
 const line: Mark = {
@@ -77,5 +86,38 @@ describe(pinAt, () => {
     expect(pinAt(marks, { x: 30, y: 30 - 13 }, 9, -13)).toBe(3);
     expect(pinAt(marks, { x: 10, y: 10 - 13 }, 9, -13)).toBe(0);
     expect(pinAt(marks, { x: 100, y: 100 }, 9, -13)).toBeNull();
+  });
+});
+
+/** Where pin 1, at x 100 in the saved image, ends up after one arrow step of `pixels`. */
+const savedX = (pixelsPerDip: number, pixels: number): number => {
+  const marks = addPin([], { x: 100 / pixelsPerDip, y: 0 });
+  const step = nudgeStep(pixels, pixelsPerDip);
+  const moved = nudgePin(marks, 0, { x: step, y: 0 });
+
+  return (pinsOf(moved)[0]?.at.x ?? 0) * pixelsPerDip;
+};
+
+describe(nudgeStep, () => {
+  it("moves a pin 1 image pixel, or 10 with Shift, on a 1× capture", () => {
+    expect([savedX(1, 1), savedX(1, 10)]).toStrictEqual([101, 110]);
+  });
+
+  it("moves a pin 1 image pixel, or 10 with Shift, on a 2× capture", () => {
+    expect([savedX(2, 1), savedX(2, 10)]).toStrictEqual([101, 110]);
+  });
+});
+
+describe(draggedTo, () => {
+  it("keeps the tip where it was when the head is grabbed and not moved", () => {
+    const grab = { pin: { x: 50, y: 80 }, pointer: { x: 50, y: 67 } };
+
+    expect(draggedTo(grab, { x: 50, y: 67 })).toStrictEqual({ x: 50, y: 80 });
+  });
+
+  it("moves a pin only sideways when the pointer moves only sideways", () => {
+    const grab = { pin: { x: 50, y: 80 }, pointer: { x: 52, y: 67 } };
+
+    expect(draggedTo(grab, { x: 72, y: 67 })).toStrictEqual({ x: 70, y: 80 });
   });
 });

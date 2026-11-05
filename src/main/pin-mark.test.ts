@@ -91,3 +91,31 @@ describe(drawPinMarks, () => {
     expect(drawPinMarks(bitmap, [], 2)).toStrictEqual(bitmap.data);
   });
 });
+
+describe("an exported image with several labelled pins", () => {
+  const bitmap = greyBitmap(120, 100);
+
+  const pins = [
+    { label: "Title too close", x: 20, y: 50 },
+    { label: "Error text", x: 60, y: 50 },
+    { x: 100, y: 50 },
+  ];
+
+  const marked = drawPinMarks(bitmap, pins, 1);
+
+  it("draws every pin with its tip on its point, labelled or not", () => {
+    const tips = pins.map((pin) => bgraAt(marked, 120, pin.x, pin.y - 1)[0]);
+
+    expect(tips.every((blue) => blue !== GREY)).toBeTruthy();
+  });
+
+  it("draws the labels nowhere on the image: they go in the copied text", () => {
+    expect(drawPinMarks(bitmap, pins, 1)).toStrictEqual(
+      drawPinMarks(
+        bitmap,
+        pins.map(({ x, y }) => ({ x, y })),
+        1
+      )
+    );
+  });
+});

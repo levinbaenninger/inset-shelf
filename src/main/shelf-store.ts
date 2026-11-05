@@ -17,6 +17,7 @@ import {
   parseShelfDocument,
 } from "@shared/shelf";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
+import { z } from "zod";
 
 const DOC_FILE = "shelf.json";
 const ATTACHMENTS = "attachments";
@@ -108,7 +109,7 @@ export const failNextWrite = (fs: StoreFs): StoreFs => {
 
 export interface ShelfStore {
   readonly initial: ShelfDoc;
-  /** Set when shelf.json could not be read and was set aside. */
+  /** Set when shelf.json could not be read: it was set aside, or it is left alone and nothing is saved. */
   readonly recovered: string | null;
   /** Coalesces: while one write runs, only the newest pending document is written next. */
   readonly save: (doc: ShelfDoc) => Promise<WriteResult>;
@@ -119,10 +120,21 @@ export interface ShelfStore {
   readonly attachmentPath: (file: string) => string | null;
 }
 
-interface Loaded {
-  readonly doc: ShelfDoc;
-  readonly recovered: string | null;
-}
+/**
+ * What opening found. Only a shelf that was read (or never existed) may have
+ * its attachments tidied; one that could not be read or moved aside is never
+ * written over, so its file stays exactly as it was.
+ */
+type Loaded =
+  | { readonly kind: "read"; readonly doc: ShelfDoc }
+  | { readonly kind: "setAside"; readonly doc: ShelfDoc; readonly note: string }
+  | { readonly kind: "blocked"; readonly doc: ShelfDoc; readonly note: string };
+
+/** The system's code for a failed file operation, such as ENOENT. */
+const FsErrorSchema = z.object({ code: z.string() });
+
+const BLOCKED_SAVE =
+  "Nothing is saved this session, so the shelf file that could not be opened stays as it was.";
 
 const load = async (
   fs: StoreFs,
@@ -131,37 +143,89 @@ const load = async (
   now: () => Date
 ): Promise<Loaded> => {
   const file = path.join(dir, DOC_FILE);
+  const empty = emptyShelf(newSectionId());
   let raw: string;
 
   try {
     raw = await fs.readFile(file);
-  } catch {
-    return { doc: emptyShelf(newSectionId()), recovered: null };
+  } catch (error) {
+    const code = FsErrorSchema.safeParse(error).data?.code ?? "unknown";
+
+    return code === "ENOENT"
+      ? { doc: empty, kind: "read" }
+      : {
+          doc: empty,
+          kind: "blocked",
+          note: `The saved shelf could not be opened (${code}). ${BLOCKED_SAVE}`,
+        };
   }
 
   const doc = parseShelfDocument(raw);
 
   if (doc !== null) {
-    return { doc, recovered: null };
+    return { doc, kind: "read" };
   }
 
   const aside = `shelf.unreadable-${now().toISOString().replaceAll(":", "-")}.json`;
 
-  await fs.rename(file, path.join(dir, aside));
+  try {
+    await fs.rename(file, path.join(dir, aside));
+  } catch {
+    return {
+      doc: empty,
+      kind: "blocked",
+      note: `The saved shelf could not be read or set aside. ${BLOCKED_SAVE}`,
+    };
+  }
 
   return {
-    doc: emptyShelf(newSectionId()),
-    recovered: `The saved shelf could not be read, so a new one was started. The old file was kept as ${aside}.`,
+    doc: empty,
+    kind: "setAside",
+    note: `The saved shelf could not be read, so a new one was started. The old file was kept as ${aside}, with its pictures and files.`,
   };
 };
 
-/** Deletes attachment files the document no longer names, such as a removal that was not undone before quitting. */
+const SET_ASIDE = /^shelf\.unreadable-.*\.json$/u;
+
+const ATTACHMENT_NAMES =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,8}/gu;
+
+/**
+ * The attachments that shelf files set aside as unreadable still name, so
+ * they are never tidied away; null when one of those files can't be read.
+ */
+const namedBySetAside = async (
+  fs: StoreFs,
+  dir: string
+): Promise<readonly string[] | null> => {
+  try {
+    const names = await fs.list(dir);
+    const files = names.filter((name) => SET_ASIDE.test(name));
+
+    const texts = await Promise.all(
+      files.map(async (name) => await fs.readFile(path.join(dir, name)))
+    );
+
+    return texts.flatMap((text) => text.match(ATTACHMENT_NAMES) ?? []);
+  } catch {
+    return null;
+  }
+};
+
+/** Deletes attachment files no shelf file names, such as a removal that was not undone before quitting. */
 const collectGarbage = async (
   fs: StoreFs,
+  dir: string,
   attachments: string,
   doc: ShelfDoc
 ): Promise<void> => {
-  const used = new Set(doc.items.flatMap(attachmentsOf));
+  const kept = await namedBySetAside(fs, dir);
+
+  if (kept === null) {
+    return;
+  }
+
+  const used = new Set([...doc.items.flatMap(attachmentsOf), ...kept]);
 
   const names = await fs.list(attachments);
 
@@ -192,21 +256,30 @@ export const openShelfStore = async (
 
   await fs.mkdir(attachments);
 
-  const { doc, recovered } = await load(
-    fs,
-    dir,
-    options.newSectionId,
-    options.now
-  );
+  const loaded = await load(fs, dir, options.newSectionId, options.now);
 
-  await collectGarbage(fs, attachments, doc);
+  if (loaded.kind === "read") {
+    await collectGarbage(fs, dir, attachments, loaded.doc);
+  }
 
   const write = async (next: ShelfDoc): Promise<WriteResult> => {
+    if (loaded.kind === "blocked") {
+      return { message: BLOCKED_SAVE, ok: false };
+    }
+
+    const text = `${JSON.stringify(next, null, 2)}\n`;
+
+    // The store never writes a file it could not read back on the next launch.
+    if (parseShelfDocument(text) === null) {
+      return {
+        message:
+          "The shelf could not be saved: an entry holds something the saved file can't keep. The last saved copy is unchanged.",
+        ok: false,
+      };
+    }
+
     try {
-      await fs.writeAtomic(
-        path.join(dir, DOC_FILE),
-        `${JSON.stringify(next, null, 2)}\n`
-      );
+      await fs.writeAtomic(path.join(dir, DOC_FILE), text);
 
       return { ok: true };
     } catch (error) {
@@ -255,8 +328,8 @@ export const openShelfStore = async (
         await fs.remove(path.join(attachments, file));
       }
     },
-    initial: doc,
-    recovered,
+    initial: loaded.doc,
+    recovered: loaded.kind === "read" ? null : loaded.note,
     save,
     copyAttachment: async (from, extension) => {
       const file = `${randomUUID()}.${extension}`;

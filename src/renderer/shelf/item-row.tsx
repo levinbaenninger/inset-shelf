@@ -177,6 +177,7 @@ const FileName = ({
   <button
     className="focus-visible:ring-ring/50 flex min-w-0 cursor-grab items-center gap-2 rounded-sm text-left text-sm outline-none focus-visible:ring-3 active:cursor-grabbing"
     draggable
+    data-row-keys
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDragStart={(event) => {
@@ -203,6 +204,43 @@ const FileName = ({
     </span>
   </button>
 );
+
+/**
+ * A line with its words on the left and the metadata badges right-aligned.
+ * The words keep at least 14 characters; badges that don't fit wrap out of
+ * sight, lowest priority first, so the line never grows. `reach` lets the
+ * badges run on under the More button's column, below its button.
+ */
+const BadgeLine = ({
+  badges,
+  children,
+  reach,
+}: {
+  readonly badges: readonly ReactNode[];
+  readonly children: ReactNode;
+  readonly reach: boolean;
+}) => {
+  const words = children !== null && children !== undefined;
+
+  if (badges.length === 0) {
+    return words ? <div className="flex min-w-0">{children}</div> : null;
+  }
+
+  return (
+    <div className={cn("flex min-w-0 items-center gap-2", reach && "-mr-9")}>
+      {words ? <div className="flex min-w-0 flex-1">{children}</div> : null}
+      <div
+        className={cn(
+          "ml-auto flex h-5 shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
+          words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
+        )}
+        data-badges
+      >
+        {badges}
+      </div>
+    </div>
+  );
+};
 
 export interface RowHandlers {
   /** Opens the page an item was captured from, or a link in it. */
@@ -403,7 +441,7 @@ const NoteField = ({
 
 /**
  * The note under an image or file as text: two lines until the item is
- * selected. A double-click, Return or Edit Note opens it for typing.
+ * selected. A double-click, Return or Edit Caption opens it for typing.
  */
 const NoteText = ({
   item,
@@ -421,6 +459,7 @@ const NoteText = ({
         "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
         item.done && "text-muted-foreground line-through"
       )}
+      data-row-keys
       onClick={onSelect}
       onContextMenu={contextMenuAt(onContextMenu)}
       onDoubleClick={onEdit}
@@ -455,6 +494,7 @@ const Picture = ({
       compact ? "w-24" : "w-full"
     )}
     draggable
+    data-row-keys
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDoubleClick={onOpen}
@@ -534,6 +574,7 @@ const ImageBody = ({
             item.note === "" && "text-muted-foreground",
             item.done && "text-muted-foreground line-through"
           )}
+          data-row-keys
           onClick={onSelect}
           onContextMenu={contextMenuAt(onContextMenu)}
           type="button"
@@ -602,6 +643,7 @@ const ImageBody = ({
 
 /** An attached file's name with its note: a field while the file is selected, else the note as text. */
 const FileBody = ({
+  badges,
   editing,
   item,
   onContextMenu,
@@ -616,6 +658,8 @@ const FileBody = ({
   readonly item: FileItem;
   readonly selected: boolean;
   readonly editing: boolean;
+  /** Without a source line, the badges sit on the file's own line. */
+  readonly badges: readonly ReactNode[];
 } & Pick<
   RowHandlers,
   | "onContextMenu"
@@ -633,6 +677,7 @@ const FileBody = ({
           "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
           item.done && "text-muted-foreground line-through"
         )}
+        data-row-keys
         onClick={onSelect}
         onContextMenu={contextMenuAt(onContextMenu)}
         type="button"
@@ -642,12 +687,14 @@ const FileBody = ({
         </span>
       </button>
     )}
-    <FileName
-      item={item}
-      onContextMenu={onContextMenu}
-      onDragImage={onDragImage}
-      onSelect={onSelect}
-    />
+    <BadgeLine badges={badges} reach={item.title !== null}>
+      <FileName
+        item={item}
+        onContextMenu={onContextMenu}
+        onDragImage={onDragImage}
+        onSelect={onSelect}
+      />
+    </BadgeLine>
     {editing ? (
       <NoteField
         autoFocus
@@ -708,18 +755,22 @@ const TextBody = ({
     <>
       {/* Open, its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        <Markdown
-          className={words}
-          interactive
-          onOpenLink={onOpenLink}
-          text={item.text}
-        />
+        // Where focus comes back to from details: the row, whose keys are Return and Space.
+        <div className="rounded-sm outline-none" data-row-keys tabIndex={-1}>
+          <Markdown
+            className={words}
+            interactive
+            onOpenLink={onOpenLink}
+            text={item.text}
+          />
+        </div>
       ) : (
         <button
           className={cn(
             "focus-visible:ring-ring/50 rounded-sm text-left outline-none focus-visible:ring-3",
             words
           )}
+          data-row-keys
           onClick={onSelect}
           onContextMenu={contextMenuAt(onContextMenu)}
           onDoubleClick={onEdit}
@@ -753,25 +804,13 @@ const SourceRow = ({
   readonly badges: readonly ReactNode[];
   readonly context: ItemContext | null;
   readonly onOpenLink: () => void;
-}) => {
-  const source =
-    context === null ? null : (
+}) => (
+  <BadgeLine badges={badges} reach>
+    {context === null ? null : (
       <SourceLine context={context} onOpenLink={onOpenLink} />
-    );
-
-  if (badges.length === 0) {
-    return source;
-  }
-
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <div className="flex min-w-0 flex-1">{source}</div>
-      <div className="flex shrink-0 items-center gap-1" data-badges>
-        {badges}
-      </div>
-    </div>
-  );
-};
+    )}
+  </BadgeLine>
+);
 
 /** What an open row shows besides its words: the description, checkable steps and the linked windows. */
 const Expansion = ({
@@ -828,8 +867,21 @@ const TagStripe = ({ item }: { readonly item: ShelfItem }) =>
     />
   );
 
+/** A file without a source line carries its badges on the file's own line, not on a line of their own. */
+const placedBadges = (
+  item: ShelfItem,
+  badges: readonly ReactNode[]
+): {
+  readonly fileLine: readonly ReactNode[];
+  readonly sourceLine: readonly ReactNode[];
+} =>
+  item.kind === "file" && item.context === null
+    ? { fileLine: badges, sourceLine: [] }
+    : { fileLine: [], sourceLine: badges };
+
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
+  const badges = placedBadges(item, metaBadges(item, props.now, selected));
 
   return (
     <li
@@ -914,6 +966,7 @@ export const ItemRow = (props: ItemRowProps) => {
         ) : null}
         {item.kind === "file" ? (
           <FileBody
+            badges={badges.fileLine}
             editing={editing}
             item={item}
             onContextMenu={props.onContextMenu}
@@ -934,7 +987,7 @@ export const ItemRow = (props: ItemRowProps) => {
           />
         ) : null}
         <SourceRow
-          badges={metaBadges(item, props.now)}
+          badges={badges.sourceLine}
           context={item.context}
           onOpenLink={() => {
             props.onOpenLink();

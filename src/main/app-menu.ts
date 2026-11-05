@@ -137,7 +137,7 @@ const itemSubmenu = (actions: AppMenuActions): MenuItemConstructorOptions[] => {
     SEPARATOR,
     field("description", "Add Description", "CommandOrControl+D"),
     field("steps", "Add Next Steps", "Shift+CommandOrControl+S"),
-    field("due", "Set Due Date…", "Shift+CommandOrControl+D"),
+    field("due", "Set Due…", "Shift+CommandOrControl+D"),
     {
       click: () => {
         actions.item("linkWindow");
@@ -230,6 +230,12 @@ export const appMenuTemplate = (
       {
         accelerator: "Alt+CommandOrControl+C",
         click: () => {
+          actions.item("copyDetails");
+        },
+        label: "Copy with Details",
+      },
+      {
+        click: () => {
           actions.item("copyWithLink");
         },
         label: "Copy with Link",
@@ -238,12 +244,6 @@ export const appMenuTemplate = (
         accelerator: "Shift+CommandOrControl+C",
         click: actions.copyAsList,
         label: "Copy as List",
-      },
-      {
-        click: () => {
-          actions.item("copyDetails");
-        },
-        label: "Copy with Details",
       },
       { role: "paste" },
       {

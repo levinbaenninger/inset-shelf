@@ -254,7 +254,6 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
     ? []
     : [
         {
-          accelerator: "Alt+CommandOrControl+C",
           choice: { id: item.id, kind: "copyWithLink" },
           enabled: true,
           icon: "link",
@@ -263,11 +262,12 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
         },
       ];
 
-/** Only an item with metadata copies differently with its details. */
+/** ⌥⌘C in every Inset app; shown only where it copies more than Copy does. */
 const copyDetails = (item: ShelfItem): readonly MenuEntry[] =>
-  hasDetails(item)
+  hasDetails(item) || (item.context?.url ?? null) !== null
     ? [
         {
+          accelerator: "Alt+CommandOrControl+C",
           choice: { id: item.id, kind: "copyDetails" },
           enabled: true,
           icon: "copy",
@@ -324,8 +324,8 @@ export const itemMenu = (
     kind: "choice",
     label: "Copy",
   },
-  ...copyWithLink(item),
   ...copyDetails(item),
+  ...copyWithLink(item),
   SEPARATOR,
   {
     accelerator: "Right",
@@ -342,7 +342,7 @@ export const itemMenu = (
     enabled: true,
     icon: "edit",
     kind: "choice",
-    label: item.kind === "text" ? "Edit" : "Edit Note",
+    label: item.kind === "text" ? "Edit" : "Edit Caption",
   },
   {
     accelerator: "Space",

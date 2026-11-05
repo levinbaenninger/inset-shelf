@@ -29,11 +29,19 @@ const isPrintable = (event: KeyboardEvent): boolean =>
   !commandKey(event) &&
   (!event.altKey || event.getModifierState("AltGraph"));
 
-/** A button, checkbox or link in details: Return and Space press it, as anywhere else. */
-const isControlInDetails = (target: EventTarget | null): boolean =>
-  target instanceof Element &&
-  target.closest("[data-details-view]") !== null &&
-  target.closest("button, a, [role=checkbox], [role=button]") !== null;
+/**
+ * A button, checkbox or link that Return and Space press, as anywhere else:
+ * a step's checkbox, a window to reopen, Details. Only the buttons that stand
+ * for the row itself (data-row-keys) keep Return to edit and Space to check off.
+ */
+const pressesItself = (target: EventTarget | null): boolean => {
+  const control =
+    target instanceof Element
+      ? target.closest<HTMLElement>("button, a, [role=checkbox], [role=button]")
+      : null;
+
+  return control !== null && control.dataset.rowKeys === undefined;
+};
 
 /** An open menu handles its own keys, typing included. */
 const inMenu = (target: EventTarget | null): boolean =>
@@ -77,7 +85,7 @@ const actionFor = (
 
   if (
     (event.key === "Enter" || event.key === " ") &&
-    isControlInDetails(event.target)
+    pressesItself(event.target)
   ) {
     return null;
   }

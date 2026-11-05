@@ -1,14 +1,17 @@
 import {
   AppWindowIcon,
   Calendar03Icon,
+  CalendarRemove01Icon,
   CheckListIcon,
   Location01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  dateText,
   DUE_CHOICE_LABEL,
   DUE_CHOICES,
   dueBucket,
+  dueChipText,
   dueFor,
   dueText,
   parseDay,
@@ -81,29 +84,30 @@ export const Badge = ({
   </span>
 );
 
+/** The Due chip as said aloud: the full date, not only the relative word. */
 export const dueLabel = (due: string, now: Date): string => {
-  const bucket = dueBucket(due, now);
-  const text = dueText(due, now, true);
+  const day = parseDay(due);
+  const date = day === null ? due : dateText(day, now, { weekday: true });
 
-  return bucket === "overdue" ? `Overdue: was due ${text}` : `Due ${text}`;
+  return dueBucket(due, now) === "overdue"
+    ? `Overdue, was due ${date}`
+    : `Due ${dueText(due, now)}, ${date}`;
 };
 
-/** The Due chip: red once overdue, in the accent when due today. */
+/** The Due chip: "Overdue · Nov 3" in red once overdue, in the accent when due today. */
 export const DueBadge = ({
   due,
-  long = false,
   now,
 }: {
   readonly due: string;
   readonly now: Date;
-  readonly long?: boolean;
 }) => (
   <Badge
     icon={Calendar03Icon}
     label={dueLabel(due, now)}
     tone={dueBucket(due, now)}
   >
-    {dueText(due, now, long)}
+    {dueChipText(due, now)}
   </Badge>
 );
 
@@ -116,13 +120,15 @@ export const filledSteps = (steps: readonly Step[]): readonly Step[] =>
 
 /**
  * The badges on an item's source line, at most three, most telling first:
- * due, step progress, linked windows, pins. A description has none.
+ * due, step progress, linked windows, pins. A description has none. An open
+ * row lists its steps and windows, so it leaves out their counts.
  */
 export const metaBadges = (
   item: ShelfItem,
-  now: Date
+  now: Date,
+  open = false
 ): readonly ReactNode[] => {
-  const steps = filledSteps(item.steps);
+  const steps = open ? [] : filledSteps(item.steps);
   const pins = item.kind === "image" ? item.pins.length : 0;
 
   return [
@@ -136,7 +142,7 @@ export const metaBadges = (
         {stepsDone(steps)}/{steps.length}
       </Badge>
     ),
-    item.windows.length === 0 ? null : (
+    open || item.windows.length === 0 ? null : (
       <Badge
         icon={AppWindowIcon}
         key="windows"
@@ -294,16 +300,11 @@ export const WindowStrip = ({
   </ul>
 );
 
-const LONG_DAY = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-  weekday: "short",
-});
-
-const dayHint = (iso: string): string => {
+/** A quick choice's day, right of its name: "Sat, Nov 7". */
+const dayHint = (iso: string, now: Date): string => {
   const day = parseDay(iso);
 
-  return day === null ? iso : LONG_DAY.format(day);
+  return day === null ? iso : dateText(day, now, { weekday: true });
 };
 
 /**
@@ -348,21 +349,26 @@ export const DueMenu = ({
             }}
           >
             {DUE_CHOICE_LABEL[choice]}
-            <DropdownMenuShortcut>{dayHint(day)}</DropdownMenuShortcut>
+            <DropdownMenuShortcut>{dayHint(day, now)}</DropdownMenuShortcut>
           </DropdownMenuItem>
         );
       })}
       <DropdownMenuSeparator />
-      <DropdownMenuItem onSelect={onPickDate}>Pick a date…</DropdownMenuItem>
-      <DropdownMenuItem
-        disabled={due === null}
-        onSelect={() => {
-          onSet(null);
-        }}
-        variant="destructive"
-      >
-        Clear
+      <DropdownMenuItem onSelect={onPickDate}>
+        <HugeiconsIcon icon={Calendar03Icon} />
+        Pick a date…
       </DropdownMenuItem>
+      {due === null ? null : (
+        <DropdownMenuItem
+          onSelect={() => {
+            onSet(null);
+          }}
+          variant="destructive"
+        >
+          <HugeiconsIcon icon={CalendarRemove01Icon} />
+          Clear
+        </DropdownMenuItem>
+      )}
     </DropdownMenuContent>
   </DropdownMenu>
 );

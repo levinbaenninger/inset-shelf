@@ -16,7 +16,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DetailField } from "@shared/contracts";
-import { dueBucket } from "@shared/due";
+import { dateText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import {
   DESCRIPTION_MAX,
@@ -61,6 +61,7 @@ import { isMac } from "@/shared/platform";
 
 import {
   DueBadge,
+  dueLabel,
   DueMenu,
   reopenLabel,
   windowName,
@@ -72,7 +73,7 @@ import type { MenuAnchor } from "./menus";
 
 /** What ⌘Z in details can bring back. */
 export type DetailsUndo =
-  | { readonly kind: "steps"; readonly steps: readonly Step[] }
+  | { readonly kind: "step"; readonly step: Step; readonly index: number }
   | { readonly kind: "window"; readonly windowId: WindowRef["id"] };
 
 /** A field to open, from the Add… menu or a field shortcut; seq makes each request new. */
@@ -118,10 +119,7 @@ const newStep = (): Step => ({
   text: "",
 });
 
-const CREATED = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 const k = (accelerator: string): string => keyText(accelerator, isMac);
 
@@ -177,8 +175,8 @@ const ImagePreview = ({
   <button
     aria-label="Annotate this image"
     className="bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block w-full overflow-hidden rounded-lg outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-lg after:ring-1 after:ring-inset focus-visible:ring-3"
-    onDoubleClick={onOpenImage}
-    title="Double-click to annotate"
+    onClick={onOpenImage}
+    title="Annotate and place pins"
     type="button"
   >
     <img
@@ -210,6 +208,7 @@ const AutoText = ({
   multiline,
   onSave,
   placeholder,
+  rows = 2,
   value,
 }: {
   readonly value: string;
@@ -219,6 +218,7 @@ const AutoText = ({
   readonly multiline: boolean;
   readonly onSave: (value: string) => void;
   readonly autoFocus?: boolean;
+  readonly rows?: number;
 }) => {
   const [text, setText] = useState(value);
   const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
@@ -256,7 +256,7 @@ const AutoText = ({
     value: text,
   };
 
-  return multiline ? <Textarea {...props} rows={2} /> : <Input {...props} />;
+  return multiline ? <Textarea {...props} rows={rows} /> : <Input {...props} />;
 };
 
 /**
@@ -275,7 +275,7 @@ const StepsEditor = ({
   /** Changes when the last step should take focus. */
   readonly focusSeq: number;
   readonly onChange: (steps: readonly Step[]) => void;
-  readonly onRemoved: (before: readonly Step[]) => void;
+  readonly onRemoved: (step: Step, index: number) => void;
   readonly onUndo: () => boolean;
 }) => {
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
@@ -331,7 +331,7 @@ const StepsEditor = ({
       return;
     }
 
-    onRemoved(steps);
+    onRemoved(step, index);
     onChange(steps.filter((other) => other.id !== step.id));
     markRemoved(true);
 
@@ -407,7 +407,7 @@ const StepsEditor = ({
           <textarea
             aria-label={`Step ${index + 1}`}
             className={cn(
-              "placeholder:text-muted-foreground focus-visible:bg-foreground/[0.04] field-sizing-content min-h-7 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1.5 py-1 text-sm leading-snug outline-none",
+              "placeholder:text-muted-foreground focus-visible:ring-ring/50 focus-visible:bg-foreground/[0.04] field-sizing-content min-h-7 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1.5 py-1 text-sm leading-snug outline-none focus-visible:ring-3",
               step.done && "text-muted-foreground line-through"
             )}
             maxLength={STEP_TEXT_MAX}
@@ -635,8 +635,11 @@ const PinLabels = ({
   >
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
       {item.pins.map((pin, index) => (
-        // oxlint-disable-next-line react/no-array-index-key -- a pin's place is its number.
-        <li className="flex items-center gap-2" key={index}>
+        // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
+        <li
+          className="flex items-center gap-2"
+          key={`${index}:${pin.x}:${pin.y}`}
+        >
           <PinGlyph height={18} number={index + 1} />
           <AutoText
             label={`Label for pin ${index + 1}`}
@@ -754,23 +757,32 @@ const Content = (props: ContentProps) => {
           value={item.title ?? ""}
         />
       </Field>
-      <Field icon={StickyNote01Icon} label="Note">
+      <Field
+        action={
+          <span className="text-muted-foreground/80 text-xs">
+            {item.kind === "image"
+              ? "Copied with the image"
+              : "Copied with the file"}
+          </span>
+        }
+        icon={StickyNote01Icon}
+        label="Caption"
+      >
         <AutoText
           autoFocus={editing}
           key={editing ? "editing" : "note"}
           label={
-            item.kind === "image" ? "Note for this image" : "Note for this file"
+            item.kind === "image"
+              ? "Caption, copied with the image"
+              : "Caption, copied with the file"
           }
           max={TEXT_MAX}
           multiline
           onSave={(note) => {
             onApply({ id: item.id, note, type: "editNote" });
           }}
-          placeholder={
-            item.kind === "image"
-              ? "Copied with the image"
-              : "Copied with the file"
-          }
+          placeholder="A line to paste along with it"
+          rows={1}
           value={item.note}
         />
       </Field>
@@ -965,10 +977,8 @@ const DueField = ({
     }
   }, [pickingDate]);
 
-  const overdue = item.due !== null && dueBucket(item.due, now) === "overdue";
-
   return (
-    <Field icon={Calendar03Icon} label={overdue ? "Due · overdue" : "Due"}>
+    <Field icon={Calendar03Icon} label="Due">
       <div className="flex min-h-7 flex-wrap items-center gap-2">
         <DueMenu
           due={item.due}
@@ -986,22 +996,37 @@ const DueField = ({
           {item.due === null ? (
             <Button size="xs" variant="outline">
               <HugeiconsIcon data-icon="inline-start" icon={Calendar03Icon} />
-              Set a due date
+              Set Due
             </Button>
           ) : (
             <button
-              aria-label={`Due ${item.due}. Change the due date`}
+              aria-label={`${dueLabel(item.due, now)}. Change Due`}
               className="focus-visible:ring-ring/50 flex min-h-6 items-center rounded-md outline-none focus-visible:ring-3"
               type="button"
             >
-              <DueBadge due={item.due} long now={now} />
+              <DueBadge due={item.due} now={now} />
             </button>
           )}
         </DueMenu>
+        {item.due === null ? null : (
+          <Button
+            aria-label="Clear Due"
+            className="-ml-1.5"
+            onClick={() => {
+              setPickingDate(false);
+              onApply({ due: null, id: item.id, type: "setDue" });
+            }}
+            size="icon-xs"
+            title="Clear Due"
+            variant="quiet"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} />
+          </Button>
+        )}
         {pickingDate ? (
           <div className="w-40">
             <Input
-              aria-label="Due date"
+              aria-label="Due"
               defaultValue={item.due ?? ""}
               onBlur={() => {
                 setPickingDate(false);
@@ -1032,38 +1057,47 @@ const DueField = ({
   );
 };
 
-/** Where the item came from, the links copied with it, and when it was added. */
+const addedText = (item: ShelfItem): string => {
+  const created = new Date(item.createdAt);
+
+  const from =
+    item.kind === "text" && item.via === "selection"
+      ? " · from a selection"
+      : "";
+
+  return `Added ${dateText(created, new Date())}, ${TIME.format(created)}${from}`;
+};
+
+/** Where the item came from, the links copied with it, and when it was added; only the time when there is no source. */
 const SourceField = ({
   item,
   onOpenLink,
 }: {
   readonly item: ShelfItem;
   readonly onOpenLink: (url?: string) => void;
-}) => (
-  <Field icon={ArrowUpRight01Icon} label="Source">
-    <div className="flex flex-col gap-1">
-      {item.context === null ? null : (
-        <div className="flex min-w-0">
-          <SourceLine
-            context={item.context}
-            onOpenLink={() => {
-              onOpenLink();
-            }}
-          />
-        </div>
-      )}
-      {item.kind === "text" && item.links.length > 0 ? (
-        <LinkList links={item.links} onOpenLink={onOpenLink} />
-      ) : null}
-      <p className="text-muted-foreground text-xs">
-        Added {CREATED.format(new Date(item.createdAt))}
-        {item.kind === "text" && item.via === "selection"
-          ? " · from a selection"
-          : ""}
-      </p>
-    </div>
-  </Field>
-);
+}) =>
+  item.context === null && (item.kind !== "text" || item.links.length === 0) ? (
+    <p className="text-muted-foreground text-xs">{addedText(item)}</p>
+  ) : (
+    <Field icon={ArrowUpRight01Icon} label="Source">
+      <div className="flex flex-col gap-1">
+        {item.context === null ? null : (
+          <div className="flex min-w-0">
+            <SourceLine
+              context={item.context}
+              onOpenLink={() => {
+                onOpenLink();
+              }}
+            />
+          </div>
+        )}
+        {item.kind === "text" && item.links.length > 0 ? (
+          <LinkList links={item.links} onOpenLink={onOpenLink} />
+        ) : null}
+        <p className="text-muted-foreground text-xs">{addedText(item)}</p>
+      </div>
+    </Field>
+  );
 
 /** The item's linked windows, each to reopen, describe, move or remove; Reopen all when there are several. */
 const WindowsField = ({
@@ -1271,8 +1305,8 @@ export const DetailsView = (props: DetailsProps) => {
             <StepsEditor
               focusSeq={stepsFocus}
               onChange={saveSteps}
-              onRemoved={(before) => {
-                props.onUndoable({ kind: "steps", steps: before });
+              onRemoved={(step, index) => {
+                props.onUndoable({ index, kind: "step", step });
               }}
               onUndo={props.onUndo}
               steps={steps}

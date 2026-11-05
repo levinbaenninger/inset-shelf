@@ -1,3 +1,4 @@
+import { Strike } from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -19,6 +20,12 @@ export const editorWithFocus = (): Editor | null => focusedEditor;
  */
 const toMarkdown = (editor: Editor): string =>
   editor.getMarkdown().replaceAll("  \n", "\n");
+
+/**
+ * ~~text~~ still strikes through, but ⇧⌘S is Next steps in every Inset app,
+ * so the editor leaves that chord to the menu.
+ */
+const StrikeWithoutKey = Strike.extend({ addKeyboardShortcuts: () => ({}) });
 
 /** What a note field does with the keys a plain field would not. */
 export interface MarkdownFieldKeys {
@@ -182,9 +189,11 @@ export const MarkdownField = ({
         heading: { levels: [1, 2, 3] },
         // Links open from the list, through the app, never inside the field.
         link: { autolink: true, openOnClick: false },
+        strike: false,
         trailingNode: false,
         underline: false,
       }),
+      StrikeWithoutKey,
       Markdown.configure({ markedOptions: { breaks: true, gfm: true } }),
       Placeholder.configure({ placeholder: placeholder ?? "" }),
     ],

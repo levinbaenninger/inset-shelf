@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dateText,
   dueBucket,
+  dueChipText,
   dueFor,
+  dueSuggestions,
   dueText,
   isoDay,
   isValidDay,
@@ -71,14 +74,43 @@ describe(dueText, () => {
   const now = at("2026-11-05");
 
   it.each([
-    ["2026-11-05", false, "Today"],
-    ["2026-11-06", false, "Tomorrow"],
-    ["2026-11-04", false, "Yesterday"],
-    ["2026-11-07", false, "Sat"],
-    ["2026-11-20", false, "Nov 20"],
-    ["2026-11-07", true, "Sat, Nov 7"],
-  ] as const)("shows %s (long: %s) as %s", (due, long, text) => {
-    expect(dueText(due, now, long)).toBe(text);
+    ["2026-11-05", "Today"],
+    ["2026-11-06", "Tomorrow"],
+    ["2026-11-04", "Yesterday"],
+    ["2026-11-07", "Sat"],
+    ["2026-11-11", "Wed"],
+    ["2026-11-12", "Nov 12"],
+    ["2027-01-20", "Jan 20, 2027"],
+  ] as const)("says %s as %s in US English", (due, text) => {
+    expect(dueText(due, now, "en-US")).toBe(text);
+  });
+
+  it("follows the system's language", () => {
+    expect(dueText("2026-11-12", now, "en-GB")).toBe("12 Nov");
+    expect(dueText("2026-11-07", now, "de-CH")).toBe("Sa");
+  });
+});
+
+describe(dueChipText, () => {
+  const now = at("2026-11-05");
+
+  it("says overdue in words, not by colour alone", () => {
+    expect(dueChipText("2026-11-03", now, "en-US")).toBe("Overdue · Nov 3");
+    expect(dueChipText("2026-11-04", now, "en-US")).toBe("Overdue · Yesterday");
+    expect(dueChipText("2026-11-05", now, "en-US")).toBe("Today");
+  });
+});
+
+describe(dateText, () => {
+  const now = at("2026-11-05");
+
+  it("adds the weekday when asked, and the year only when it differs", () => {
+    expect(
+      dateText(at("2026-11-07"), now, { locale: "en-US", weekday: true })
+    ).toBe("Sat, Nov 7");
+    expect(dateText(at("2025-11-07"), now, { locale: "en-GB" })).toBe(
+      "7 Nov 2025"
+    );
   });
 });
 
@@ -98,20 +130,56 @@ describe(matchesDue, () => {
   ] as const)("due %s passes due:%s: %s", (due, filter, passes) => {
     expect(matchesDue(due, filter, now)).toBe(passes);
   });
+
+  it.each([
+    ["the past", "2026-11-04", ["overdue", "week", "any"]],
+    ["today", "2026-11-05", ["today", "week", "any"]],
+    ["in 6 days", "2026-11-11", ["week", "any"]],
+    ["in 7 days", "2026-11-12", ["any"]],
+  ] as const)(
+    "puts a day %s in exactly the filters it belongs to",
+    (_, due, filters) => {
+      expect(
+        (["today", "overdue", "week", "any", "none"] as const).filter(
+          (filter) => matchesDue(due, filter, now)
+        )
+      ).toStrictEqual(filters);
+    }
+  );
 });
 
 describe(parseSearch, () => {
   it("takes a due filter out of the words", () => {
     expect(parseSearch("Quote  due:today chairs")).toStrictEqual({
       due: "today",
+      pendingDue: null,
       terms: ["quote", "chairs"],
     });
   });
 
-  it("searches an unknown due word as text", () => {
-    expect(parseSearch("due:soon")).toStrictEqual({
+  it("holds back a due word still being typed instead of searching for it", () => {
+    expect(parseSearch("chairs due:to")).toStrictEqual({
       due: null,
-      terms: ["due:soon"],
+      pendingDue: "to",
+      terms: ["chairs"],
     });
+    expect(parseSearch("due:").pendingDue).toBe("");
+  });
+});
+
+describe(dueSuggestions, () => {
+  it("offers the filters a partial word may become", () => {
+    expect(dueSuggestions("o")).toStrictEqual(["overdue"]);
+    expect(dueSuggestions("")).toStrictEqual([
+      "today",
+      "overdue",
+      "week",
+      "any",
+      "none",
+    ]);
+  });
+
+  it("offers every filter when none fits", () => {
+    expect(dueSuggestions("soon")).toHaveLength(5);
   });
 });

@@ -436,7 +436,7 @@ export const AddMenu = ({
         }}
       >
         <HugeiconsIcon icon={AppWindowIcon} />
-        New Window Link
+        New Window Link…
         <Shortcut accelerator="Shift+CommandOrControl+L" />
       </DropdownMenuItem>
     </DropdownMenuContent>

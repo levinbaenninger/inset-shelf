@@ -90,10 +90,41 @@ export type Step = z.output<typeof StepSchema>;
 
 export const StepsSchema = z.array(StepSchema).max(STEPS_MAX);
 
+/**
+ * A removed step back where it was, in the list as it is now: ticks and
+ * edits made since the removal stay.
+ */
+export const withStepBack = (
+  steps: readonly Step[],
+  removed: { readonly step: Step; readonly index: number }
+): readonly Step[] =>
+  steps.some((step) => step.id === removed.step.id)
+    ? steps
+    : steps.toSpliced(Math.min(removed.index, steps.length), 0, removed.step);
+
 /** A due day, `YYYY-MM-DD` in local time (due.ts). */
 export const DueSchema = z.string().refine(isValidDay, "Not a calendar day.");
 
 export const WindowIdSchema = z.string().regex(LOWER_UUID).brand<"WindowId">();
+
+export const WINDOW_TITLE_MAX = 500;
+export const APP_NAME_MAX = 200;
+export const PATH_MAX = 4096;
+export const PAGE_URL_MAX = 2000;
+
+/** Text the system reported, cut to what the saved shelf keeps, ending in "…" when cut. */
+export const fitText = (text: string, max: number): string => {
+  if (text.length <= max) {
+    return text;
+  }
+
+  const cut = text.slice(0, max - 1);
+  const last = cut.codePointAt(cut.length - 1) ?? 0;
+  // Never leave half of a character that takes two code units.
+  const whole = last >= 0xd8_00 && last <= 0xdb_ff ? cut.slice(0, -1) : cut;
+
+  return `${whole}…`;
+};
 
 export type WindowId = z.output<typeof WindowIdSchema>;
 
@@ -102,19 +133,19 @@ export type WindowId = z.output<typeof WindowIdSchema>;
  * main process makes these; the shelf window refers to them by id.
  */
 export const WindowRefSchema = z.object({
-  app: z.string().max(200).nullable(),
+  app: z.string().max(APP_NAME_MAX).nullable(),
   /** The app's bundle or executable, to bring it forward. */
-  appPath: z.string().max(4096).nullable(),
+  appPath: z.string().max(PATH_MAX).nullable(),
   capturedAt: z.iso.datetime(),
   description: z.string().max(DESCRIPTION_MAX),
   /** The file the window showed, read from the system, never from the page. */
-  document: z.string().max(4096).nullable(),
+  document: z.string().max(PATH_MAX).nullable(),
   id: WindowIdSchema,
   thumb: ImageSchema.nullable(),
-  title: z.string().max(500).nullable(),
+  title: z.string().max(WINDOW_TITLE_MAX).nullable(),
   url: z
     .url({ protocol: /^https?$/u })
-    .max(2000)
+    .max(PAGE_URL_MAX)
     .nullable(),
 });
 
@@ -152,16 +183,16 @@ const ItemBaseV1 = {
 
 /** Where an item came from: the app in front, its window title and, for a browser, the page. */
 export const ContextSchema = z.object({
-  app: z.string().max(200).nullable(),
+  app: z.string().max(APP_NAME_MAX).nullable(),
   /**
    * Opens the item where it was in its desktop app: a ChatGPT or T3 Code
    * thread, a Claude chat, a Notion page. Only known app schemes.
    */
   appLink: z.string().refine(isAppLink).nullable().default(null),
-  title: z.string().max(500).nullable(),
+  title: z.string().max(WINDOW_TITLE_MAX).nullable(),
   url: z
     .url({ protocol: /^https?$/u })
-    .max(2000)
+    .max(PAGE_URL_MAX)
     .nullable(),
 });
 

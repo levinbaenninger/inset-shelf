@@ -171,7 +171,7 @@ describe(itemMenu, () => {
       "---",
       "Details",
       "Annotate",
-      "Edit Note",
+      "Edit Caption",
     ]);
     expect(entries.find((entry) => entry.kind === "colors")).toStrictEqual({
       current: "blue",

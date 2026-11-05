@@ -485,6 +485,38 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
+      await select(page, 10);
+      await item(page, 10)
+        .getByRole("checkbox", { name: /^(?:Done|Not done): /u })
+        .first()
+        .focus();
+    },
+    check: async (page) => {
+      await page.keyboard.press("Space");
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(150);
+
+      const ops = await applied(page);
+      const sent = ops.map((op) => op.type);
+
+      const editing = await page
+        .getByRole("textbox", { name: "Edit item" })
+        .count();
+
+      if (sent.includes("toggleDone") || editing > 0) {
+        return `Space or Return on a step's checkbox reached the row: ${JSON.stringify(sent)}, editing ${editing}`;
+      }
+
+      return sent.includes("toggleStep")
+        ? null
+        : `Space on a step's checkbox sent ${JSON.stringify(sent)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-expanded-step-keys",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },
@@ -620,6 +652,30 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
+      const field = page.getByRole("textbox", { name: /^New note in/u });
+
+      await field.click();
+      await page.keyboard.type("Call Rieder");
+      await page.keyboard.press("Meta+a");
+    },
+    check: async (page) => {
+      await page.keyboard.press("Meta+Shift+s");
+
+      const struck = await page
+        .getByRole("textbox", { name: /^New note in/u })
+        .locator("s")
+        .count();
+
+      return struck === 0
+        ? null
+        : "⇧⌘S struck the text through instead of leaving the key to Next steps";
+    },
+    data: { view: shelfView() },
+    name: "shelf-composer-strike-key",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
       await details(page, 10);
       await page.getByRole("button", { name: /^Due /u }).click();
       await page.getByRole("menuitem", { name: /^Tomorrow/u }).waitFor();
@@ -686,12 +742,53 @@ const SCENES: readonly Scene[] = [
         return `the list scrolled from ${state.before} to ${state.after} through details`;
       }
 
-      return state.row === uuid(16)
+      if (state.row !== uuid(16)) {
+        return `focus came back to ${state.row}, not the item`;
+      }
+
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(150);
+
+      const editing = await page
+        .getByRole("textbox", { name: "Edit item" })
+        .count();
+
+      const reopened = await page
+        .getByRole("button", { name: "Back to the list" })
+        .isVisible();
+
+      return editing === 1 && !reopened
         ? null
-        : `focus came back to ${state.row}, not the item`;
+        : `Return after Back: editing ${editing}, details reopened ${reopened}`;
     },
     data: { view: shelfView() },
     name: "shelf-details-back",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await select(page, 16);
+      await page.keyboard.press("ArrowRight");
+      await page.getByRole("button", { name: "Back to the list" }).waitFor();
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(200);
+      await page.keyboard.press("Space");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const ops = await applied(page);
+      const sent = ops.map((op) => op.type);
+
+      const reopened = await page
+        .getByRole("button", { name: "Back to the list" })
+        .isVisible();
+
+      return sent.includes("toggleDone") && !reopened
+        ? null
+        : `Space after Back sent ${JSON.stringify(sent)}, details reopened ${reopened}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-back-space",
     page: "shelf",
   },
   {
@@ -762,7 +859,7 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
-      await page.getByRole("button", { name: "Filter by due date" }).click();
+      await page.getByRole("button", { name: "Filter by Due" }).click();
       await page.getByRole("menuitem", { name: /^Overdue/u }).waitFor();
     },
     data: { view: shelfView() },
@@ -778,6 +875,39 @@ const SCENES: readonly Scene[] = [
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-search-due-week",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page
+        .getByRole("textbox", { name: "Search the shelf" })
+        .fill("due:o");
+    },
+    check: async (page) => {
+      const empty = await page.getByText(/^No matches/u).count();
+
+      const suggested = await page
+        .getByRole("button", { name: /\(due:overdue\)$/u })
+        .count();
+
+      await page
+        .getByRole("textbox", { name: "Search the shelf" })
+        .press("Enter");
+
+      const query = await page
+        .getByRole("textbox", { name: "Search the shelf" })
+        .inputValue();
+
+      if (empty > 0 || suggested === 0) {
+        return `a partial due: showed ${empty} empty states and ${suggested} suggestions`;
+      }
+
+      return query === "due:overdue"
+        ? null
+        : `Return on a partial due: left “${query}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-due-partial",
     page: "shelf",
   },
   {

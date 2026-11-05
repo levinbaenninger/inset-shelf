@@ -8,6 +8,7 @@ import type { DesktopCapturerSource } from "electron";
 import { openWindows } from "get-windows";
 
 import { appBundle, readWindowOrigin } from "./window-origin";
+import { windowRef } from "./window-ref";
 
 /** The picker's previews: small enough to list a dozen windows quickly. */
 const CANDIDATE_THUMB = { height: 200, width: 320 };
@@ -109,7 +110,7 @@ export const createWindowLinker = (deps: {
       ]);
 
       const links = await Promise.all(
-        chosen.map(async (candidate): Promise<WindowRef | null> => {
+        chosen.map(async (candidate): Promise<WindowRef> => {
           const source = large.find((found) => found.id === candidate.sourceId);
           const windowId = sourceWindowId(candidate.sourceId);
 
@@ -119,6 +120,7 @@ export const createWindowLinker = (deps: {
               : (listed.find((found) => sameWindow(found, windowId)) ??
                 candidate.listed);
 
+          // The full title: the accessibility lookup matches it exactly.
           const title = orNull(source?.name) ?? candidate.title;
 
           const origin =
@@ -133,29 +135,30 @@ export const createWindowLinker = (deps: {
           const png = source?.thumbnail.toPNG();
           const size = source?.thumbnail.getSize();
 
-          return {
-            app: orNull(window?.owner.name),
-            appPath: appBundle(window?.owner.path),
-            capturedAt: deps.now().toISOString(),
-            description: "",
-            document: origin.document,
-            id: WindowIdSchema.parse(randomUUID()),
-            thumb:
-              png === undefined || size === undefined
-                ? null
-                : {
-                    file: await deps.writeAttachment(png),
-                    heightPx: Math.max(1, size.height),
-                    pixelsPerDip: 1,
-                    widthPx: Math.max(1, size.width),
-                  },
-            title,
-            url: origin.url,
-          };
+          return windowRef(
+            {
+              app: orNull(window?.owner.name),
+              appPath: appBundle(window?.owner.path),
+              document: origin.document,
+              thumb:
+                png === undefined || size === undefined
+                  ? null
+                  : {
+                      file: await deps.writeAttachment(png),
+                      heightPx: Math.max(1, size.height),
+                      pixelsPerDip: 1,
+                      widthPx: Math.max(1, size.width),
+                    },
+              title,
+              url: origin.url,
+            },
+            WindowIdSchema.parse(randomUUID()),
+            deps.now()
+          );
         })
       );
 
-      return links.filter((link) => link !== null);
+      return links;
     },
     list: async () => {
       const [found, listed] = await Promise.all([

@@ -166,10 +166,16 @@ describe(menuEntryForKey, () => {
   it("runs the field shortcuts", () => {
     expect(labelFor(press("d", { control: true }))).toBe("Add Description");
     expect(labelFor(press("D", { control: true, shift: true }))).toBe(
-      "Set Due Date…"
+      "Set Due…"
     );
     expect(labelFor(press("S", { control: true, shift: true }))).toBe(
       "Add Next Steps"
+    );
+  });
+
+  it("runs Copy with Details on Ctrl+Alt+C, as in every Inset app", () => {
+    expect(labelFor(press("c", { alt: true, control: true }))).toBe(
+      "Copy with Details"
     );
   });
 
