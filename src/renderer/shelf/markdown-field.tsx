@@ -36,6 +36,22 @@ export interface MarkdownFieldHandle {
   readonly element: () => HTMLElement | null;
 }
 
+/**
+ * Every Markdown shortcut but "# ", for the note field: there "# Name" makes
+ * a section, so it must not turn into a bold heading as it is typed.
+ */
+const RULES_WITHOUT_HEADINGS = [
+  "blockquote",
+  "bold",
+  "bulletList",
+  "code",
+  "codeBlock",
+  "horizontalRule",
+  "italic",
+  "orderedList",
+  "strike",
+];
+
 const isInside = (editor: Editor, node: string): boolean =>
   editor.isActive(node);
 
@@ -67,6 +83,7 @@ export const MarkdownField = ({
   autoFocus = false,
   className,
   controlSlot = false,
+  headingRules = true,
   keys,
   onBlur,
   onChange,
@@ -84,6 +101,8 @@ export const MarkdownField = ({
   readonly className?: string;
   /** In an input group, the field is its control, which draws the group's focus ring. */
   readonly controlSlot?: boolean;
+  /** Whether "# " turns a line into a heading as it is typed. */
+  readonly headingRules?: boolean;
   readonly onBlur?: (markdown: string) => void;
   readonly ref?: Ref<MarkdownFieldHandle>;
 }) => {
@@ -100,6 +119,7 @@ export const MarkdownField = ({
     autofocus: autoFocus ? "end" : false,
     content: value,
     contentType: "markdown",
+    enableInputRules: headingRules ? true : RULES_WITHOUT_HEADINGS,
     editorProps: {
       attributes: fieldAttributes(ariaLabel, className, controlSlot),
       handleKeyDown: (_view, event) => {

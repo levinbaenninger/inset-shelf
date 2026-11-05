@@ -1,5 +1,5 @@
 import type { ShelfStatus, ShelfView } from "@shared/contracts";
-import { applyOp, attachmentOf, UNDO_MAX } from "@shared/shelf";
+import { applyOp, attachmentsOf, UNDO_MAX } from "@shared/shelf";
 import type {
   ItemId,
   MainOp,
@@ -8,6 +8,8 @@ import type {
   ShelfDoc,
   ShelfItem,
   ShelfOp,
+  WindowId,
+  WindowRef,
 } from "@shared/shelf";
 
 import type { WriteResult } from "./shelf-store";
@@ -29,15 +31,38 @@ export interface ShelfController {
   /** Returns the id of an item the operation added. */
   readonly apply: (op: ShelfOp | MainOp) => ItemId | null;
   readonly item: (id: ItemId) => ShelfItem | undefined;
-  readonly focus: (id: ItemId) => void;
+  /** Selects an item in the shelf; `edit` opens its text for typing. */
+  readonly focus: (id: ItemId, edit?: boolean) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
   /** Writes any pending change now; used before quitting. */
   readonly flush: () => Promise<void>;
+  /** A window removed in details that can still come back. */
+  readonly removedWindow: (id: WindowId) => WindowRef | undefined;
 }
 
-const isEdit = (op: ShelfOp | MainOp): boolean =>
-  op.type === "editText" || op.type === "editNote";
+/** Typing saves after a pause; everything else at once. */
+const TYPED: ReadonlySet<string> = new Set([
+  "editText",
+  "editNote",
+  "setTitle",
+  "setDescription",
+  "setSteps",
+  "describeWindow",
+  "setPins",
+]);
+
+const isEdit = (op: ShelfOp | MainOp): boolean => TYPED.has(op.type);
+
+/** A window taken off an item, kept so details can put it back with ⌘Z. */
+interface RemovedWindow {
+  readonly itemId: ItemId;
+  readonly window: WindowRef;
+  readonly index: number;
+}
+
+/** Windows removed in details that can still come back; their pictures stay until the shelf is next opened. */
+const REMOVED_WINDOWS_MAX = 20;
 
 export const createShelfController = (
   deps: ControllerDeps
@@ -49,6 +74,7 @@ export const createShelfController = (
   let focusSeq = 0;
   let cancelTimer: (() => void) | null = null;
   let toDelete: ShelfItem[] = [];
+  let removedWindows: readonly RemovedWindow[] = [];
   let inFlight: Promise<void> = Promise.resolve();
   const listeners = new Set<() => void>();
 
@@ -83,11 +109,9 @@ export const createShelfController = (
     }
 
     await Promise.all(
-      deletable.flatMap((item) => {
-        const file = attachmentOf(item);
-
-        return file === null ? [] : [deps.deleteAttachment(file)];
-      })
+      deletable.flatMap((item) =>
+        attachmentsOf(item).map(deps.deleteAttachment)
+      )
     );
   };
 
@@ -110,8 +134,59 @@ export const createShelfController = (
     }, EDIT_SAVE_DELAY_MS);
   };
 
+  /** removeWindow remembers the window; restoreWindow puts it back where it was. */
+  const windowOp = (op: ShelfOp | MainOp): ShelfOp | MainOp | null => {
+    if (op.type === "removeWindow") {
+      const item = doc.items.find((candidate) => candidate.id === op.id);
+
+      const index =
+        item?.windows.findIndex((window) => window.id === op.windowId) ?? -1;
+
+      const window = item?.windows[index];
+
+      if (window !== undefined) {
+        removedWindows = [
+          ...removedWindows,
+          { index, itemId: op.id, window },
+        ].slice(-REMOVED_WINDOWS_MAX);
+      }
+
+      return op;
+    }
+
+    if (op.type !== "restoreWindow") {
+      return op;
+    }
+
+    const removed = removedWindows.find(
+      (candidate) =>
+        candidate.itemId === op.id && candidate.window.id === op.windowId
+    );
+
+    if (removed === undefined) {
+      return null;
+    }
+
+    removedWindows = removedWindows.filter(
+      (candidate) => candidate !== removed
+    );
+
+    return {
+      id: removed.itemId,
+      index: removed.index,
+      type: "insertWindow",
+      window: removed.window,
+    };
+  };
+
   return {
-    apply: (op) => {
+    apply: (requested) => {
+      const op = windowOp(requested);
+
+      if (op === null) {
+        return null;
+      }
+
       const result = applyOp(doc, op, deps.env, pending);
 
       if (result.doc === doc) {
@@ -146,9 +221,9 @@ export const createShelfController = (
 
       await inFlight;
     },
-    focus: (id) => {
+    focus: (id, edit = false) => {
       focusSeq += 1;
-      focus = { id, seq: focusSeq };
+      focus = edit ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),
@@ -161,5 +236,7 @@ export const createShelfController = (
       };
     },
     view: () => ({ canUndo: pending.length > 0, doc, focus, status }),
+    removedWindow: (id: WindowId) =>
+      removedWindows.find((removed) => removed.window.id === id)?.window,
   };
 };

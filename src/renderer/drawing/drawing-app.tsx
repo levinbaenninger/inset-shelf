@@ -1,5 +1,6 @@
 import type { DrawingImage, DrawingView } from "@shared/contracts";
-import { useEffect, useState } from "react";
+import type { Pin } from "@shared/shelf";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   AlertDialog,
@@ -13,23 +14,25 @@ import {
 } from "@/components/ui/alert-dialog";
 import { drawingBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
-import { PinMarker } from "@/shared/pin-marker";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 import { Page } from "./page";
 import type { PageImage } from "./page";
-import { exportAnnotated, exportPng } from "./render";
+import { nudgePin, movePin, pinsOf, removePin } from "./pins";
+import { exportAnnotated, exportPng, measureText } from "./render";
 import {
   addMark,
   canRedo,
   canUndo,
   clearMarks,
-  emptyHistory,
+  commit,
+  EXPORT_SCALE,
+  exportFrame,
   redo,
   undo,
 } from "./sketch";
-import type { Color, History, Mark, Stroke, Tool } from "./sketch";
+import type { Color, History, Mark, Point, Stroke, Tool } from "./sketch";
 import { Toolbar } from "./toolbar";
 import { useDark, useDrawingKeys } from "./use-drawing-keys";
 
@@ -40,14 +43,61 @@ const load = async (): Promise<DrawingView> => await api.getView();
 const subscribe = (listener: (view: DrawingView | null) => void) =>
   api.on("view", listener);
 
-/** The marks drawn into the open image, or onto a fresh page; null when there is nothing to save. */
+/** The pins, in the saved image's pixels, labels kept. */
+const pinsInPixels = (
+  marks: readonly Mark[],
+  toPixels: (point: Point) => Point
+): Pin[] =>
+  pinsOf(marks).map((pin) => {
+    const at = toPixels(pin.at);
+
+    const point = {
+      x: Math.max(0, Math.round(at.x)),
+      y: Math.max(0, Math.round(at.y)),
+    };
+
+    return pin.label === undefined ? point : { ...point, label: pin.label };
+  });
+
+interface Saved {
+  readonly png: Uint8Array<ArrayBuffer> | null;
+  readonly pins: Pin[];
+}
+
+/**
+ * What a save sends: on an image, the marks drawn into it (none when only
+ * the pins changed) and the pins in its pixels; on a blank page, the
+ * drawing trimmed to everything on it and the pins in that picture.
+ */
 const exportMarks = async (
   marks: readonly Mark[],
   image: DrawingImage | null,
   dark: boolean
-): Promise<Uint8Array<ArrayBuffer> | null> => {
+): Promise<Saved | null> => {
+  const strokes = marks.filter((mark) => mark.kind !== "pin");
+
   if (image === null) {
-    return await exportPng(marks, dark);
+    const frame = exportFrame(marks, measureText);
+    const png = await exportPng(marks, dark);
+
+    return png === null || frame === null
+      ? null
+      : {
+          pins: pinsInPixels(marks, (point) => ({
+            x: (point.x - frame.origin.x) * EXPORT_SCALE,
+            y: (point.y - frame.origin.y) * EXPORT_SCALE,
+          })),
+          png,
+        };
+  }
+
+  const pins = pinsInPixels(marks, (point) => ({
+    x: Math.min(point.x * image.pixelsPerDip, image.widthPx - 1),
+    y: Math.min(point.y * image.pixelsPerDip, image.heightPx - 1),
+  }));
+
+  if (strokes.length === 0) {
+    return { pins, png: null };
   }
 
   const png = await api.getImage();
@@ -56,12 +106,15 @@ const exportMarks = async (
     throw new Error("The image is no longer on the shelf.");
   }
 
-  return await exportAnnotated(marks, {
-    heightPx: image.heightPx,
-    pixelsPerDip: image.pixelsPerDip,
-    png: new Uint8Array(png),
-    widthPx: image.widthPx,
-  });
+  return {
+    pins,
+    png: await exportAnnotated(strokes, {
+      heightPx: image.heightPx,
+      pixelsPerDip: image.pixelsPerDip,
+      png: new Uint8Array(png),
+      widthPx: image.widthPx,
+    }),
+  };
 };
 
 /** Resolves to a problem to show, or null once main has the drawing. */
@@ -72,13 +125,13 @@ const saveDrawing = async (
   dark: boolean
 ): Promise<string | null> => {
   try {
-    const png = await exportMarks(marks, image, dark);
+    const saved = await exportMarks(marks, image, dark);
 
-    if (png === null) {
+    if (saved === null) {
       return null;
     }
 
-    const result = await api.save({ copy, png });
+    const result = await api.save({ copy, pins: saved.pins, png: saved.png });
 
     return result.ok ? null : result.message;
   } catch {
@@ -86,13 +139,7 @@ const saveDrawing = async (
   }
 };
 
-const percent = (value: number, total: number): string =>
-  `${(value / total) * 100}%`;
-
-/** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
-const PIN_DIAMETER_DIP = 28;
-
-/** The image under the marks, with its pin as the shelf shows it. */
+/** The image under the marks; its pins are drawn by the page, where they can be moved. */
 const ImageUnderlay = ({ image }: { readonly image: DrawingImage }) => (
   <div className="relative size-full">
     <img
@@ -101,13 +148,6 @@ const ImageUnderlay = ({ image }: { readonly image: DrawingImage }) => (
       draggable={false}
       src={image.url}
     />
-    {image.pin === null ? null : (
-      <PinMarker
-        left={percent(image.pin.x, image.widthPx)}
-        top={percent(image.pin.y, image.heightPx)}
-        width={percent(PIN_DIAMETER_DIP * image.pixelsPerDip, image.widthPx)}
-      />
-    )}
     <div className="ring-foreground/15 pointer-events-none absolute inset-0 ring-1" />
   </div>
 );
@@ -121,10 +161,39 @@ const pageImage = (image: DrawingImage | null): PageImage | null =>
         width: image.widthPx / image.pixelsPerDip,
       };
 
+/** The image's pins as marks, in its DIP, so the page can show and move them. */
+const startingMarks = (image: DrawingImage | null): readonly Mark[] =>
+  image === null
+    ? []
+    : image.pins.map((pin): Mark => {
+        const at = {
+          x: pin.x / image.pixelsPerDip,
+          y: pin.y / image.pixelsPerDip,
+        };
+
+        return pin.label === undefined
+          ? { at, kind: "pin" }
+          : { at, kind: "pin", label: pin.label };
+      });
+
 /** One drawing, on a blank page or over an image; the app remounts it for every opening. */
 const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
-  const [history, setHistory] = useState<History>(emptyHistory);
-  const [tool, setTool] = useState<Tool>("pen");
+  const initial = useMemo(() => startingMarks(image), [image]);
+
+  const [history, setHistory] = useState<History>(() => ({
+    future: [],
+    past: [],
+    present: initial,
+  }));
+
+  // Add Pins… and Move pins in details open with the Pin tool; anything else starts with the pen.
+  const [tool, setTool] = useState<Tool>(
+    image?.pinMode === true ? "pin" : "pen"
+  );
+
+  const [lastTool, setLastTool] = useState<Tool>("pen");
+  const [selectedPin, setSelectedPin] = useState<number | null>(null);
+  const pointerRef = useRef<Point | null>(null);
   // Marks on a picture stand out in red; a blank page starts in ink.
   const [color, setColor] = useState<Color>(image === null ? "ink" : "red");
   const [stroke, setStroke] = useState<Stroke>("thin");
@@ -134,14 +203,47 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   // On an image the marks keep the colours they are saved in, whatever the theme.
   const dark = useDark() && image === null;
   const marks = history.present;
-  const empty = marks.length === 0;
+  const pins = pinsOf(marks);
+  const empty = marks.every((mark) => mark.kind === "pin");
+  const pinsChanged = JSON.stringify(pins) !== JSON.stringify(pinsOf(initial));
+  // Something to save: new marks, or pins added, moved or removed.
+  const dirty = !empty || pinsChanged;
+
+  const bounds =
+    image === null
+      ? undefined
+      : {
+          height: image.heightPx / image.pixelsPerDip,
+          width: image.widthPx / image.pixelsPerDip,
+        };
+
+  const change = (next: readonly Mark[]): void => {
+    setHistory(commit(history, next));
+  };
+
+  /** P toggles the Pin tool; any other key picks its tool. */
+  const pickTool = (next: Tool): void => {
+    if (next === "pin" && tool === "pin") {
+      setTool(lastTool);
+    } else {
+      if (next === "pin") {
+        setLastTool(tool);
+      }
+
+      setTool(next);
+    }
+
+    if (next !== "pin") {
+      setSelectedPin(null);
+    }
+  };
 
   // Takes the marks to save, so ⌘↩ in the text field can include the text it just added.
   const save = async (
     copy: boolean,
     toSave: readonly Mark[]
   ): Promise<void> => {
-    if (saving || toSave.length === 0) {
+    if (saving || (toSave.length === 0 && !pinsChanged)) {
       return;
     }
 
@@ -160,9 +262,11 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   };
 
   useLocalKeys({
-    // Only an empty page closes on Esc, so a stray key never throws a drawing away.
+    // Esc lets go of a selected pin first; only an untouched page closes on it, so a stray key never throws work away.
     onEscape: () => {
-      if (empty) {
+      if (selectedPin !== null) {
+        setSelectedPin(null);
+      } else if (!dirty) {
         api.cancel();
       }
     },
@@ -172,8 +276,8 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   });
 
   useEffect(() => {
-    api.setDirty(!empty);
-  }, [empty]);
+    api.setDirty(dirty);
+  }, [dirty]);
 
   // Closing the window with marks asks here, in the page's own dialog.
   useEffect(
@@ -196,12 +300,46 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   );
 
   useDrawingKeys({
-    pickTool: setTool,
+    dropPin: () => {
+      const center =
+        bounds === undefined
+          ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+          : { x: bounds.width / 2, y: bounds.height / 2 };
+
+      change([...marks, { at: pointerRef.current ?? center, kind: "pin" }]);
+      setSelectedPin(pins.length);
+    },
+    nudgePin: (dx, dy) => {
+      if (selectedPin === null) {
+        return false;
+      }
+
+      change(nudgePin(marks, selectedPin, { x: dx, y: dy }, bounds));
+
+      return true;
+    },
+    pickTool,
     redo: () => {
       setHistory(redo(history));
     },
+    removePin: () => {
+      if (selectedPin === null) {
+        return false;
+      }
+
+      change(removePin(marks, selectedPin));
+      setSelectedPin(null);
+
+      return true;
+    },
+    selectPin: (index) => {
+      if (index < pins.length) {
+        setSelectedPin(index);
+      }
+    },
     undo: () => {
       setHistory(undo(history));
+      setSelectedPin(null);
     },
   });
 
@@ -231,19 +369,32 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           onAdd={(mark) => {
             add(mark);
           }}
+          onMovePin={(index, to) => {
+            change(movePin(marks, index, to, bounds));
+          }}
+          onSelectPin={setSelectedPin}
           onSubmit={(mark) => {
             const next = mark === null ? history : add(mark);
 
             void save(false, next.present);
           }}
+          pointerRef={pointerRef}
+          selectedPin={selectedPin}
           stroke={stroke}
           tool={tool}
         />
+        {tool === "pin" ? (
+          <p className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm">
+            {selectedPin === null
+              ? `Click to place pin ${pins.length + 1}`
+              : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ⌫ removes it`}
+          </p>
+        ) : null}
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
           <Toolbar
-            canClear={!empty}
+            canClear={marks.length > 0}
             canRedo={canRedo(history)}
-            canSave={!empty && !saving}
+            canSave={dirty && !saving}
             canUndo={canUndo(history)}
             color={color}
             dark={dark}
@@ -261,7 +412,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
               void save(false, marks);
             }}
             onStroke={setStroke}
-            onTool={setTool}
+            onTool={pickTool}
             onUndo={() => {
               setHistory(undo(history));
             }}

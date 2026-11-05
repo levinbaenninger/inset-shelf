@@ -3,8 +3,9 @@ import {
   ItemIdSchema,
   SectionIdSchema,
   UNDO_MAX,
+  WindowIdSchema,
 } from "@shared/shelf";
-import type { ShelfDoc } from "@shared/shelf";
+import type { ShelfDoc, WindowRef } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
 import { createShelfController, EDIT_SAVE_DELAY_MS } from "./shelf-controller";
@@ -66,13 +67,26 @@ const image = {
   widthPx: 10,
 };
 
+/** A window linked to an item, for the undo of its removal. */
+const linked = (n: number): WindowRef => ({
+  app: "Safari",
+  appPath: "/Applications/Safari.app",
+  capturedAt: "2026-10-22T10:00:00.000Z",
+  description: "",
+  document: null,
+  id: WindowIdSchema.parse(uuid(n)),
+  thumb: null,
+  title: `Window ${n}`,
+  url: null,
+});
+
 describe(createShelfController, () => {
   it("saves additions at once and note edits after a pause", async () => {
     const { controller, saved, timers } = setup();
 
     const id = controller.apply({
       image,
-      pin: null,
+      pins: [],
       source: null,
       context: null,
       type: "addImage",
@@ -102,7 +116,7 @@ describe(createShelfController, () => {
 
     const first = controller.apply({
       image,
-      pin: null,
+      pins: [],
       source: null,
       context: null,
       type: "addImage",
@@ -179,5 +193,33 @@ describe(createShelfController, () => {
     controller.focus(id);
     controller.focus(id);
     expect(controller.view().focus).toStrictEqual({ id, seq: 2 });
+  });
+
+  it("puts a window removed in details back where it was, once", () => {
+    const { controller } = setup();
+
+    const [a, b, c] = [linked(60), linked(61), linked(62)];
+
+    const id = controller.apply({
+      context: null,
+      html: null,
+      text: "Quote",
+      type: "addText",
+      via: "typed",
+      windows: [a, b, c],
+    });
+
+    if (id === null) {
+      throw new Error("not added");
+    }
+
+    const order = () =>
+      controller.item(id)?.windows.map((window) => window.title);
+
+    controller.apply({ id, type: "removeWindow", windowId: b.id });
+    controller.apply({ id, type: "restoreWindow", windowId: b.id });
+    controller.apply({ id, type: "restoreWindow", windowId: b.id });
+
+    expect(order()).toStrictEqual(["Window 60", "Window 61", "Window 62"]);
   });
 });

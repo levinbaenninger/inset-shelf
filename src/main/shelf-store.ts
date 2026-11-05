@@ -11,7 +11,7 @@ import {
 import path from "node:path";
 
 import {
-  attachmentOf,
+  attachmentsOf,
   AttachmentFileSchema,
   emptyShelf,
   parseShelfDocument,
@@ -161,13 +161,7 @@ const collectGarbage = async (
   attachments: string,
   doc: ShelfDoc
 ): Promise<void> => {
-  const used = new Set(
-    doc.items.flatMap((item) => {
-      const file = attachmentOf(item);
-
-      return file === null ? [] : [file];
-    })
-  );
+  const used = new Set(doc.items.flatMap(attachmentsOf));
 
   const names = await fs.list(attachments);
 

@@ -218,7 +218,7 @@ describe(applyOp, () => {
     const { doc } = apply(start, [
       {
         image,
-        pin: { x: 480, y: 300 },
+        pins: [{ x: 480, y: 300 }],
         source: "Built-in Retina Display",
         context: null,
         type: "addImage",
@@ -231,7 +231,7 @@ describe(applyOp, () => {
     expect(item).toMatchObject({
       kind: "image",
       note: "",
-      pin: { x: 480, y: 300 },
+      pins: [{ x: 480, y: 300 }],
       via: "pin",
     });
 
@@ -300,7 +300,7 @@ describe(applyOp, () => {
       {
         context: null,
         image,
-        pin: { x: 480, y: 300 },
+        pins: [{ x: 480, y: 300 }],
         source: null,
         type: "addImage",
         via: "pin",
@@ -334,7 +334,7 @@ describe(applyOp, () => {
     );
     expect(result.doc.items[0]).toMatchObject({
       image: annotated,
-      pin: { x: 480, y: 300 },
+      pins: [{ x: 480, y: 300 }],
     });
     expect(result.discarded).toStrictEqual([first]);
     expect(
@@ -618,20 +618,25 @@ describe(parseShelfDocument, () => {
   it("upgrades the first format and keeps every item as it was", () => {
     const doc = parseShelfDocument(JSON.stringify(firstFormat));
 
-    expect(doc?.schemaVersion).toBe(2);
+    expect(doc?.schemaVersion).toBe(3);
     expect(doc?.items).toMatchObject([
       {
         color: null,
         context: null,
+        description: "",
+        due: null,
         id: uuid(20),
+        steps: [],
         text: "Building this little habit app\n",
+        windows: [],
       },
       {
         color: null,
         context: null,
         done: true,
         id: uuid(21),
-        pin: { x: 480, y: 300 },
+        pins: [{ x: 480, y: 300 }],
+        title: null,
       },
     ]);
     expect(ShelfDocSchema.safeParse(doc).success).toBeTruthy();
@@ -642,7 +647,7 @@ describe(parseShelfDocument, () => {
 
     expect(parseShelfDocument(JSON.stringify(current))).toStrictEqual(current);
     expect(
-      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 3 }))
+      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 4 }))
     ).toBeNull();
     expect(parseShelfDocument("{ not a shelf")).toBeNull();
   });

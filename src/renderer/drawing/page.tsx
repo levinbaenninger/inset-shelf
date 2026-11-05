@@ -1,9 +1,12 @@
 import { viewerImageRect } from "@shared/geometry";
+import { PIN_HEAD_RADIUS, PIN_HEAD_Y, PIN_HEIGHT } from "@shared/pin-shape";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from "react";
 
+import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
+import { pinAt, pinsOf } from "./pins";
 import { inkColor, paletteFor, renderSketch } from "./render";
 import {
   fontFor,
@@ -45,7 +48,18 @@ export interface PageProps {
   readonly onAdd: (mark: Mark) => void;
   /** ⌘↩ in the text field: keep the text, if any, and save. */
   readonly onSubmit: (mark: Mark | null) => void;
+  /** The selected pin (0-based), which ⌫ removes and the arrow keys nudge. */
+  readonly selectedPin: number | null;
+  readonly onSelectPin: (index: number | null) => void;
+  /** A pin dragged to a new place, once it is let go. */
+  readonly onMovePin: (index: number, to: Point) => void;
+  /** Where the pointer is over the drawing, for ⇧P; null when it is off the page. */
+  readonly pointerRef: RefObject<Point | null>;
 }
+
+/** On screen a pin is as tall as in the export, scaled with the image, but never too small to grab. */
+const pinHeight = (scale: number): number =>
+  Math.min(Math.max(PIN_HEIGHT * scale, 16), PIN_HEIGHT);
 
 interface CanvasSize {
   readonly width: number;
@@ -130,7 +144,7 @@ const useFontsLoaded = (): boolean => {
 };
 
 const startDrag = (
-  tool: Exclude<Tool, "text">,
+  tool: Exclude<Tool, "text" | "pin">,
   at: Point,
   color: Color,
   width: number
@@ -229,10 +243,21 @@ export const Page = ({
   image,
   marks,
   onAdd,
+  onMovePin,
+  onSelectPin,
   onSubmit,
+  pointerRef,
+  selectedPin,
   stroke,
   tool,
 }: PageProps) => {
+  // A pin being dragged: which one and where it is now, committed on release.
+  const [pinDrag, setPinDrag] = useState<{
+    readonly index: number;
+    readonly at: Point;
+    readonly moved: boolean;
+  } | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(canvasRef);
   const fontsLoaded = useFontsLoaded();
@@ -333,11 +358,47 @@ export const Page = ({
   };
 
   const finishDrag = (): void => {
+    if (pinDrag !== null) {
+      if (pinDrag.moved) {
+        onMovePin(pinDrag.index, pinDrag.at);
+      }
+
+      setPinDrag(null);
+
+      return;
+    }
+
     if (drag !== null && isVisible(drag)) {
       onAdd(drag);
     }
 
     setDrag(null);
+  };
+
+  const height = pinHeight(view.scale);
+  const pinScale = height / PIN_HEIGHT;
+
+  /** Pin mode: a click on a pin's head grabs it, anywhere else places the next pin. */
+  const pinPointerDown = (
+    event: PointerEvent<HTMLCanvasElement>,
+    at: Point
+  ): void => {
+    const hit = pinAt(
+      marks,
+      at,
+      (PIN_HEAD_RADIUS * pinScale + 3) / view.scale,
+      (PIN_HEAD_Y * pinScale) / view.scale
+    );
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    if (hit === null) {
+      onAdd({ at, kind: "pin" });
+      onSelectPin(pinsOf(marks).length);
+    } else {
+      onSelectPin(hit);
+      setPinDrag({ at, index: hit, moved: false });
+    }
   };
 
   const onPointerDown = (event: PointerEvent<HTMLCanvasElement>): void => {
@@ -354,6 +415,12 @@ export const Page = ({
       if (tool === "text") {
         return;
       }
+    }
+
+    if (tool === "pin") {
+      pinPointerDown(event, at);
+
+      return;
     }
 
     if (tool === "text") {
@@ -381,11 +448,21 @@ export const Page = ({
   };
 
   const onPointerMove = (event: PointerEvent<HTMLCanvasElement>): void => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const here = drawingPoint(event, box);
+
+    pointerRef.current = here;
+
+    if (pinDrag !== null) {
+      setPinDrag({ ...pinDrag, at: here, moved: true });
+
+      return;
+    }
+
     if (drag === null) {
       return;
     }
 
-    const box = event.currentTarget.getBoundingClientRect();
     const samples = event.nativeEvent.getCoalescedEvents();
 
     const points = (samples.length > 0 ? samples : [event]).map((sample) =>
@@ -415,7 +492,7 @@ export const Page = ({
       )}
       <canvas
         aria-label="Drawing"
-        className="absolute inset-0 size-full cursor-crosshair touch-none data-[tool=text]:cursor-text"
+        className="absolute inset-0 size-full cursor-crosshair touch-none data-[tool=pin]:cursor-copy data-[tool=text]:cursor-text"
         data-tool={tool}
         // Every drag captures the pointer, so this ends it once: on release, cancel, or capture lost.
         onLostPointerCapture={finishDrag}
@@ -424,9 +501,27 @@ export const Page = ({
           event.preventDefault();
         }}
         onPointerDown={onPointerDown}
+        onPointerLeave={() => {
+          pointerRef.current = null;
+        }}
         onPointerMove={onPointerMove}
         ref={canvasRef}
       />
+      {pinsOf(marks).map((pin, index) => {
+        const at = toPage(view, pinDrag?.index === index ? pinDrag.at : pin.at);
+
+        return (
+          <PinMarker
+            height={height}
+            // oxlint-disable-next-line react/no-array-index-key -- a pin's place is its number.
+            key={index}
+            left={`${at.x}px`}
+            number={index + 1}
+            selected={selectedPin === index}
+            top={`${at.y}px`}
+          />
+        );
+      })}
       {text === null ? null : (
         <TextField
           dark={dark}

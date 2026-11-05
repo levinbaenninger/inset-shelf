@@ -1,4 +1,4 @@
-import type { ItemAction, Permission } from "@shared/contracts";
+import type { DetailField, ItemAction, Permission } from "@shared/contracts";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
 import type { MenuItemConstructorOptions } from "electron";
 
@@ -21,6 +21,10 @@ export interface AppMenuActions {
   readonly newNote: () => void;
   readonly newSection: () => void;
   readonly newDrawing: () => void;
+  readonly newWindowLink: () => void;
+  /** ⌘D, ⌘⇧D, ⌘⇧S: details with that field. */
+  readonly field: (field: DetailField) => void;
+  readonly showShortcuts: () => void;
   readonly closeWindow: () => void;
   readonly undo: () => void;
   readonly redo: () => void;
@@ -113,10 +117,33 @@ const itemSubmenu = (actions: AppMenuActions): MenuItemConstructorOptions[] => {
     registerAccelerator,
   });
 
+  const field = (
+    which: DetailField,
+    label: string,
+    accelerator: string
+  ): MenuItemConstructorOptions => ({
+    accelerator,
+    click: () => {
+      actions.field(which);
+    },
+    label,
+  });
+
   return [
     entry("open", "Open", "CommandOrControl+O"),
     entry("edit", "Edit", "Enter", false),
+    entry("details", "Show Details", "Right", false),
     entry("toggleDone", "Check Off", "Space", false),
+    SEPARATOR,
+    field("description", "Add Description", "CommandOrControl+D"),
+    field("steps", "Add Next Steps", "Shift+CommandOrControl+S"),
+    field("due", "Set Due Date…", "Shift+CommandOrControl+D"),
+    {
+      click: () => {
+        actions.item("linkWindow");
+      },
+      label: "Link Window…",
+    },
     SEPARATOR,
     entry(
       "previousSection",
@@ -147,6 +174,11 @@ const fileSubmenu = (
     accelerator: "Alt+CommandOrControl+N",
     click: actions.newDrawing,
     label: "New Drawing…",
+  },
+  {
+    accelerator: "Shift+CommandOrControl+L",
+    click: actions.newWindowLink,
+    label: "New Window Link…",
   },
   SEPARATOR,
   // Without an app menu, Settings and Exit live here.
@@ -207,6 +239,12 @@ export const appMenuTemplate = (
         click: actions.copyAsList,
         label: "Copy as List",
       },
+      {
+        click: () => {
+          actions.item("copyDetails");
+        },
+        label: "Copy with Details",
+      },
       { role: "paste" },
       {
         accelerator: "CommandOrControl+A",
@@ -244,6 +282,11 @@ export const appMenuTemplate = (
   {
     role: "help",
     submenu: [
+      {
+        accelerator: "CommandOrControl+/",
+        click: actions.showShortcuts,
+        label: "Keyboard Shortcuts",
+      },
       { click: actions.openHelp, label: "Inset Shelf Help" },
       // Elsewhere About is part of Settings instead of a system message box.
       ...(mac

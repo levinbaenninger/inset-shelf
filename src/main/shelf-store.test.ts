@@ -14,6 +14,7 @@ import {
   ItemIdSchema,
   SectionIdSchema,
   ShelfDocSchema,
+  NO_META,
 } from "@shared/shelf";
 import type { ShelfDoc } from "@shared/shelf";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,6 +34,7 @@ const withNote = (doc: ShelfDoc, text: string): ShelfDoc => ({
   items: [
     ...doc.items,
     {
+      ...NO_META,
       color: null,
       context: null,
       createdAt: "2026-10-22T10:00:00.000Z",

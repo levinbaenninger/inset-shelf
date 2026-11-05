@@ -6,23 +6,38 @@ import { pathToFileURL } from "node:url";
 
 import {
   drawingContract,
+  pickerContract,
   screenshotContract,
   settingsContract,
   shelfContract,
   toastContract,
 } from "@shared/contracts";
-import type { ActionResult, Permission, ShelfCommand } from "@shared/contracts";
+import type {
+  ActionResult,
+  Permission,
+  PickerView,
+  ShelfCommand,
+} from "@shared/contracts";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import {
   ItemIdSchema,
+  itemDetailsText,
   SectionIdSchema,
   itemsAsList,
+  itemText,
   itemTextWithLink,
   listHtmlWithImage,
 } from "@shared/shelf";
-import type { ItemContext, ItemId, MainOp, ShelfItem } from "@shared/shelf";
+import type {
+  ItemContext,
+  ItemId,
+  MainOp,
+  Pin,
+  ShelfItem,
+  WindowRef,
+} from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import { desktopLink, isAppLink, openingApp } from "@shared/web-source";
 import {
@@ -40,7 +55,7 @@ import {
   shell,
   systemPreferences,
 } from "electron";
-import type { NativeImage } from "electron";
+import type { NativeImage, WebContents } from "electron";
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
@@ -53,7 +68,9 @@ import { createDragStaging, exportImage } from "./exports";
 import { frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
-import { openApp } from "./open-app";
+import { menuEntryForKey } from "./menu-keys";
+import { openApp, openAppAt } from "./open-app";
+import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
@@ -69,6 +86,7 @@ import type { ShelfTray } from "./tray";
 import type { TrayAction } from "./tray-menu";
 import { updateNotice } from "./update-state";
 import { createUpdater } from "./updater";
+import { canListWindows, createWindowLinker } from "./window-links";
 import {
   appOrigin,
   pageUrl,
@@ -83,6 +101,9 @@ const APP_ID = "ch.inset.prototype.shelf";
 /** Fixed constants: never built from renderer input. */
 const MAC_ACCESSIBILITY_SETTINGS =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+
+const MAC_SCREEN_SETTINGS =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
 
 const KEYS_POLL_MS = 3000;
 
@@ -209,6 +230,54 @@ const openInApp = async (
   }
 };
 
+/** The note a new window link starts as: the windows' titles, which the user can then edit. */
+const linkText = (windows: readonly WindowRef[]): string =>
+  windows.map((window) => window.title ?? window.app ?? "Window").join(" · ");
+
+/**
+ * Runs the app menu's entry for a key press in this page (item 8): on
+ * Windows the frameless windows have no menu bar to take the keys from.
+ * Preventing the event also keeps it from the page and the menu.
+ */
+const answerMenuKeys = (contents: WebContents): void => {
+  contents.on("before-input-event", (event, input) => {
+    const menu = Menu.getApplicationMenu();
+    const entry = menu === null ? null : menuEntryForKey(menu.items, input);
+
+    if (entry !== null) {
+      event.preventDefault();
+      // Electron types click as Function. It is an arrow function taking (event, focusedWindow, focusedWebContents).
+      entry.click.call(
+        undefined,
+        undefined,
+        BrowserWindow.fromWebContents(contents) ?? undefined,
+        contents
+      );
+    }
+  });
+};
+
+/**
+ * Reopens a linked window: its page in the browser, its file in its app,
+ * else its app brought forward. Every target was read by main when the
+ * window was linked, never sent by a page.
+ */
+const reopenWindow = (window: WindowRef): void => {
+  if (window.url !== null && /^https?:\/\//u.test(window.url)) {
+    void shell.openExternal(window.url);
+  } else if (window.document !== null) {
+    void shell.openPath(window.document);
+  } else if (window.appPath !== null) {
+    if (isMac) {
+      openAppAt(window.appPath);
+    } else {
+      void shell.openPath(window.appPath);
+    }
+  } else if (window.app !== null && isMac) {
+    openApp(window.app);
+  }
+};
+
 /**
  * The addresses an item may open: the page it came from, the links copied
  * with it, and, for a link written in a Markdown note, any address that
@@ -280,6 +349,14 @@ const start = async (): Promise<void> => {
     credits: "A prototype for the Inset capture experiments.",
   });
   secureSession();
+
+  // Item 8: Windows has no menu bar for the frameless shelf to take the menu's
+  // keys from, so every window reads them itself and runs the entry.
+  if (!isMac) {
+    app.on("browser-window-created", (_event, window) => {
+      answerMenuKeys(window.webContents);
+    });
+  }
 
   const dataDir = app.getPath("userData");
 
@@ -400,7 +477,7 @@ const start = async (): Promise<void> => {
     drawing.open(null);
   };
 
-  const openImage = (id: ItemId): void => {
+  const openImage = (id: ItemId, pinMode = false): void => {
     const item = controller.item(id);
 
     if (item?.kind !== "image") {
@@ -411,7 +488,8 @@ const start = async (): Promise<void> => {
     e2eLog("drawingShown", { itemId: id });
     drawing.open({
       heightPx: item.image.heightPx,
-      pin: item.pin,
+      pinMode,
+      pins: item.pins,
       pixelsPerDip: item.image.pixelsPerDip,
       url: insetUrl.attachment(item.image.file),
       widthPx: item.image.widthPx,
@@ -654,7 +732,7 @@ const start = async (): Promise<void> => {
             pixelsPerDip: 1,
             widthPx: width,
           },
-          pin: null,
+          pins: [],
           source: null,
           type: "addImage",
           via: "paste",
@@ -903,6 +981,175 @@ const start = async (): Promise<void> => {
     }
   };
 
+  // The window-link picker: New Window Link… makes a note, Link Window… adds to an item.
+  const picker = createPickerWindow({
+    handOff: focusShelf,
+    preload: preloadPath("picker"),
+    url: pageUrl("picker"),
+  });
+
+  const linker = createWindowLinker({
+    now: () => new Date(),
+    ownSourceIds: () =>
+      new Set(
+        BrowserWindow.getAllWindows().map((window) => window.getMediaSourceId())
+      ),
+    writeAttachment: store.writeAttachment,
+  });
+
+  let pickerTarget: ItemId | null = null;
+
+  let pickerView: PickerView = {
+    linking: false,
+    seq: 0,
+    state: { kind: "loading" },
+    target: { kind: "new" },
+  };
+
+  // Set once the picker's IPC server exists.
+  let showPickerView: ((view: PickerView) => void) | null = null;
+
+  const setPickerView = (patch: Partial<PickerView>): void => {
+    pickerView = { ...pickerView, ...patch };
+    showPickerView?.(pickerView);
+  };
+
+  const listWindows = async (): Promise<void> => {
+    const { seq } = pickerView;
+
+    if (!canListWindows()) {
+      setPickerView({ state: { kind: "permission" } });
+
+      return;
+    }
+
+    setPickerView({ state: { kind: "loading" } });
+
+    try {
+      const candidates = await linker.list();
+
+      // A newer opening started over meanwhile.
+      if (pickerView.seq === seq) {
+        setPickerView({ state: { candidates, kind: "ready" } });
+      }
+    } catch (error) {
+      setPickerView({
+        state: {
+          kind: "failed",
+          message: `The open windows couldn't be listed: ${errorMessage(error)}`,
+        },
+      });
+    }
+  };
+
+  const openPicker = (target: ItemId | null): void => {
+    const item = target === null ? undefined : controller.item(target);
+
+    pickerTarget = item === undefined ? null : item.id;
+    setPickerView({
+      linking: false,
+      seq: pickerView.seq + 1,
+      state: { kind: "loading" },
+      target:
+        item === undefined
+          ? { kind: "new" }
+          : { kind: "item", label: excerpt(itemText(item)) },
+    });
+    picker.open();
+    void listWindows();
+  };
+
+  const chooseWindows = async (
+    ids: readonly string[]
+  ): Promise<ActionResult> => {
+    setPickerView({ linking: true });
+
+    try {
+      const windows = await linker.capture(ids);
+
+      if (windows.length === 0) {
+        setPickerView({ linking: false });
+
+        return {
+          message: "Those windows are gone. Refresh the list and pick again.",
+          ok: false,
+        };
+      }
+
+      const target =
+        pickerTarget === null ? undefined : controller.item(pickerTarget);
+
+      picker.close();
+
+      if (target === undefined) {
+        const id = controller.apply({
+          context: null,
+          html: null,
+          text: linkText(windows),
+          type: "addText",
+          via: "typed",
+          windows: [...windows],
+        });
+
+        await showShelf();
+
+        if (id !== null) {
+          e2eLog("itemAdded", { itemId: id, kind: "text", via: "windowLink" });
+          controller.focus(id, true);
+        }
+      } else {
+        controller.apply({
+          id: target.id,
+          type: "attachWindows",
+          windows: [...windows],
+        });
+        notify(
+          windows.length === 1
+            ? "Linked 1 window"
+            : `Linked ${windows.length} windows`
+        );
+      }
+
+      return { ok: true };
+    } catch (error) {
+      setPickerView({ linking: false });
+
+      return {
+        message: `The windows couldn't be linked: ${errorMessage(error)}`,
+        ok: false,
+      };
+    }
+  };
+
+  const pickerServer = serveContract(
+    pickerContract,
+    {
+      cancel: () => {
+        picker.close();
+      },
+      choose: chooseWindows,
+      getView: () => pickerView,
+      openScreenSettings: () => {
+        if (isMac) {
+          void shell.openExternal(MAC_SCREEN_SETTINGS);
+        }
+      },
+      refresh: () => {
+        void listWindows();
+      },
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => picker.webContents,
+    }
+  );
+
+  showPickerView = (view) => {
+    pickerServer.emit("view", view);
+  };
+
   // Set once the shelf's IPC server exists; menus built before then only reach it later.
   let sendCommand: ((command: ShelfCommand) => void) | null = null;
 
@@ -927,6 +1174,15 @@ const start = async (): Promise<void> => {
         void pickFiles();
       },
       copy: copyItem,
+      copyDetails: (id) => {
+        screenshots.ignoreClipboard();
+
+        const item = controller.item(id);
+
+        if (item !== undefined) {
+          void clipboard.writeText(itemDetailsText(item));
+        }
+      },
       copyList,
       copyWithLink: (id) => {
         screenshots.ignoreClipboard();
@@ -935,6 +1191,21 @@ const start = async (): Promise<void> => {
 
         if (item !== undefined) {
           void clipboard.writeText(itemTextWithLink(item));
+        }
+      },
+      linkWindows: (id) => {
+        openPicker(id);
+      },
+      newWindowLink: () => {
+        openPicker(null);
+      },
+      reopenWindow: ({ id, windowId }) => {
+        const windows = controller.item(id)?.windows ?? [];
+
+        for (const window of windows) {
+          if (windowId === undefined || window.id === windowId) {
+            reopenWindow(window);
+          }
         }
       },
       dismissProblem: () => {
@@ -957,7 +1228,12 @@ const start = async (): Promise<void> => {
       },
       newDrawing,
       openHelp,
-      openImage,
+      openImage: (id) => {
+        openImage(id);
+      },
+      openPins: (id) => {
+        openImage(id, true);
+      },
       openKeySettings,
       openLink: ({ id, url }) => {
         const item = controller.item(id);
@@ -1002,7 +1278,7 @@ const start = async (): Promise<void> => {
 
         const id = controller.apply({
           image: { file, heightPx: height, pixelsPerDip: 1, widthPx: width },
-          pin: null,
+          pins: [],
           source: null,
           type: "addImage",
           via: "paste",
@@ -1032,10 +1308,15 @@ const start = async (): Promise<void> => {
   /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
   const DRAWING_PIXELS_PER_DIP = 2;
 
-  /** Puts the annotated image in place of the old one, which is deleted once the shelf is saved. */
+  /**
+   * Puts the annotated image in place of the old one, which is deleted once
+   * the shelf is saved, and keeps its pins; without new marks (`image`
+   * null) only the pins change.
+   */
   const saveAnnotation = async (
     id: ItemId,
-    image: NativeImage,
+    image: NativeImage | null,
+    pins: readonly Pin[],
     copy: boolean
   ): Promise<ActionResult> => {
     const item = controller.item(id);
@@ -1044,19 +1325,23 @@ const start = async (): Promise<void> => {
       return { message: "This image is no longer on the shelf.", ok: false };
     }
 
-    const { height, width } = image.getSize();
+    if (image !== null) {
+      const { height, width } = image.getSize();
 
-    controller.apply({
-      id,
-      image: {
-        file: await store.writeAttachment(image.toPNG()),
-        heightPx: height,
-        pixelsPerDip: item.image.pixelsPerDip,
-        widthPx: width,
-      },
-      type: "replaceImage",
-    });
-    // Copies dragged out earlier show the old picture.
+      controller.apply({
+        id,
+        image: {
+          file: await store.writeAttachment(image.toPNG()),
+          heightPx: height,
+          pixelsPerDip: item.image.pixelsPerDip,
+          widthPx: width,
+        },
+        type: "replaceImage",
+      });
+    }
+
+    controller.apply({ id, pins: [...pins], type: "setPins" });
+    // Copies dragged out earlier show the old picture and pins.
     staging.clear(id);
 
     if (copy) {
@@ -1088,7 +1373,13 @@ const start = async (): Promise<void> => {
       },
       getView: () => drawing.view(),
       setDirty: drawing.setDirty,
-      save: async ({ copy, png }) => {
+      save: async ({ copy, pins, png }) => {
+        if (png === null) {
+          return drawingItem === null
+            ? { message: "There is nothing to save.", ok: false }
+            : await saveAnnotation(drawingItem, null, pins, copy);
+        }
+
         const image = nativeImage.createFromBuffer(Buffer.from(png));
 
         if (image.isEmpty()) {
@@ -1096,7 +1387,7 @@ const start = async (): Promise<void> => {
         }
 
         if (drawingItem !== null) {
-          return await saveAnnotation(drawingItem, image, copy);
+          return await saveAnnotation(drawingItem, image, pins, copy);
         }
 
         const { height, width } = image.getSize();
@@ -1109,7 +1400,7 @@ const start = async (): Promise<void> => {
             pixelsPerDip: DRAWING_PIXELS_PER_DIP,
             widthPx: width,
           },
-          pin: null,
+          pins,
           source: null,
           type: "addImage",
           via: "drawing",
@@ -1174,7 +1465,7 @@ const start = async (): Promise<void> => {
         pixelsPerDip: scaleFactor,
         widthPx: width,
       },
-      pin: null,
+      pins: [],
       source: null,
       type: "addImage",
       via: "screenshot",
@@ -1393,6 +1684,8 @@ const start = async (): Promise<void> => {
             closeWindow: () => {
               if (drawing.isFocused()) {
                 drawing.requestClose();
+              } else if (picker.isFocused()) {
+                picker.close();
               } else if (settingsWindow.isFocused()) {
                 settingsWindow.close();
               } else {
@@ -1420,6 +1713,15 @@ const start = async (): Promise<void> => {
             newDrawing,
             newNote: () => {
               void commandShelf({ kind: "newNote" });
+            },
+            field: (field) => {
+              void commandShelf({ field, kind: "field" });
+            },
+            newWindowLink: () => {
+              openPicker(null);
+            },
+            showShortcuts: () => {
+              void commandShelf({ kind: "shortcuts" });
             },
             newSection: () => {
               void commandShelf({ kind: "newSection" });
@@ -1531,6 +1833,11 @@ const start = async (): Promise<void> => {
         break;
       }
 
+      case "showShortcuts": {
+        void commandShelf({ kind: "shortcuts" });
+        break;
+      }
+
       case "checkForUpdates": {
         updater.check();
         break;
@@ -1635,6 +1942,7 @@ const start = async (): Promise<void> => {
     screenshotCard.load(),
     drawing.load(),
     settingsWindow.load(),
+    picker.load(),
   ]);
 
   let quitting = false;

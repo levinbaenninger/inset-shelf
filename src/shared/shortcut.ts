@@ -23,6 +23,9 @@ const MAC_KEYS = new Map([
   ["Control", "⌃"],
   ["Down", "↓"],
   ["Enter", "↩"],
+  ["Esc", "Esc"],
+  ["Left", "←"],
+  ["Right", "→"],
   ["Shift", "⇧"],
   ["Up", "↑"],
 ]);
@@ -31,6 +34,10 @@ const OTHER_KEYS = new Map([
   ["Backspace", "Del"],
   ["CommandOrControl", "Ctrl"],
   ["Control", "Ctrl"],
+  ["Down", "↓"],
+  ["Left", "←"],
+  ["Right", "→"],
+  ["Up", "↑"],
 ]);
 
 /** Windows names the modifiers in this order, before the key. */

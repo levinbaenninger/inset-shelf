@@ -177,6 +177,11 @@ const drawText = (ctx: Context2D, mark: TextMark): void => {
 };
 
 const drawMark = (ctx: Context2D, mark: Mark, palette: Palette): void => {
+  // Pins are drawn over the page, and by the shelf over copies, never into the picture.
+  if (mark.kind === "pin") {
+    return;
+  }
+
   const color = palette[mark.color];
 
   ctx.strokeStyle = color;

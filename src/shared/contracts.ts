@@ -3,7 +3,12 @@ import { z } from "zod";
 import { defineContract, event, invoke, out, send } from "./ipc";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
-import { ItemIdSchema, ShelfOpSchema } from "./shelf";
+import {
+  ItemIdSchema,
+  PinsSchema,
+  ShelfOpSchema,
+  WindowIdSchema,
+} from "./shelf";
 import type { ItemId, Pin, ShelfDoc } from "./shelf";
 
 export type Permission = "granted" | "missing" | "notNeeded";
@@ -24,19 +29,32 @@ export interface ShelfStatus {
 export interface ShelfView {
   readonly doc: ShelfDoc;
   readonly status: ShelfStatus;
-  /** The item to select and scroll to, set by a capture. Changes with every capture. */
-  readonly focus: { readonly id: ItemId; readonly seq: number } | null;
+  /**
+   * The item to select and scroll to, set by a capture. Changes with every
+   * capture. `edit` opens its text for typing, as after a new window link.
+   */
+  readonly focus: {
+    readonly id: ItemId;
+    readonly seq: number;
+    readonly edit?: boolean;
+  } | null;
   /** An item can be restored with undoRemove. */
   readonly canUndo: boolean;
 }
+
+/** The fields the field shortcuts (⌘D, ⌘⇧D, ⌘⇧S) open in details. */
+export type DetailField = "description" | "due" | "steps";
 
 /** App-menu choices the shelf window carries out itself, so its own state (editing, undo) stays in one place. */
 /** What the menu bar's Item menu asks of the selected item. */
 export type ItemAction =
   | "copyList"
   | "copyWithLink"
+  | "copyDetails"
   | "open"
   | "edit"
+  | "details"
+  | "linkWindow"
   | "toggleDone"
   | "previousSection"
   | "nextSection"
@@ -44,6 +62,10 @@ export type ItemAction =
 
 export type ShelfCommand =
   | { readonly kind: "newSection" }
+  /** ⌘D, ⌘⇧D, ⌘⇧S: details open with that field focused or added. */
+  | { readonly kind: "field"; readonly field: DetailField }
+  /** ⌘/ and Help › Keyboard Shortcuts. */
+  | { readonly kind: "shortcuts" }
   | { readonly kind: "item"; readonly action: ItemAction }
   /** Edit › Redo, which a note field takes from its own history. */
   | { readonly kind: "redo" }
@@ -86,8 +108,18 @@ export const shelfContract = defineContract({
       z.array(ItemIdSchema).min(1).max(1000),
       out<ActionResult>()
     ),
-    /** The item's words and the page it came from, as text. */
+    /** The item's words and the page it came from, as text, with its metadata when it has any. */
     copyWithLink: send(ItemIdSchema),
+    /** The item's title, words, page and every piece of metadata, as text. */
+    copyDetails: send(ItemIdSchema),
+    /** File › New Window Link…: the picker, in its own window; picking makes a note. */
+    newWindowLink: send(z.void()),
+    /** Link Window… in details: the picker, adding to this item. */
+    linkWindows: send(ItemIdSchema),
+    /** Opens a linked window's page or file, else brings its app forward. */
+    reopenWindow: send(
+      z.object({ id: ItemIdSchema, windowId: WindowIdSchema.optional() })
+    ),
     dismissProblem: send(z.void()),
     getView: invoke(z.void(), out<ShelfView>()),
     hide: send(z.void()),
@@ -98,6 +130,8 @@ export const shelfContract = defineContract({
     openHelp: send(z.void()),
     /** Shows an image large in the drawing window, to look at or draw on. */
     openImage: send(ItemIdSchema),
+    /** Add Pins… and Move pins in details: the image opens with the Pin tool. */
+    openPins: send(ItemIdSchema),
     openKeySettings: send(z.void()),
     /**
      * Opens the page an item was captured from, or one of the links in it;
@@ -177,8 +211,10 @@ export interface DrawingImage {
   readonly widthPx: number;
   readonly heightPx: number;
   readonly pixelsPerDip: number;
-  /** Shown over the image as in the shelf; it is drawn into copies, not into the saved image. */
-  readonly pin: Pin | null;
+  /** Numbered pins, in image pixels, edited with the Pin tool; drawn into copies, never into the saved image. */
+  readonly pins: readonly Pin[];
+  /** Opened from details to place or move pins: the Pin tool is picked at once. */
+  readonly pinMode: boolean;
 }
 
 export interface DrawingView {
@@ -209,9 +245,13 @@ export const drawingContract = defineContract({
       z.object({
         /** Also put the drawing on the clipboard, for pasting into a prompt. */
         copy: z.boolean(),
+        /** Null when only the pins changed: the image stays as it is. */
         png: z
           .instanceof(Uint8Array)
-          .refine((bytes) => bytes.byteLength <= DRAWING_MAX_BYTES),
+          .refine((bytes) => bytes.byteLength <= DRAWING_MAX_BYTES)
+          .nullable(),
+        /** In the saved image's pixels. */
+        pins: PinsSchema,
       }),
       out<ActionResult>()
     ),
@@ -235,6 +275,54 @@ export const settingsContract = defineContract({
 });
 
 export type SettingsContract = typeof settingsContract;
+
+/** An open window the picker offers, with a small picture of it. */
+export interface WindowCandidate {
+  readonly id: string;
+  readonly app: string | null;
+  readonly title: string | null;
+  /** A small PNG as a data URL. */
+  readonly thumb: string;
+}
+
+export interface PickerView {
+  /** Changes with every opening, so the page starts over. */
+  readonly seq: number;
+  /** A new note from the windows, or windows added to an item (its words, for the header). */
+  readonly target:
+    | { readonly kind: "new" }
+    | { readonly kind: "item"; readonly label: string };
+  readonly state:
+    | { readonly kind: "loading" }
+    | {
+        readonly kind: "ready";
+        readonly candidates: readonly WindowCandidate[];
+      }
+    | { readonly kind: "failed"; readonly message: string }
+    /** macOS: Screen Recording is off, so windows can't be listed. */
+    | { readonly kind: "permission" };
+  /** Linking is under way: the chosen windows are being captured. */
+  readonly linking: boolean;
+}
+
+/** The window-link picker: a window of its own, like New Drawing. */
+export const pickerContract = defineContract({
+  events: { view: event<PickerView>() },
+  global: "insetPicker",
+  methods: {
+    cancel: send(z.void()),
+    choose: invoke(
+      z.array(z.string().min(1).max(100)).min(1).max(20),
+      out<ActionResult>()
+    ),
+    getView: invoke(z.void(), out<PickerView>()),
+    openScreenSettings: send(z.void()),
+    refresh: send(z.void()),
+  },
+  name: "picker",
+});
+
+export type PickerContract = typeof pickerContract;
 
 export type ShelfContract = typeof shelfContract;
 

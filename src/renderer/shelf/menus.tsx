@@ -1,4 +1,5 @@
 import {
+  AppWindowIcon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowUpRight01Icon,
@@ -12,6 +13,8 @@ import {
   FolderExportIcon,
   HelpCircleIcon,
   InboxDownloadIcon,
+  KeyboardIcon,
+  SidebarRightIcon,
   Link01Icon,
   PaintBrush01Icon,
   PencilEdit02Icon,
@@ -60,14 +63,17 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
   clear: CleanIcon,
   copy: Copy01Icon,
   delete: Delete02Icon,
+  details: SidebarRightIcon,
   edit: PencilEdit02Icon,
   float: PinIcon,
   help: HelpCircleIcon,
+  keyboard: KeyboardIcon,
   link: Link01Icon,
   move: FolderExportIcon,
   newSection: FolderAddIcon,
   open: ArrowUpRight01Icon,
   settings: Settings02Icon,
+  windowLink: AppWindowIcon,
 };
 
 const EntryIcon = ({ icon }: { readonly icon?: MenuIcon }) =>
@@ -384,6 +390,7 @@ export const ShelfMenu = ({
 export interface AddActions {
   readonly attachFiles: () => void;
   readonly newDrawing: () => void;
+  readonly newWindowLink: () => void;
 }
 
 /** The "+" in the note field opens upward, above the field, so it never covers it; closing it goes back to the field. */
@@ -422,6 +429,15 @@ export const AddMenu = ({
         <HugeiconsIcon icon={Edit02Icon} />
         New Drawing
         <Shortcut accelerator="Alt+CommandOrControl+N" />
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={() => {
+          actions.newWindowLink();
+        }}
+      >
+        <HugeiconsIcon icon={AppWindowIcon} />
+        New Window Link
+        <Shortcut accelerator="Shift+CommandOrControl+L" />
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>

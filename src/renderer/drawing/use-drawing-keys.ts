@@ -1,3 +1,4 @@
+import { DRAWING_TOOL_KEYS } from "@shared/shortcuts";
 import { useEffect, useEffectEvent, useSyncExternalStore } from "react";
 
 import { isMac } from "@/shared/platform";
@@ -9,16 +10,25 @@ export interface DrawingKeyActions {
   readonly undo: () => void;
   readonly redo: () => void;
   readonly pickTool: (tool: Tool) => void;
+  /** ⇧P: a pin at the pointer, or the middle of the image. */
+  readonly dropPin: () => void;
+  /** 1–9: selects that pin. */
+  readonly selectPin: (index: number) => void;
+  /** ⌫ with a pin selected; false when none is, so the key does nothing. */
+  readonly removePin: () => boolean;
+  /** The arrow keys, 10 with Shift; false when no pin is selected. */
+  readonly nudgePin: (dx: number, dy: number) => boolean;
 }
 
-export const TOOL_KEYS: Readonly<Record<Tool, string>> = {
-  arrow: "A",
-  ellipse: "O",
-  line: "L",
-  pen: "P",
-  rect: "R",
-  text: "T",
-};
+/** P is the Pin tool (P toggles it); the pen moved to B. */
+export const TOOL_KEYS: Readonly<Record<Tool, string>> = DRAWING_TOOL_KEYS;
+
+const NUDGE = new Map<string, readonly [number, number]>([
+  ["ArrowDown", [0, 1]],
+  ["ArrowLeft", [-1, 0]],
+  ["ArrowRight", [1, 0]],
+  ["ArrowUp", [0, -1]],
+]);
 
 const toolForKey = new Map(
   TOOLS.map((tool): [string, Tool] => [TOOL_KEYS[tool].toLowerCase(), tool])
@@ -33,44 +43,88 @@ export const SAVE_KEYS = isMac ? "⌘↩" : "Ctrl+Enter";
 const isTextField = (target: EventTarget | null): boolean =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
+/** ⌘Z and ⇧⌘Z, or Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z elsewhere; true when the key was one of them. */
+const historyKey = (
+  event: KeyboardEvent,
+  actions: DrawingKeyActions
+): boolean => {
+  const command = (isMac ? event.metaKey : event.ctrlKey) && !event.altKey;
+  const letter = event.key.toLowerCase();
+
+  if (command && letter === "z") {
+    if (event.shiftKey) {
+      actions.redo();
+    } else {
+      actions.undo();
+    }
+
+    return true;
+  }
+
+  if (command && !isMac && letter === "y" && !event.shiftKey) {
+    actions.redo();
+
+    return true;
+  }
+
+  return false;
+};
+
+/** ⇧P drops a pin, 1–9 select one, the arrows nudge it (10 px with Shift), ⌫ removes it; true when the key was used. */
+const pinKey = (event: KeyboardEvent, actions: DrawingKeyActions): boolean => {
+  if (event.shiftKey && event.key.toLowerCase() === "p") {
+    actions.dropPin();
+
+    return true;
+  }
+
+  if (/^[1-9]$/u.test(event.key)) {
+    actions.selectPin(Number(event.key) - 1);
+
+    return true;
+  }
+
+  const nudge = NUDGE.get(event.key);
+
+  if (nudge !== undefined) {
+    const step = event.shiftKey ? 10 : 1;
+
+    return actions.nudgePin(nudge[0] * step, nudge[1] * step);
+  }
+
+  return (
+    (event.key === "Backspace" || event.key === "Delete") && actions.removePin()
+  );
+};
+
 /**
- * ⌘Z and ⇧⌘Z step through the history, as do Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z
- * elsewhere; a plain letter picks a tool. A text field keeps its own keys.
- * The letter is read from the layout, so Z is found on QWERTZ keyboards too.
+ * The history keys, the pin keys, and a plain letter for each tool (P
+ * toggles the Pin tool). A text field keeps its own keys. The letter is read
+ * from the layout, so Z is found on QWERTZ keyboards too.
  */
 export const useDrawingKeys = (actions: DrawingKeyActions): void => {
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || event.isComposing) {
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      isTextField(event.target)
+    ) {
       return;
     }
 
-    if (isTextField(event.target)) {
-      return;
-    }
-
-    const command = (isMac ? event.metaKey : event.ctrlKey) && !event.altKey;
-    const letter = event.key.toLowerCase();
-
-    if (command && letter === "z") {
+    if (historyKey(event, actions)) {
       event.preventDefault();
-
-      if (event.shiftKey) {
-        actions.redo();
-      } else {
-        actions.undo();
-      }
-
-      return;
-    }
-
-    if (command && !isMac && letter === "y" && !event.shiftKey) {
-      event.preventDefault();
-      actions.redo();
 
       return;
     }
 
     if (event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
+
+    if (pinKey(event, actions)) {
+      event.preventDefault();
+
       return;
     }
 

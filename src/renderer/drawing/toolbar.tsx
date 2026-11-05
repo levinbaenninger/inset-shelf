@@ -3,6 +3,7 @@ import {
   CircleIcon,
   Copy01Icon,
   Delete02Icon,
+  Location01Icon,
   SlashIcon,
   PencilIcon,
   Redo02Icon,
@@ -32,6 +33,7 @@ const TOOL_LABEL: Readonly<Record<Tool, string>> = {
   ellipse: "Ellipse",
   line: "Line",
   pen: "Pen",
+  pin: "Pin",
   rect: "Rectangle",
   text: "Text",
 };
@@ -41,6 +43,7 @@ const TOOL_ICON: Readonly<Record<Tool, typeof PencilIcon>> = {
   ellipse: CircleIcon,
   line: SlashIcon,
   pen: PencilIcon,
+  pin: Location01Icon,
   rect: SquareIcon,
   text: TextIcon,
 };

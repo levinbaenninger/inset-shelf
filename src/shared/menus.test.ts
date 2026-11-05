@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { itemMenu, pickedMenu, sectionMenu, shelfMenu } from "./menus";
 import type { MenuEntry } from "./menus";
-import { emptyShelf, ItemIdSchema, SectionIdSchema } from "./shelf";
+import { emptyShelf, ItemIdSchema, SectionIdSchema, NO_META } from "./shelf";
 import type { ImageItem, ShelfDoc } from "./shelf";
 
 const uuid = (n: number) =>
@@ -18,6 +18,7 @@ const doc: ShelfDoc = {
   ...emptyShelf(INBOX),
   items: [
     {
+      ...NO_META,
       color: null,
       context: null,
       createdAt: "2026-10-22T10:00:00.000Z",
@@ -38,6 +39,7 @@ const doc: ShelfDoc = {
 };
 
 const image: ImageItem = {
+  ...NO_META,
   color: "blue",
   context: null,
   createdAt: "2026-10-22T10:00:00.000Z",
@@ -51,9 +53,10 @@ const image: ImageItem = {
   },
   kind: "image",
   note: "",
-  pin: null,
+  pins: [],
   sectionId: INBOX,
   source: null,
+  title: null,
   via: "area",
 };
 
@@ -61,8 +64,10 @@ describe(shelfMenu, () => {
   it("starts a section and opens Settings, without listing the sections", () => {
     expect(labels(shelfMenu())).toStrictEqual([
       "New Section",
+      "New Window Link…",
       "---",
       "Settings",
+      "Keyboard Shortcuts",
     ]);
   });
 
@@ -71,13 +76,15 @@ describe(shelfMenu, () => {
 
     expect(labels(entries)).toStrictEqual([
       "New Section",
+      "New Window Link…",
       "---",
       "Float on Top",
       "---",
       "Settings",
+      "Keyboard Shortcuts",
       "Inset Shelf Help",
     ]);
-    expect(entries[2]).toMatchObject({
+    expect(entries[3]).toMatchObject({
       checked: true,
       choice: { kind: "setFloatOnTop", on: false },
     });
@@ -139,6 +146,7 @@ describe(itemMenu, () => {
     expect(labels(itemMenu(item, doc))).toStrictEqual([
       "Copy",
       "---",
+      "Details",
       "Edit",
       "Uncheck",
       "Move to",
@@ -147,7 +155,7 @@ describe(itemMenu, () => {
       "---",
       "Delete",
     ]);
-    expect(itemMenu(item, doc)[4]).toMatchObject({
+    expect(itemMenu(item, doc)[5]).toMatchObject({
       entries: [
         { choice: { kind: "moveTo", sectionId: LATER }, label: "Later" },
       ],
@@ -158,9 +166,10 @@ describe(itemMenu, () => {
   it("lets an image be opened and shows its colour in the swatch row", () => {
     const entries = itemMenu(image, { ...doc, items: [image] });
 
-    expect(labels(entries).slice(0, 4)).toStrictEqual([
+    expect(labels(entries).slice(0, 5)).toStrictEqual([
       "Copy",
       "---",
+      "Details",
       "Annotate",
       "Edit Note",
     ]);
@@ -170,6 +179,25 @@ describe(itemMenu, () => {
       kind: "colors",
       label: "Colour",
     });
+  });
+
+  it("offers Copy with Details only for an item that has some", () => {
+    const [item] = doc.items;
+
+    if (item === undefined) {
+      throw new Error("missing item");
+    }
+
+    const withSteps = {
+      ...item,
+      steps: [{ done: false, id: uuid(70), text: "Reply" }],
+    };
+
+    expect(labels(itemMenu(item, doc))).not.toContain("Copy with Details");
+    expect(labels(itemMenu(withSteps, doc)).slice(0, 2)).toStrictEqual([
+      "Copy",
+      "Copy with Details",
+    ]);
   });
 
   it("opens a text item where it came from: its desktop app, else its page", () => {

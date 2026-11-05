@@ -8,6 +8,7 @@ export type TrayAction =
   | "toggleShelf"
   | "turnOnKeys"
   | "openSettings"
+  | "showShortcuts"
   | UpdateAction;
 
 export type TrayItem =
@@ -71,6 +72,12 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
       kind: "item",
       label: "Settings…",
       ...accelerator("CommandOrControl+,"),
+    },
+    {
+      action: "showShortcuts",
+      kind: "item",
+      label: "Keyboard Shortcuts",
+      ...accelerator("CommandOrControl+/"),
     },
     SEPARATOR,
     { kind: "label", label: `Version ${model.version}` },

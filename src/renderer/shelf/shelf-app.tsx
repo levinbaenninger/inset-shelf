@@ -1,24 +1,26 @@
-import {
-  Cancel01Icon,
-  MoreHorizontalIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import { Cancel01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ItemAction, ShelfCommand, ShelfView } from "@shared/contracts";
+import type {
+  DetailField,
+  ItemAction,
+  ShelfCommand,
+  ShelfView,
+} from "@shared/contracts";
 import type { MenuChoice } from "@shared/menus";
 import { groupItems, itemText, UNDO_MAX } from "@shared/shelf";
-import type { ItemId, SectionId, ShelfItem, ShelfOp } from "@shared/shelf";
+import type {
+  ItemId,
+  SectionId,
+  ShelfItem,
+  ShelfOp,
+  WindowRef,
+} from "@shared/shelf";
+import { keyText } from "@shared/shortcut";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ComponentProps, PointerEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group";
 import { Toaster } from "@/components/ui/sonner";
 import {
   Tooltip,
@@ -35,6 +37,7 @@ import { Banners } from "./banners";
 import { Composer } from "./composer";
 import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
+import { DetailsView } from "./details-view";
 import { EmptyShelf } from "./empty-shelf";
 import { ItemRow } from "./item-row";
 import { Markdown } from "./markdown";
@@ -42,6 +45,7 @@ import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
 import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
+import { NoMatches, SearchBar } from "./search-bar";
 import {
   SectionHeader,
   SectionNameField,
@@ -53,7 +57,10 @@ import {
   stepSelection,
   togglePick,
 } from "./selection";
+import { ShortcutSheet } from "./shortcut-sheet";
+import { useDetails } from "./use-details";
 import { useItemDrag } from "./use-item-drag";
+import { useSearchHighlight } from "./use-search-highlight";
 import { isTextField, useShelfKeys } from "./use-shelf-keys";
 
 const api = shelfBridge();
@@ -117,6 +124,41 @@ const chooseInMain = (choice: MainChoice): void => {
 };
 
 /** A text field, or a text selection anywhere, keeps the normal Copy and Undo. */
+const ITEM_CHOICES = new Set<MenuChoice["kind"]>([
+  "details",
+  "copyDetails",
+  "copy",
+  "copyWithLink",
+  "open",
+  "openSource",
+  "setColor",
+  "edit",
+  "toggleDone",
+  "remove",
+  "moveTo",
+]);
+
+type ItemChoice = Extract<
+  MenuChoice,
+  {
+    readonly kind:
+      | "details"
+      | "copyDetails"
+      | "copy"
+      | "copyWithLink"
+      | "open"
+      | "openSource"
+      | "setColor"
+      | "edit"
+      | "toggleDone"
+      | "remove"
+      | "moveTo";
+  }
+>;
+
+const isItemChoice = (choice: MenuChoice): choice is ItemChoice =>
+  ITEM_CHOICES.has(choice.kind);
+
 const inTextContext = (): boolean =>
   isTextField(document.activeElement) ||
   window.getSelection()?.isCollapsed === false;
@@ -128,7 +170,7 @@ const HeaderButton = ({
   ...props
 }: {
   readonly label: string;
-  readonly icon: typeof Search01Icon;
+  readonly icon: typeof Cancel01Icon;
 } & ComponentProps<typeof Button>) => (
   <Tooltip>
     <TooltipTrigger asChild>
@@ -295,10 +337,64 @@ const chosenItems = (
 const itemCount = (count: number): string =>
   count === 1 ? "1 item" : `${count} items`;
 
+/** Today, kept fresh: the Due chips turn at midnight and when the shelf comes back. */
+const useNow = (): Date => {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const tick = (): void => {
+      setNow(new Date());
+    };
+
+    const timer = setInterval(tick, 60_000);
+
+    window.addEventListener("focus", tick);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", tick);
+    };
+  }, []);
+
+  return now;
+};
+
+const PICK_ONE = "Pick one item to see its details";
+
+/** Above the note field, inset like the fields; the shelf is narrower than Sonner's usual toast. In details, at the bottom. */
+const ShelfToaster = ({ raised }: { readonly raised: boolean }) => {
+  const offset = { bottom: raised ? 52 : 8, left: 8, right: 8 };
+
+  return (
+    <Toaster mobileOffset={offset} offset={offset} position="bottom-center" />
+  );
+};
+
+/** A removal in details that Undo or ⌘Z puts back. */
+const undoableToast = (message: string, undo: () => boolean): void => {
+  toast(message, {
+    action: {
+      label: "Undo",
+      onClick: () => {
+        undo();
+      },
+    },
+    description: `${keyText("CommandOrControl+Z", isMac)} puts it back`,
+    duration: UNDO_VISIBLE_MS,
+    id: "details-undo",
+  });
+};
+
+/** Opens a linked window again, or every window of the item when none is given. */
+const reopenWindow = (id: ItemId, window?: WindowRef): void => {
+  api.reopenWindow(window === undefined ? { id } : { id, windowId: window.id });
+};
+
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
   const [query, setQuery] = useState("");
-  const groups = groupItems(doc, query);
+  const now = useNow();
+  const groups = groupItems(doc, query, now);
   const { collapsed, setOpen } = useCollapsedSections();
   // A search shows its matches in folded sections too.
   const searching = query.trim() !== "";
@@ -388,6 +484,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
   const [namingSection, setNamingSection] = useState(false);
   const composerRef = useRef<MarkdownFieldHandle>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Level 2: the item whose details are pushed over the list.
+  const details = useDetails({ apply, doc, listRef });
+  const detailsItem = details.item;
+  const inDetails = detailsItem !== undefined;
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  useSearchHighlight(listRef, query);
 
   const countOf = (sectionId: SectionId, done: boolean | null): number =>
     doc.items.filter(
@@ -447,7 +551,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     setHandledFocus(focus.seq);
     setSelectedId(focus.id);
-    setEditingId(kind === "image" ? focus.id : null);
+    setEditingId(kind === "image" || focus.edit === true ? focus.id : null);
+    details.close();
   }
 
   useEffect(() => {
@@ -467,6 +572,33 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const pickedItems = items.filter((item) => picked.includes(item.id));
 
   const chosen = chosenItems(pickedItems, selected);
+
+  const openDetails = (id: ItemId, field?: DetailField): void => {
+    setPicked([]);
+    setSelectedId(id);
+    setEditingId(null);
+    details.open(id, field);
+  };
+
+  const closeDetails = (): void => {
+    setEditingId(null);
+    details.close();
+  };
+
+  /** → and the field shortcuts: details for the one selected item; several picked get a hint. */
+  const detailsFor = (field?: DetailField): void => {
+    if (inDetails) {
+      if (field !== undefined) {
+        details.requestField(field);
+      }
+    } else if (pickedItems.length > 1) {
+      toast(PICK_ONE, { duration: NOTICE_MS, id: "pick-one" });
+    } else if (selected !== undefined) {
+      openDetails(selected.id, field);
+    } else if (field !== undefined) {
+      toast("Select an item first", { duration: NOTICE_MS, id: "pick-one" });
+    }
+  };
 
   const unpick = (): void => {
     setPicked([]);
@@ -654,17 +786,22 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         }
       : onSelected(one);
 
-  useShelfKeys({
+  const listKeys = {
     edit: onSelected(setEditingId),
-    // Escape lets go of picked items before it hides the shelf.
+    forward: () => {
+      detailsFor();
+    },
+    // Escape, layered: open menus and fields close themselves first, then details go back, then picks let go, then the shelf hides.
     hide: () => {
-      if (picked.length > 0) {
+      if (inDetails) {
+        closeDetails();
+      } else if (picked.length > 0) {
         unpick();
       } else {
         api.hide();
       }
     },
-    move: (offset) => {
+    move: (offset: 1 | -1) => {
       unpick();
 
       const next = stepSelection(ids, selectedId, offset);
@@ -682,7 +819,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     toggleDone: onChosen((id) => {
       apply({ id, type: "toggleDone" });
     }, toggleMany),
-  });
+  };
+
+  useShelfKeys({ ...listKeys, back: closeDetails }, inDetails);
 
   // A click on empty space in the list lets go of the selection and any note being edited.
   const onListPointerDown = (event: PointerEvent<HTMLElement>): void => {
@@ -706,36 +845,18 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }
   };
 
-  const choose = (choice: MenuChoice): void => {
-    if (isMainChoice(choice)) {
-      chooseInMain(choice);
-
-      return;
-    }
-
+  /** A choice in an item's menu. */
+  const chooseForItem = (choice: ItemChoice): void => {
     switch (choice.kind) {
-      case "selectSection": {
-        apply({ id: choice.id, type: "selectSection" });
+      case "details": {
+        openDetails(choice.id);
         break;
       }
 
-      case "clearDone": {
-        clearDone(choice.sectionId);
-        break;
-      }
-
-      case "renameSection": {
-        setRenamingId(choice.id);
-        break;
-      }
-
-      case "removeSection": {
-        removeSection(choice.id);
-        break;
-      }
-
-      case "newSection": {
-        setNamingSection(true);
+      case "copyDetails": {
+        api.copyDetails(choice.id);
+        setCopiedId(choice.id);
+        noticeToast("Copied with details");
         break;
       }
 
@@ -785,6 +906,62 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         break;
       }
 
+      default: {
+        break;
+      }
+    }
+  };
+
+  const choose = (choice: MenuChoice): void => {
+    if (isMainChoice(choice)) {
+      chooseInMain(choice);
+
+      return;
+    }
+
+    if (isItemChoice(choice)) {
+      chooseForItem(choice);
+
+      return;
+    }
+
+    switch (choice.kind) {
+      case "selectSection": {
+        apply({ id: choice.id, type: "selectSection" });
+        break;
+      }
+
+      case "clearDone": {
+        clearDone(choice.sectionId);
+        break;
+      }
+
+      case "renameSection": {
+        setRenamingId(choice.id);
+        break;
+      }
+
+      case "removeSection": {
+        removeSection(choice.id);
+        break;
+      }
+
+      case "newSection": {
+        closeDetails();
+        setNamingSection(true);
+        break;
+      }
+
+      case "newWindowLink": {
+        api.newWindowLink();
+        break;
+      }
+
+      case "shortcuts": {
+        setSheetOpen(true);
+        break;
+      }
+
       case "copyList": {
         void copyList(doc.items.filter((item) => choice.ids.includes(item.id)));
         break;
@@ -821,8 +998,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     if (
       selected === undefined ||
-      (action === "copyWithLink" && inTextContext())
+      ((action === "copyWithLink" || action === "copyDetails") &&
+        inTextContext())
     ) {
+      if (selected === undefined && pickedItems.length > 1) {
+        toast(PICK_ONE, { duration: NOTICE_MS, id: "pick-one" });
+      }
+
       return;
     }
 
@@ -850,6 +1032,23 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         break;
       }
 
+      case "details": {
+        detailsFor();
+        break;
+      }
+
+      case "linkWindow": {
+        api.linkWindows(id);
+        break;
+      }
+
+      case "copyDetails": {
+        api.copyDetails(id);
+        setCopiedId(id);
+        noticeToast("Copied with details");
+        break;
+      }
+
       case "toggleDone": {
         apply({ id, type: "toggleDone" });
         break;
@@ -872,6 +1071,55 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }
   };
 
+  /** ⌘Z: a note field's own history, another field's native one, a removal in details, else the last deletion. */
+  const undoCommand = (): void => {
+    const field = editorWithFocus();
+
+    // Right after a step was removed, ⌘Z in the steps brings it back (details-view.tsx).
+    const stepRemoved =
+      document.activeElement?.closest<HTMLElement>("[data-step-removed]") ??
+      null;
+
+    if (field !== null) {
+      field.commands.undo();
+    } else if (stepRemoved !== null && details.undo()) {
+      delete stepRemoved.dataset.stepRemoved;
+      noticeToast("Put back");
+    } else if (inTextContext()) {
+      api.nativeEdit("undo");
+    } else if (details.undo()) {
+      noticeToast("Put back");
+    } else if (canUndo && !inDetails) {
+      undo();
+    }
+  };
+
+  /** Copy, Redo and Select All: a text field's own, else the shelf's. */
+  const editCommand = (kind: "copy" | "redo" | "selectAll"): void => {
+    const field = editorWithFocus();
+
+    if (kind === "redo") {
+      if (field === null) {
+        api.nativeEdit("redo");
+      } else {
+        field.commands.redo();
+      }
+    } else if (inTextContext()) {
+      api.nativeEdit(kind);
+    } else if (kind === "selectAll") {
+      // Every item shown in the list; details have nothing to pick.
+      if (!inDetails) {
+        setSelectedId(null);
+        setEditingId(null);
+        setPicked(ids);
+      }
+    } else if (pickedItems.length > 1) {
+      void copyList(pickedItems);
+    } else if (selected !== undefined) {
+      void copy(selected.id);
+    }
+  };
+
   const onCommand = useEffectEvent((command: ShelfCommand) => {
     switch (command.kind) {
       case "item": {
@@ -885,70 +1133,45 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       }
 
       case "find": {
-        searchRef.current?.focus();
-        searchRef.current?.select();
+        closeDetails();
+        requestAnimationFrame(() => {
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        });
+        break;
+      }
+
+      case "field": {
+        detailsFor(command.field);
+        break;
+      }
+
+      case "shortcuts": {
+        setSheetOpen(true);
         break;
       }
 
       case "newNote": {
-        focusComposer();
+        closeDetails();
+        requestAnimationFrame(focusComposer);
         break;
       }
 
       case "newSection": {
+        closeDetails();
         setNamingSection(true);
         break;
       }
 
-      case "copy": {
-        if (inTextContext()) {
-          api.nativeEdit("copy");
-        } else if (pickedItems.length > 1) {
-          void copyList(pickedItems);
-        } else if (selected !== undefined) {
-          void copy(selected.id);
-        }
-
-        break;
-      }
-
-      case "redo": {
-        const field = editorWithFocus();
-
-        if (field === null) {
-          api.nativeEdit("redo");
-        } else {
-          field.commands.redo();
-        }
-
-        break;
-      }
-
-      // In a text field its text; in the list every item shown.
-      case "selectAll": {
-        if (isTextField(document.activeElement)) {
-          api.nativeEdit("selectAll");
-        } else {
-          setSelectedId(null);
-          setEditingId(null);
-          setPicked(ids);
-        }
-
-        break;
-      }
-
       case "undo": {
-        const field = editorWithFocus();
+        undoCommand();
+        break;
+      }
 
-        // A note field keeps its own history; other text fields the native one.
-        if (field !== null) {
-          field.commands.undo();
-        } else if (inTextContext()) {
-          api.nativeEdit("undo");
-        } else if (canUndo) {
-          undo();
-        }
-
+      case "copy":
+      case "redo":
+      case "selectAll": {
+        editCommand(command.kind);
         break;
       }
 
@@ -1034,245 +1257,286 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         dropping && "ring-pin ring-2 ring-inset"
       )}
     >
-      <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
-        <h1 className="sr-only">Inset Shelf</h1>
-        <InputGroup>
-          <InputGroupAddon>
-            <HugeiconsIcon icon={Search01Icon} />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="Search the shelf"
-            onChange={(event) => {
-              setQuery(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              // Escape clears a search, and hides the shelf when there is none.
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.stopPropagation();
-
-                if (query === "") {
-                  api.hide();
-                } else {
-                  setQuery("");
-                }
-              }
-            }}
-            placeholder="Search"
-            ref={searchRef}
-            type="text"
-            value={query}
-          />
-          {query === "" ? null : (
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton
-                aria-label="Clear Search"
-                onClick={() => {
-                  setQuery("");
-                  searchRef.current?.focus();
-                }}
-                size="icon-xs"
-              >
-                <HugeiconsIcon icon={Cancel01Icon} />
-              </InputGroupButton>
-            </InputGroupAddon>
-          )}
-        </InputGroup>
-        <ShelfMenu floatOnTop={status.floatOnTop} onChoose={choose}>
-          <HeaderButton icon={MoreHorizontalIcon} label="More" />
-        </ShelfMenu>
-        <HeaderButton
-          icon={Cancel01Icon}
-          label="Hide Shelf"
-          onClick={() => {
+      <h1 className="sr-only">Inset Shelf</h1>
+      {detailsItem === undefined ? null : (
+        <DetailsView
+          editing={editingId === detailsItem.id}
+          item={detailsItem}
+          key={detailsItem.id}
+          now={now}
+          onApply={apply}
+          onBack={closeDetails}
+          onEdit={() => {
+            setEditingId(detailsItem.id);
+          }}
+          onHide={() => {
             api.hide();
           }}
-        />
-      </header>
-      <Banners
-        onDismissProblem={() => {
-          api.dismissProblem();
-        }}
-        onOpenKeySettings={() => {
-          api.openKeySettings();
-        }}
-        status={status}
-      />
-      <div
-        className="shelf-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-1 pl-2"
-        onContextMenu={(event) => {
-          // Items and section headings open their own menus.
-          if (!event.defaultPrevented) {
-            event.preventDefault();
+          onLinkWindow={() => {
+            api.linkWindows(detailsItem.id);
+          }}
+          onMenu={(anchor) => {
             setOpenMenu({
-              align: "start",
-              height: 0,
-              target: { kind: "shelf" },
-              width: 0,
-              x: event.clientX,
-              y: event.clientY,
+              ...anchor,
+              target: { id: detailsItem.id, kind: "item" },
             });
-          }
-        }}
-        onPointerDown={onListPointerDown}
-      >
-        {groups.length === 0 ? (
-          <p className="text-muted-foreground px-3 py-8 text-center text-sm">
-            No matches
-          </p>
-        ) : null}
-        {firstRun ? <EmptyShelf /> : null}
-        {(firstRun ? [] : groups).map((group) => {
-          const open = isOpen(group.section.id);
+          }}
+          onOpenImage={() => {
+            api.openImage(detailsItem.id);
+          }}
+          onOpenPins={() => {
+            api.openPins(detailsItem.id);
+          }}
+          onOpenLink={(url) => {
+            api.openLink({ id: detailsItem.id, url });
+          }}
+          onReopenWindow={(window) => {
+            reopenWindow(detailsItem.id, window);
+          }}
+          onStopEditing={() => {
+            setEditingId(null);
+          }}
+          onUndo={() => details.undo()}
+          onUndoable={(entry) => {
+            details.pushUndo(entry);
+            undoableToast(
+              entry.kind === "steps" ? "Step removed" : "Window removed",
+              details.undo
+            );
+          }}
+          request={details.request}
+          stepsReset={details.stepsReset}
+        />
+      )}
+      <div className="flex min-h-0 flex-1 flex-col" hidden={inDetails}>
+        <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
+          <SearchBar
+            inputRef={searchRef}
+            onChange={setQuery}
+            onHide={() => {
+              api.hide();
+            }}
+            query={query}
+          />
+          <ShelfMenu floatOnTop={status.floatOnTop} onChoose={choose}>
+            <HeaderButton icon={MoreHorizontalIcon} label="More" />
+          </ShelfMenu>
+          <HeaderButton
+            icon={Cancel01Icon}
+            label="Hide Shelf"
+            onClick={() => {
+              api.hide();
+            }}
+          />
+        </header>
+        <Banners
+          onDismissProblem={() => {
+            api.dismissProblem();
+          }}
+          onOpenKeySettings={() => {
+            api.openKeySettings();
+          }}
+          status={status}
+        />
+        <div
+          className="shelf-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-1 pl-2"
+          ref={listRef}
+          onContextMenu={(event) => {
+            // Items and section headings open their own menus.
+            if (!event.defaultPrevented) {
+              event.preventDefault();
+              setOpenMenu({
+                align: "start",
+                height: 0,
+                target: { kind: "shelf" },
+                width: 0,
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }
+          }}
+          onPointerDown={onListPointerDown}
+        >
+          {groups.length === 0 ? (
+            <NoMatches
+              onClear={() => {
+                setQuery("");
+                searchRef.current?.focus();
+              }}
+              query={query}
+            />
+          ) : null}
+          {firstRun ? <EmptyShelf /> : null}
+          {(firstRun ? [] : groups).map((group) => {
+            const open = isOpen(group.section.id);
 
-          return (
-            <section
-              aria-label={group.section.name}
-              className={cn(
-                "rounded-lg pb-1 transition-colors",
-                drag.overSectionId === group.section.id &&
-                  "bg-pin/10 ring-pin/60 ring-1 ring-inset"
-              )}
-              key={group.section.id}
-              {...drag.sectionProps(group.section.id)}
-            >
-              <SectionHeader
-                active={group.active}
-                collapsed={!open}
-                onMakeActive={() => {
-                  apply({ id: group.section.id, type: "selectSection" });
-                }}
-                onOpenMenu={(anchor) => {
-                  setOpenMenu({
-                    ...anchor,
-                    target: { id: group.section.id, kind: "section" },
-                  });
-                }}
-                onRename={(name) => {
-                  apply({ id: group.section.id, name, type: "renameSection" });
-                }}
-                onStopRenaming={() => {
-                  setRenamingId(null);
-                }}
-                onToggle={() => {
-                  setOpen(group.section.id, !open);
-                }}
-                renaming={renamingId === group.section.id}
-                section={group.section}
-              />
-              {open && group.items.length === 0 ? (
-                <p className="text-muted-foreground px-2 pb-1 text-xs">
-                  Nothing here yet
-                </p>
-              ) : null}
-              {open ? (
-                <ul className="flex flex-col gap-1.5">
-                  {group.items.map((item) => (
-                    <ItemRow
-                      copied={copiedId === item.id}
-                      dragProps={drag.itemProps(item.id, itemText(item))}
-                      dragging={drag.draggingId === item.id}
-                      onPick={(mode) => {
-                        pick(item.id, mode);
-                      }}
-                      picked={picked.includes(item.id)}
-                      editing={editingId === item.id}
-                      item={item}
-                      key={item.id}
-                      onContextMenu={(anchor) => {
-                        // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
-                        if (document.activeElement instanceof HTMLElement) {
-                          document.activeElement.blur();
-                        }
+            return (
+              <section
+                aria-label={group.section.name}
+                className={cn(
+                  "rounded-lg pb-1 transition-colors",
+                  drag.overSectionId === group.section.id &&
+                    "bg-pin/10 ring-pin/60 ring-1 ring-inset"
+                )}
+                key={group.section.id}
+                {...drag.sectionProps(group.section.id)}
+              >
+                <SectionHeader
+                  active={group.active}
+                  collapsed={!open}
+                  onMakeActive={() => {
+                    apply({ id: group.section.id, type: "selectSection" });
+                  }}
+                  onOpenMenu={(anchor) => {
+                    setOpenMenu({
+                      ...anchor,
+                      target: { id: group.section.id, kind: "section" },
+                    });
+                  }}
+                  onRename={(name) => {
+                    apply({
+                      id: group.section.id,
+                      name,
+                      type: "renameSection",
+                    });
+                  }}
+                  onStopRenaming={() => {
+                    setRenamingId(null);
+                  }}
+                  onToggle={() => {
+                    setOpen(group.section.id, !open);
+                  }}
+                  renaming={renamingId === group.section.id}
+                  section={group.section}
+                />
+                {open && group.items.length === 0 ? (
+                  <p className="text-muted-foreground px-2 pb-1 text-xs">
+                    Nothing here yet
+                  </p>
+                ) : null}
+                {open ? (
+                  <ul className="flex flex-col gap-1.5">
+                    {group.items.map((item) => (
+                      <ItemRow
+                        copied={copiedId === item.id}
+                        dragProps={drag.itemProps(item.id, itemText(item))}
+                        dragging={drag.draggingId === item.id}
+                        onPick={(mode) => {
+                          pick(item.id, mode);
+                        }}
+                        picked={picked.includes(item.id)}
+                        editing={editingId === item.id}
+                        item={item}
+                        key={item.id}
+                        onContextMenu={(anchor) => {
+                          // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
+                          if (document.activeElement instanceof HTMLElement) {
+                            document.activeElement.blur();
+                          }
 
-                        // On one of several picked items, the menu acts on all of them.
-                        if (picked.length > 1 && picked.includes(item.id)) {
+                          // On one of several picked items, the menu acts on all of them.
+                          if (picked.length > 1 && picked.includes(item.id)) {
+                            setOpenMenu({
+                              ...anchor,
+                              target: { ids: picked, kind: "items" },
+                            });
+
+                            return;
+                          }
+
+                          unpick();
+                          setSelectedId(item.id);
                           setOpenMenu({
                             ...anchor,
-                            target: { ids: picked, kind: "items" },
+                            target: { id: item.id, kind: "item" },
                           });
+                        }}
+                        onDragImage={() => {
+                          drag.startDragOut(item.id);
+                          api.startDrag(item.id);
+                        }}
+                        onEdit={() => {
+                          setSelectedId(item.id);
+                          setEditingId(item.id);
+                        }}
+                        onEditNote={(note) => {
+                          apply({ id: item.id, note, type: "editNote" });
+                        }}
+                        onOpen={() => {
+                          api.openImage(item.id);
+                        }}
+                        onOpenLink={(url) => {
+                          api.openLink({ id: item.id, url });
+                        }}
+                        onHide={() => {
+                          api.hide();
+                        }}
+                        onEditText={(text) => {
+                          apply({ id: item.id, text, type: "editText" });
+                        }}
+                        onSelect={() => {
+                          // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
+                          if (editingId !== item.id) {
+                            setEditingId(null);
 
-                          return;
-                        }
+                            const field = document.activeElement;
 
-                        unpick();
-                        setSelectedId(item.id);
-                        setOpenMenu({
-                          ...anchor,
-                          target: { id: item.id, kind: "item" },
-                        });
-                      }}
-                      onDragImage={() => {
-                        drag.startDragOut(item.id);
-                        api.startDrag(item.id);
-                      }}
-                      onEdit={() => {
-                        setSelectedId(item.id);
-                        setEditingId(item.id);
-                      }}
-                      onEditNote={(note) => {
-                        apply({ id: item.id, note, type: "editNote" });
-                      }}
-                      onOpen={() => {
-                        api.openImage(item.id);
-                      }}
-                      onOpenLink={(url) => {
-                        api.openLink({ id: item.id, url });
-                      }}
-                      onHide={() => {
-                        api.hide();
-                      }}
-                      onEditText={(text) => {
-                        apply({ id: item.id, text, type: "editText" });
-                      }}
-                      onSelect={() => {
-                        // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
-                        if (editingId !== item.id) {
-                          setEditingId(null);
-
-                          const field = document.activeElement;
-
-                          if (
-                            field instanceof HTMLElement &&
-                            isTextField(field)
-                          ) {
-                            field.blur();
+                            if (
+                              field instanceof HTMLElement &&
+                              isTextField(field)
+                            ) {
+                              field.blur();
+                            }
                           }
-                        }
 
-                        unpick();
-                        setAnchorId(item.id);
-                        setSelectedId(item.id);
-                      }}
-                      onStopEditing={() => {
-                        setEditingId(null);
-                      }}
-                      onToggle={() => {
-                        apply({ id: item.id, type: "toggleDone" });
-                      }}
-                      selected={selectedId === item.id}
-                    />
-                  ))}
-                </ul>
-              ) : null}
-            </section>
-          );
-        })}
-        {namingSection ? (
-          <div className="flex h-9 items-center pt-1">
-            <SectionNameField
-              initial=""
-              label="New section name"
-              onCancel={() => {
-                setNamingSection(false);
-              }}
-              onSave={(name) => {
-                apply({ name, type: "addSection" });
-                setNamingSection(false);
-              }}
-            />
-          </div>
-        ) : null}
+                          unpick();
+                          setAnchorId(item.id);
+                          setSelectedId(item.id);
+                        }}
+                        onStopEditing={() => {
+                          setEditingId(null);
+                        }}
+                        onToggle={() => {
+                          apply({ id: item.id, type: "toggleDone" });
+                        }}
+                        onToggleStep={(step) => {
+                          apply({
+                            id: item.id,
+                            stepId: step.id,
+                            type: "toggleStep",
+                          });
+                        }}
+                        onReopenWindow={(window) => {
+                          reopenWindow(item.id, window);
+                        }}
+                        onShowDetails={() => {
+                          openDetails(item.id);
+                        }}
+                        now={now}
+                        selected={selectedId === item.id}
+                      />
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            );
+          })}
+          {namingSection ? (
+            <div className="flex h-9 items-center pt-1">
+              <SectionNameField
+                initial=""
+                label="New section name"
+                onCancel={() => {
+                  setNamingSection(false);
+                }}
+                onSave={(name) => {
+                  apply({ name, type: "addSection" });
+                  setNamingSection(false);
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
       <PointerMenu
         doc={doc}
@@ -1289,12 +1553,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         }}
         request={confirming}
       />
-      {/* Above the note field, inset like the fields; the shelf is narrower than Sonner's usual toast. */}
-      <Toaster
-        mobileOffset={{ bottom: 52, left: 8, right: 8 }}
-        offset={{ bottom: 52, left: 8, right: 8 }}
-        position="bottom-center"
-      />
+      <ShortcutSheet onOpenChange={setSheetOpen} open={sheetOpen} />
+      <ShelfToaster raised={!inDetails} />
       <Composer
         addActions={{
           attachFiles: () => {
@@ -1303,7 +1563,12 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           newDrawing: () => {
             api.newDrawing();
           },
+          newWindowLink: () => {
+            api.newWindowLink();
+          },
         }}
+        hidden={inDetails}
+        sectionNames={doc.sections.map((section) => section.name)}
         onEscape={() => {
           api.hide();
         }}

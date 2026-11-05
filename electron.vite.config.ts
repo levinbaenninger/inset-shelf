@@ -21,6 +21,7 @@ export default defineConfig({
       rolldownOptions: {
         input: {
           drawing: path.resolve(preload, "drawing.ts"),
+          picker: path.resolve(preload, "picker.ts"),
           screenshot: path.resolve(preload, "screenshot.ts"),
           settings: path.resolve(preload, "settings.ts"),
           shelf: path.resolve(preload, "shelf.ts"),
@@ -37,6 +38,7 @@ export default defineConfig({
       rolldownOptions: {
         input: {
           drawing: path.resolve(renderer, "drawing.html"),
+          picker: path.resolve(renderer, "picker.html"),
           screenshot: path.resolve(renderer, "screenshot.html"),
           settings: path.resolve(renderer, "settings.html"),
           shelf: path.resolve(renderer, "shelf.html"),

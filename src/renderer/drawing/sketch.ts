@@ -43,7 +43,18 @@ export interface TextMark {
   readonly size: number;
 }
 
-export type Mark = PenMark | SegmentMark | TextMark;
+/**
+ * A numbered map pin, kept with the marks so undo covers it, but never drawn
+ * into the saved picture: the shelf keeps pins beside the image and draws
+ * them over it. Its number is its place among the pins.
+ */
+export interface PinMark {
+  readonly kind: "pin";
+  readonly at: Point;
+  readonly label?: string;
+}
+
+export type Mark = PenMark | SegmentMark | TextMark | PinMark;
 
 export const TOOLS = [
   "pen",
@@ -52,6 +63,7 @@ export const TOOLS = [
   "rect",
   "ellipse",
   "text",
+  "pin",
 ] as const;
 
 export type Tool = (typeof TOOLS)[number];
@@ -77,6 +89,10 @@ export const fontFor = (size: number): string => `500 ${size}px ${TEXT_FONT}`;
 const MIN_DRAG = 2;
 
 export const isVisible = (mark: Mark): boolean => {
+  if (mark.kind === "pin") {
+    return true;
+  }
+
   if (mark.kind === "pen") {
     return mark.points.length > 0;
   }
@@ -193,6 +209,9 @@ export const arrowhead = (
 /** Width of a line of text in CSS pixels at a font size; the page measures with the canvas. */
 export type MeasureText = (text: string, size: number) => number;
 
+/** The room a pin takes above and around its tip, in drawing units. */
+const PIN_REACH = 26;
+
 const boxAround = (points: readonly Point[], margin: number): Bounds | null => {
   if (points.length === 0) {
     return null;
@@ -222,6 +241,16 @@ const segmentPoints = (mark: SegmentMark): readonly Point[] => {
 
 /** The area a mark paints, including half its stroke. */
 export const markBounds = (mark: Mark, measure: MeasureText): Bounds | null => {
+  // A pin's head stands above its tip; a blank drawing keeps room for it.
+  if (mark.kind === "pin") {
+    return {
+      height: PIN_REACH,
+      width: PIN_REACH,
+      x: mark.at.x - PIN_REACH / 2,
+      y: mark.at.y - PIN_REACH,
+    };
+  }
+
   if (mark.kind === "text") {
     const lines = mark.text.split("\n");
     const widest = Math.max(...lines.map((line) => measure(line, mark.size)));

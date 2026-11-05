@@ -1,3 +1,4 @@
+import { hasDetails } from "./shelf";
 import type {
   ItemColor,
   ItemId,
@@ -23,11 +24,16 @@ export type MenuChoice =
   | { readonly kind: "renameSection"; readonly id: SectionId }
   | { readonly kind: "removeSection"; readonly id: SectionId }
   | { readonly kind: "newSection" }
+  | { readonly kind: "newWindowLink" }
+  | { readonly kind: "shortcuts" }
   | { readonly kind: "openSettings" }
   | { readonly kind: "setFloatOnTop"; readonly on: boolean }
   | { readonly kind: "openHelp" }
   | { readonly kind: "copy"; readonly id: ItemId }
   | { readonly kind: "copyWithLink"; readonly id: ItemId }
+  | { readonly kind: "copyDetails"; readonly id: ItemId }
+  /** The details view: every field, for editing. */
+  | { readonly kind: "details"; readonly id: ItemId }
   /** Opens an image large, ready to draw on. */
   | { readonly kind: "open"; readonly id: ItemId }
   /** Opens the page or desktop app an item came from. */
@@ -54,6 +60,9 @@ export type MenuIcon =
   | "addHere"
   | "clear"
   | "newSection"
+  | "windowLink"
+  | "keyboard"
+  | "details"
   | "settings"
   | "float"
   | "help"
@@ -114,6 +123,14 @@ export const shelfMenu = (
     kind: "choice",
     label: "New Section",
   },
+  {
+    accelerator: "Shift+CommandOrControl+L",
+    choice: { kind: "newWindowLink" },
+    enabled: true,
+    icon: "windowLink",
+    kind: "choice",
+    label: "New Window Link…",
+  },
   SEPARATOR,
   ...(windowMenu === null
     ? []
@@ -135,6 +152,14 @@ export const shelfMenu = (
     icon: "settings",
     kind: "choice",
     label: "Settings",
+  },
+  {
+    accelerator: "CommandOrControl+/",
+    choice: { kind: "shortcuts" },
+    enabled: true,
+    icon: "keyboard",
+    kind: "choice",
+    label: "Keyboard Shortcuts",
   },
   ...(windowMenu === null
     ? []
@@ -238,6 +263,20 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
         },
       ];
 
+/** Only an item with metadata copies differently with its details. */
+const copyDetails = (item: ShelfItem): readonly MenuEntry[] =>
+  hasDetails(item)
+    ? [
+        {
+          choice: { id: item.id, kind: "copyDetails" },
+          enabled: true,
+          icon: "copy",
+          kind: "choice",
+          label: "Copy with Details",
+        },
+      ]
+    : [];
+
 /** ⌘O: an image opens to draw on; anything else opens where it came from, if the shelf knows. */
 const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
   if (item.kind === "image") {
@@ -286,7 +325,16 @@ export const itemMenu = (
     label: "Copy",
   },
   ...copyWithLink(item),
+  ...copyDetails(item),
   SEPARATOR,
+  {
+    accelerator: "Right",
+    choice: { id: item.id, kind: "details" },
+    enabled: true,
+    icon: "details",
+    kind: "choice",
+    label: "Details",
+  },
   ...open(item, mac),
   {
     accelerator: "Enter",
