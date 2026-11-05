@@ -1327,10 +1327,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           onUndo={() => details.undo()}
           onUndoable={(entry) => {
             details.pushUndo(entry);
-            undoableToast(
-              entry.kind === "step" ? "Step removed" : "Window removed",
-              details.undo
-            );
+
+            // A label edit shows as it is typed; only removals need a toast to undo them.
+            if (entry.kind !== "pinLabel") {
+              undoableToast(
+                entry.kind === "step" ? "Step removed" : "Window removed",
+                details.undo
+              );
+            }
           }}
           request={details.request}
           stepsReset={details.stepsReset}

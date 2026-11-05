@@ -30,11 +30,13 @@ const isPrintable = (event: KeyboardEvent): boolean =>
   (!event.altKey || event.getModifierState("AltGraph"));
 
 /**
- * A button, checkbox or link that Return and Space press, as anywhere else:
- * a step's checkbox, a window to reopen, Details. Only the buttons that stand
- * for the row itself (data-row-keys) keep Return to edit and Space to check off.
+ * A button, checkbox or link inside a row: a step's checkbox, a window to
+ * reopen, Details, ⋯. Return and Space press it, as anywhere else, and ⌫
+ * never deletes the item from it. Only the buttons that stand for the row
+ * itself (data-row-keys) keep Return to edit, Space to check off and ⌫ to
+ * delete.
  */
-const pressesItself = (target: EventTarget | null): boolean => {
+const isInlineControl = (target: EventTarget | null): boolean => {
   const control =
     target instanceof Element
       ? target.closest<HTMLElement>("button, a, [role=checkbox], [role=button]")
@@ -42,6 +44,9 @@ const pressesItself = (target: EventTarget | null): boolean => {
 
   return control !== null && control.dataset.rowKeys === undefined;
 };
+
+/** The keys that act on the row, which an inline control keeps from it. */
+const ROW_KEYS = new Set(["Enter", " ", "Backspace", "Delete"]);
 
 /** An open menu handles its own keys, typing included. */
 const inMenu = (target: EventTarget | null): boolean =>
@@ -83,10 +88,7 @@ const actionFor = (
     ["Delete", actions.remove],
   ]);
 
-  if (
-    (event.key === "Enter" || event.key === " ") &&
-    pressesItself(event.target)
-  ) {
+  if (ROW_KEYS.has(event.key) && isInlineControl(event.target)) {
     return null;
   }
 

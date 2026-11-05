@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   addMark,
+  amend,
   arrowhead,
+  commit,
   canRedo,
   canUndo,
   clearMarks,
@@ -73,6 +75,22 @@ describe("history", () => {
     expect(cleared.present).toStrictEqual([]);
     expect(undo(cleared).present).toStrictEqual(drawn.present);
     expect(clearMarks(emptyHistory)).toBe(emptyHistory);
+  });
+
+  it("undoes a step changed in place in one go, back to before it began", () => {
+    const start = addMark(emptyHistory, line(0));
+    const first = commit(start, [line(1)]);
+    const held = amend(amend(first, [line(2)]), [line(3)]);
+
+    expect(held.present).toStrictEqual([line(3)]);
+    expect(undo(held).present).toStrictEqual([line(0)]);
+    expect(redo(undo(held)).present).toStrictEqual([line(3)]);
+  });
+
+  it("drops the redo when a step is changed in place", () => {
+    const back = undo(addMark(addMark(emptyHistory, line(0)), line(20)));
+
+    expect(canRedo(amend(back, [line(5)]))).toBeFalsy();
   });
 
   it("does not change the history it was given", () => {

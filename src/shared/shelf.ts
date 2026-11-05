@@ -60,6 +60,13 @@ export type Pin = z.output<typeof PinSchema>;
 
 export const PinsSchema = z.array(PinSchema).max(PINS_MAX);
 
+/** The pins with one pin's label changed; the store drops a label left empty. */
+export const withPinLabel = (
+  pins: readonly Pin[],
+  index: number,
+  label: string
+): Pin[] => pins.map((pin, at) => (at === index ? { ...pin, label } : pin));
+
 export const ImageFileSchema = z.string().regex(IMAGE_FILE);
 
 export const ImageSchema = z.object({

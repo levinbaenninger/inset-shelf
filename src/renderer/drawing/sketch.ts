@@ -129,6 +129,13 @@ export const commit = (
   present,
 });
 
+/** Changes the latest step in place, so a key held down undoes as one step. */
+export const amend = (history: History, present: readonly Mark[]): History => ({
+  ...history,
+  future: [],
+  present,
+});
+
 export const addMark = (history: History, mark: Mark): History =>
   commit(history, [...history.present, mark]);
 

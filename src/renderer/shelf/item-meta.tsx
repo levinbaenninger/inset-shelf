@@ -32,6 +32,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Kbd } from "@/components/ui/kbd";
 import {
   Tooltip,
   TooltipContent,
@@ -48,6 +49,10 @@ const BADGE_TONE: Readonly<Record<DueBucket | "plain", string>> = {
   today: "bg-pin/14 text-pin-ink dark:bg-pin/22",
   week: "bg-foreground/[0.06] text-muted-foreground",
 };
+
+/** The Due chip's tint: red once overdue, the accent when due today. */
+export const dueTone = (due: string, now: Date): string =>
+  BADGE_TONE[dueBucket(due, now)];
 
 /** A small rounded tag, the one chip style the shelf uses for metadata. */
 export const Badge = ({
@@ -332,11 +337,9 @@ export const DueMenu = ({
   <DropdownMenu modal={false} onOpenChange={onOpenChange} open={open}>
     <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
     <DropdownMenuContent align="start" className="min-w-52">
-      <DropdownMenuLabel>
+      <DropdownMenuLabel className="flex items-center justify-between">
         Due
-        <span className="text-muted-foreground/80 ml-2 font-normal">
-          {keyText("Shift+CommandOrControl+D", isMac)}
-        </span>
+        <Kbd>{keyText("Shift+CommandOrControl+D", isMac)}</Kbd>
       </DropdownMenuLabel>
       {DUE_CHOICES.map((choice) => {
         const day = dueFor(choice, now);

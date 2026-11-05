@@ -466,8 +466,41 @@ const details = async (page: Page, n: number): Promise<void> => {
   await page.getByRole("button", { name: "Back to the list" }).waitFor();
 };
 
+/** The drawing window's pins, and the one selected. */
+const drawingPins = (page: Page) => page.locator("span[style*='--pin-x']");
+
+const selectedPin = (page: Page) => page.locator(".pin-selected");
+
+/** The row's remove ops sent so far. */
+const removes = async (page: Page): Promise<number> => {
+  const ops = await applied(page);
+
+  return ops.filter((op) => op.type === "remove").length;
+};
+
 const SCENES: readonly Scene[] = [
   {
+    check: async (page) => {
+      const badges = z
+        .array(z.object({ hidden: z.boolean(), wrapped: z.boolean() }))
+        .parse(
+          await page.evaluate(`[...document.querySelectorAll("[data-badges] > *")].map((badge) => ({
+            hidden: badge.getAttribute("aria-hidden") === "true",
+            wrapped: badge.getBoundingClientRect().top >= badge.parentElement.getBoundingClientRect().bottom,
+          }))`)
+        );
+
+      const wrapped = badges.filter((badge) => badge.wrapped).length;
+      const wrong = badges.filter((badge) => badge.hidden !== badge.wrapped);
+
+      if (wrapped === 0) {
+        return "no badge wraps out of sight in the list, so aria-hidden goes untested";
+      }
+
+      return wrong.length === 0
+        ? null
+        : `${wrong.length} badges are aria-hidden where they show, or read out where they don't`;
+    },
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-list",
@@ -513,6 +546,57 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-expanded-step-keys",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await select(page, 10);
+    },
+    check: async (page) => {
+      const row = item(page, 10);
+
+      const controls = new Map([
+        [
+          "a step's checkbox",
+          row.getByRole("checkbox", { name: /^(?:Done|Not done): /u }).first(),
+        ],
+        [
+          "a window",
+          row
+            .getByRole("list", { name: "Linked windows" })
+            .getByRole("button")
+            .first(),
+        ],
+        ["Details", row.getByRole("button", { name: "Show details" })],
+        ["⋯", row.getByRole("button", { name: "More" })],
+      ]);
+
+      for (const [name, control] of controls) {
+        // oxlint-disable-next-line no-await-in-loop -- one control after another, on purpose.
+        await control.focus();
+        // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+        await page.keyboard.press("Backspace");
+        // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+        await page.keyboard.press("Delete");
+
+        // oxlint-disable-next-line no-await-in-loop -- checked before the next control, which a deletion would hide.
+        if ((await removes(page)) > 0) {
+          return `⌫ or Delete on ${name} deleted the item`;
+        }
+      }
+
+      await row.locator("[data-row-keys]").first().focus();
+      await page.keyboard.press("Backspace");
+      await page.waitForTimeout(150);
+
+      const fromRow = await removes(page);
+
+      return fromRow === 1
+        ? null
+        : `⌫ on the row itself sent ${fromRow} deletions, not 1`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-expanded-delete-keys",
     page: "shelf",
   },
   {
@@ -566,6 +650,35 @@ const SCENES: readonly Scene[] = [
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-details-pin-labels",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 11);
+
+      const field = page.getByRole("textbox", { name: "Label for pin 1" });
+
+      await field.click();
+      await page.keyboard.press("Meta+a");
+      await page.keyboard.type("Button label is cut off");
+      await page.getByRole("heading", { name: "Details" }).focus();
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", { name: "Label for pin 1" });
+      const edited = await field.inputValue();
+
+      await page.evaluate(`globalThis.__emit("command", { kind: "undo" })`);
+      await page.waitForTimeout(150);
+
+      const after = await field.inputValue();
+
+      return edited === "Button label is cut off" &&
+        after === "Title too close to the field"
+        ? null
+        : `Undo after leaving a pin's label: “${edited}” became “${after}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-pin-label-undo",
     page: "shelf",
   },
   {
@@ -914,6 +1027,17 @@ const SCENES: readonly Scene[] = [
     act: async (page) => {
       await page
         .getByRole("textbox", { name: "Search the shelf" })
+        .fill("due:");
+    },
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-search-due-all",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page
+        .getByRole("textbox", { name: "Search the shelf" })
         .fill("zebra crossing");
     },
     data: { view: shelfView() },
@@ -1001,6 +1125,70 @@ const SCENES: readonly Scene[] = [
   {
     data: { view: drawingView([], true) },
     name: "drawing-pin-hint",
+    page: "drawing",
+  },
+  {
+    act: async (page) => {
+      await page.keyboard.press("p");
+      await page.keyboard.press("2");
+      await page.getByRole("button", { name: "Pen" }).focus();
+    },
+    check: async (page) => {
+      const selectedAfterLeaving = await selectedPin(page).count();
+
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Delete");
+
+      const pinsAfterLeaving = await drawingPins(page).count();
+
+      await page.keyboard.press("2");
+      await page.keyboard.press("Backspace");
+
+      const pinsAfterRemoving = await drawingPins(page).count();
+
+      if (selectedAfterLeaving > 0 || pinsAfterLeaving !== 3) {
+        return `with focus on the toolbar: ${selectedAfterLeaving} pins selected, ${pinsAfterLeaving} of 3 left after ⌫`;
+      }
+
+      return pinsAfterRemoving === 2
+        ? null
+        : `2 then ⌫ left ${pinsAfterRemoving} pins, not 2`;
+    },
+    data: { view: drawingView(IMAGE.pins, false) },
+    name: "drawing-pin-focus",
+    page: "drawing",
+  },
+  {
+    act: async (page) => {
+      await page.keyboard.press("p");
+      await page.keyboard.press("2");
+    },
+    check: async (page) => {
+      const before = await selectedPin(page).getAttribute("style");
+
+      for (const key of ["ArrowRight", "ArrowRight", "ArrowRight"]) {
+        // oxlint-disable-next-line no-await-in-loop -- a key held down repeats, one after another.
+        await page.keyboard.down(key);
+      }
+
+      await page.keyboard.up("ArrowRight");
+
+      const held = await selectedPin(page).getAttribute("style");
+
+      await page.keyboard.press("Meta+z");
+
+      const undone = await drawingPins(page).nth(1).getAttribute("style");
+
+      if (held === before) {
+        return "holding → did not move the pin";
+      }
+
+      return undone === before
+        ? null
+        : `one Undo after holding →: ${undone}, not ${before}`;
+    },
+    data: { view: drawingView(IMAGE.pins, false) },
+    name: "drawing-held-nudge",
     page: "drawing",
   },
 ];

@@ -16,8 +16,8 @@ export interface DrawingKeyActions {
   readonly selectPin: (index: number) => void;
   /** ⌫ with a pin selected; false when none is, so the key does nothing. */
   readonly removePin: () => boolean;
-  /** The arrow keys, 10 with Shift; false when no pin is selected. */
-  readonly nudgePin: (dx: number, dy: number) => boolean;
+  /** The arrow keys, 10 with Shift; held is true for a held key's repeats. False when no pin is selected. */
+  readonly nudgePin: (dx: number, dy: number, held: boolean) => boolean;
 }
 
 /** P is the Pin tool (P toggles it); the pen moved to B. */
@@ -89,7 +89,7 @@ const pinKey = (event: KeyboardEvent, actions: DrawingKeyActions): boolean => {
   if (nudge !== undefined) {
     const step = event.shiftKey ? 10 : 1;
 
-    return actions.nudgePin(nudge[0] * step, nudge[1] * step);
+    return actions.nudgePin(nudge[0] * step, nudge[1] * step, event.repeat);
   }
 
   return (

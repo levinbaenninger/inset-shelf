@@ -23,6 +23,7 @@ import { nudgePin, nudgeStep, movePin, pinsOf, removePin } from "./pins";
 import { exportAnnotated, exportPng, measureText } from "./render";
 import {
   addMark,
+  amend,
   canRedo,
   canUndo,
   clearMarks,
@@ -194,17 +195,41 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   const [lastTool, setLastTool] = useState<Tool>("pen");
   const [selectedPin, setSelectedPin] = useState<number | null>(null);
   const pointerRef = useRef<Point | null>(null);
+  // The image and its pins: a selected pin brings focus here, and focus leaving lets go of it.
+  const pinsRef = useRef<HTMLElement>(null);
+  // The step a held arrow key last made, so its repeats move the pin within that step.
+  const nudged = useRef<History | null>(null);
 
-  // Leaving the window lets go of the pin, so digits and ⌫ typed on return never touch it unasked.
+  const selectPin = (index: number | null): void => {
+    setSelectedPin(index);
+
+    if (index !== null) {
+      pinsRef.current?.focus({ preventScroll: true });
+    }
+  };
+
+  // Focus leaving the image, or the window, lets go of the pin, so digits and ⌫ typed elsewhere never touch it.
   useEffect(() => {
+    const area = pinsRef.current;
+
     const letGo = (): void => {
       setSelectedPin(null);
     };
 
+    const onFocusOut = (event: FocusEvent): void => {
+      const to = event.relatedTarget;
+
+      if (!(to instanceof Node && area?.contains(to) === true)) {
+        letGo();
+      }
+    };
+
     window.addEventListener("blur", letGo);
+    area?.addEventListener("focusout", onFocusOut);
 
     return () => {
       window.removeEventListener("blur", letGo);
+      area?.removeEventListener("focusout", onFocusOut);
     };
   }, []);
   // Marks on a picture stand out in red; a blank page starts in ink.
@@ -320,9 +345,9 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           : { x: bounds.width / 2, y: bounds.height / 2 };
 
       change([...marks, { at: pointerRef.current ?? center, kind: "pin" }]);
-      setSelectedPin(pins.length);
+      selectPin(pins.length);
     },
-    nudgePin: (dx, dy) => {
+    nudgePin: (dx, dy, held) => {
       if (selectedPin === null) {
         return false;
       }
@@ -330,14 +355,21 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
       // dx and dy are pixels of the saved image, whatever the screen's scale.
       const scale = image?.pixelsPerDip ?? EXPORT_SCALE;
 
-      change(
-        nudgePin(
-          marks,
-          selectedPin,
-          { x: nudgeStep(dx, scale), y: nudgeStep(dy, scale) },
-          bounds
-        )
+      const moved = nudgePin(
+        marks,
+        selectedPin,
+        { x: nudgeStep(dx, scale), y: nudgeStep(dy, scale) },
+        bounds
       );
+
+      // One Undo puts the pin back where the held key started it.
+      const next =
+        held && nudged.current === history
+          ? amend(history, moved)
+          : commit(history, moved);
+
+      nudged.current = next;
+      setHistory(next);
 
       return true;
     },
@@ -357,7 +389,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
     },
     selectPin: (index) => {
       if (index < pins.length) {
-        setSelectedPin(index);
+        selectPin(index);
       }
     },
     undo: () => {
@@ -384,28 +416,35 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
         )}
       </WindowHeader>
       <div className="relative min-h-0 flex-1">
-        <Page
-          color={color}
-          dark={dark}
-          image={pageImage(image)}
-          marks={marks}
-          onAdd={(mark) => {
-            add(mark);
-          }}
-          onMovePin={(index, to) => {
-            change(movePin(marks, index, to, bounds));
-          }}
-          onSelectPin={setSelectedPin}
-          onSubmit={(mark) => {
-            const next = mark === null ? history : add(mark);
+        <section
+          aria-label="Pins"
+          className="absolute inset-0 outline-none"
+          ref={pinsRef}
+          tabIndex={-1}
+        >
+          <Page
+            color={color}
+            dark={dark}
+            image={pageImage(image)}
+            marks={marks}
+            onAdd={(mark) => {
+              add(mark);
+            }}
+            onMovePin={(index, to) => {
+              change(movePin(marks, index, to, bounds));
+            }}
+            onSelectPin={selectPin}
+            onSubmit={(mark) => {
+              const next = mark === null ? history : add(mark);
 
-            void save(false, next.present);
-          }}
-          pointerRef={pointerRef}
-          selectedPin={selectedPin}
-          stroke={stroke}
-          tool={tool}
-        />
+              void save(false, next.present);
+            }}
+            pointerRef={pointerRef}
+            selectedPin={selectedPin}
+            stroke={stroke}
+            tool={tool}
+          />
+        </section>
         {tool === "pin" ? (
           <p className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm">
             {selectedPin === null

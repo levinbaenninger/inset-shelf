@@ -14,6 +14,7 @@ import {
   ShelfDocSchema,
   UNDO_MAX,
   fitText,
+  withPinLabel,
   withStepBack,
 } from "./shelf";
 import type { OpEnv, ShelfDoc, ShelfOp, MainOp, Removed } from "./shelf";
@@ -774,6 +775,26 @@ describe(withStepBack, () => {
     expect(
       withStepBack([step(1), step(2)], { index: 0, step: step(2) })
     ).toStrictEqual([step(1), step(2)]);
+  });
+});
+
+describe(withPinLabel, () => {
+  it("changes only that pin's label, keeping where every pin is", () => {
+    const pins = [
+      { label: "Title", x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ];
+
+    expect(withPinLabel(pins, 1, "Error text")).toStrictEqual([
+      { label: "Title", x: 10, y: 20 },
+      { label: "Error text", x: 30, y: 40 },
+    ]);
+  });
+
+  it("leaves the pins alone when that pin is gone", () => {
+    expect(withPinLabel([{ x: 1, y: 2 }], 3, "Gone")).toStrictEqual([
+      { x: 1, y: 2 },
+    ]);
   });
 });
 

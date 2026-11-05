@@ -16,7 +16,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DetailField } from "@shared/contracts";
-import { dateText } from "@shared/due";
+import { dateText, dueChipText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import {
   DESCRIPTION_MAX,
@@ -24,6 +24,7 @@ import {
   STEP_TEXT_MAX,
   TEXT_MAX,
   TITLE_MAX,
+  withPinLabel,
 } from "@shared/shelf";
 import type {
   FileItem,
@@ -60,9 +61,9 @@ import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
 import {
-  DueBadge,
   dueLabel,
   DueMenu,
+  dueTone,
   reopenLabel,
   windowName,
   WindowThumb,
@@ -74,7 +75,12 @@ import type { MenuAnchor } from "./menus";
 /** What ⌘Z in details can bring back. */
 export type DetailsUndo =
   | { readonly kind: "step"; readonly step: Step; readonly index: number }
-  | { readonly kind: "window"; readonly windowId: WindowRef["id"] };
+  | { readonly kind: "window"; readonly windowId: WindowRef["id"] }
+  | {
+      readonly kind: "pinLabel";
+      readonly index: number;
+      readonly label: string;
+    };
 
 /** A field to open, from the Add… menu or a field shortcut; seq makes each request new. */
 export interface FieldRequest {
@@ -98,7 +104,7 @@ export interface DetailsProps {
   readonly onBack: () => void;
   readonly onApply: (op: ShelfOp) => void;
   readonly onUndoable: (undo: DetailsUndo) => void;
-  /** ⌘Z: puts back the last removed step or window; false when there is none. */
+  /** ⌘Z: puts back the last removed step or window, or a pin's label; false when there is none. */
   readonly onUndo: () => boolean;
   readonly onEdit: () => void;
   readonly onStopEditing: () => void;
@@ -200,12 +206,17 @@ const ImagePreview = ({
   </button>
 );
 
-/** A text that saves as it is typed; main waits for a pause before writing. */
+/**
+ * A text that saves as it is typed; main waits for a pause before writing.
+ * While it has focus it keeps what is typed; otherwise it shows the saved
+ * value, so an undo made elsewhere shows up here.
+ */
 const AutoText = ({
   autoFocus = false,
   label,
   max,
   multiline,
+  onEdited,
   onSave,
   placeholder,
   rows = 2,
@@ -217,11 +228,24 @@ const AutoText = ({
   readonly max: number;
   readonly multiline: boolean;
   readonly onSave: (value: string) => void;
+  /** Focus left after the text changed: what it held when focus came in. */
+  readonly onEdited?: (before: string) => void;
   readonly autoFocus?: boolean;
   readonly rows?: number;
 }) => {
   const [text, setText] = useState(value);
+  const [saved, setSaved] = useState(value);
+  const [focused, setFocused] = useState(false);
+  const before = useRef(value);
   const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+
+  if (value !== saved) {
+    setSaved(value);
+
+    if (!focused) {
+      setText(value);
+    }
+  }
 
   useEffect(() => {
     if (autoFocus) {
@@ -246,9 +270,20 @@ const AutoText = ({
   const props = {
     "aria-label": label,
     maxLength: max,
+    onBlur: () => {
+      setFocused(false);
+
+      if (text !== before.current) {
+        onEdited?.(before.current);
+      }
+    },
     onChange: (event: { readonly target: { readonly value: string } }) => {
       setText(event.target.value);
       onSave(event.target.value);
+    },
+    onFocus: () => {
+      before.current = text;
+      setFocused(true);
     },
     onKeyDown,
     placeholder,
@@ -618,10 +653,12 @@ const PinLabels = ({
   item,
   onApply,
   onOpenPins,
+  onUndoable,
 }: {
   readonly item: ImageItem;
   readonly onApply: (op: ShelfOp) => void;
   readonly onOpenPins: () => void;
+  readonly onUndoable: (undo: DetailsUndo) => void;
 }) => (
   <Field
     action={
@@ -645,12 +682,13 @@ const PinLabels = ({
             label={`Label for pin ${index + 1}`}
             max={PIN_LABEL_MAX}
             multiline={false}
+            onEdited={(label) => {
+              onUndoable({ index, kind: "pinLabel", label });
+            }}
             onSave={(label) => {
               onApply({
                 id: item.id,
-                pins: item.pins.map((other, at) =>
-                  at === index ? { ...other, label } : other
-                ),
+                pins: withPinLabel(item.pins, index, label),
                 type: "setPins",
               });
             }}
@@ -689,6 +727,7 @@ type ContentProps = Pick<
   | "onOpenPins"
   | "onOpenLink"
   | "onStopEditing"
+  | "onUndoable"
 >;
 
 /** A text item is its text: shown as in the list, edited in place with Return. */
@@ -699,7 +738,7 @@ const TextContent = ({
   onEdit,
   onOpenLink,
   onStopEditing,
-}: Omit<ContentProps, "item" | "onOpenImage" | "onOpenPins"> & {
+}: Omit<ContentProps, "item" | "onOpenImage" | "onOpenPins" | "onUndoable"> & {
   readonly item: TextItem;
 }) =>
   editing ? (
@@ -791,6 +830,7 @@ const Content = (props: ContentProps) => {
           item={item}
           onApply={onApply}
           onOpenPins={props.onOpenPins}
+          onUndoable={props.onUndoable}
         />
       ) : null}
     </div>
@@ -977,51 +1017,71 @@ const DueField = ({
     }
   }, [pickingDate]);
 
+  const menu = (trigger: ReactNode) => (
+    <DueMenu
+      due={item.due}
+      now={now}
+      onOpenChange={onOpenChange}
+      onPickDate={() => {
+        setPickingDate(true);
+      }}
+      onSet={(due) => {
+        setPickingDate(false);
+        onApply({ due, id: item.id, type: "setDue" });
+      }}
+      open={open}
+    >
+      {trigger}
+    </DueMenu>
+  );
+
   return (
     <Field icon={Calendar03Icon} label="Due">
       <div className="flex min-h-7 flex-wrap items-center gap-2">
-        <DueMenu
-          due={item.due}
-          now={now}
-          onOpenChange={onOpenChange}
-          onPickDate={() => {
-            setPickingDate(true);
-          }}
-          onSet={(due) => {
-            setPickingDate(false);
-            onApply({ due, id: item.id, type: "setDue" });
-          }}
-          open={open}
-        >
-          {item.due === null ? (
+        {item.due === null ? (
+          menu(
             <Button size="xs" variant="outline">
               <HugeiconsIcon data-icon="inline-start" icon={Calendar03Icon} />
               Set Due
             </Button>
-          ) : (
+          )
+        ) : (
+          // The × sits inside the chip's tint, as in the other Inset apps.
+          <span
+            className={cn(
+              "inline-flex h-6 shrink-0 items-center rounded-md text-xs font-medium whitespace-nowrap tabular-nums",
+              dueTone(item.due, now)
+            )}
+          >
+            {menu(
+              <button
+                aria-label={`${dueLabel(item.due, now)}. Change Due`}
+                className="focus-visible:ring-ring/50 flex h-full items-center gap-1 rounded-md pr-0.5 pl-1.5 outline-none focus-visible:ring-3"
+                title={dueLabel(item.due, now)}
+                type="button"
+              >
+                <HugeiconsIcon
+                  className="shrink-0"
+                  icon={Calendar03Icon}
+                  size={11}
+                  strokeWidth={2}
+                />
+                {dueChipText(item.due, now)}
+              </button>
+            )}
             <button
-              aria-label={`${dueLabel(item.due, now)}. Change Due`}
-              className="focus-visible:ring-ring/50 flex min-h-6 items-center rounded-md outline-none focus-visible:ring-3"
+              aria-label="Clear Due"
+              className="focus-visible:ring-ring/50 grid h-full w-6 place-items-center rounded-md opacity-70 outline-none hover:opacity-100 focus-visible:ring-3"
+              onClick={() => {
+                setPickingDate(false);
+                onApply({ due: null, id: item.id, type: "setDue" });
+              }}
+              title="Clear Due"
               type="button"
             >
-              <DueBadge due={item.due} now={now} />
+              <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
             </button>
-          )}
-        </DueMenu>
-        {item.due === null ? null : (
-          <Button
-            aria-label="Clear Due"
-            className="-ml-1.5"
-            onClick={() => {
-              setPickingDate(false);
-              onApply({ due: null, id: item.id, type: "setDue" });
-            }}
-            size="icon-xs"
-            title="Clear Due"
-            variant="quiet"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} />
-          </Button>
+          </span>
         )}
         {pickingDate ? (
           <div className="w-40">
@@ -1271,6 +1331,7 @@ export const DetailsView = (props: DetailsProps) => {
           onOpenLink={props.onOpenLink}
           onOpenPins={props.onOpenPins}
           onStopEditing={props.onStopEditing}
+          onUndoable={props.onUndoable}
         />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">

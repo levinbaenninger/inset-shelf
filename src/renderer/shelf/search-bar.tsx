@@ -139,17 +139,12 @@ export const DueSuggestions = ({
   }
 
   return (
-    <fieldset
-      className="flex flex-wrap items-center gap-1 px-3 pb-2"
-      data-no-highlight
-    >
+    <fieldset className="flex flex-col px-2 pb-2" data-no-highlight>
       <legend className="sr-only">Due filters</legend>
-      <span aria-hidden="true" className="text-muted-foreground mr-1 text-xs">
-        Filter:
-      </span>
       {dueSuggestions(pendingDue).map((filter, index) => (
         <Button
           aria-label={`${DUE_FILTER_LABEL[filter]} (due:${filter})`}
+          className="justify-between"
           key={filter}
           onClick={() => {
             onChoose(filter);
@@ -159,6 +154,9 @@ export const DueSuggestions = ({
           variant={index === 0 ? "secondary" : "ghost"}
         >
           due:{filter}
+          <span className="text-muted-foreground font-normal">
+            {DUE_FILTER_LABEL[filter]}
+          </span>
         </Button>
       ))}
     </fieldset>

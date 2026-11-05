@@ -97,6 +97,10 @@ const applyOp = (doc, op) => {
       return updateItem(doc, op.id, (item) => ({ ...item, steps: op.steps }));
     }
 
+    case "setPins": {
+      return updateItem(doc, op.id, (item) => ({ ...item, pins: op.pins }));
+    }
+
     case "setDescription": {
       return updateItem(doc, op.id, (item) => ({
         ...item,

@@ -1,5 +1,5 @@
 import type { DetailField } from "@shared/contracts";
-import { withStepBack } from "@shared/shelf";
+import { withPinLabel, withStepBack } from "@shared/shelf";
 import type { ItemId, ShelfDoc, ShelfItem, ShelfOp } from "@shared/shelf";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 import type { DetailsUndo, FieldRequest, StepsReset } from "./details-view";
 
-/** Removals in details that ⌘Z can still put back. */
+/** Removals and label edits in details that ⌘Z can still put back. */
 const UNDO_DEPTH = 20;
 
 let lastSeq = 0;
@@ -31,7 +31,7 @@ export interface Details {
   /** A field shortcut while details are open. */
   readonly requestField: (field: DetailField) => void;
   readonly pushUndo: (undo: DetailsUndo) => void;
-  /** ⌘Z in details: the last removed step or window comes back; false when there is none. */
+  /** ⌘Z in details: the last removed step or window, or a pin's last label, comes back; false when there is none. */
   readonly undo: () => boolean;
 }
 
@@ -123,11 +123,21 @@ export const useDetails = ({
 
       undoable.current = undoable.current.slice(0, -1);
 
+      const { current } = currentItem;
+
       if (last.kind === "step") {
-        const steps = withStepBack(currentItem.current?.steps ?? [], last);
+        const steps = withStepBack(current?.steps ?? [], last);
 
         apply({ id: itemId, steps: [...steps], type: "setSteps" });
         setStepsReset({ seq: nextSeq(), steps });
+      } else if (last.kind === "pinLabel") {
+        if (current?.kind === "image") {
+          apply({
+            id: itemId,
+            pins: withPinLabel(current.pins, last.index, last.label),
+            type: "setPins",
+          });
+        }
       } else {
         apply({ id: itemId, type: "restoreWindow", windowId: last.windowId });
       }

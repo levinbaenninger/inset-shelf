@@ -205,6 +205,19 @@ const FileName = ({
   </button>
 );
 
+/** Badges wrapped below the line are out of sight, so screen readers skip them too. */
+const hideWrapped = (line: HTMLElement): void => {
+  const { bottom } = line.getBoundingClientRect();
+
+  for (const badge of line.children) {
+    if (badge.getBoundingClientRect().top >= bottom) {
+      badge.setAttribute("aria-hidden", "true");
+    } else {
+      badge.removeAttribute("aria-hidden");
+    }
+  }
+};
+
 /**
  * A line with its words on the left and the metadata badges right-aligned.
  * The words keep at least 14 characters; badges that don't fit wrap out of
@@ -221,6 +234,24 @@ const BadgeLine = ({
   readonly reach: boolean;
 }) => {
   const words = children !== null && children !== undefined;
+  const ref = useRef<HTMLDivElement>(null);
+
+  // A new observer reports once on every render, when the badges may have changed, and again on each resize.
+  useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry?.target instanceof HTMLElement) {
+        hideWrapped(entry.target);
+      }
+    });
+
+    if (ref.current !== null) {
+      observer.observe(ref.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  });
 
   if (badges.length === 0) {
     return words ? <div className="flex min-w-0">{children}</div> : null;
@@ -235,6 +266,7 @@ const BadgeLine = ({
           words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
         )}
         data-badges
+        ref={ref}
       >
         {badges}
       </div>
@@ -457,6 +489,8 @@ const NoteText = ({
     <button
       className={cn(
         "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
+        // Under a title the caption is the second line, quiet as it is in details.
+        item.title !== null && "text-muted-foreground",
         item.done && "text-muted-foreground line-through"
       )}
       data-row-keys
