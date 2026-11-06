@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isAppChord,
   itemMenu,
   menuChoiceForKey,
   pickedMenu,
@@ -319,10 +320,6 @@ describe(menuChoiceForKey, () => {
       id,
       kind: "copy",
     });
-    expect(menuChoiceForKey(menu, press(" "), true)).toStrictEqual({
-      id,
-      kind: "toggleDone",
-    });
     expect(menuChoiceForKey(menu, press("ArrowRight"), true)).toStrictEqual({
       id,
       kind: "details",
@@ -371,8 +368,9 @@ describe(menuChoiceForKey, () => {
     ).toBeNull();
   });
 
-  it("leaves Return and the arrows to the menu, and acts once on a held key", () => {
+  it("leaves Return, Space and the arrows to the menu, and acts once on a held key", () => {
     expect(menuChoiceForKey(menu, press("Enter"), true)).toBeNull();
+    expect(menuChoiceForKey(menu, press(" "), true)).toBeNull();
     expect(menuChoiceForKey(menu, press("ArrowDown"), true)).toBeNull();
     expect(menuChoiceForKey(menu, press("Escape"), true)).toBeNull();
     expect(
@@ -403,15 +401,12 @@ describe(menuChoiceForKey, () => {
     ).toBeNull();
   });
 
-  it("checks off and deletes every picked item with Space and ⌫", () => {
+  it("deletes every picked item with ⌫, and leaves Space to the highlighted entry", () => {
     const items = [...doc.items, image];
     const picked = pickedMenu(items, { ...doc, items });
     const ids = [doc.items[0]?.id, image.id];
 
-    expect(menuChoiceForKey(picked, press(" "), true)).toStrictEqual({
-      ids,
-      kind: "toggleMany",
-    });
+    expect(menuChoiceForKey(picked, press(" "), true)).toBeNull();
     expect(menuChoiceForKey(picked, press("Backspace"), false)).toStrictEqual({
       ids,
       kind: "removeMany",
@@ -428,5 +423,23 @@ describe(menuChoiceForKey, () => {
         true
       )
     ).toStrictEqual({ ids: [doc.items[0]?.id, image.id], kind: "copyList" });
+  });
+});
+
+describe(isAppChord, () => {
+  it("takes every key held with ⌘ on a Mac, and with Ctrl elsewhere", () => {
+    expect(
+      isAppChord(press("d", { metaKey: true, shiftKey: true }), true)
+    ).toBeTruthy();
+    expect(isAppChord(press("z", { ctrlKey: true }), false)).toBeTruthy();
+    expect(isAppChord(press("ArrowUp", { metaKey: true }), true)).toBeTruthy();
+  });
+
+  it("leaves plain keys, the other system's modifier and a lone modifier to the menu", () => {
+    expect(isAppChord(press("d"), true)).toBeFalsy();
+    expect(isAppChord(press(" "), false)).toBeFalsy();
+    expect(isAppChord(press("d", { ctrlKey: true }), true)).toBeFalsy();
+    expect(isAppChord(press("d", { metaKey: true }), false)).toBeFalsy();
+    expect(isAppChord(press("Meta", { metaKey: true }), true)).toBeFalsy();
   });
 });

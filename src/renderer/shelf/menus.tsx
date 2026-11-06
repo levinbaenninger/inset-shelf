@@ -35,7 +35,6 @@ import {
 import type { MenuChoice, MenuEntry, MenuIcon } from "@shared/menus";
 import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
-import { keyText } from "@shared/shortcut";
 import { useState } from "react";
 import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
@@ -46,7 +45,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuSwatchItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -79,11 +77,6 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
 
 const EntryIcon = ({ icon }: { readonly icon?: MenuIcon }) =>
   icon === undefined ? null : <HugeiconsIcon icon={ICONS[icon]} />;
-
-const Shortcut = ({ accelerator }: { readonly accelerator?: string }) =>
-  accelerator === undefined ? null : (
-    <DropdownMenuShortcut>{keyText(accelerator, isMac)}</DropdownMenuShortcut>
-  );
 
 /** The colours as one row of swatches, without a heading; the item's own is ringed. */
 const ColorRow = ({
@@ -158,15 +151,9 @@ const Entries = ({
       case "group": {
         return (
           <DropdownMenuItem
-            data-menu-group
+            // → opens it, as it would a submenu (MenuContent).
+            data-menu-group={entry.label}
             key={entry.label}
-            // → opens it, as it would a submenu.
-            onKeyDown={(event) => {
-              if (event.key === "ArrowRight") {
-                event.preventDefault();
-                onOpenGroup(entry);
-              }
-            }}
             onSelect={(event) => {
               // The menu stays open and shows the group's entries instead.
               event.preventDefault();
@@ -192,11 +179,11 @@ const Entries = ({
             onSelect={() => {
               onChoose(entry.choice);
             }}
+            shortcut={entry.accelerator}
             variant={entry.destructive === true ? "destructive" : "default"}
           >
             <EntryIcon icon={entry.icon} />
             <span className="truncate">{entry.label}</span>
-            <Shortcut accelerator={entry.accelerator} />
             {entry.checked === true ? (
               <HugeiconsIcon className="ml-auto" icon={Tick02Icon} />
             ) : null}
@@ -217,9 +204,9 @@ const keepFocus = (event: Event): void => {
 
 /**
  * A menu's content, showing one group's entries in place when it is opened.
- * With `onKey`, the keys its entries show run them from anywhere in the menu,
- * before the highlighted entry sees the key: Space checks the item off rather
- * than choosing that entry.
+ * With `onKey`, the keys its entries show run them for the menu's item from
+ * any page of the menu, "Move to" included, whichever entry is highlighted.
+ * Return and Space choose the highlighted entry, on either page.
  */
 const MenuContent = ({
   entries,
@@ -236,22 +223,40 @@ const MenuContent = ({
   const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "ArrowLeft" && group !== null) {
       event.preventDefault();
+      event.stopPropagation();
       setGroup(null);
 
       return;
     }
 
-    // → belongs to "Move to" while it is highlighted or open.
-    const walking =
+    // → belongs to "Move to" while it is highlighted or open: it opens the list.
+    const highlighted =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-menu-group]")?.dataset
+            .menuGroup
+        : undefined;
+
+    if (
       event.key === "ArrowRight" &&
-      (group !== null ||
-        (event.target instanceof Element &&
-          event.target.closest("[data-menu-group]") !== null));
+      (group !== null || highlighted !== undefined)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      setGroup(
+        (current) =>
+          current ??
+          entries.find(
+            (entry): entry is GroupEntry =>
+              entry.kind === "group" && entry.label === highlighted
+          ) ??
+          null
+      );
+
+      return;
+    }
 
     const choice =
-      onKey === undefined || walking
-        ? null
-        : menuChoiceForKey(entries, event, isMac);
+      onKey === undefined ? null : menuChoiceForKey(entries, event, isMac);
 
     if (choice !== null) {
       event.preventDefault();
@@ -372,15 +377,10 @@ export const PointerMenu = ({
   const entries =
     menu === null ? null : entriesFor(menu.target, doc, floatOnTop);
 
-  const kind = menu?.target.kind;
-
-  const onKey =
-    kind === "item" || kind === "items"
-      ? (choice: MenuChoice): void => {
-          onChoose(choice);
-          onClose();
-        }
-      : undefined;
+  const onKey = (choice: MenuChoice): void => {
+    onChoose(choice);
+    onClose();
+  };
 
   return (
     <DropdownMenu
@@ -495,19 +495,19 @@ export const AddMenu = ({
         onSelect={() => {
           actions.newDrawing();
         }}
+        shortcut="Alt+CommandOrControl+N"
       >
         <HugeiconsIcon icon={Edit02Icon} />
         New Drawing
-        <Shortcut accelerator="Alt+CommandOrControl+N" />
       </DropdownMenuItem>
       <DropdownMenuItem
         onSelect={() => {
           actions.newWindowLink();
         }}
+        shortcut="Shift+CommandOrControl+L"
       >
         <HugeiconsIcon icon={AppWindowIcon} />
         New Window Link…
-        <Shortcut accelerator="Shift+CommandOrControl+L" />
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>

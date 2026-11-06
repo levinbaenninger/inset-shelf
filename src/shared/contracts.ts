@@ -88,12 +88,17 @@ const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 export const shelfContract = defineContract({
   events: {
     command: event<ShelfCommand>(),
-    /** A short confirmation of something main did, shown as a toast. */
-    notice: event<{ readonly message: string }>(),
+    /** A short note on something main did, shown as a toast: a confirmation, or why it failed. */
+    notice: event<{ readonly message: string; readonly tone: NoticeTone }>(),
     view: event<ShelfView>(),
   },
   global: "insetShelf",
   methods: {
+    /**
+     * A menu in the shelf opened (true) or the last one closed: meanwhile
+     * the menu takes every key, so main holds back the menu bar's keys.
+     */
+    menuOpen: send(z.boolean()),
     /** Files dropped or pasted into the shelf, by path; main reads them. */
     addFiles: invoke(
       z.array(z.string().min(1).max(4096)).min(1).max(50),
@@ -154,10 +159,14 @@ export const shelfContract = defineContract({
   name: "shelf",
 });
 
+/** A done thing gets a tick; a failed one says so. */
+export type NoticeTone = "done" | "failed";
+
 export interface ToastView {
   readonly title: string;
   readonly detail: string;
   readonly seq: number;
+  readonly tone: NoticeTone;
 }
 
 export const toastContract = defineContract({

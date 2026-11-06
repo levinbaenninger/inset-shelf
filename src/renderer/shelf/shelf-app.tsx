@@ -29,6 +29,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { onMenusOpen } from "@/lib/menu-keys";
 import { cn } from "@/lib/utils";
 import { filePath, shelfBridge } from "@/shared/bridge";
 import { isMac } from "@/shared/platform";
@@ -71,6 +72,10 @@ import { useSearchHighlight } from "./use-search-highlight";
 import { isTextField, useShelfKeys } from "./use-shelf-keys";
 
 const api = shelfBridge();
+
+onMenusOpen((open) => {
+  api.menuOpen(open);
+});
 
 const COPIED_MS = 1400;
 const UNDO_VISIBLE_MS = 6000;
@@ -318,9 +323,17 @@ const flushEdits = (): void => {
   }
 };
 
-/** Whether main copied; when it couldn't, a toast says why and nothing shows as copied. */
-const copied = async (result: Promise<ActionResult>): Promise<boolean> => {
-  const outcome = await result;
+/**
+ * Every copy the shelf asks for goes through here: an edit still open is
+ * saved first, main copies only once the disk holds it (src/main/copy-gate.ts),
+ * and a copy that couldn't be made says why and shows nothing as copied.
+ */
+const requestCopy = async (
+  send: () => Promise<ActionResult>
+): Promise<boolean> => {
+  flushEdits();
+
+  const outcome = await send();
 
   if (!outcome.ok) {
     toast.error(outcome.message, { duration: NOTICE_MS });
@@ -335,7 +348,9 @@ const copyList = async (list: readonly ShelfItem[]): Promise<void> => {
     return;
   }
 
-  if (await copied(api.copyList(list.map((item) => item.id)))) {
+  const ids = list.map((item) => item.id);
+
+  if (await requestCopy(async () => await api.copyList(ids))) {
     noticeToast(
       list.length === 1
         ? "Copied as a list"
@@ -689,7 +704,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   /** ⇧⌘C: the picked items, else the open items of the section new items go to. */
   const copyAsList = (): void => {
-    flushEdits();
     void copyList(
       chosen.length > 0
         ? chosen
@@ -720,7 +734,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   };
 
   const copy = async (id: ItemId): Promise<void> => {
-    if (await copied(api.copy(id))) {
+    if (await requestCopy(async () => await api.copy(id))) {
       setCopiedId(id);
     }
   };
@@ -730,7 +744,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     id: ItemId,
     kind: "copyDetails" | "copyWithLink"
   ): Promise<void> => {
-    if (await copied(api[kind](id))) {
+    if (await requestCopy(async () => await api[kind](id))) {
       setCopiedId(id);
 
       if (kind === "copyDetails") {
@@ -1202,10 +1216,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         setPicked(ids);
       }
     } else if (pickedItems.length > 1) {
-      flushEdits();
       void copyList(pickedItems);
     } else if (selected !== undefined) {
-      flushEdits();
       void copy(selected.id);
     }
   };
@@ -1278,8 +1290,12 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   useEffect(
     () =>
-      api.on("notice", ({ message }) => {
-        noticeToast(message);
+      api.on("notice", ({ message, tone }) => {
+        if (tone === "failed") {
+          toast.error(message, { duration: NOTICE_MS });
+        } else {
+          noticeToast(message);
+        }
       }),
     []
   );

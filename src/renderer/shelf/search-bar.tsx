@@ -209,7 +209,7 @@ export const SearchBar = ({
           }
         }
       }}
-      placeholder="Search, or due:today"
+      placeholder="Search or due:today"
       ref={inputRef}
       title={`Search (${keyText("CommandOrControl+F", isMac)})`}
       type="text"

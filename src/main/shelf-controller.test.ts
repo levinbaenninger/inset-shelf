@@ -1,3 +1,5 @@
+import { once } from "node:events";
+
 import {
   emptyShelf,
   itemDetailsText,
@@ -7,7 +9,7 @@ import {
   WindowIdSchema,
 } from "@shared/shelf";
 import type { ShelfDoc, WindowRef } from "@shared/shelf";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createShelfController, EDIT_SAVE_DELAY_MS } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
@@ -17,7 +19,11 @@ const uuid = (n: number) =>
 
 const SECTION = SectionIdSchema.parse(uuid(1));
 
-const setup = (results: WriteResult[] = []) => {
+/** `hold` keeps every save on the disk until it resolves. */
+const setup = (
+  results: WriteResult[] = [],
+  hold: Promise<void> = Promise.resolve()
+) => {
   let next = 10;
   const saved: ShelfDoc[] = [];
   const deleted: string[] = [];
@@ -36,7 +42,7 @@ const setup = (results: WriteResult[] = []) => {
     initial: emptyShelf(SECTION),
     save: async (doc) => {
       saved.push(doc);
-      await Promise.resolve();
+      await hold;
 
       return results.shift() ?? { ok: true };
     },
@@ -212,6 +218,83 @@ describe(createShelfController, () => {
     controller.apply({ text: "two", type: "compose" });
     await controller.flush();
     expect(controller.view().status.saveError).toBeNull();
+  });
+
+  it("keeps reporting a failed save until a retry reaches the disk", async () => {
+    const { controller, saved } = setup([
+      { message: "disk full", ok: false },
+      { message: "disk full", ok: false },
+    ]);
+
+    controller.apply({ text: "one", type: "compose" });
+
+    await expect(controller.flush()).resolves.toStrictEqual({
+      message: "disk full",
+      ok: false,
+    });
+    // No edit since, and no timer waiting: the flush still tries again.
+    await expect(controller.flush()).resolves.toStrictEqual({
+      message: "disk full",
+      ok: false,
+    });
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
+    expect(saved).toHaveLength(3);
+    expect(controller.view().status.saveError).toBeNull();
+  });
+
+  it("writes nothing when the disk already holds every change", async () => {
+    const { controller, saved } = setup();
+
+    controller.apply({ text: "one", type: "compose" });
+
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
+    expect(saved).toHaveLength(1);
+  });
+
+  it("writes a typed edit still waiting for its pause before saying it is saved", async () => {
+    const { controller, saved, timers } = setup();
+    const id = controller.apply({ text: "one", type: "compose" });
+
+    if (id === null) {
+      throw new Error("no id");
+    }
+
+    await controller.flush();
+    controller.apply({ id, text: "one more", type: "editText" });
+    expect(timers).toHaveLength(1);
+
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
+    expect(timers).toHaveLength(0);
+    expect(saved.at(-1)?.items[0]).toMatchObject({ text: "one more" });
+  });
+
+  it("stays saved when an edit lands while the flush waits for the disk", async () => {
+    const disk = new EventTarget();
+
+    const written = (async () => {
+      await once(disk, "written");
+    })();
+
+    const { controller, saved, timers } = setup([], written);
+    const id = controller.apply({ text: "one", type: "compose" });
+
+    if (id === null) {
+      throw new Error("no id");
+    }
+
+    const flushed = controller.flush();
+
+    await vi.waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    controller.apply({ id, text: "one more", type: "editText" });
+    disk.dispatchEvent(new Event("written"));
+
+    await expect(flushed).resolves.toStrictEqual({ ok: true });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.items[0]).toMatchObject({ text: "one" });
+    expect(timers).toHaveLength(1);
   });
 
   it("marks the focused item with a new sequence each time", () => {

@@ -310,7 +310,11 @@ const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
   ];
 };
 
-/** What a right-click on an item offers, with the keys that do the same in the list. */
+/**
+ * What a right-click on an item offers, with the keys that act on the item
+ * while its menu is open. Return and Space choose the highlighted entry
+ * there, as in any menu, so no entry shows them.
+ */
 export const itemMenu = (
   item: ShelfItem,
   doc: ShelfDoc,
@@ -337,7 +341,6 @@ export const itemMenu = (
   },
   ...open(item, mac),
   {
-    accelerator: "Enter",
     choice: { id: item.id, kind: "edit" },
     enabled: true,
     icon: "edit",
@@ -345,7 +348,6 @@ export const itemMenu = (
     label: item.kind === "text" ? "Edit" : "Edit Caption",
   },
   {
-    accelerator: "Space",
     choice: { id: item.id, kind: "toggleDone" },
     enabled: true,
     icon: "check",
@@ -390,7 +392,6 @@ export const pickedMenu = (
     },
     SEPARATOR,
     {
-      accelerator: "Space",
       choice: { ids, kind: "toggleMany" },
       enabled: true,
       icon: "check",
@@ -441,7 +442,6 @@ export interface MenuKeyPress {
 const NAMED_KEYS = new Map<string, readonly string[]>([
   ["Backspace", ["Backspace", "Delete"]],
   ["Right", ["ArrowRight"]],
-  ["Space", [" "]],
 ]);
 
 const pressesKey = (press: MenuKeyPress, key: string, mac: boolean): boolean =>
@@ -450,7 +450,8 @@ const pressesKey = (press: MenuKeyPress, key: string, mac: boolean): boolean =>
     (press.key.toLowerCase() === key.toLowerCase() ||
       (mac && press.code === `Key${key.toUpperCase()}`)));
 
-const matches = (
+/** Whether a key press is an accelerator, such as "Alt+CommandOrControl+C", on this system. */
+export const pressesAccelerator = (
   press: MenuKeyPress,
   accelerator: string,
   mac: boolean
@@ -471,8 +472,8 @@ const matches = (
 
 /**
  * The choice a key press runs while an item's menu is open: the entry that
- * shows that key, for the item the menu belongs to. Return is left to the
- * menu, which chooses the highlighted entry with it, and a held key acts once.
+ * shows that key, for the item the menu belongs to, whichever entry is
+ * highlighted. A held key acts once.
  */
 export const menuChoiceForKey = (
   entries: readonly MenuEntry[],
@@ -488,8 +489,7 @@ export const menuChoiceForKey = (
       entry.kind === "choice" &&
       entry.enabled &&
       entry.accelerator !== undefined &&
-      entry.accelerator !== "Enter" &&
-      matches(press, entry.accelerator, mac)
+      pressesAccelerator(press, entry.accelerator, mac)
     ) {
       return entry.choice;
     }
@@ -497,3 +497,12 @@ export const menuChoiceForKey = (
 
   return null;
 };
+
+const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift", "AltGraph"]);
+
+/**
+ * An app shortcut, which an open menu keeps from the page under it unless
+ * the menu shows it: any key held with ⌘ on a Mac, or Ctrl elsewhere.
+ */
+export const isAppChord = (press: MenuKeyPress, mac: boolean): boolean =>
+  (mac ? press.metaKey : press.ctrlKey) && !MODIFIER_KEYS.has(press.key);

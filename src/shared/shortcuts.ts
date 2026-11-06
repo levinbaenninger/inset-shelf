@@ -61,6 +61,10 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k("CommandOrControl+F")], label: "Search (try due:today)" },
         { keys: [click, "⇧-click"], label: "Pick several items" },
         { keys: [k("CommandOrControl+A")], label: "Pick every item shown" },
+        {
+          keys: [k("Enter"), "Space"],
+          label: "Choose a menu entry",
+        },
       ],
       title: "Navigate",
     },

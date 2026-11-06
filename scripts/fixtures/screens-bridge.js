@@ -65,13 +65,24 @@ globalThis.__applied = [];
 globalThis.__calls = [];
 
 const logged = (call, answer) => (arg) => {
-  globalThis.__calls.push({ arg, call });
+  // A call without an argument logs null, so the log reads back as JSON.
+  globalThis.__calls.push({ arg: arg ?? null, call });
 
   return answer(arg);
 };
 
 const resolved = (value) => () => Promise.resolve(value);
 const ok = resolved({ ok: true });
+
+/** `copyFails`: main refuses every copy with this message, as when the shelf can't be saved. */
+const copied =
+  data?.copyFails === undefined
+    ? ok
+    : resolved({ message: data.copyFails, ok: false });
+
+/** Each time the page told main a menu opened (true) or the last one closed (false). */
+globalThis.__menuOpen = [];
+
 const nothing = Function.prototype;
 
 const withFallback = (api, fallback) =>
@@ -155,11 +166,15 @@ if (page === "shelf") {
         view = { ...view, doc: applyOp(view.doc, op) };
         echo(view);
       }),
-      copy: logged("copy", ok),
-      copyDetails: logged("copyDetails", ok),
-      copyList: logged("copyList", ok),
-      copyWithLink: logged("copyWithLink", ok),
+      copy: logged("copy", copied),
+      copyDetails: logged("copyDetails", copied),
+      copyList: logged("copyList", copied),
+      copyWithLink: logged("copyWithLink", copied),
       getView: () => Promise.resolve(view),
+      menuOpen: (open) => {
+        globalThis.__menuOpen.push(open);
+      },
+      newWindowLink: logged("newWindowLink", nothing),
       on,
       openImage: logged("openImage", nothing),
       openLink: logged("openLink", nothing),

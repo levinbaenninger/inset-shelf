@@ -576,7 +576,7 @@ const openAThenMenuOnB = async (page: Page): Promise<void> => {
 /** A command main sends when a menu bar item runs (src/shared/contracts.ts ShelfCommand). */
 interface MenuCommand {
   readonly kind: "copy" | "item";
-  readonly action?: "copyDetails" | "copyList" | "open";
+  readonly action?: "copyDetails" | "copyList" | "copyWithLink" | "open";
 }
 
 interface MenuStep {
@@ -591,6 +591,41 @@ interface MenuStep {
 /** A step that presses a key. */
 const pressing = (combo: string) => async (on: Page) => {
   await on.keyboard.press(combo);
+};
+
+const ACTIVE_ENTRY =
+  "document.activeElement?.getAttribute('role') === 'menuitem' ? document.activeElement.textContent : ''";
+
+/**
+ * Moves the menu's highlight down to the entry named, as a keyboard user
+ * does. The menu moves its highlight a moment after each ↓, so each step
+ * waits for it.
+ */
+const walkTo = async (on: Page, name: string): Promise<void> => {
+  let label = String(await on.evaluate(ACTIVE_ENTRY));
+
+  while (!label.startsWith(name)) {
+    const was = label;
+
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    await on.keyboard.press("ArrowDown");
+    // oxlint-disable-next-line no-await-in-loop -- the highlight moves after the key.
+    await on.waitForFunction(
+      `(${ACTIVE_ENTRY}) !== ${JSON.stringify(was)}`,
+      undefined,
+      {
+        timeout: 1000,
+      }
+    );
+    // oxlint-disable-next-line no-await-in-loop -- read after each key.
+    label = String(await on.evaluate(ACTIVE_ENTRY));
+  }
+};
+
+/** A step that highlights the entry named, then presses `key` there. */
+const onEntry = (name: string, key: string) => async (on: Page) => {
+  await walkTo(on, name);
+  await on.keyboard.press(key);
 };
 
 /** A step that runs a menu bar command, as main sends it. */
@@ -769,7 +804,43 @@ const menuOwnershipCheck = async (page: Page): Promise<string | null> => {
             run: pressing(`Alt+${mod}+c`),
             sends: [{ arg: b, call: "copyDetails" }],
           },
-          { name: "Space", run: pressing("Space"), sends: [toggling(b)] },
+          // Return and Space choose the highlighted entry, for B.
+          {
+            name: "↓ and Space on Copy",
+            run: onEntry("Copy", "Space"),
+            sends: [{ arg: b, call: "copy" }],
+          },
+          {
+            name: "↓ and Return on Copy",
+            run: onEntry("Copy", "Enter"),
+            sends: [{ arg: b, call: "copy" }],
+          },
+          {
+            name: "Space on Check Off",
+            run: onEntry("Check Off", "Space"),
+            sends: [toggling(b)],
+          },
+          {
+            name: "Space on a section in Move to",
+            run: async (on) => {
+              await onEntry("Move to", "ArrowRight")(on);
+              await onEntry("Later", "Space")(on);
+            },
+            sends: [
+              {
+                arg: { id: b, sectionId: LATER, type: "moveItem" },
+                call: "apply",
+              },
+            ],
+          },
+          {
+            name: `${mod}+C on the Move to list`,
+            run: async (on) => {
+              await onEntry("Move to", "ArrowRight")(on);
+              await on.keyboard.press(`${mod}+c`);
+            },
+            sends: [{ arg: b, call: "copy" }],
+          },
           {
             name: `${mod}+O`,
             run: pressing(`${mod}+o`),
@@ -828,8 +899,8 @@ const menuOwnershipCheck = async (page: Page): Promise<string | null> => {
             sends: [{ arg: [a, c], call: "copyList" }],
           },
           {
-            name: "Space",
-            run: pressing("Space"),
+            name: "Space on Check Off All",
+            run: onEntry("Check Off All", "Space"),
             sends: [toggling(a), toggling(c)],
           },
           {
@@ -904,6 +975,380 @@ const pendingEditCheck = async (page: Page): Promise<string | null> => {
   return isDeepStrictEqual(sent, want)
     ? null
     : `copying an item being edited sent ${JSON.stringify(sent)}, not the edit and then the copy`;
+};
+
+/** Watches each key press: whether something called preventDefault, and whether it got past the page's own handlers to the window. */
+const WATCH_KEYS = `(() => {
+  globalThis.__keys = [];
+  const reached = new WeakSet();
+
+  window.addEventListener("keydown", (event) => {
+    reached.add(event);
+  });
+  window.addEventListener("keydown", (event) => {
+    const entry = { key: event.key, prevented: false, reached: false };
+
+    globalThis.__keys.push(entry);
+    setTimeout(() => {
+      entry.prevented = event.defaultPrevented;
+      entry.reached = reached.has(event);
+    });
+  }, true);
+})()`;
+
+const KeysSchema = z.array(
+  z.object({ key: z.string(), prevented: z.boolean(), reached: z.boolean() })
+);
+
+const MenuOpenSchema = z.array(z.boolean());
+
+/** What the page last told main: a menu is open (true), or none is. */
+const menuSignal = async (page: Page): Promise<boolean | undefined> =>
+  MenuOpenSchema.parse(await page.evaluate("globalThis.__menuOpen")).at(-1);
+
+/**
+ * Presses a key the open menu doesn't show: nothing may run, the menu stays
+ * open, and the key must be held back from the page (preventDefault, so the
+ * menu bar's Copy and the rest stay quiet) and from the window's handlers.
+ */
+const swallows = async (
+  page: Page,
+  combo: string,
+  where: string
+): Promise<string | null> => {
+  const before = await callCount(page);
+
+  await page.evaluate("globalThis.__keys.length = 0");
+  await page.keyboard.press(combo);
+  await page.waitForTimeout(120);
+
+  // The modifiers go down first; the key itself is the last press.
+  const pressed = KeysSchema.parse(await page.evaluate("globalThis.__keys")).at(
+    -1
+  );
+
+  const sent = await calls(page, before);
+  const menus = await page.getByRole("menu").count();
+  const detailsOpen = await page.locator("[data-details-view]").count();
+
+  if (sent.length > 0) {
+    return `${combo} in ${where} sent ${JSON.stringify(sent)}`;
+  }
+
+  if (menus !== 1) {
+    return `${combo} in ${where} closed the menu`;
+  }
+
+  if (pressed === undefined || !pressed.prevented || pressed.reached) {
+    return `${combo} in ${where} reached the page (${JSON.stringify(pressed)})`;
+  }
+
+  return where === "B's menu" && detailsOpen > 0
+    ? `${combo} in B's menu opened details`
+    : null;
+};
+
+/**
+ * Round 5: keys a menu doesn't show never reach the page under it. With
+ * entry A open and B's menu open, the field keys, Undo, Find, Select All and
+ * the rest do nothing, and the menu stays. The page tells main a menu is
+ * open meanwhile, so main holds back the menu bar's keys on Windows too.
+ */
+const swallowedKeysCheck = async (page: Page): Promise<string | null> => {
+  const mod = await commandKey(page);
+
+  await page.evaluate(WATCH_KEYS);
+  await openAThenMenuOnB(page);
+
+  if ((await menuSignal(page)) !== true) {
+    return "the page didn't tell main that B's menu is open";
+  }
+
+  const keys = [
+    `Shift+${mod}+d`,
+    `${mod}+d`,
+    `Shift+${mod}+s`,
+    `${mod}+z`,
+    `${mod}+f`,
+    `${mod}+a`,
+    `Shift+${mod}+n`,
+    `${mod}+/`,
+    `Alt+${mod}+ArrowDown`,
+  ];
+
+  for (const combo of keys) {
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    const failed = await swallows(page, combo, "B's menu");
+
+    if (failed !== null) {
+      return failed;
+    }
+  }
+
+  await page.keyboard.press("Escape");
+  await menuClosed(page);
+
+  const focus = await focused(page);
+
+  if (focus.row !== uuid(ROW_B) || !focus.onRow) {
+    return `after the held-back keys and Esc, focus is on ${focus.tag} in ${focus.row ?? "no item"}, not on B`;
+  }
+
+  return (await menuSignal(page)) === false
+    ? null
+    : "the page didn't tell main that the last menu closed";
+};
+
+/**
+ * The other menus answer the keys they show, and only those: the ⋯ at the
+ * top, the details header's ⋯ (⌥⌘C on the open item), details' Add… and the
+ * note field's +.
+ */
+const otherMenusCheck = async (page: Page): Promise<string | null> => {
+  const mod = await commandKey(page);
+  const b = uuid(ROW_B);
+
+  await page.evaluate(WATCH_KEYS);
+  await page.locator("header").getByRole("button", { name: "More" }).click();
+  await page.getByRole("menu").waitFor();
+
+  const copyInTopMenu = await swallows(page, `${mod}+c`, "the ⋯ at the top");
+
+  if (copyInTopMenu !== null) {
+    return copyInTopMenu;
+  }
+
+  await page.keyboard.press(`Shift+${mod}+n`);
+  await menuClosed(page);
+
+  const naming = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label')"
+  );
+
+  if (naming !== "New section name") {
+    return `⇧${mod}N in the ⋯ at the top left focus on ${String(naming)}, not the new section's name`;
+  }
+
+  await page.keyboard.press("Escape");
+  await details(page, ROW_B);
+
+  let before = await callCount(page);
+
+  await page
+    .locator("[data-details-view]")
+    .getByRole("button", { exact: true, name: "More" })
+    .click();
+  await page.getByRole("menu").waitFor();
+  await page.keyboard.press(`Alt+${mod}+c`);
+  await menuClosed(page);
+
+  const fromDetailsMenu = await calls(page, before);
+
+  if (!isDeepStrictEqual(fromDetailsMenu, [{ arg: b, call: "copyDetails" }])) {
+    return `Alt+${mod}+C in the details ⋯ sent ${JSON.stringify(fromDetailsMenu)}, not copyDetails(B)`;
+  }
+
+  await page.getByRole("button", { name: "Add a field" }).click();
+  await page.getByRole("menu").waitFor();
+  await page.keyboard.press(`${mod}+d`);
+  await menuClosed(page);
+
+  const field = await page.evaluate(
+    "document.activeElement?.closest('[aria-label]')?.getAttribute('aria-label')"
+  );
+
+  if (field !== "Description") {
+    return `${mod}+D in details' Add… left focus on ${String(field)}, not the description`;
+  }
+
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await page.waitForTimeout(150);
+  before = await callCount(page);
+  await page.getByRole("button", { exact: true, name: "Add" }).click();
+  await page.getByRole("menu").waitFor();
+  await page.keyboard.press(`Shift+${mod}+l`);
+  await menuClosed(page);
+
+  const afterAdd = await calls(page, before);
+  const fromAddMenu = afterAdd.map((call) => call.call);
+
+  return isDeepStrictEqual(fromAddMenu, ["newWindowLink"])
+    ? null
+    : `Shift+${mod}+L in the note field's + sent ${JSON.stringify(fromAddMenu)}, not newWindowLink`;
+};
+
+/** A step that clicks the first menu entry whose name starts so: "Copy" is the entry above "Copy with Details". */
+const clickEntry = (name: string) => async (on: Page) => {
+  await on
+    .getByRole("menuitem", { name: new RegExp(`^${name}`, "u") })
+    .first()
+    .click();
+};
+
+/** Picks A and C, with ⇧-click, as ⌃-click is a right-click on a Mac. */
+const pickAAndC = async (page: Page): Promise<void> => {
+  await select(page, ENTRY_A);
+  await item(page, ROW_C)
+    .locator("[data-row-keys]")
+    .first()
+    .click({ modifiers: ["Shift"] });
+};
+
+/** Main's message when the shelf can't be saved: the banner shows it, and every copy is refused with it. */
+const SAVE_FAILED =
+  "The shelf could not be saved: ENOSPC: no space left on device, write";
+
+const NOT_COPIED = `Not copied. ${SAVE_FAILED}`;
+
+/**
+ * Round 5: with saves failing, main refuses every copy. Each way to copy in
+ * the shelf asks main, then shows the refusal and never "Copied".
+ */
+const copyRefusedCheck = async (page: Page): Promise<string | null> => {
+  const mod = await commandKey(page);
+
+  const ways: readonly {
+    readonly name: string;
+    readonly open: (on: Page) => Promise<void>;
+    readonly run: (on: Page) => Promise<void>;
+    readonly call: string;
+  }[] = [
+    {
+      call: "copy",
+      name: `${mod}+C in B's menu`,
+      open: openAThenMenuOnB,
+      run: pressing(`${mod}+c`),
+    },
+    {
+      call: "copyDetails",
+      name: `Alt+${mod}+C in B's menu`,
+      open: openAThenMenuOnB,
+      run: pressing(`Alt+${mod}+c`),
+    },
+    {
+      call: "copy",
+      name: "Copy in B's menu",
+      open: openAThenMenuOnB,
+      run: clickEntry("Copy"),
+    },
+    {
+      call: "copyWithLink",
+      name: "Copy with Link in B's menu",
+      open: openAThenMenuOnB,
+      run: clickEntry("Copy with Link"),
+    },
+    {
+      call: "copy",
+      name: "Edit › Copy",
+      open: async (on) => {
+        await select(on, ROW_B);
+      },
+      run: command({ kind: "copy" }),
+    },
+    {
+      call: "copyDetails",
+      name: "Item › Copy with Details",
+      open: async (on) => {
+        await select(on, ROW_B);
+      },
+      run: command({ action: "copyDetails", kind: "item" }),
+    },
+    {
+      call: "copyList",
+      name: "Item › Copy as List",
+      open: async (on) => {
+        await select(on, ROW_B);
+      },
+      run: command({ action: "copyList", kind: "item" }),
+    },
+    {
+      call: "copyWithLink",
+      name: "Item › Copy with Link",
+      open: async (on) => {
+        await select(on, ROW_B);
+      },
+      run: command({ action: "copyWithLink", kind: "item" }),
+    },
+    {
+      call: "copyList",
+      name: `Shift+${mod}+C in the menu for A and C`,
+      open: async (on) => {
+        await pickAAndC(on);
+        await openMenuOn(on, ROW_C);
+      },
+      run: pressing(`Shift+${mod}+c`),
+    },
+    {
+      call: "copyList",
+      name: "Edit › Copy with A and C picked",
+      open: pickAAndC,
+      run: command({ kind: "copy" }),
+    },
+    // Elsewhere than macOS the page answers Ctrl+C itself; on a Mac ⌘C is the menu bar's Edit › Copy, above.
+    ...(mod === "Control"
+      ? [
+          {
+            call: "copy",
+            name: "Ctrl+C on B's row",
+            open: async (on: Page) => {
+              await select(on, ROW_B);
+              await item(on, ROW_B).locator("[data-row-keys]").first().focus();
+            },
+            run: pressing("Control+c"),
+          },
+        ]
+      : []),
+  ];
+
+  // Each toast that appears from here on, by its words.
+  await page.evaluate(`(() => {
+    globalThis.__toasts = [];
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof Element && node.matches("[data-sonner-toast]")) {
+            requestAnimationFrame(() => globalThis.__toasts.push(node.textContent));
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  })()`);
+
+  for (const way of ways) {
+    // oxlint-disable-next-line no-await-in-loop -- one way after another, on purpose.
+    await way.open(page);
+    // oxlint-disable-next-line no-await-in-loop -- only the toasts this copy shows.
+    await page.evaluate("globalThis.__toasts.length = 0");
+    // oxlint-disable-next-line no-await-in-loop -- counted before the copy.
+    const before = await callCount(page);
+    // oxlint-disable-next-line no-await-in-loop -- one way after another, on purpose.
+    await way.run(page);
+    // oxlint-disable-next-line no-await-in-loop -- the refusal comes back over IPC.
+    await page.waitForTimeout(300);
+
+    // oxlint-disable-next-line no-await-in-loop -- read after the copy.
+    const after = await calls(page, before);
+    const sent = after.map((call) => call.call);
+    // oxlint-disable-next-line no-await-in-loop -- read after the copy.
+    const copiedMarks = await page.locator('[aria-label="Copied"]').count();
+    // oxlint-disable-next-line no-await-in-loop -- read after the copy.
+    const shown = await page.evaluate("globalThis.__toasts");
+    const toasts = z.array(z.string()).parse(shown);
+
+    if (!isDeepStrictEqual(sent, [way.call])) {
+      return `${way.name} sent ${JSON.stringify(sent)}, not ${way.call}`;
+    }
+
+    if (copiedMarks > 0 || toasts.some((text) => text.startsWith("Copied"))) {
+      return `${way.name} showed Copied although main refused the copy`;
+    }
+
+    if (!toasts.some((text) => text.includes(NOT_COPIED))) {
+      return `${way.name} didn't say why nothing was copied (toasts: ${JSON.stringify(toasts)})`;
+    }
+  }
+
+  return null;
 };
 
 const SCENES: readonly Scene[] = [
@@ -1382,6 +1827,44 @@ const SCENES: readonly Scene[] = [
     check: menuOwnershipCheck,
     data: { echo: "later", view: shelfView(MENU_DOC) },
     name: "shelf-row-menu-keys",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // ↓ to Check Off: the highlighted entry, which Space or Return would choose; no entry shows Space.
+    act: async (page) => {
+      await openAThenMenuOnB(page);
+      await walkTo(page, "Check Off");
+    },
+    check: async (page) => {
+      await page.keyboard.press("Escape");
+      await menuClosed(page);
+
+      return (await swallowedKeysCheck(page)) ?? (await otherMenusCheck(page));
+    },
+    data: { echo: "later", view: shelfView(MENU_DOC) },
+    name: "shelf-menu-held-keys",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    act: async (page) => {
+      const mod = await commandKey(page);
+
+      await openAThenMenuOnB(page);
+      await page.keyboard.press(`${mod}+c`);
+      await page.getByText(NOT_COPIED).waitFor();
+    },
+    check: copyRefusedCheck,
+    data: {
+      copyFails: NOT_COPIED,
+      echo: "later",
+      view: {
+        ...shelfView(MENU_DOC),
+        status: { ...STATUS, saveError: SAVE_FAILED },
+      },
+    },
+    name: "shelf-copy-save-failed",
     page: "shelf",
     platforms: ["macos", "windows"],
   },

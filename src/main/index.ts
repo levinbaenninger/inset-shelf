@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { access, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
 
 import {
   drawingContract,
@@ -14,6 +13,7 @@ import {
 } from "@shared/contracts";
 import type {
   ActionResult,
+  NoticeTone,
   Permission,
   PickerView,
   ShelfCommand,
@@ -21,15 +21,7 @@ import type {
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { IconPlace, SettingsView } from "@shared/settings";
-import {
-  ItemIdSchema,
-  itemDetailsText,
-  SectionIdSchema,
-  itemsAsList,
-  itemText,
-  itemTextWithLink,
-  listHtmlWithImage,
-} from "@shared/shelf";
+import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
 import type {
   ItemContext,
   ItemId,
@@ -60,6 +52,9 @@ import type { NativeImage, WebContents } from "electron";
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { chatGptThreadLink } from "./codex-threads";
+import { createCopyCommands } from "./copy-commands";
+import { createCopyGate } from "./copy-gate";
+import type { ClipboardContents } from "./copy-gate";
 import { copySource } from "./copy-source";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
@@ -106,10 +101,6 @@ const MAC_SCREEN_SETTINGS =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
 
 const KEYS_POLL_MS = 3000;
-
-/** The macOS pasteboard type for a file, which Electron reaches through its raw formats. */
-const MAC_FILE_URL =
-  'electron application/osclipboard;format="public.file-url"';
 
 const TOAST_EXCERPT = 80;
 
@@ -164,12 +155,7 @@ const excerpt = (text: string): string => {
     : line;
 };
 
-/** What one clipboard item holds, format by format. */
-type ClipboardData = ConstructorParameters<typeof ClipboardItem>[0];
-
-type ClipboardSnapshot = readonly ClipboardData[];
-
-const snapshotClipboard = async (): Promise<ClipboardSnapshot> => {
+const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
   const items = await clipboard.read();
 
   return await Promise.all(
@@ -199,16 +185,6 @@ const readClipboardHtml = async (): Promise<string> => {
   return await html.text();
 };
 
-const restoreClipboard = async (saved: ClipboardSnapshot): Promise<void> => {
-  if (saved.length === 0) {
-    clipboard.clear();
-
-    return;
-  }
-
-  await clipboard.write(saved.map((data) => new ClipboardItem(data)));
-};
-
 /** Opens the chat or page an item came from in its desktop app, else (macOS only) just brings the app forward. */
 const openInApp = async (
   name: string,
@@ -234,13 +210,31 @@ const openInApp = async (
 const linkText = (windows: readonly WindowRef[]): string =>
   windows.map((window) => window.title ?? window.app ?? "Window").join(" · ");
 
+/** Pages with a menu open, which then take every key themselves (src/renderer/lib/menu-keys.ts). */
+const withMenuOpen = new WeakSet<WebContents>();
+
+const setMenuOpen = (contents: WebContents, open: boolean): void => {
+  if (open) {
+    withMenuOpen.add(contents);
+  } else {
+    withMenuOpen.delete(contents);
+  }
+
+  contents.setIgnoreMenuShortcuts(open);
+};
+
 /**
  * Runs the app menu's entry for a key press in this page (item 8): on
  * Windows the frameless windows have no menu bar to take the keys from.
- * Preventing the event also keeps it from the page and the menu.
+ * Preventing the event also keeps it from the page and the menu. While a
+ * menu is open in the page, the keys are the menu's.
  */
 const answerMenuKeys = (contents: WebContents): void => {
   contents.on("before-input-event", (event, input) => {
+    if (withMenuOpen.has(contents)) {
+      return;
+    }
+
     const menu = Menu.getApplicationMenu();
     const entry = menu === null ? null : menuEntryForKey(menu.items, input);
 
@@ -417,6 +411,14 @@ const start = async (): Promise<void> => {
     url: pageUrl("shelf"),
   });
 
+  // A page that reloads or crashes with a menu open never says it closed.
+  const forgetMenu = (): void => {
+    setMenuOpen(shelf.webContents, false);
+  };
+
+  shelf.webContents.on("did-start-loading", forgetMenu);
+  shelf.webContents.on("render-process-gone", forgetMenu);
+
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
 
@@ -559,6 +561,14 @@ const start = async (): Promise<void> => {
     rendererRoot: rendererRoot(),
   });
 
+  // Every copy goes through this gate: it waits for the disk, and copies nothing when the save failed.
+  const gate = createCopyGate({
+    clipboard,
+    flush: controller.flush,
+    onWrite: screenshots.ignoreClipboard,
+    toItem: (data) => new ClipboardItem(data),
+  });
+
   const keyMonitor = createKeyMonitor();
 
   let capturingSelection = false;
@@ -581,18 +591,12 @@ const start = async (): Promise<void> => {
 
     try {
       const capture = captureSelection({
-        clear: () => {
-          screenshots.ignoreClipboard();
-          clipboard.clear();
-        },
+        clear: gate.clearForSelection,
         copy: keyMonitor.copy,
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),
-        restore: async (saved) => {
-          screenshots.ignoreClipboard();
-          await restoreClipboard(saved);
-        },
+        restore: gate.restore,
         snapshot: snapshotClipboard,
         wait: delay,
       });
@@ -814,8 +818,11 @@ const start = async (): Promise<void> => {
   };
 
   // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
-  let notify: (message: string) => void = (message) => {
-    toast.show(message, "");
+  let notify: (message: string, tone?: NoticeTone) => void = (
+    message,
+    tone
+  ) => {
+    toast.show(message, "", tone);
   };
 
   const pickFiles = async (): Promise<void> => {
@@ -837,60 +844,19 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /**
-   * Items as one numbered list, with the first image (pin drawn in) in its
-   * HTML, so apps that paste formatting show the picture with the words and
-   * the rest keep the words. Without any words, the image alone.
-   */
-  const copyList = async (ids: readonly ItemId[]): Promise<ActionResult> => {
-    screenshots.ignoreClipboard();
+  const copies = createCopyCommands({
+    exportImage: (item) => {
+      const file = store.attachmentPath(item.image.file);
+      const exported = file === null ? null : exportImage(item, file);
 
-    const items = ids.flatMap((id) => {
-      const item = controller.item(id);
-
-      return item === undefined ? [] : [item];
-    });
-
-    const list = itemsAsList(items);
-    const firstImage = items.find((item) => item.kind === "image");
-
-    const imageFile =
-      firstImage?.kind === "image"
-        ? store.attachmentPath(firstImage.image.file)
-        : null;
-
-    const exported =
-      firstImage?.kind === "image" && imageFile !== null
-        ? exportImage(firstImage, imageFile)
-        : null;
-
-    if (list.count === 0 && exported === null) {
-      return { message: "There is nothing to copy.", ok: false };
-    }
-
-    try {
-      const data: ClipboardData = {};
-
-      if (list.count > 0) {
-        const html =
-          exported === null || firstImage?.kind !== "image"
-            ? list.html
-            : listHtmlWithImage(list.html, {
-                alt: firstImage.note.trim() === "" ? "Image" : firstImage.note,
-                base64: Buffer.from(exported.png).toString("base64"),
-                width:
-                  exported.image.getSize().width /
-                  firstImage.image.pixelsPerDip,
-              });
-
-        data["text/plain"] = new Blob([list.text], { type: "text/plain" });
-        data["text/html"] = new Blob([html], { type: "text/html" });
-      } else if (exported !== null) {
-        data["image/png"] = new Blob([exported.png], { type: "image/png" });
-      }
-
-      await clipboard.write([new ClipboardItem(data)]);
-
+      return exported === null
+        ? null
+        : { png: exported.png, widthPx: exported.image.getSize().width };
+    },
+    gate,
+    item: controller.item,
+    mac: isMac,
+    onCopied: (items, kind) => {
       if (settings.current().markDoneOnCopy) {
         for (const item of items) {
           if (!item.done) {
@@ -899,109 +865,23 @@ const start = async (): Promise<void> => {
         }
       }
 
-      e2eLog("copied", { kind: "list" });
+      const [first] = items;
 
-      return { ok: true };
-    } catch (error) {
-      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
-    }
-  };
+      e2eLog(
+        "copied",
+        kind === "list" || first === undefined
+          ? { kind: "list" }
+          : { itemId: first.id, kind: first.kind }
+      );
+    },
+    stageFile: (item) => {
+      const stored = store.attachmentPath(item.file.stored);
 
-  /** An item as text: with its link, or with every detail. */
-  const copyText = async (
-    id: ItemId,
-    text: (item: ShelfItem) => string
-  ): Promise<ActionResult> => {
-    screenshots.ignoreClipboard();
-
-    const item = controller.item(id);
-
-    if (item === undefined) {
-      return { message: "This item no longer exists.", ok: false };
-    }
-
-    try {
-      await clipboard.writeText(text(item));
-
-      return { ok: true };
-    } catch (error) {
-      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
-    }
-  };
-
-  const copyItem = async (id: ItemId): Promise<ActionResult> => {
-    screenshots.ignoreClipboard();
-
-    const item = controller.item(id);
-
-    if (item === undefined) {
-      return { message: "This item no longer exists.", ok: false };
-    }
-
-    try {
-      if (item.kind === "text" && item.html !== null) {
-        // The copied HTML goes back next to the text, so links and formatting paste too.
-        await clipboard.write([
-          new ClipboardItem({
-            "text/html": new Blob([item.html], { type: "text/html" }),
-            "text/plain": new Blob([item.text], { type: "text/plain" }),
-          }),
-        ]);
-      } else if (item.kind === "text") {
-        await clipboard.writeText(item.text);
-      } else if (item.kind === "file") {
-        const stored = store.attachmentPath(item.file.stored);
-
-        if (stored === null) {
-          return { message: "The file can't be read.", ok: false };
-        }
-
-        // A named copy goes on the clipboard as a file, so it pastes into Finder, Explorer or Mail as itself.
-        const file = staging.copy(id, item.file.name, stored);
-        const url = pathToFileURL(file).href;
-
-        await clipboard.write([
-          new ClipboardItem({
-            // On Windows a URI list becomes a file drop list (CF_HDROP).
-            ...(isMac
-              ? { [MAC_FILE_URL]: new Blob([url]) }
-              : {
-                  "text/uri-list": new Blob([url], { type: "text/uri-list" }),
-                }),
-            "text/plain": new Blob([item.file.name], { type: "text/plain" }),
-          }),
-        ]);
-      } else {
-        const file = store.attachmentPath(item.image.file);
-        const exported = file === null ? null : exportImage(item, file);
-
-        if (exported === null) {
-          return { message: "The image can't be read.", ok: false };
-        }
-
-        // The note travels as text next to the image, so a chat box can take both.
-        const data: ClipboardData = {
-          "image/png": new Blob([exported.png], { type: "image/png" }),
-        };
-
-        if (item.note.trim() !== "") {
-          data["text/plain"] = new Blob([item.note], { type: "text/plain" });
-        }
-
-        await clipboard.write([new ClipboardItem(data)]);
-      }
-
-      if (settings.current().markDoneOnCopy && !item.done) {
-        controller.apply({ id, type: "toggleDone" });
-      }
-
-      e2eLog("copied", { itemId: id, kind: item.kind });
-
-      return { ok: true };
-    } catch (error) {
-      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
-    }
-  };
+      return stored === null
+        ? null
+        : staging.copy(item.id, item.file.name, stored);
+    },
+  });
 
   // The window-link picker: New Window Link… makes a note, Link Window… adds to an item.
   const picker = createPickerWindow({
@@ -1195,10 +1075,10 @@ const start = async (): Promise<void> => {
       attachFiles: () => {
         void pickFiles();
       },
-      copy: copyItem,
-      copyDetails: async (id) => await copyText(id, itemDetailsText),
-      copyList,
-      copyWithLink: async (id) => await copyText(id, itemTextWithLink),
+      copy: copies.copy,
+      copyDetails: copies.copyDetails,
+      copyList: copies.copyList,
+      copyWithLink: copies.copyWithLink,
       linkWindows: (id) => {
         openPicker(id);
       },
@@ -1221,9 +1101,12 @@ const start = async (): Promise<void> => {
       hide: () => {
         shelf.hide();
       },
+      menuOpen: (open) => {
+        setMenuOpen(shelf.webContents, open);
+      },
       nativeEdit: (action) => {
         if (action === "copy") {
-          shelf.webContents.copy();
+          gate.copySelection(shelf.webContents);
         } else if (action === "selectAll") {
           shelf.webContents.selectAll();
         } else if (action === "redo") {
@@ -1311,6 +1194,15 @@ const start = async (): Promise<void> => {
     }
   );
 
+  /** Shows the shelf with the saved image; when Copy and Save could not copy, it says why there. */
+  const showSaved = async (copied: ActionResult | null): Promise<void> => {
+    await showShelf();
+
+    if (copied !== null && !copied.ok) {
+      notify(copied.message, "failed");
+    }
+  };
+
   /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
   const DRAWING_PIXELS_PER_DIP = 2;
 
@@ -1350,14 +1242,12 @@ const start = async (): Promise<void> => {
     // Copies dragged out earlier show the old picture and pins.
     staging.clear(id);
 
-    if (copy) {
-      await copyItem(id);
-    }
+    const copied = copy ? await copies.copy(id) : null;
 
     drawing.close();
     e2eLog("itemAdded", { itemId: id, kind: "image", via: "annotation" });
     controller.focus(id);
-    void showShelf();
+    void showSaved(copied);
 
     return { ok: true };
   };
@@ -1412,16 +1302,14 @@ const start = async (): Promise<void> => {
           via: "drawing",
         });
 
-        if (copy && id !== null) {
-          await copyItem(id);
-        }
+        const copied = copy && id !== null ? await copies.copy(id) : null;
 
         drawing.close();
 
         if (id !== null) {
           e2eLog("itemAdded", { itemId: id, kind: "image", via: "drawing" });
           controller.focus(id);
-          void showShelf();
+          void showSaved(copied);
         }
 
         return { ok: true };
@@ -1533,15 +1421,21 @@ const start = async (): Promise<void> => {
           return;
         }
 
-        shot = null;
-        screenshotCard.hide();
-        screenshots.ignoreClipboard();
         void (async () => {
-          await clipboard.write([
-            new ClipboardItem({
-              "image/png": new Blob([current.png], { type: "image/png" }),
-            }),
-          ]);
+          const copied = await copies.copyScreenshot(current.png);
+
+          if (!copied.ok) {
+            // The card stays, so the screenshot isn't lost.
+            notify(copied.message, "failed");
+
+            return;
+          }
+
+          if (shot === current) {
+            shot = null;
+            screenshotCard.hide();
+          }
+
           notify("Copied screenshot");
         })();
       },
@@ -1628,11 +1522,11 @@ const start = async (): Promise<void> => {
     shelfServer.emit("command", command);
   };
 
-  notify = (message) => {
+  notify = (message, tone = "done") => {
     if (shelf.isVisible()) {
-      shelfServer.emit("notice", { message });
+      shelfServer.emit("notice", { message, tone });
     } else {
-      toast.show(message, "");
+      toast.show(message, "", tone);
     }
   };
 

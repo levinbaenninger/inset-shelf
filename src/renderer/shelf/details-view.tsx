@@ -46,7 +46,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -929,10 +928,10 @@ const DetailsHeader = ({
               onSelect={() => {
                 chosen.current = field;
               }}
+              shortcut={FIELD_KEY[field]}
             >
               <HugeiconsIcon icon={FIELD_ICON[field]} />
               {FIELD_LABEL[field]}
-              <DropdownMenuShortcut>{k(FIELD_KEY[field])}</DropdownMenuShortcut>
             </DropdownMenuItem>
           ))}
           {addable.length > 0 ? <DropdownMenuSeparator /> : null}

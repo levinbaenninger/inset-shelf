@@ -1,8 +1,12 @@
 import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { keyText } from "@shared/shortcut";
 import { cn } from "cn";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import * as React from "react";
+
+import { answerMenuKey, holdMenuOpen } from "@/lib/menu-keys";
+import { isMac } from "@/shared/platform";
 
 const CONTENT =
   "bg-popover text-popover-foreground ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-48 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg p-1 shadow-md ring-1 duration-100";
@@ -14,10 +18,30 @@ const ITEM =
 const DESTRUCTIVE =
   "text-destructive focus:bg-destructive/10 focus:text-destructive dark:focus:bg-destructive/20 [&_svg:not([class*='text-'])]:text-destructive focus:[&_svg:not([class*='text-'])]:text-destructive";
 
+/** Main holds back the menu bar's keys while any menu is open (lib/menu-keys.ts). */
 function DropdownMenu({
+  defaultOpen,
+  onOpenChange,
+  open,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
+  const [ownOpen, setOwnOpen] = React.useState(defaultOpen ?? false);
+  const shown = open ?? ownOpen;
+
+  React.useEffect(() => (shown ? holdMenuOpen() : undefined), [shown]);
+
+  return (
+    <DropdownMenuPrimitive.Root
+      data-slot="dropdown-menu"
+      defaultOpen={defaultOpen}
+      onOpenChange={(next) => {
+        setOwnOpen(next);
+        onOpenChange?.(next);
+      }}
+      open={open}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuTrigger({
@@ -31,10 +55,12 @@ function DropdownMenuTrigger({
   );
 }
 
+/** Its own keys run first (`onKeyDownCapture`), then the shared menu keys (lib/menu-keys.ts). */
 function DropdownMenuContent({
   className,
   sideOffset = 4,
   collisionPadding = 6,
+  onKeyDownCapture,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
@@ -44,6 +70,10 @@ function DropdownMenuContent({
         collisionPadding={collisionPadding}
         sideOffset={sideOffset}
         className={cn(CONTENT, className)}
+        onKeyDownCapture={(event) => {
+          onKeyDownCapture?.(event);
+          answerMenuKey(event);
+        }}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
@@ -58,20 +88,30 @@ function DropdownMenuGroup({
   );
 }
 
+/** `shortcut` (an accelerator) shows at the right edge, and pressing it while the menu is open chooses the item. */
 function DropdownMenuItem({
+  children,
   className,
+  shortcut,
   variant = "default",
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
   variant?: "default" | "destructive";
+  shortcut?: string;
 }) {
   return (
     <DropdownMenuPrimitive.Item
+      data-accelerator={shortcut}
       data-slot="dropdown-menu-item"
       data-variant={variant}
       className={cn(ITEM, variant === "destructive" && DESTRUCTIVE, className)}
       {...props}
-    />
+    >
+      {children}
+      {shortcut === undefined ? null : (
+        <DropdownMenuShortcut>{keyText(shortcut, isMac)}</DropdownMenuShortcut>
+      )}
+    </DropdownMenuPrimitive.Item>
   );
 }
 

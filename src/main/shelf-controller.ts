@@ -35,8 +35,12 @@ export interface ShelfController {
   readonly focus: (id: ItemId, edit?: boolean) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
-  /** Writes any pending change now; used before quitting. */
-  readonly flush: () => Promise<void>;
+  /**
+   * Writes every change made so far, retrying one a failed save left
+   * unwritten, and says whether the disk now holds them all. Copies wait
+   * for it, and so does quitting.
+   */
+  readonly flush: () => Promise<WriteResult>;
   /** A window removed in details that can still come back. */
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
 }
@@ -76,6 +80,11 @@ export const createShelfController = (
   let toDelete: ShelfItem[] = [];
   let removedWindows: readonly RemovedWindow[] = [];
   let inFlight: Promise<void> = Promise.resolve();
+  // Counts the changes; `saved` is the last one the disk holds.
+  let version = 0;
+  let saved = 0;
+  // A save is on its way that hasn't read the document yet.
+  let queued = false;
   const listeners = new Set<() => void>();
 
   const emit = (): void => {
@@ -90,7 +99,14 @@ export const createShelfController = (
   };
 
   const persist = async (): Promise<void> => {
+    queued = false;
+
+    if (saved === version) {
+      return;
+    }
+
     const snapshot = doc;
+    const snapshotVersion = version;
     const deletable = toDelete;
 
     toDelete = [];
@@ -103,6 +119,8 @@ export const createShelfController = (
 
       return;
     }
+
+    saved = snapshotVersion;
 
     if (status.saveError !== null) {
       setStatus({ saveError: null });
@@ -118,6 +136,7 @@ export const createShelfController = (
   const saveNow = (): void => {
     cancelTimer?.();
     cancelTimer = null;
+    queued = true;
     const previous = inFlight;
 
     inFlight = (async () => {
@@ -194,6 +213,7 @@ export const createShelfController = (
       }
 
       ({ doc } = result);
+      version += 1;
       toDelete = [...toDelete, ...result.discarded];
 
       if (op.type === "undoRemove") {
@@ -215,11 +235,22 @@ export const createShelfController = (
       return result.addedId;
     },
     flush: async () => {
-      if (cancelTimer !== null) {
+      const wanted = version;
+
+      // A typed edit waiting for its pause, or a change a failed save left unwritten.
+      if (saved < wanted && !queued) {
         saveNow();
       }
 
       await inFlight;
+
+      return saved >= wanted
+        ? { ok: true }
+        : {
+            message:
+              status.saveError ?? "The shelf could not be saved to disk.",
+            ok: false,
+          };
     },
     focus: (id, edit = false) => {
       focusSeq += 1;
