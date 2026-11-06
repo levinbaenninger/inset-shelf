@@ -1,4 +1,8 @@
-import type { DrawingImage, DrawingView } from "@shared/contracts";
+import type {
+  DrawingImage,
+  DrawingOnShelf,
+  DrawingView,
+} from "@shared/contracts";
 import type { Pin } from "@shared/shelf";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
@@ -14,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { drawingBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
+import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
@@ -202,19 +207,62 @@ const shownStroke = (drag: DragMark | null): DragMark | null =>
 const endStroke = (history: History, drag: DragMark): History =>
   isVisible(drag) ? addMark(history, drag) : history;
 
-/** The pill over the page: why it is locked during a quit, otherwise the Pin tool's hint. */
-const pagePill = (
-  quitting: boolean,
-  selectedPin: number | null,
-  pinCount: number
-): string => {
+/** How long the page says why New Drawing or Annotate brought it forward instead. */
+const REFUSED_MS = 4000;
+
+/** What the page announces over everything else: why it is locked during a quit, or why another drawing didn't open. */
+const pageNotice = (quitting: boolean, refused: boolean): string | null => {
   if (quitting) {
     return "Locked while Inset asks about quitting";
   }
 
-  return selectedPin === null
+  return refused ? "Save or discard this drawing to open another" : null;
+};
+
+const pinHint = (selectedPin: number | null, pinCount: number): string =>
+  selectedPin === null
     ? `Click to place pin ${pinCount + 1}`
     : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ⌫ removes it`;
+
+/** The pill over the page: the page's notice, otherwise the Pin tool's hint. */
+const PagePill = ({
+  hint,
+  notice,
+}: {
+  readonly hint: string | null;
+  readonly notice: string | null;
+}) => {
+  const text = notice ?? hint;
+
+  return text === null ? null : (
+    <p
+      className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm"
+      role={notice === null ? undefined : "status"}
+    >
+      {text}
+    </p>
+  );
+};
+
+/** What closing a new drawing keeps, from what the shelf holds of it. */
+const BLANK_CLOSING: Readonly<Record<DrawingOnShelf, string>> = {
+  asIs: "It is already on the shelf.",
+  earlier: "The shelf keeps it without your latest changes.",
+  none: "It is not on the shelf yet.",
+};
+
+/** What the close confirm says closing keeps or loses. */
+const closingText = (
+  image: DrawingImage | null,
+  onShelf: DrawingOnShelf
+): string => {
+  if (image === null) {
+    return BLANK_CLOSING[onShelf];
+  }
+
+  return onShelf === "asIs"
+    ? "The image on the shelf already has these marks."
+    : "The image on the shelf stays as it was.";
 };
 
 /** One drawing, on a blank page or over an image; the app remounts it for every opening. */
@@ -285,6 +333,9 @@ const Editor = ({
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [closing, setClosing] = useState<DrawingOnShelf>("none");
+  // Each time New Drawing or Annotate brought this drawing forward instead: the pill says why for a while.
+  const [refused, setRefused] = useExpiringState<number>(REFUSED_MS);
   // Words in the open text field, not yet a mark in the history.
   const [draft, setDraft] = useState<Mark | null>(null);
   // A pen, line or shape still being drawn, not yet a mark in the history.
@@ -398,18 +449,27 @@ const Editor = ({
   );
 
   // Closing the window with marks asks here, in the page's own dialog; not while a quit or a save is under way.
-  const confirmClose = useEffectEvent(() => {
+  const confirmClose = useEffectEvent((onShelf: DrawingOnShelf) => {
     if (!locked) {
+      setClosing(onShelf);
       setConfirming(true);
     }
   });
 
   useEffect(
     () =>
-      api.on("confirmClose", () => {
-        confirmClose();
+      api.on("confirmClose", (onShelf) => {
+        confirmClose(onShelf);
       }),
     []
+  );
+
+  useEffect(
+    () =>
+      api.on("openRefused", () => {
+        setRefused((count) => (count ?? 0) + 1);
+      }),
+    [setRefused]
   );
 
   // The menu bar's Undo and Redo arrive here instead of as keys.
@@ -542,14 +602,10 @@ const Editor = ({
             tool={tool}
           />
         </section>
-        {quitting || tool === "pin" ? (
-          <p
-            className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm"
-            role={quitting ? "status" : undefined}
-          >
-            {pagePill(quitting, selectedPin, pins.length)}
-          </p>
-        ) : null}
+        <PagePill
+          hint={tool === "pin" ? pinHint(selectedPin, pins.length) : null}
+          notice={pageNotice(quitting, refused !== null)}
+        />
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
           <Toolbar
             canClear={marks.length > 0}
@@ -591,9 +647,7 @@ const Editor = ({
                 : "Discard what you drew on this image?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {image === null
-                ? "It is not on the shelf yet."
-                : "The image on the shelf stays as it was."}
+              {closingText(image, closing)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

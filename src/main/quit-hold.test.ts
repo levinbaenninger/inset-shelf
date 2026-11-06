@@ -436,15 +436,6 @@ const duringDiskWait = (countStuck = false) => {
     page.answered(seq);
   });
 
-  followPage(
-    {
-      on: (event, listener) => {
-        contents.addEventListener(event, listener);
-      },
-    },
-    page
-  );
-
   const hold = createQuitHold({
     ask: async (question) => {
       questions.push(question);
@@ -480,6 +471,18 @@ const duringDiskWait = (countStuck = false) => {
     }),
   });
 
+  followPage(
+    {
+      on: (event, listener) => {
+        contents.addEventListener(event, listener);
+      },
+    },
+    () => {
+      page.reset();
+      hold.pageEnded();
+    }
+  );
+
   return {
     /** The page crashes, reloads or goes away: it answers nothing more. */
     end: (event: string): void => {
@@ -510,7 +513,357 @@ const duringDiskWait = (countStuck = false) => {
   };
 };
 
+const DISK_FULL_SENTENCE = "The disk is full.";
+
+/**
+ * The real PageSettle following a shelf page that shows the quit's prompt,
+ * on a disk that refuses every write (`holdWrite`: the first one only once
+ * the test lets it go). Main's dialog waits for the test's answer.
+ */
+const promptOnPage = (options: { readonly holdWrite?: boolean } = {}) => {
+  const contents = new EventTarget();
+  const disk = new EventTarget();
+  const native = new EventTarget();
+  const questions: NativeQuestion[] = [];
+  const finished: string[] = [];
+  const locks: boolean[] = [];
+  const timers: { readonly run: () => void; readonly ms: number }[] = [];
+  let nativeAnswer: QuitAnswer = "cancel";
+  let shown: QuitPrompt | null = null;
+  let holdWrite = options.holdWrite === true;
+  // A page that ended, or hangs, answers nothing.
+  let answers = true;
+
+  const page = createPageSettle((seq) => {
+    if (answers) {
+      page.answered(seq);
+    }
+  });
+
+  const hold = createQuitHold({
+    ask: async (question) => {
+      questions.push(question);
+      await once(native, "answer");
+
+      return nativeAnswer;
+    },
+    flush: async () => {
+      if (holdWrite) {
+        holdWrite = false;
+        await once(disk, "release");
+      }
+
+      return { message: DISK_FULL_SENTENCE, ok: false };
+    },
+    pageDrafts: page.drafts,
+    prompt: (prompt) => {
+      shown = prompt;
+    },
+    quitting: (busy) => {
+      locks.push(busy);
+    },
+    saveDrawing: async () => {
+      await Promise.resolve();
+    },
+    settlePage: page.request,
+    setTimer: (run, ms) => {
+      const timer = { ms, run };
+
+      timers.push(timer);
+
+      return () => {
+        timers.splice(timers.indexOf(timer), 1);
+      };
+    },
+    state: () => ({
+      drawing: "none",
+      drawingError: null,
+      readOnly: false,
+      saveError: DISK_FULL_SENTENCE,
+      unsaved: 1,
+    }),
+  });
+
+  // As main wires it: each end of the page reaches the settle and the hold.
+  followPage(
+    {
+      on: (event, listener) => {
+        contents.addEventListener(event, listener);
+      },
+    },
+    () => {
+      page.reset();
+      hold.pageEnded();
+    }
+  );
+
+  return {
+    answerNative: (answer: QuitAnswer): void => {
+      nativeAnswer = answer;
+      native.dispatchEvent(new Event("answer"));
+    },
+    /** The page loads again and reports its count, as a fresh page does. */
+    comeBack: (): void => {
+      answers = true;
+      page.setDrafts(0);
+    },
+    /** The page crashes, reloads, navigates or goes away. */
+    end: (...events: readonly string[]): void => {
+      answers = false;
+
+      for (const event of events) {
+        contents.dispatchEvent(new Event(event));
+      }
+    },
+    finished,
+    fire: (ms: number): void => {
+      for (const timer of timers.filter((candidate) => candidate.ms === ms)) {
+        timer.run();
+      }
+    },
+    /** The page stops answering without ending. */
+    hang: (): void => {
+      answers = false;
+    },
+    locked: (): boolean | undefined => locks.at(-1),
+    questions,
+    quit: async (): Promise<void> => {
+      hold.request(() => {
+        finished.push("quit");
+      });
+      await settled();
+    },
+    release: (): void => {
+      disk.dispatchEvent(new Event("release"));
+    },
+    shown: (): QuitPrompt | null => shown,
+  };
+};
+
+const HELD_ON_FULL_DISK: QuitPrompt = {
+  count: 1,
+  message: DISK_FULL_SENTENCE,
+  state: "asking",
+};
+
 describe("the quit hold", () => {
+  it.each([
+    "render-process-gone",
+    "did-navigate",
+    "did-start-loading",
+    "destroyed",
+  ])(
+    "asks in main's dialog, with the same count, when the page showing the quit prompt ends (%s), and Cancel unlocks the drawing (Sol round 8)",
+    async (end) => {
+      const app = promptOnPage();
+
+      await app.quit();
+      const before = app.shown();
+
+      // A crash reloads the page, so its events come in a burst.
+      app.end(end, "did-start-loading", "did-navigate");
+      await settled();
+
+      const asked = {
+        locked: app.locked(),
+        questions: [...app.questions],
+        shown: app.shown(),
+      };
+
+      app.answerNative("cancel");
+      await settled();
+
+      expect({
+        after: { finished: app.finished, locked: app.locked() },
+        asked,
+        before,
+      }).toStrictEqual({
+        after: { finished: [], locked: false },
+        asked: {
+          locked: true,
+          questions: [{ kind: "gone", prompt: HELD_ON_FULL_DISK }],
+          shown: null,
+        },
+        before: HELD_ON_FULL_DISK,
+      });
+    }
+  );
+
+  it("quits on Quit anyway in main's dialog after the page showing the prompt ended", async () => {
+    const app = promptOnPage();
+
+    await app.quit();
+    app.end("render-process-gone");
+    await settled();
+    app.answerNative("discard");
+    await settled();
+
+    expect(app.finished).toStrictEqual(["quit"]);
+  });
+
+  it("asks in the page that came back on Wait in main's dialog", async () => {
+    const app = promptOnPage();
+
+    await app.quit();
+    app.end("render-process-gone", "did-start-loading", "did-navigate");
+    app.comeBack();
+    await settled();
+    app.answerNative("retry");
+    await settled();
+
+    expect({
+      finished: app.finished,
+      questions: app.questions.length,
+      shown: app.shown(),
+    }).toStrictEqual({
+      finished: [],
+      questions: 1,
+      shown: HELD_ON_FULL_DISK,
+    });
+  });
+
+  it("asks with main's Retry dialog on Wait when no page came back, and never quits on its own", async () => {
+    const app = promptOnPage();
+
+    await app.quit();
+    app.end("render-process-gone");
+    await settled();
+    app.answerNative("retry");
+    await settled();
+
+    expect({
+      finished: app.finished,
+      questions: app.questions,
+      shown: app.shown(),
+    }).toStrictEqual({
+      finished: [],
+      questions: [
+        { kind: "gone", prompt: HELD_ON_FULL_DISK },
+        { kind: "held", prompt: HELD_ON_FULL_DISK },
+      ],
+      shown: null,
+    });
+  });
+
+  it("asks in main's dialog when the page ends before it answers, holding nothing, and the write fails", async () => {
+    const app = promptOnPage();
+
+    app.hang();
+    await app.quit();
+    app.end("render-process-gone");
+    await settled();
+
+    expect({
+      finished: app.finished,
+      questions: app.questions,
+      shown: app.shown(),
+    }).toStrictEqual({
+      finished: [],
+      questions: [{ kind: "gone", prompt: HELD_ON_FULL_DISK }],
+      shown: null,
+    });
+  });
+
+  it("asks in main's dialog when the page that answered ends during the disk wait and the write fails", async () => {
+    const app = promptOnPage({ holdWrite: true });
+
+    await app.quit();
+    app.end("render-process-gone");
+    app.release();
+    await settled();
+
+    expect({ questions: app.questions, shown: app.shown() }).toStrictEqual({
+      questions: [{ kind: "gone", prompt: HELD_ON_FULL_DISK }],
+      shown: null,
+    });
+  });
+
+  it("brings the prompt back on a second quit while its page answers, and asks in main's dialog once it no longer does", async () => {
+    const app = promptOnPage();
+
+    await app.quit();
+    await app.quit();
+    const live = { questions: app.questions.length, shown: app.shown() };
+
+    app.hang();
+    await app.quit();
+    const waiting = app.questions.length;
+
+    app.fire(QUIT_WAIT_MS);
+    await settled();
+
+    expect({ live, questions: app.questions, waiting }).toStrictEqual({
+      live: { questions: 0, shown: HELD_ON_FULL_DISK },
+      questions: [{ kind: "gone", prompt: HELD_ON_FULL_DISK }],
+      waiting: 0,
+    });
+  });
+
+  it("asks in main's dialog on a second quit after the page showing the prompt went away unheard (Sol's round 8 probe)", async () => {
+    const questions: NativeQuestion[] = [];
+
+    const page = createPageSettle((seq) => {
+      page.answered(seq);
+    });
+
+    const hold = createQuitHold({
+      ask: async (question) => {
+        questions.push(question);
+        await Promise.resolve();
+
+        return "cancel";
+      },
+      flush: async () =>
+        await Promise.resolve({ message: DISK_FULL_SENTENCE, ok: false }),
+      pageDrafts: page.drafts,
+      prompt: () => {},
+      quitting: () => {},
+      saveDrawing: async () => {
+        await Promise.resolve();
+      },
+      settlePage: page.request,
+      setTimer: () => () => {},
+      state: () => ({
+        drawing: "none",
+        drawingError: null,
+        readOnly: false,
+        saveError: DISK_FULL_SENTENCE,
+        unsaved: 1,
+      }),
+    });
+
+    hold.request(() => {});
+    await settled();
+    page.reset();
+    hold.request(() => {});
+    await settled();
+
+    expect(questions).toStrictEqual([
+      { kind: "gone", prompt: HELD_ON_FULL_DISK },
+    ]);
+  });
+
+  it("says in main's dialog how many changes are held and that the shelf window stopped responding", () => {
+    expect(
+      nativeDialog(
+        {
+          kind: "gone",
+          prompt: {
+            count: 2,
+            message: DISK_FULL_SENTENCE,
+            state: "stillFailing",
+          },
+        },
+        "Inset Shelf"
+      )
+    ).toStrictEqual({
+      buttons: ["Wait", "Quit anyway", "Cancel"],
+      detail:
+        "Still not saved. The disk is full. The shelf window stopped responding, so Inset Shelf asks here. Wait asks again, in the shelf window if it’s back.",
+      message: "2 changes couldn’t be saved",
+    });
+  });
+
   it("quits without asking when the disk holds every change", async () => {
     const shelf = setup();
 
@@ -941,7 +1294,7 @@ describe("the quit hold", () => {
             contents.addEventListener(event, listener);
           },
         },
-        page
+        page.reset
       );
 
       const hold = createQuitHold({

@@ -314,6 +314,45 @@ describe(createDrawingSaves, () => {
     });
   });
 
+  it("tells the close confirm what the shelf holds of a new drawing: nothing, the drawing as it is once a held quit saved it, then an earlier version (Opus and Sol round 8)", async () => {
+    const app = await setup(dir);
+    const before = app.saves.kept();
+
+    await app.quit();
+    const write = app.holdNextWrite();
+
+    app.quitHold.answer("retry");
+    await write.started;
+    app.quitHold.answer("cancel");
+    write.release();
+    await Promise.all(app.pageSaves);
+    await app.controller.flush();
+    const saved = app.saves.kept();
+
+    app.saves.changed();
+    const changed = app.saves.kept();
+
+    const [made] = app.controller.view().doc.items;
+
+    if (made === undefined) {
+      throw new Error("the drawing is not on the shelf");
+    }
+
+    app.controller.apply({ id: made.id, type: "remove" });
+
+    expect({
+      before,
+      changed,
+      removed: app.saves.kept(),
+      saved,
+    }).toStrictEqual({
+      before: "none",
+      changed: "earlier",
+      removed: "none",
+      saved: "asIs",
+    });
+  });
+
   it("stays open and unsaved until shelf.json holds the drawing, and puts it on the shelf once however often Retry runs", async () => {
     const app = await setup(dir);
 

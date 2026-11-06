@@ -152,7 +152,7 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
     },
     bounds: () => (window.isVisible() ? window.getBounds() : null),
     isFocused: () => window.isVisible() && window.isFocused(),
-    isVisible: () => window.isVisible(),
+    isVisible: () => !window.isDestroyed() && window.isVisible(),
     load: async () => {
       await window.loadURL(options.url);
     },
@@ -167,6 +167,10 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
       window.setAlwaysOnTop(on, "floating");
     },
     raiseForPrompt: (on) => {
+      if (window.isDestroyed()) {
+        return;
+      }
+
       // One level above the drawing window, which floats one above the shelf.
       if (on) {
         window.setAlwaysOnTop(true, "floating", 2);
@@ -175,6 +179,10 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
       }
     },
     show: (target) => {
+      if (window.isDestroyed()) {
+        return;
+      }
+
       window.setBounds(placement(target));
 
       if (isMac) {

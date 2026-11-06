@@ -291,13 +291,22 @@ export interface DrawingView {
   readonly quitting: boolean;
 }
 
+/**
+ * What the shelf holds of the drawing being closed, so its confirm says
+ * what closing loses: nothing of it, the drawing as it is (a held quit's
+ * save put it there), or an earlier version of it.
+ */
+export type DrawingOnShelf = "none" | "asIs" | "earlier";
+
 /** The drawing window: a blank canvas that saves one PNG to the shelf, or an image item drawn on. */
 export const drawingContract = defineContract({
   events: {
     /** The window is closing with marks on the page: the page asks before throwing them away. */
-    confirmClose: event<null>(),
+    confirmClose: event<DrawingOnShelf>(),
     /** Undo and Redo from the menu bar, which takes ⌘Z before the page sees it. */
     edit: event<"undo" | "redo">(),
+    /** New Drawing or Annotate asked for another drawing: this one, with its unsaved marks, came forward instead. */
+    openRefused: event<null>(),
     /** Retry in a held quit: the page saves its marks to the shelf, as Save does. */
     saveForQuit: event<null>(),
     view: event<DrawingView>(),

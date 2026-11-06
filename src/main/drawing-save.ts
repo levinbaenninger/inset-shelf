@@ -1,6 +1,6 @@
 import { once } from "node:events";
 
-import type { ActionResult } from "@shared/contracts";
+import type { ActionResult, DrawingOnShelf } from "@shared/contracts";
 import type { ImageItem, ItemId, Pin, ShelfItem } from "@shared/shelf";
 
 import type { CopyCommands } from "./copy-commands";
@@ -74,6 +74,10 @@ export interface DrawingSaves {
   /** The page's marks changed. */
   readonly changed: () => void;
   readonly state: () => DrawingSaveState;
+  /** What the shelf holds of the marks, for the close confirm. */
+  readonly kept: () => DrawingOnShelf;
+  /** The image item the marks go to; null for a blank page no save has put on the shelf. */
+  readonly target: () => ItemId | null;
 }
 
 /** The item a save put the marks on, and the shelf's revision that holds them. */
@@ -288,6 +292,12 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     return { ok: true };
   };
 
+  // Deleted, discarded or edited since, the shelf no longer holds these marks.
+  const onShelf = (): boolean =>
+    applied !== null &&
+    target !== null &&
+    deps.controller.item(target) === applied;
+
   const run = async (input: DrawingSaveInput): Promise<ActionResult> => {
     // After Cancel the window keeps its marks, so the page shows no problem either.
     const stop = input.forQuit ? quitStop : null;
@@ -342,13 +352,16 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
         deps.ended();
       }
     },
-    // Deleted, discarded or edited since, the shelf no longer holds these marks.
-    state: () => ({
-      error,
-      onShelf:
-        applied !== null &&
-        target !== null &&
-        deps.controller.item(target) === applied,
-    }),
+    kept: () => {
+      if (onShelf()) {
+        return "asIs";
+      }
+
+      return target !== null && deps.controller.item(target) !== undefined
+        ? "earlier"
+        : "none";
+    },
+    state: () => ({ error, onShelf: onShelf() }),
+    target: () => target,
   };
 };

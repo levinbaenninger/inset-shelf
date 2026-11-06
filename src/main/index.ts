@@ -486,8 +486,6 @@ const start = async (): Promise<void> => {
     askPageToSettle(seq);
   });
 
-  followPage(shelf.webContents, pageSettle);
-
   const toast = createToastWindow({
     preload: preloadPath("toast"),
     url: pageUrl("toast"),
@@ -1194,10 +1192,44 @@ const start = async (): Promise<void> => {
     },
   });
 
-  // Unsaved marks are never replaced by another drawing: their window comes forward instead.
+  // A crash, reload or navigation of the shelf page: its settle gets no answer, and a prompt it showed is asked in main's dialog.
+  followPage(shelf.webContents, () => {
+    pageSettle.reset();
+    quitHold.pageEnded();
+  });
+
+  const drawingServer = serveContract(
+    drawingContract,
+    {
+      cancel: () => {
+        drawing.close();
+      },
+      // The image the window opened on, whatever a save during a held quit has put on the shelf since.
+      getImage: async () => await drawingSaves.image(),
+      getView: () => drawing.view(),
+      setDirty: (dirty) => {
+        drawing.setDirty(dirty);
+        drawingSaves.changed();
+      },
+      save: drawingSaves.save,
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => drawing.webContents,
+    }
+  );
+
+  // Unsaved marks are never replaced by another drawing: their window comes forward instead, and says why.
+  const keepDrawing = (): void => {
+    drawing.bringForward();
+    drawingServer.emit("openRefused", null);
+  };
+
   const newDrawing = (): void => {
     if (drawing.isDirty()) {
-      drawing.bringForward();
+      keepDrawing();
 
       return;
     }
@@ -1213,8 +1245,13 @@ const start = async (): Promise<void> => {
       return;
     }
 
+    // Annotate on the picture the window already shows only brings it forward.
     if (drawing.isDirty()) {
-      drawing.bringForward();
+      if (drawingSaves.target() === id) {
+        drawing.bringForward();
+      } else {
+        keepDrawing();
+      }
 
       return;
     }
@@ -1371,29 +1408,6 @@ const start = async (): Promise<void> => {
     }
   );
 
-  const drawingServer = serveContract(
-    drawingContract,
-    {
-      cancel: () => {
-        drawing.close();
-      },
-      // The image the window opened on, whatever a save during a held quit has put on the shelf since.
-      getImage: async () => await drawingSaves.image(),
-      getView: () => drawing.view(),
-      setDirty: (dirty) => {
-        drawing.setDirty(dirty);
-        drawingSaves.changed();
-      },
-      save: drawingSaves.save,
-    },
-    {
-      appOrigin: appOrigin(),
-      ipc: ipcMain,
-      onRejected: logRejected,
-      target: () => drawing.webContents,
-    }
-  );
-
   drawing.onView((view) => {
     drawingServer.emit("view", view);
   });
@@ -1402,7 +1416,7 @@ const start = async (): Promise<void> => {
   };
 
   drawing.onCloseRequest(() => {
-    drawingServer.emit("confirmClose", null);
+    drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
   /** The card's screenshot, when it is still the newest; null for an older card's request. */

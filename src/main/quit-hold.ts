@@ -113,38 +113,58 @@ export const decideQuit = (state: QuitState): QuitDecision => {
 
 /**
  * What main asks in a dialog of its own when the shelf page can't: it
- * didn't confirm it had sent its edits (Wait, Quit anyway, Cancel), or it
- * didn't answer and the quit is held (Retry, Quit without saving, Cancel).
- * Either way the first button answers "retry", the second "discard".
+ * didn't confirm it had sent its edits (Wait, Quit anyway, Cancel); it
+ * ended, so the prompt it showed or was about to show is asked here (Wait,
+ * Quit anyway, Cancel); or it didn't answer and the quit is held (Retry,
+ * Quit without saving, Cancel). The first button answers "retry", the
+ * second "discard".
  */
 export type NativeQuestion =
   | { readonly kind: "unconfirmed" }
+  | { readonly kind: "gone"; readonly prompt: QuitPrompt }
   | { readonly kind: "held"; readonly prompt: QuitPrompt };
 
-/** Main's dialog for a question: its title, its text, and its buttons, which answer retry, discard and cancel in that order. */
-export const nativeDialog = (
-  question: NativeQuestion,
-  appName: string
-): {
+const promptDetail = (prompt: QuitPrompt): string =>
+  prompt.state === "stillFailing"
+    ? `Still not saved. ${prompt.message}`
+    : prompt.message;
+
+/** Main's dialog: its title, its text, and its buttons, which answer retry, discard and cancel in that order. */
+export interface NativeDialog {
   readonly message: string;
   readonly detail: string;
   readonly buttons: readonly [string, string, string];
-} =>
-  question.kind === "unconfirmed"
-    ? {
-        buttons: ["Wait", "Quit anyway", "Cancel"],
-        detail:
-          "The shelf window stopped responding, so an edit you were typing there may not be saved. Wait gives it more time to answer.",
-        message: `${appName} couldn’t confirm your changes were saved`,
-      }
-    : {
-        buttons: ["Retry", "Quit without saving", "Cancel"],
-        detail:
-          question.prompt.state === "stillFailing"
-            ? `Still not saved. ${question.prompt.message}`
-            : question.prompt.message,
-        message: quitTitle(question.prompt.count),
-      };
+}
+
+export const nativeDialog = (
+  question: NativeQuestion,
+  appName: string
+): NativeDialog => {
+  if (question.kind === "unconfirmed") {
+    return {
+      buttons: ["Wait", "Quit anyway", "Cancel"],
+      detail:
+        "The shelf window stopped responding, so an edit you were typing there may not be saved. Wait gives it more time to answer.",
+      message: `${appName} couldn’t confirm your changes were saved`,
+    };
+  }
+
+  const { prompt } = question;
+
+  if (question.kind === "gone") {
+    return {
+      buttons: ["Wait", "Quit anyway", "Cancel"],
+      detail: `${promptDetail(prompt)} The shelf window stopped responding, so ${appName} asks here. Wait asks again, in the shelf window if it’s back.`,
+      message: quitTitle(prompt.count),
+    };
+  }
+
+  return {
+    buttons: ["Retry", "Quit without saving", "Cancel"],
+    detail: promptDetail(prompt),
+    message: quitTitle(prompt.count),
+  };
+};
 
 export const NATIVE_ANSWERS: readonly QuitAnswer[] = [
   "retry",
@@ -184,6 +204,8 @@ export interface QuitHold {
   readonly answer: (answer: QuitAnswer) => void;
   /** `finish` has run, so a quit that comes back through the OS goes straight on. */
   readonly exiting: () => boolean;
+  /** The shelf page crashed, reloaded, navigated or went away: a prompt it showed is asked in main's dialog (Round 8). */
+  readonly pageEnded: () => void;
 }
 
 type Phase =
@@ -204,6 +226,8 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
   let finish = ignore;
   // Each wait's number: a wait that ends after Cancel, or after a newer one started, decides nothing.
   let attempt = 0;
+  // Each end of the shelf page: a page that ended during a wait can't show the prompt it decides on.
+  let pageEnds = 0;
   let drawingSave = new AbortController();
 
   const enter = (next: Phase): void => {
@@ -277,21 +301,21 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
     return phase.kind === "asking" ? answer : null;
   };
 
+  // Main's dialog in place of the page's prompt: Retry retries, Wait asks the page again.
+  const ask = async (question: NativeQuestion): Promise<void> => {
+    const answer = await askNatively(question);
+
+    if (answer === "retry") {
+      // oxlint-disable-next-line no-use-before-define -- waiting can end in this dialog again.
+      wait(question.kind === "held" ? question.prompt : null);
+    } else if (answer === "discard") {
+      exit();
+    } else if (answer === "cancel") {
+      cancel();
+    }
+  };
+
   const wait = (retried: QuitPrompt | null): void => {
-    // Main's dialog in place of the page's prompt: Wait or Retry waits again.
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- it calls wait, so it lives in it.
-    const ask = async (question: NativeQuestion): Promise<void> => {
-      const answer = await askNatively(question);
-
-      if (answer === "retry") {
-        wait(question.kind === "held" ? question.prompt : null);
-      } else if (answer === "discard") {
-        exit();
-      } else if (answer === "cancel") {
-        cancel();
-      }
-    };
-
     attempt += 1;
     const mine = attempt;
 
@@ -304,6 +328,7 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
 
     // The page first, then the disk; the drawing saves only on the first pass of a Retry.
     const pass = async (round: number): Promise<void> => {
+      const endsBefore = pageEnds;
       const answered = await within(deps.settlePage().catch(() => false));
 
       if (!live()) {
@@ -366,8 +391,10 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
         state: retried === null ? "asking" : "stillFailing",
       };
 
-      // The page didn't answer, so it can't show the prompt either.
-      if (pageAnswered) {
+      // A page that ended or didn't answer can't show the prompt either.
+      if (pageEnds !== endsBefore) {
+        void ask({ kind: "gone", prompt });
+      } else if (pageAnswered) {
         enter({ kind: "held", prompt });
       } else {
         void ask({ kind: "held", prompt });
@@ -375,6 +402,17 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
     };
 
     void pass(0);
+  };
+
+  /** Quit again while asked: the prompt comes back to the front, and main asks instead once its page doesn't answer. */
+  const askAgain = async (held: QuitPrompt): Promise<void> => {
+    const mine = attempt;
+
+    const answered = await within(deps.settlePage().catch(() => false));
+
+    if (answered !== true && mine === attempt && phase.kind === "held") {
+      await ask({ kind: "gone", prompt: held });
+    }
   };
 
   return {
@@ -398,6 +436,13 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
       }
     },
     exiting: () => phase.kind === "exiting",
+    pageEnded: () => {
+      pageEnds += 1;
+
+      if (phase.kind === "held") {
+        void ask({ kind: "gone", prompt: phase.prompt });
+      }
+    },
     request: (next) => {
       if (phase.kind === "exiting") {
         return;
@@ -408,8 +453,8 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
       if (phase.kind === "idle") {
         wait(null);
       } else if (phase.kind === "held") {
-        // Quit again while asked: the prompt comes back to the front.
         enter(phase);
+        void askAgain(phase.prompt);
       }
     },
   };

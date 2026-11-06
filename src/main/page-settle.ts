@@ -33,16 +33,14 @@ const PAGE_ENDS = [
 ] as const;
 
 /**
- * Follows the shelf page: each end resets the request. Nothing clears the
+ * Follows the shelf page: `ended` runs on each of its ends, which reset the
+ * settle and hand a prompt the page showed to main. Nothing clears the
  * count on load, so a crash or reload is never taken as "nothing unsaved";
  * the new page reports its own count when it starts.
  */
-export const followPage = (
-  page: Emitter,
-  settle: Pick<PageSettle, "reset">
-): void => {
+export const followPage = (page: Emitter, ended: () => void): void => {
   for (const event of PAGE_ENDS) {
-    page.on(event, settle.reset);
+    page.on(event, ended);
   }
 };
 

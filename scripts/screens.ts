@@ -580,7 +580,7 @@ const lockedPageCheck = async (page: Page): Promise<string | null> => {
   }
 
   await page.keyboard.press("Escape");
-  await page.evaluate('globalThis.__emit("confirmClose", null)');
+  await page.evaluate('globalThis.__emit("confirmClose", "none")');
   await page.waitForTimeout(150);
 
   const after = await dirtyReports(page);
@@ -3126,7 +3126,7 @@ const SCENES: readonly Scene[] = [
     // Red-team round 8: the menu bar's Undo and the keys change nothing behind the Discard confirm.
     act: async (page) => {
       await drawStroke(page, 160);
-      await page.evaluate('globalThis.__emit("confirmClose", null)');
+      await page.evaluate('globalThis.__emit("confirmClose", "none")');
       await page.getByRole("alertdialog").waitFor();
     },
     check: async (page) => {
@@ -3146,6 +3146,90 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: BLANK_DRAWING },
     name: "drawing-confirm-locked",
+    page: "drawing",
+  },
+  {
+    // Opus round 8: New Drawing or Annotate brought this unsaved drawing forward instead, and the page says why.
+    act: async (page) => {
+      await drawStroke(page, 160);
+      await page.evaluate('globalThis.__emit("openRefused", null)');
+      await page.getByRole("status").waitFor();
+    },
+    check: async (page) => {
+      const said = await page.getByRole("status").textContent();
+      const expected = "Save or discard this drawing to open another";
+
+      return said === expected
+        ? null
+        : `the page said ${JSON.stringify(said)}, not ${JSON.stringify(expected)}`;
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-open-refused",
+    page: "drawing",
+  },
+  {
+    // Opus and Sol round 8: the close confirm says what the shelf holds of the drawing.
+    act: async (page) => {
+      await drawStroke(page, 160);
+      await page.evaluate('globalThis.__emit("confirmClose", "asIs")');
+      await page.getByRole("alertdialog").waitFor();
+    },
+    check: async (page) => {
+      const said: Record<string, string | null> = {};
+
+      for (const onShelf of ["asIs", "earlier", "none"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one confirm after another.
+        await page.evaluate(
+          `globalThis.__emit("confirmClose", ${JSON.stringify(onShelf)})`
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one confirm after another.
+        await page.getByRole("alertdialog").waitFor();
+        // oxlint-disable-next-line no-await-in-loop -- one confirm after another.
+        said[onShelf] = await page
+          .getByRole("alertdialog")
+          .locator("[data-slot=alert-dialog-description]")
+          .textContent();
+        // oxlint-disable-next-line no-await-in-loop -- one confirm after another.
+        await page.getByRole("button", { name: "Keep Drawing" }).click();
+        // oxlint-disable-next-line no-await-in-loop -- one confirm after another.
+        await page.getByRole("alertdialog").waitFor({ state: "detached" });
+      }
+
+      const expected = {
+        asIs: "It is already on the shelf.",
+        earlier: "The shelf keeps it without your latest changes.",
+        none: "It is not on the shelf yet.",
+      };
+
+      return isDeepStrictEqual(said, expected)
+        ? null
+        : `the confirm said ${JSON.stringify(said)}, not ${JSON.stringify(expected)}`;
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-confirm-on-shelf",
+    page: "drawing",
+  },
+  {
+    // Opus and Sol round 8: on an image, the confirm says when the shelf's picture already has the marks.
+    act: async (page) => {
+      await drawStroke(page, 160);
+      await page.evaluate('globalThis.__emit("confirmClose", "asIs")');
+      await page.getByRole("alertdialog").waitFor();
+    },
+    check: async (page) => {
+      const said = await page
+        .getByRole("alertdialog")
+        .locator("[data-slot=alert-dialog-description]")
+        .textContent();
+
+      const expected = "The image on the shelf already has these marks.";
+
+      return said === expected
+        ? null
+        : `the confirm said ${JSON.stringify(said)}, not ${JSON.stringify(expected)}`;
+    },
+    data: { view: drawingView(IMAGE.pins, false) },
+    name: "drawing-confirm-image-on-shelf",
     page: "drawing",
   },
 ];
