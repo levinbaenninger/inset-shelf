@@ -7,7 +7,13 @@ import {
   itemTextWithLink,
   listHtmlWithImage,
 } from "@shared/shelf";
-import type { FileItem, ImageItem, ItemId, ShelfItem } from "@shared/shelf";
+import type {
+  FileItem,
+  ImageItem,
+  ItemId,
+  ShelfDoc,
+  ShelfItem,
+} from "@shared/shelf";
 
 import type { ClipboardData, CopyGate, Payload } from "./copy-gate";
 
@@ -23,17 +29,16 @@ export interface ExportedPng {
 
 export interface CopyCommandDeps {
   readonly gate: CopyGate;
-  /** The item as the shelf holds it, read after the save. */
-  readonly item: (id: ItemId) => ShelfItem | undefined;
   readonly exportImage: (item: ImageItem) => ExportedPng | null;
   /** A copy of the file under its own name, to put on the clipboard; null when it can't be read. */
   readonly stageFile: (item: FileItem) => string | null;
   readonly mac: boolean;
-  /** Items copied with Copy or Copy as List; the setting may check them off. */
-  readonly onCopied: (
-    items: readonly ShelfItem[],
-    kind: "item" | "list"
-  ) => void;
+  /**
+   * Items copied with Copy or Copy as List; the setting may check them off.
+   * Only their ids: the copy took them as they were when it started, and
+   * anything done with them now must read the shelf as it is.
+   */
+  readonly onCopied: (ids: readonly ItemId[], kind: "item" | "list") => void;
 }
 
 /** Every copy the app offers. Each one goes through the gate. */
@@ -45,13 +50,18 @@ export interface CopyCommands {
   readonly copyWithLink: (id: ItemId) => Promise<ActionResult>;
   /** ⇧⌘C, Copy as List, and ⌘C with several items picked. */
   readonly copyList: (ids: readonly ItemId[]) => Promise<ActionResult>;
-  /** The screenshot card's Copy. */
+  /** The screenshot card's Copy: its own picture, so no save is waited for. */
   readonly copyScreenshot: (png: Uint8Array) => Promise<ActionResult>;
+  /** A new drawing's Copy and Save, as it was just added: its own picture, so no save is waited for. */
+  readonly copyDrawing: (item: ImageItem) => Promise<ActionResult>;
 }
 
 const text = (value: string): Blob => new Blob([value], { type: "text/plain" });
 
 const GONE: Payload = { problem: "This item no longer exists." };
+
+const itemIn = (doc: ShelfDoc, id: ItemId): ShelfItem | undefined =>
+  doc.items.find((item) => item.id === id);
 
 export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
   const fileData = (item: FileItem): Payload => {
@@ -153,8 +163,8 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     id: ItemId,
     format: (item: ShelfItem) => string
   ): Promise<ActionResult> =>
-    await deps.gate.copy(() => {
-      const item = deps.item(id);
+    await deps.gate.copy((doc) => {
+      const item = itemIn(doc, id);
 
       return item === undefined
         ? GONE
@@ -165,14 +175,14 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     copy: async (id) => {
       let copied: ShelfItem | undefined;
 
-      const result = await deps.gate.copy(() => {
-        copied = deps.item(id);
+      const result = await deps.gate.copy((doc) => {
+        copied = itemIn(doc, id);
 
         return copied === undefined ? GONE : itemData(copied);
       });
 
       if (result.ok && copied !== undefined) {
-        deps.onCopied([copied], "item");
+        deps.onCopied([copied.id], "item");
       }
 
       return result;
@@ -181,9 +191,9 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     copyList: async (ids) => {
       let copied: readonly ShelfItem[] = [];
 
-      const result = await deps.gate.copy(() => {
+      const result = await deps.gate.copy((doc) => {
         copied = ids.flatMap((id) => {
-          const item = deps.item(id);
+          const item = itemIn(doc, id);
 
           return item === undefined ? [] : [item];
         });
@@ -192,15 +202,33 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
       });
 
       if (result.ok) {
-        deps.onCopied(copied, "list");
+        deps.onCopied(
+          copied.map((item) => item.id),
+          "list"
+        );
+      }
+
+      return result;
+    },
+    copyDrawing: async (item) => {
+      const built = itemData(item);
+
+      if ("problem" in built) {
+        return { message: built.problem, ok: false };
+      }
+
+      const result = await deps.gate.copyOwn(built.data);
+
+      if (result.ok) {
+        deps.onCopied([item.id], "item");
       }
 
       return result;
     },
     copyScreenshot: async (png) =>
-      await deps.gate.copy(() => ({
-        data: { "image/png": new Blob([png], { type: "image/png" }) },
-      })),
+      await deps.gate.copyOwn({
+        "image/png": new Blob([png], { type: "image/png" }),
+      }),
     copyWithLink: async (id) => await copyText(id, itemTextWithLink),
   };
 };

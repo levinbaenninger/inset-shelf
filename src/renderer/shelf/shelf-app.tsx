@@ -36,7 +36,7 @@ import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 
-import { Banners } from "./banners";
+import { Banners, SaveErrorBanner } from "./banners";
 import { Composer } from "./composer";
 import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
@@ -48,6 +48,7 @@ import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
 import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
+import { QuitPromptDialog } from "./quit-prompt";
 import {
   DueSuggestions,
   NoMatches,
@@ -340,6 +341,15 @@ const requestCopy = async (
   }
 
   return outcome.ok;
+};
+
+/** Retry in the "Not saved to disk" banner; the banner goes once the disk holds every change. */
+const retrySave = async (): Promise<void> => {
+  const saved = await api.retrySave();
+
+  if (!saved.ok) {
+    toast.error(`Still not saved. ${saved.message}`, { duration: NOTICE_MS });
+  }
 };
 
 /** Several items as one numbered list. */
@@ -1369,6 +1379,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       <h1 className="sr-only">Inset Shelf</h1>
       {detailsItem === undefined ? null : (
         <DetailsView
+          banner={
+            <SaveErrorBanner
+              onRetry={() => {
+                void retrySave();
+              }}
+              status={status}
+            />
+          }
           editing={editingId === detailsItem.id}
           item={detailsItem}
           key={detailsItem.id}
@@ -1448,6 +1466,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           }}
           onOpenKeySettings={() => {
             api.openKeySettings();
+          }}
+          onRetrySave={() => {
+            void retrySave();
           }}
           status={status}
         />
@@ -1678,6 +1699,12 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           setConfirming(null);
         }}
         request={confirming}
+      />
+      <QuitPromptDialog
+        onAnswer={(answer) => {
+          api.answerQuit(answer);
+        }}
+        prompt={status.quitPrompt}
       />
       <ShortcutSheet onOpenChange={setSheetOpen} open={sheetOpen} />
       <ShelfToaster raised={!inDetails} />

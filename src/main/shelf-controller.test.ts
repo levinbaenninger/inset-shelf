@@ -59,6 +59,8 @@ const setup = (
       floatOnTop: true,
       keys: "granted",
       problem: null,
+      quitPrompt: null,
+      readOnly: false,
       saveError: null,
       selectionCapture: true,
     },
@@ -295,6 +297,110 @@ describe(createShelfController, () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]?.items[0]).toMatchObject({ text: "one" });
     expect(timers).toHaveLength(1);
+  });
+
+  it("waits for a write already holding a revision instead of writing the edit made after it", async () => {
+    const disk = new EventTarget();
+
+    const written = (async () => {
+      await once(disk, "written");
+    })();
+
+    const { controller, saved } = setup([], written);
+    const id = controller.apply({ text: "one", type: "compose" });
+
+    if (id === null) {
+      throw new Error("no id");
+    }
+
+    await vi.waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+
+    const persisting = controller.persisted(controller.snapshot().rev);
+
+    controller.apply({ id, text: "one more", type: "editText" });
+    disk.dispatchEvent(new Event("written"));
+
+    await expect(persisting).resolves.toStrictEqual({ ok: true });
+    expect(
+      saved.map((doc) => doc.items[0]?.kind === "text" && doc.items[0].text)
+    ).toStrictEqual(["one"]);
+    expect(controller.item(id)).toMatchObject({ text: "one more" });
+  });
+
+  it("keeps every edit a failed save left unwritten and writes them all once the disk takes them", async () => {
+    const { controller, saved } = setup([
+      { ok: true },
+      { message: "disk full", ok: false },
+    ]);
+
+    const id = controller.apply({ text: "one", type: "compose" });
+
+    if (id === null) {
+      throw new Error("no id");
+    }
+
+    await controller.flush();
+    controller.apply({ id, text: "one, edited", type: "editText" });
+    controller.apply({
+      description: "Before Friday",
+      id,
+      type: "setDescription",
+    });
+
+    await expect(controller.flush()).resolves.toStrictEqual({
+      message: "disk full",
+      ok: false,
+    });
+    expect(controller.view().doc.items[0]).toMatchObject({
+      description: "Before Friday",
+      text: "one, edited",
+    });
+
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
+    expect(saved.at(-1)?.items[0]).toMatchObject({
+      description: "Before Friday",
+      text: "one, edited",
+    });
+  });
+
+  it("counts the items the disk doesn't hold yet", async () => {
+    const { controller } = setup([
+      { ok: true },
+      { message: "disk full", ok: false },
+    ]);
+
+    const add = (text: string) => {
+      const id = controller.apply({ text, type: "compose" });
+
+      if (id === null) {
+        throw new Error("no id");
+      }
+
+      return id;
+    };
+
+    const one = add("one");
+    const two = add("two");
+    const three = add("three");
+
+    await controller.flush();
+    const clean = controller.unsaved();
+
+    controller.apply({ id: one, text: "one, edited", type: "editText" });
+    controller.apply({ id: two, text: "two, edited", type: "editText" });
+    const typed = controller.unsaved();
+
+    controller.apply({ id: three, type: "remove" });
+    await controller.flush();
+    const failed = controller.unsaved();
+
+    await controller.flush();
+
+    expect([clean, typed, failed, controller.unsaved()]).toStrictEqual([
+      0, 2, 3, 0,
+    ]);
   });
 
   it("marks the focused item with a new sequence each time", () => {

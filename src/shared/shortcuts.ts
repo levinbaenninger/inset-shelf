@@ -34,6 +34,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
   const k = (accelerator: string): string => keyText(accelerator, mac);
   const labels = shortcutLabels(mac);
   const click = mac ? "⌘-click" : "Ctrl+click";
+  const rangeClick = mac ? "⇧-click" : "Shift+click";
 
   return [
     {
@@ -59,7 +60,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k("Right")], label: "Show details" },
         { keys: [k("Left"), "Esc"], label: "Back to the list" },
         { keys: [k("CommandOrControl+F")], label: "Search (try due:today)" },
-        { keys: [click, "⇧-click"], label: "Pick several items" },
+        { keys: [click, rangeClick], label: "Pick several items" },
         { keys: [k("CommandOrControl+A")], label: "Pick every item shown" },
         {
           keys: [k("Enter"), "Space"],

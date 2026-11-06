@@ -1,6 +1,8 @@
+import { once } from "node:events";
+
 import type { ActionResult } from "@shared/contracts";
 import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
-import type { ItemId } from "@shared/shelf";
+import type { ImageItem, ItemId, ShelfDoc } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
 import { createCopyCommands } from "./copy-commands";
@@ -8,6 +10,8 @@ import type { CopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
 import type { ClipboardContents } from "./copy-gate";
 import { createShelfController } from "./shelf-controller";
+import { openShelfStore } from "./shelf-store";
+import type { StoreFs, WriteResult } from "./shelf-store";
 
 const uuid = (n: number) =>
   `5b2e8c1a-7d3f-4c62-8e1b-2a9f0c4d6e${String(n).padStart(2, "0")}`;
@@ -16,25 +20,47 @@ interface Items {
   readonly text: ItemId;
   readonly image: ItemId;
   readonly file: ItemId;
+  /** The image as a new drawing hands it over, just added. */
+  readonly drawing: ImageItem;
+}
+
+interface EntryPoint {
+  /** Whether it copies shelf items, and so waits for the disk; the screenshot card and a new drawing carry their own picture. */
+  readonly waitsForSave: boolean;
+  readonly run: (commands: CopyCommands, items: Items) => Promise<ActionResult>;
 }
 
 /**
  * Every copy the app offers, keyed by the command, so a new one fails to
- * compile until it is listed here.
+ * compile until it is listed here and says whether it waits for the disk.
  */
-const ENTRY_POINTS: Record<
-  keyof CopyCommands,
-  (commands: CopyCommands, items: Items) => Promise<ActionResult>
-> = {
-  copy: async (commands, items) => await commands.copy(items.text),
-  copyDetails: async (commands, items) =>
-    await commands.copyDetails(items.text),
-  copyList: async (commands, items) =>
-    await commands.copyList([items.text, items.image, items.file]),
-  copyScreenshot: async (commands) =>
-    await commands.copyScreenshot(new Uint8Array([1, 2, 3])),
-  copyWithLink: async (commands, items) =>
-    await commands.copyWithLink(items.text),
+const ENTRY_POINTS: Record<keyof CopyCommands, EntryPoint> = {
+  copy: {
+    run: async (commands, items) => await commands.copy(items.text),
+    waitsForSave: true,
+  },
+  copyDetails: {
+    run: async (commands, items) => await commands.copyDetails(items.text),
+    waitsForSave: true,
+  },
+  copyDrawing: {
+    run: async (commands, items) => await commands.copyDrawing(items.drawing),
+    waitsForSave: false,
+  },
+  copyList: {
+    run: async (commands, items) =>
+      await commands.copyList([items.text, items.image, items.file]),
+    waitsForSave: true,
+  },
+  copyScreenshot: {
+    run: async (commands) =>
+      await commands.copyScreenshot(new Uint8Array([80, 78, 71])),
+    waitsForSave: false,
+  },
+  copyWithLink: {
+    run: async (commands, items) => await commands.copyWithLink(items.text),
+    waitsForSave: true,
+  },
 };
 
 /** The words on the clipboard, format by format. */
@@ -61,14 +87,59 @@ const added = (id: ItemId | null): ItemId => {
   return id;
 };
 
-/** A shelf with a text, an image and a file, the real controller saving to a disk that can fill up, and a clipboard that records. */
-const setup = async () => {
+/** A save the test lets reach the disk when it chooses, with the outcome it chooses. */
+interface HeldSave {
+  readonly started: Promise<void>;
+  readonly release: (result: WriteResult) => void;
+}
+
+interface Hold {
+  readonly start: () => void;
+  readonly outcome: Promise<WriteResult>;
+}
+
+/**
+ * A shelf with a text, an image and a file, the real controller saving to a
+ * disk that can fill up or hold a save back, and a clipboard that records.
+ * `save` and `readOnly` stand in for a real store.
+ */
+const setup = async (
+  store: {
+    readonly save?: (doc: ShelfDoc) => Promise<WriteResult>;
+    readonly readOnly?: boolean;
+  } = {}
+) => {
   const disk = { full: false };
   const events: string[] = [];
   const written: ClipboardContents[][] = [];
   const copied: string[] = [];
   const timers: (() => void)[] = [];
+  const onDisk: ShelfDoc[] = [];
+  const holds: Hold[] = [];
   let next = 10;
+
+  const save = async (doc: ShelfDoc): Promise<WriteResult> => {
+    events.push("save");
+
+    const hold = holds.shift();
+
+    if (hold !== undefined) {
+      hold.start();
+    }
+
+    const result =
+      hold === undefined
+        ? await Promise.resolve<WriteResult>(
+            disk.full ? { message: "disk full", ok: false } : { ok: true }
+          )
+        : await hold.outcome;
+
+    if (result.ok) {
+      onDisk.push(doc);
+    }
+
+    return result;
+  };
 
   const controller = createShelfController({
     deleteAttachment: async () => {
@@ -80,12 +151,7 @@ const setup = async () => {
       now: () => new Date("2026-11-05T10:00:00.000Z"),
     },
     initial: emptyShelf(SectionIdSchema.parse(uuid(1))),
-    save: async () => {
-      events.push("save");
-      await Promise.resolve();
-
-      return disk.full ? { message: "disk full", ok: false } : { ok: true };
-    },
+    save: store.save ?? save,
     setTimer: (run) => {
       timers.push(run);
 
@@ -97,6 +163,8 @@ const setup = async () => {
       floatOnTop: true,
       keys: "granted",
       problem: null,
+      quitPrompt: null,
+      readOnly: false,
       saveError: null,
       selectionCapture: true,
     },
@@ -113,18 +181,19 @@ const setup = async () => {
         await Promise.resolve();
       },
     },
-    flush: controller.flush,
     onWrite: () => {},
+    persisted: controller.persisted,
+    readOnly: store.readOnly ?? false,
+    snapshot: controller.snapshot,
     toItem: (data) => data,
   });
 
   const commands = createCopyCommands({
     exportImage: () => ({ png: Buffer.from("PNG"), widthPx: 40 }),
     gate,
-    item: controller.item,
     mac: true,
-    onCopied: (items, kind) => {
-      copied.push(`${kind}:${items.length}`);
+    onCopied: (ids, kind) => {
+      copied.push(`${kind}:${ids.length}`);
     },
     stageFile: (item) => `/tmp/staged/${item.file.name}`,
   });
@@ -165,20 +234,70 @@ const setup = async () => {
   await controller.flush();
   events.length = 0;
 
+  const drawing = controller.item(image);
+
+  if (drawing?.kind !== "image") {
+    throw new Error("no image");
+  }
+
+  /** The next save waits until the test releases it. */
+  const holdNextSave = (): HeldSave => {
+    const signal = new EventTarget();
+    let result: WriteResult = { ok: true };
+
+    const started = (async () => {
+      await once(signal, "started");
+    })();
+
+    const outcome = (async () => {
+      await once(signal, "released");
+
+      return result;
+    })();
+
+    holds.push({
+      outcome,
+      start: () => {
+        signal.dispatchEvent(new Event("started"));
+      },
+    });
+
+    return {
+      release: (chosen) => {
+        result = chosen;
+        signal.dispatchEvent(new Event("released"));
+      },
+      started,
+    };
+  };
+
+  /** The words of an item in the last shelf the disk took. */
+  const savedText = (id: ItemId): string | undefined => {
+    const item = onDisk.at(-1)?.items.find((candidate) => candidate.id === id);
+
+    if (item === undefined) {
+      return undefined;
+    }
+
+    return item.kind === "text" ? item.text : item.note;
+  };
+
   return {
     commands,
     controller,
     copied,
     disk,
     events,
-    items: { file, image, text },
+    holdNextSave,
+    items: { drawing, file, image, text },
+    savedText,
     timers,
     written,
   };
 };
 
 describe(createCopyCommands, () => {
-  it("copies nothing from any entry point while the shelf can't be saved", async () => {
+  it("copies no shelf item while the shelf can't be saved, but still copies a screenshot or a new drawing", async () => {
     const { commands, controller, copied, disk, items, written } =
       await setup();
 
@@ -189,18 +308,35 @@ describe(createCopyCommands, () => {
       type: "editText",
     });
 
-    for (const [name, run] of Object.entries(ENTRY_POINTS)) {
-      // oxlint-disable-next-line no-await-in-loop -- each entry point on its own.
-      const result = await run(commands, items);
+    const results = [];
 
-      expect({ name, result }).toStrictEqual({
-        name,
-        result: { message: "Not copied. disk full", ok: false },
-      });
+    for (const [name, entry] of Object.entries(ENTRY_POINTS)) {
+      // oxlint-disable-next-line no-await-in-loop -- each entry point on its own.
+      results.push({ name, result: await entry.run(commands, items) });
     }
 
-    expect(written).toStrictEqual([]);
-    expect(copied).toStrictEqual([]);
+    expect(results).toStrictEqual([
+      { name: "copy", result: { message: "Not copied. disk full", ok: false } },
+      {
+        name: "copyDetails",
+        result: { message: "Not copied. disk full", ok: false },
+      },
+      { name: "copyDrawing", result: { ok: true } },
+      {
+        name: "copyList",
+        result: { message: "Not copied. disk full", ok: false },
+      },
+      { name: "copyScreenshot", result: { ok: true } },
+      {
+        name: "copyWithLink",
+        result: { message: "Not copied. disk full", ok: false },
+      },
+    ]);
+    await expect(
+      Promise.all(written.map(async (contents) => await formats(contents[0])))
+    ).resolves.toStrictEqual([{ "image/png": "PNG" }, { "image/png": "PNG" }]);
+    // Only the drawing is an item; the setting may check it off.
+    expect(copied).toStrictEqual(["item:1"]);
     expect(controller.view().status.saveError).toBe("disk full");
   });
 
@@ -219,9 +355,9 @@ describe(createCopyCommands, () => {
 
     disk.full = false;
 
-    for (const [name, run] of Object.entries(ENTRY_POINTS)) {
+    for (const [name, entry] of Object.entries(ENTRY_POINTS)) {
       // oxlint-disable-next-line no-await-in-loop -- each entry point on its own.
-      const result = await run(commands, items);
+      const result = await entry.run(commands, items);
 
       expect({ name, result }).toStrictEqual({ name, result: { ok: true } });
     }
@@ -248,6 +384,232 @@ describe(createCopyCommands, () => {
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
       "text/plain": "Call Rieder at 9",
     });
+  });
+
+  it("copies the edit it waited for, not a second one typed during the wait", async () => {
+    const { commands, controller, holdNextSave, items, savedText, written } =
+      await setup();
+
+    const held = holdNextSave();
+
+    controller.apply({ id: items.text, text: "FIRST EDIT", type: "editText" });
+
+    const copying = commands.copyDetails(items.text);
+
+    await held.started;
+    controller.apply({
+      id: items.text,
+      text: "SECOND UNSAVED EDIT",
+      type: "editText",
+    });
+    held.release({ ok: true });
+
+    await expect(copying).resolves.toStrictEqual({ ok: true });
+    expect(savedText(items.text)).toBe("FIRST EDIT");
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "FIRST EDIT\n\nBefore Friday",
+    });
+    expect(controller.item(items.text)).toMatchObject({
+      text: "SECOND UNSAVED EDIT",
+    });
+  });
+
+  it("waits for a save already on its way instead of writing the edit typed after it", async () => {
+    const {
+      commands,
+      controller,
+      events,
+      holdNextSave,
+      items,
+      savedText,
+      timers,
+      written,
+    } = await setup();
+
+    const held = holdNextSave();
+
+    controller.apply({ id: items.text, text: "FIRST EDIT", type: "editText" });
+    timers.shift()?.();
+    await held.started;
+
+    const copying = commands.copy(items.text);
+
+    controller.apply({
+      id: items.text,
+      text: "SECOND UNSAVED EDIT",
+      type: "editText",
+    });
+    held.release({ ok: true });
+
+    await expect(copying).resolves.toStrictEqual({ ok: true });
+    expect(events).toStrictEqual(["save", "write"]);
+    expect(savedText(items.text)).toBe("FIRST EDIT");
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "FIRST EDIT",
+    });
+    // The second edit still waits for its own pause.
+    expect(timers).toHaveLength(1);
+  });
+
+  it("copies nothing when the save it waited for fails", async () => {
+    const { commands, controller, holdNextSave, items, written } =
+      await setup();
+
+    const held = holdNextSave();
+
+    controller.apply({ id: items.text, text: "FIRST EDIT", type: "editText" });
+
+    const copying = commands.copyWithLink(items.text);
+
+    await held.started;
+    controller.apply({
+      id: items.text,
+      text: "SECOND UNSAVED EDIT",
+      type: "editText",
+    });
+    held.release({ message: "disk full", ok: false });
+
+    await expect(copying).resolves.toStrictEqual({
+      message: "Not copied. disk full",
+      ok: false,
+    });
+    expect(written).toStrictEqual([]);
+  });
+
+  it("copies one item as it was while another's edit is still being saved", async () => {
+    const {
+      commands,
+      controller,
+      holdNextSave,
+      items,
+      savedText,
+      timers,
+      written,
+    } = await setup();
+
+    const held = holdNextSave();
+
+    controller.apply({
+      id: items.text,
+      text: "Call Rieder at 9",
+      type: "editText",
+    });
+    timers.shift()?.();
+    await held.started;
+    controller.apply({ id: items.image, note: "Floor plan", type: "editNote" });
+
+    const copying = commands.copy(items.text);
+
+    held.release({ ok: true });
+
+    await expect(copying).resolves.toStrictEqual({ ok: true });
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "Call Rieder at 9",
+    });
+    // The copy waited for the image's note too, which was in the shelf it took.
+    expect([savedText(items.text), savedText(items.image)]).toStrictEqual([
+      "Call Rieder at 9",
+      "Floor plan",
+    ]);
+  });
+
+  it("keeps an edit whose save failed, refuses to copy it until the disk takes it, then copies it", async () => {
+    const { commands, controller, disk, items, savedText, written } =
+      await setup();
+
+    disk.full = true;
+    controller.apply({
+      id: items.text,
+      text: "UNSAVED AFTER FAILURE",
+      type: "editText",
+    });
+    await expect(controller.flush()).resolves.toStrictEqual({
+      message: "disk full",
+      ok: false,
+    });
+
+    // Later, from the item's menu, with another item open.
+    const refused = await commands.copyDetails(items.text);
+
+    expect({
+      draft: controller.item(items.text),
+      refused,
+      written,
+    }).toMatchObject({
+      draft: { text: "UNSAVED AFTER FAILURE" },
+      refused: { message: "Not copied. disk full", ok: false },
+      written: [],
+    });
+
+    disk.full = false;
+
+    const copied = await commands.copyDetails(items.text);
+
+    expect({ copied, onDisk: savedText(items.text) }).toStrictEqual({
+      copied: { ok: true },
+      onDisk: "UNSAVED AFTER FAILURE",
+    });
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "UNSAVED AFTER FAILURE\n\nBefore Friday",
+    });
+  });
+
+  it("copies items in a session that saves nothing, since the shelf file could not be opened", async () => {
+    const denied: StoreFs = {
+      copyAtomic: async () => {
+        await Promise.resolve();
+      },
+      list: async () => await Promise.resolve([]),
+      mkdir: async () => {
+        await Promise.resolve();
+      },
+      readFile: async () => {
+        await Promise.resolve();
+
+        throw Object.assign(new Error("permission denied"), {
+          code: "EACCES",
+        });
+      },
+      remove: async () => {
+        await Promise.resolve();
+      },
+      rename: async () => {
+        await Promise.resolve();
+      },
+      writeAtomic: async () => {
+        await Promise.resolve();
+
+        throw new Error("The shelf file must stay as it was.");
+      },
+    };
+
+    const store = await openShelfStore("/shelf", {
+      fs: denied,
+      newSectionId: () => SectionIdSchema.parse(uuid(1)),
+      now: () => new Date("2026-11-05T10:00:00.000Z"),
+    });
+
+    const { commands, controller, items, written } = await setup(store);
+
+    controller.apply({
+      id: items.text,
+      text: "Call Rieder at 9",
+      type: "editText",
+    });
+
+    await expect(
+      Promise.all([commands.copy(items.text), commands.copyDetails(items.text)])
+    ).resolves.toStrictEqual([{ ok: true }, { ok: true }]);
+    await expect(
+      Promise.all(written.map(async (contents) => await formats(contents[0])))
+    ).resolves.toStrictEqual([
+      { "text/plain": "Call Rieder at 9" },
+      { "text/plain": "Call Rieder at 9\n\nBefore Friday" },
+    ]);
+    await controller.flush();
+    expect(controller.view().status.saveError).toBe(
+      "Nothing is saved this session, so the shelf file that could not be opened stays as it was."
+    );
   });
 
   it("puts each format on the clipboard as before", async () => {
@@ -289,7 +651,7 @@ describe(createCopyGate, () => {
   it("puts back the clipboard a selection copy replaced, or empties it, without waiting for a save", async () => {
     const written: ClipboardContents[][] = [];
     let cleared = 0;
-    let flushed = 0;
+    let waited = 0;
 
     const gate = createCopyGate<ClipboardContents>({
       clipboard: {
@@ -301,13 +663,18 @@ describe(createCopyGate, () => {
           await Promise.resolve();
         },
       },
-      flush: async () => {
-        flushed += 1;
+      onWrite: () => {},
+      persisted: async () => {
+        waited += 1;
         await Promise.resolve();
 
         return { message: "disk full", ok: false };
       },
-      onWrite: () => {},
+      readOnly: false,
+      snapshot: () => ({
+        doc: emptyShelf(SectionIdSchema.parse(uuid(1))),
+        rev: 1,
+      }),
       toItem: (data) => data,
     });
 
@@ -318,6 +685,6 @@ describe(createCopyGate, () => {
 
     expect(written).toStrictEqual([[saved]]);
     expect(cleared).toBe(1);
-    expect(flushed).toBe(0);
+    expect(waited).toBe(0);
   });
 });

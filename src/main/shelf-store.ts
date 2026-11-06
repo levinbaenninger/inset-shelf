@@ -111,6 +111,8 @@ export interface ShelfStore {
   readonly initial: ShelfDoc;
   /** Set when shelf.json could not be read: it was set aside, or it is left alone and nothing is saved. */
   readonly recovered: string | null;
+  /** The shelf file could not be read or set aside, so nothing is saved this session and it stays as it was. */
+  readonly readOnly: boolean;
   /** Coalesces: while one write runs, only the newest pending document is written next. */
   readonly save: (doc: ShelfDoc) => Promise<WriteResult>;
   readonly writeAttachment: (png: Uint8Array) => Promise<string>;
@@ -329,6 +331,7 @@ export const openShelfStore = async (
       }
     },
     initial: loaded.doc,
+    readOnly: loaded.kind === "blocked",
     recovered: loaded.kind === "read" ? null : loaded.note,
     save,
     copyAttachment: async (from, extension) => {

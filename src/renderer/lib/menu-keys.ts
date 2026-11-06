@@ -44,7 +44,11 @@ export const answerMenuKey = (event: KeyboardEvent<HTMLElement>): void => {
 let openMenus = 0;
 let onChange: ((open: boolean) => void) | null = null;
 
-/** Tells main when the first menu opens and the last one closes, so it holds back the menu bar's keys meanwhile. */
+/**
+ * Tells main when the first menu opens and the last one closes, so it holds
+ * back its own keys meanwhile. A menu closes when the window loses focus
+ * (Radix), which is also when main forgets it.
+ */
 export const onMenusOpen = (listener: (open: boolean) => void): void => {
   onChange = listener;
 };

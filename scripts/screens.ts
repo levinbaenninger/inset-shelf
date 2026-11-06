@@ -362,6 +362,8 @@ const STATUS = {
   floatOnTop: true,
   keys: "granted",
   problem: null,
+  quitPrompt: null,
+  readOnly: false,
   saveError: null,
   selectionCapture: true,
 };
@@ -1006,6 +1008,22 @@ const MenuOpenSchema = z.array(z.boolean());
 const menuSignal = async (page: Page): Promise<boolean | undefined> =>
   MenuOpenSchema.parse(await page.evaluate("globalThis.__menuOpen")).at(-1);
 
+/** A menu closes when the window loses focus, and the page tells main, which forgets it on blur as well. */
+const blurClosesMenuCheck = async (page: Page): Promise<string | null> => {
+  await openMenuOn(page, ROW_C);
+
+  if ((await menuSignal(page)) !== true) {
+    return "the page didn't tell main that C's menu is open";
+  }
+
+  await page.evaluate('window.dispatchEvent(new Event("blur"))');
+  await menuClosed(page);
+
+  return (await menuSignal(page)) === false
+    ? null
+    : "C's menu closed as the window lost focus, but the page didn't tell main";
+};
+
 /**
  * Presses a key the open menu doesn't show: nothing may run, the menu stays
  * open, and the key must be held back from the page (preventDefault, so the
@@ -1199,6 +1217,151 @@ const SAVE_FAILED =
   "The shelf could not be saved: ENOSPC: no space left on device, write";
 
 const NOT_COPIED = `Not copied. ${SAVE_FAILED}`;
+
+const DRAFT_DESCRIPTION = "Keys from the caretaker";
+const DRAFT_TEXT = "The upload test fails one run in ten on CI today";
+
+/**
+ * With saves failing, types a description into A's details and goes back,
+ * then edits B's words in its row and picks C, then opens A's details again.
+ * The shelf's drafts live in main, so each edit must reach it as it is left.
+ */
+const keepDraftsAct = async (page: Page): Promise<void> => {
+  await details(page, ENTRY_A);
+  await page.getByRole("button", { name: "Add a field" }).click();
+  await page.getByRole("menuitem", { name: /^Description/u }).click();
+  await page.getByRole("textbox", { name: "Description" }).waitFor();
+  await page.keyboard.type(DRAFT_DESCRIPTION);
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await select(page, ROW_B);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+  await page.keyboard.press("End");
+  await page.keyboard.type(" today");
+  await select(page, ROW_C);
+  // Main echoes each edit back a moment later (`echo: "later"`).
+  await page.waitForTimeout(400);
+  await details(page, ENTRY_A);
+};
+
+const keepDraftsCheck = async (page: Page): Promise<string | null> => {
+  const description = await page
+    .getByRole("textbox", { name: "Description" })
+    .inputValue();
+
+  if (description !== DRAFT_DESCRIPTION) {
+    return `A's details show ${JSON.stringify(description)} after leaving them with saves failing, not the description typed`;
+  }
+
+  if (
+    !(await page
+      .locator("[data-details-view]")
+      .getByText("Not saved to disk")
+      .isVisible())
+  ) {
+    return "A's details, opened again with saves failing, don't say the shelf isn't saved";
+  }
+
+  await page.getByRole("button", { name: "Back to the list" }).click();
+
+  const b = (await item(page, ROW_B).textContent()) ?? "";
+
+  if (!b.includes(DRAFT_TEXT)) {
+    return `B's row reads ${JSON.stringify(b)} after its edit was left, not ${JSON.stringify(DRAFT_TEXT)}`;
+  }
+
+  const before = await callCount(page);
+
+  await page.getByRole("button", { exact: true, name: "Retry" }).click();
+  await page.getByText(`Still not saved. ${SAVE_FAILED}`).waitFor();
+
+  const sent = await calls(page, before);
+  const retried = sent.map((call) => call.call);
+
+  return isDeepStrictEqual(retried, ["retrySave"])
+    ? null
+    : `Retry in the banner sent ${JSON.stringify(retried)}, not retrySave`;
+};
+
+/** Main's view once a quit is held: the shelf as it was, with the prompt. */
+const QUIT_HELD_VIEW = {
+  ...shelfView(MENU_DOC),
+  status: {
+    ...STATUS,
+    quitPrompt: { count: 2, message: SAVE_FAILED, state: "asking" },
+    saveError: SAVE_FAILED,
+  },
+};
+
+/** B is picked when Quit is held, as when the shelf is in use. */
+const quitHeldAct = async (page: Page): Promise<void> => {
+  await select(page, ROW_B);
+  await page.evaluate(
+    `globalThis.__emit("view", ${JSON.stringify(QUIT_HELD_VIEW)})`
+  );
+  await page.getByRole("alertdialog").waitFor();
+};
+
+const QuitLayoutSchema = z.object({
+  focused: z.string(),
+  inside: z.boolean(),
+  overflowing: z.array(z.string()),
+});
+
+/**
+ * Round 6b: Retry has the keyboard, every button fits at the shelf's
+ * narrowest, Return retries even from Quit without saving, Esc cancels,
+ * and the list behind keeps its keys: → doesn't open the picked item's
+ * details.
+ */
+const quitHeldCheck = async (page: Page): Promise<string | null> => {
+  const layout = QuitLayoutSchema.parse(
+    await page.evaluate(`(() => {
+      const dialog = document.querySelector("[role=alertdialog]");
+      const box = dialog.getBoundingClientRect();
+
+      return {
+        focused: document.activeElement?.textContent ?? "",
+        inside: box.left >= 8 && box.right <= innerWidth - 8,
+        overflowing: [...dialog.querySelectorAll("button")]
+          .filter((button) => button.scrollWidth > button.clientWidth)
+          .map((button) => button.textContent),
+      };
+    })()`)
+  );
+
+  if (layout.focused !== "Retry") {
+    return `the quit prompt opened with focus on ${JSON.stringify(layout.focused)}, not Retry`;
+  }
+
+  if (!layout.inside || layout.overflowing.length > 0) {
+    return `the quit prompt doesn't fit the window: inside ${layout.inside}, cut ${JSON.stringify(layout.overflowing)}`;
+  }
+
+  const before = await callCount(page);
+
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+
+  const sent = await calls(page, before);
+
+  if ((await page.locator("[data-details-view]").count()) > 0) {
+    return "→ in the quit prompt opened the picked item's details behind it";
+  }
+
+  return isDeepStrictEqual(sent, [
+    { arg: "retry", call: "answerQuit" },
+    { arg: "retry", call: "answerQuit" },
+    { arg: "cancel", call: "answerQuit" },
+  ])
+    ? null
+    : `→, Return, Tab and Return, then Esc in the quit prompt sent ${JSON.stringify(sent)}, not retry, retry, cancel`;
+};
 
 /**
  * Round 5: with saves failing, main refuses every copy. Each way to copy in
@@ -1840,7 +2003,11 @@ const SCENES: readonly Scene[] = [
       await page.keyboard.press("Escape");
       await menuClosed(page);
 
-      return (await swallowedKeysCheck(page)) ?? (await otherMenusCheck(page));
+      return (
+        (await swallowedKeysCheck(page)) ??
+        (await otherMenusCheck(page)) ??
+        (await blurClosesMenuCheck(page))
+      );
     },
     data: { echo: "later", view: shelfView(MENU_DOC) },
     name: "shelf-menu-held-keys",
@@ -1867,6 +2034,32 @@ const SCENES: readonly Scene[] = [
     name: "shelf-copy-save-failed",
     page: "shelf",
     platforms: ["macos", "windows"],
+  },
+  {
+    act: keepDraftsAct,
+    check: keepDraftsCheck,
+    data: {
+      echo: "later",
+      view: {
+        ...shelfView(MENU_DOC),
+        status: { ...STATUS, saveError: SAVE_FAILED },
+      },
+    },
+    name: "shelf-draft-kept",
+    page: "shelf",
+  },
+  {
+    act: quitHeldAct,
+    check: quitHeldCheck,
+    data: {
+      view: {
+        ...shelfView(MENU_DOC),
+        status: { ...STATUS, saveError: SAVE_FAILED },
+      },
+    },
+    name: "shelf-quit-held",
+    page: "shelf",
+    width: 300,
   },
   {
     act: typeInEntryA,

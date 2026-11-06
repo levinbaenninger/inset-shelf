@@ -6,6 +6,7 @@ export interface BannersProps {
   readonly status: ShelfStatus;
   readonly onOpenKeySettings: () => void;
   readonly onDismissProblem: () => void;
+  readonly onRetrySave: () => void;
 }
 
 const Banner = ({
@@ -46,10 +47,32 @@ const Banner = ({
   </div>
 );
 
+/**
+ * A failed save, with Retry. The shelf keeps every change in memory, so it
+ * shows over details too: an entry opened again shows what was typed and
+ * that it isn't on disk yet.
+ */
+export const SaveErrorBanner = ({
+  onRetry,
+  status,
+}: {
+  readonly status: ShelfStatus;
+  readonly onRetry: () => void;
+}) =>
+  status.saveError === null ? null : (
+    <Banner
+      action={status.readOnly ? null : { label: "Retry", run: onRetry }}
+      text={status.saveError}
+      title="Not saved to disk"
+      tone="error"
+    />
+  );
+
 /** One line per thing that needs the user: a missing permission, a failed save, a failed capture. */
 export const Banners = ({
   onDismissProblem,
   onOpenKeySettings,
+  onRetrySave,
   status,
 }: BannersProps) => (
   <>
@@ -64,14 +87,7 @@ export const Banners = ({
         tone="notice"
       />
     ) : null}
-    {status.saveError === null ? null : (
-      <Banner
-        action={null}
-        text={status.saveError}
-        title="Not saved to disk"
-        tone="error"
-      />
-    )}
+    <SaveErrorBanner onRetry={onRetrySave} status={status} />
     {status.problem === null ? null : (
       <Banner
         action={{ label: "Dismiss", run: onDismissProblem }}

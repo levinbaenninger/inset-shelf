@@ -121,6 +121,14 @@ const applyOp = (doc, op) => {
       return updateItem(doc, op.id, (item) => ({ ...item, pins: op.pins }));
     }
 
+    case "editText": {
+      return updateItem(doc, op.id, (item) => ({ ...item, text: op.text }));
+    }
+
+    case "editNote": {
+      return updateItem(doc, op.id, (item) => ({ ...item, note: op.note }));
+    }
+
     case "setDescription": {
       return updateItem(doc, op.id, (item) => ({
         ...item,
@@ -171,10 +179,15 @@ if (page === "shelf") {
       copyList: logged("copyList", copied),
       copyWithLink: logged("copyWithLink", copied),
       getView: () => Promise.resolve(view),
+      answerQuit: logged("answerQuit", nothing),
       menuOpen: (open) => {
         globalThis.__menuOpen.push(open);
       },
       newWindowLink: logged("newWindowLink", nothing),
+      retrySave: logged(
+        "retrySave",
+        resolved({ message: data.view.status?.saveError ?? "", ok: false })
+      ),
       on,
       openImage: logged("openImage", nothing),
       openLink: logged("openLink", nothing),

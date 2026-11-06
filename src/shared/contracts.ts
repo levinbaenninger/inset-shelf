@@ -18,13 +18,31 @@ export interface ShelfStatus {
   readonly keys: Permission;
   /** Copying the selection works on macOS and Windows; elsewhere double Shift only toggles the shelf. */
   readonly selectionCapture: boolean;
-  /** The last write failed; the shelf keeps working in memory. */
+  /** The last write failed; the shelf keeps every change in memory and saves it on the next change, copy or Retry. */
   readonly saveError: string | null;
+  /** The shelf file could not be read or set aside at launch, so this session saves nothing and there is nothing to retry. */
+  readonly readOnly: boolean;
   /** A capture or paste could not be completed. */
   readonly problem: string | null;
   /** The shelf floats above other windows; Window › Float on Top, or the shelf's ⋯ on Windows. */
   readonly floatOnTop: boolean;
+  /** A quit is held because changes couldn't reach the disk; the shelf asks what to do. */
+  readonly quitPrompt: QuitPrompt | null;
 }
+
+/** "retrying" while Retry saves; "stillFailing" once a Retry has failed. */
+export type QuitPromptState = "asking" | "retrying" | "stillFailing";
+
+export interface QuitPrompt {
+  /** Items that differ from what the disk holds, at least 1. */
+  readonly count: number;
+  readonly message: string;
+  readonly state: QuitPromptState;
+}
+
+export const QuitAnswerSchema = z.enum(["retry", "discard", "cancel"]);
+
+export type QuitAnswer = z.output<typeof QuitAnswerSchema>;
 
 export interface ShelfView {
   readonly doc: ShelfDoc;
@@ -126,6 +144,10 @@ export const shelfContract = defineContract({
       z.object({ id: ItemIdSchema, windowId: WindowIdSchema.optional() })
     ),
     dismissProblem: send(z.void()),
+    /** Retry in the "Not saved to disk" banner: writes every change the disk doesn't hold yet. */
+    retrySave: invoke(z.void(), out<ActionResult>()),
+    /** The held quit's prompt: Retry, Quit without saving, or Cancel. */
+    answerQuit: send(QuitAnswerSchema),
     getView: invoke(z.void(), out<ShelfView>()),
     hide: send(z.void()),
     /** Copy and Undo inside a text field, done by the window's own edit commands. */

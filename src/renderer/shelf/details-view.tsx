@@ -116,6 +116,8 @@ export interface DetailsProps {
   readonly onOpenPins: () => void;
   readonly onMenu: (anchor: MenuAnchor) => void;
   readonly onHide: () => void;
+  /** A failed save's banner, under the header. */
+  readonly banner: ReactNode;
 }
 
 const newStep = (): Step => ({
@@ -1317,6 +1319,7 @@ export const DetailsView = (props: DetailsProps) => {
         onOpenPins={props.onOpenPins}
         titleRef={titleRef}
       />
+      <div className="pb-2 empty:hidden">{props.banner}</div>
       <div
         className="shelf-list flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pt-1 pb-4"
         data-details

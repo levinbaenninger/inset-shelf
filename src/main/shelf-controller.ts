@@ -26,6 +26,12 @@ export interface ControllerDeps {
   readonly setTimer: (run: () => void, ms: number) => () => void;
 }
 
+/** The shelf at one revision; each change makes the next one. */
+export interface Revision {
+  readonly rev: number;
+  readonly doc: ShelfDoc;
+}
+
 export interface ShelfController {
   readonly view: () => ShelfView;
   /** Returns the id of an item the operation added. */
@@ -35,12 +41,18 @@ export interface ShelfController {
   readonly focus: (id: ItemId, edit?: boolean) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
+  /** The shelf as it is now, with the revision that names it. Documents are never changed in place. */
+  readonly snapshot: () => Revision;
   /**
-   * Writes every change made so far, retrying one a failed save left
-   * unwritten, and says whether the disk now holds them all. Copies wait
-   * for it, and so does quitting.
+   * Resolves once the disk holds revision `rev` or a later one, retrying a
+   * change a failed save left unwritten, or with why it doesn't. A write
+   * already on its way that covers `rev` is waited for, not repeated.
    */
+  readonly persisted: (rev: number) => Promise<WriteResult>;
+  /** `persisted` for every change made so far. Quitting waits for it. */
   readonly flush: () => Promise<WriteResult>;
+  /** How many items differ from what the disk holds: 0 once it holds every change, otherwise at least 1. */
+  readonly unsaved: () => number;
   /** A window removed in details that can still come back. */
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
 }
@@ -72,6 +84,7 @@ export const createShelfController = (
   deps: ControllerDeps
 ): ShelfController => {
   let doc = deps.initial;
+  let onDisk = deps.initial;
   let { status } = deps;
   let pending: readonly Removed[] = [];
   let focus: ShelfView["focus"] = null;
@@ -85,6 +98,8 @@ export const createShelfController = (
   let saved = 0;
   // A save is on its way that hasn't read the document yet.
   let queued = false;
+  // The revision the write now on the disk's way holds, if one is.
+  let writing: number | null = null;
   const listeners = new Set<() => void>();
 
   const emit = (): void => {
@@ -110,8 +125,11 @@ export const createShelfController = (
     const deletable = toDelete;
 
     toDelete = [];
+    writing = snapshotVersion;
 
     const result = await deps.save(snapshot);
+
+    writing = null;
 
     if (!result.ok) {
       toDelete = [...deletable, ...toDelete];
@@ -121,6 +139,7 @@ export const createShelfController = (
     }
 
     saved = snapshotVersion;
+    onDisk = snapshot;
 
     if (status.saveError !== null) {
       setStatus({ saveError: null });
@@ -198,6 +217,22 @@ export const createShelfController = (
     };
   };
 
+  const persisted = async (rev: number): Promise<WriteResult> => {
+    // A typed edit waiting for its pause, or a change a failed save left unwritten.
+    if (saved < rev && !queued && (writing ?? 0) < rev) {
+      saveNow();
+    }
+
+    await inFlight;
+
+    return saved >= rev
+      ? { ok: true }
+      : {
+          message: status.saveError ?? "The shelf could not be saved to disk.",
+          ok: false,
+        };
+  };
+
   return {
     apply: (requested) => {
       const op = windowOp(requested);
@@ -234,37 +269,39 @@ export const createShelfController = (
 
       return result.addedId;
     },
-    flush: async () => {
-      const wanted = version;
-
-      // A typed edit waiting for its pause, or a change a failed save left unwritten.
-      if (saved < wanted && !queued) {
-        saveNow();
-      }
-
-      await inFlight;
-
-      return saved >= wanted
-        ? { ok: true }
-        : {
-            message:
-              status.saveError ?? "The shelf could not be saved to disk.",
-            ok: false,
-          };
-    },
+    flush: async () => await persisted(version),
     focus: (id, edit = false) => {
       focusSeq += 1;
       focus = edit ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),
+    persisted,
     setStatus,
+    snapshot: () => ({ doc, rev: version }),
     subscribe: (listener) => {
       listeners.add(listener);
 
       return () => {
         listeners.delete(listener);
       };
+    },
+    unsaved: () => {
+      if (saved === version) {
+        return 0;
+      }
+
+      const stored = new Map(onDisk.items.map((item) => [item.id, item]));
+      const now = new Set(doc.items.map((item) => item.id));
+
+      const changed = doc.items.filter(
+        (item) => stored.get(item.id) !== item
+      ).length;
+
+      const removed = onDisk.items.filter((item) => !now.has(item.id)).length;
+
+      // A change to sections alone still counts as one.
+      return Math.max(1, changed + removed);
     },
     view: () => ({ canUndo: pending.length > 0, doc, focus, status }),
     removedWindow: (id: WindowId) =>

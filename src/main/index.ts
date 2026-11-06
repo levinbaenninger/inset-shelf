@@ -46,8 +46,13 @@ import {
   screen,
   shell,
   systemPreferences,
+  webContents,
 } from "electron";
-import type { NativeImage, WebContents } from "electron";
+import type {
+  MenuItemConstructorOptions,
+  NativeImage,
+  WebContents,
+} from "electron";
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
@@ -63,10 +68,15 @@ import { createDragStaging, exportImage } from "./exports";
 import { frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
-import { menuEntryForKey } from "./menu-keys";
+import {
+  answerMenuKeys,
+  createMenuOpenTracker,
+  holdMenuBarKeys,
+} from "./menu-open";
 import { openApp, openAppAt } from "./open-app";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
+import { createQuitHold } from "./quit-hold";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
@@ -74,6 +84,7 @@ import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
+import type { WriteResult } from "./shelf-store";
 import { createShelfWindow } from "./shelf-window";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
@@ -211,45 +222,15 @@ const linkText = (windows: readonly WindowRef[]): string =>
   windows.map((window) => window.title ?? window.app ?? "Window").join(" · ");
 
 /** Pages with a menu open, which then take every key themselves (src/renderer/lib/menu-keys.ts). */
-const withMenuOpen = new WeakSet<WebContents>();
+const menus = createMenuOpenTracker<WebContents>();
 
-const setMenuOpen = (contents: WebContents, open: boolean): void => {
-  if (open) {
-    withMenuOpen.add(contents);
-  } else {
-    withMenuOpen.delete(contents);
-  }
-
-  contents.setIgnoreMenuShortcuts(open);
-};
-
-/**
- * Runs the app menu's entry for a key press in this page (item 8): on
- * Windows the frameless windows have no menu bar to take the keys from.
- * Preventing the event also keeps it from the page and the menu. While a
- * menu is open in the page, the keys are the menu's.
- */
-const answerMenuKeys = (contents: WebContents): void => {
-  contents.on("before-input-event", (event, input) => {
-    if (withMenuOpen.has(contents)) {
-      return;
-    }
-
-    const menu = Menu.getApplicationMenu();
-    const entry = menu === null ? null : menuEntryForKey(menu.items, input);
-
-    if (entry !== null) {
-      event.preventDefault();
-      // Electron types click as Function. It is an arrow function taking (event, focusedWindow, focusedWebContents).
-      entry.click.call(
-        undefined,
-        undefined,
-        BrowserWindow.fromWebContents(contents) ?? undefined,
-        contents
-      );
-    }
-  });
-};
+/** The app menu, whose keys do nothing while the focused page has a menu open. */
+const heldMenuTemplate = (
+  ...args: Parameters<typeof appMenuTemplate>
+): MenuItemConstructorOptions[] =>
+  holdMenuBarKeys(appMenuTemplate(...args), () =>
+    menus.isOpen(webContents.getFocusedWebContents())
+  );
 
 /**
  * Reopens a linked window: its page in the browser, its file in its app,
@@ -334,6 +315,14 @@ const freePath = async (folder: string, name: string): Promise<string> => {
   return path.join(folder, `${stem} ${Date.now()}${ext}`);
 };
 
+const setTimer = (run: () => void, ms: number): (() => void) => {
+  const timer = setTimeout(run, ms);
+
+  return () => {
+    clearTimeout(timer);
+  };
+};
+
 const start = async (): Promise<void> => {
   await app.whenReady();
 
@@ -348,7 +337,19 @@ const start = async (): Promise<void> => {
   // keys from, so every window reads them itself and runs the entry.
   if (!isMac) {
     app.on("browser-window-created", (_event, window) => {
-      answerMenuKeys(window.webContents);
+      const contents = window.webContents;
+
+      answerMenuKeys({
+        held: () => menus.isOpen(contents),
+        menu: () => Menu.getApplicationMenu()?.items ?? [],
+        onKey: (listener) => {
+          contents.on("before-input-event", listener);
+        },
+        run: (entry) => {
+          // Electron types click as Function. It is an arrow function taking (event, focusedWindow, focusedWebContents).
+          entry.click.call(undefined, undefined, window, contents);
+        },
+      });
     });
   }
 
@@ -380,17 +381,13 @@ const start = async (): Promise<void> => {
     },
     initial: store.initial,
     save: store.save,
-    setTimer: (run, ms) => {
-      const timer = setTimeout(run, ms);
-
-      return () => {
-        clearTimeout(timer);
-      };
-    },
+    setTimer,
     status: {
       floatOnTop: true,
       keys: keyPermission(true, trusted()),
       problem: store.recovered,
+      quitPrompt: null,
+      readOnly: store.readOnly,
       saveError: null,
       selectionCapture,
     },
@@ -411,13 +408,7 @@ const start = async (): Promise<void> => {
     url: pageUrl("shelf"),
   });
 
-  // A page that reloads or crashes with a menu open never says it closed.
-  const forgetMenu = (): void => {
-    setMenuOpen(shelf.webContents, false);
-  };
-
-  shelf.webContents.on("did-start-loading", forgetMenu);
-  shelf.webContents.on("render-process-gone", forgetMenu);
+  menus.watch(shelf.webContents, shelf.dialogParent);
 
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
@@ -445,6 +436,38 @@ const start = async (): Promise<void> => {
 
     shelf.show(front.own ? lastTarget : front.bounds);
   };
+
+  /**
+   * Quitting and the update restart wait here for the disk. Changes it still
+   * doesn't hold keep the app open and the shelf asks what to do.
+   */
+  const quitHold = createQuitHold({
+    flush: controller.flush,
+    prompt: (quitPrompt) => {
+      controller.setStatus({ quitPrompt });
+
+      if (quitPrompt === null) {
+        return;
+      }
+
+      // From the notification area, the window in front is a part of the taskbar.
+      if (shelf.isVisible()) {
+        shelf.focus();
+      } else {
+        void showShelf({ dock: isMac });
+      }
+    },
+    setTimer,
+    state: () => {
+      const { status } = controller.view();
+
+      return {
+        readOnly: status.readOnly,
+        saveError: status.saveError,
+        unsaved: controller.unsaved(),
+      };
+    },
+  });
 
   const toggleShelf = async (): Promise<void> => {
     if (shelf.isFocused()) {
@@ -561,11 +584,13 @@ const start = async (): Promise<void> => {
     rendererRoot: rendererRoot(),
   });
 
-  // Every copy goes through this gate: it waits for the disk, and copies nothing when the save failed.
+  // Every copy goes through this gate: a copy of items waits for the disk, and copies nothing when the save failed.
   const gate = createCopyGate({
     clipboard,
-    flush: controller.flush,
     onWrite: screenshots.ignoreClipboard,
+    persisted: controller.persisted,
+    readOnly: store.readOnly,
+    snapshot: controller.snapshot,
     toItem: (data) => new ClipboardItem(data),
   });
 
@@ -854,22 +879,27 @@ const start = async (): Promise<void> => {
         : { png: exported.png, widthPx: exported.image.getSize().width };
     },
     gate,
-    item: controller.item,
     mac: isMac,
-    onCopied: (items, kind) => {
+    onCopied: (ids, kind) => {
+      // Checked off as the items are now: one checked off while the copy waited stays checked.
       if (settings.current().markDoneOnCopy) {
-        for (const item of items) {
-          if (!item.done) {
-            controller.apply({ id: item.id, type: "toggleDone" });
+        for (const id of ids) {
+          if (controller.item(id)?.done === false) {
+            controller.apply({ id, type: "toggleDone" });
           }
         }
       }
 
-      const [first] = items;
+      const [firstId] = ids;
+
+      const first =
+        kind === "list" || firstId === undefined
+          ? undefined
+          : controller.item(firstId);
 
       e2eLog(
         "copied",
-        kind === "list" || first === undefined
+        first === undefined
           ? { kind: "list" }
           : { itemId: first.id, kind: first.kind }
       );
@@ -1097,12 +1127,14 @@ const start = async (): Promise<void> => {
       dismissProblem: () => {
         controller.setStatus({ problem: null });
       },
+      retrySave: async () => await controller.flush(),
+      answerQuit: quitHold.answer,
       getView: () => controller.view(),
       hide: () => {
         shelf.hide();
       },
       menuOpen: (open) => {
-        setMenuOpen(shelf.webContents, open);
+        menus.set(shelf.webContents, open);
       },
       nativeEdit: (action) => {
         if (action === "copy") {
@@ -1194,12 +1226,27 @@ const start = async (): Promise<void> => {
     }
   );
 
-  /** Shows the shelf with the saved image; when Copy and Save could not copy, it says why there. */
-  const showSaved = async (copied: ActionResult | null): Promise<void> => {
+  /**
+   * Shows the shelf with the saved image; when Copy and Save could not copy,
+   * it says why there. `saving`: a new drawing copied before it reached the
+   * disk, which says so if it never does.
+   */
+  const showSaved = async (
+    copied: ActionResult | null,
+    saving: Promise<WriteResult> | null = null
+  ): Promise<void> => {
     await showShelf();
 
     if (copied !== null && !copied.ok) {
       notify(copied.message, "failed");
+
+      return;
+    }
+
+    const saved = await saving;
+
+    if (saved !== null && !saved.ok) {
+      notify(`Copied, but not saved to disk. ${saved.message}`, "failed");
     }
   };
 
@@ -1302,14 +1349,23 @@ const start = async (): Promise<void> => {
           via: "drawing",
         });
 
-        const copied = copy && id !== null ? await copies.copy(id) : null;
+        const added = id === null ? undefined : controller.item(id);
+        const { rev } = controller.snapshot();
+
+        // The drawing is the user's own picture: it is copied even when the shelf can't save it (Round 6).
+        const copied =
+          copy && added?.kind === "image"
+            ? await copies.copyDrawing(added)
+            : null;
+
+        const saving = copied?.ok === true ? controller.persisted(rev) : null;
 
         drawing.close();
 
         if (id !== null) {
           e2eLog("itemAdded", { itemId: id, kind: "image", via: "drawing" });
           controller.focus(id);
-          void showSaved(copied);
+          void showSaved(copied, saving);
         }
 
         return { ok: true };
@@ -1541,6 +1597,12 @@ const start = async (): Promise<void> => {
 
   const updater = createUpdater();
 
+  const restartToUpdate = (): void => {
+    if (updater.state().kind === "ready") {
+      quitHold.request(updater.restart);
+    }
+  };
+
   // What the menu shows; a note being typed changes the document but not this.
   let builtMenu = "";
 
@@ -1566,7 +1628,7 @@ const start = async (): Promise<void> => {
 
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
-        appMenuTemplate(
+        heldMenuTemplate(
           {
             doc,
             floatOnTop: status.floatOnTop,
@@ -1632,7 +1694,7 @@ const start = async (): Promise<void> => {
             },
             setFloatOnTop,
             openSettings: settingsWindow.open,
-            restartToUpdate: updater.restart,
+            restartToUpdate,
             redo: () => {
               if (drawing.isFocused()) {
                 drawingServer.emit("edit", "redo");
@@ -1744,7 +1806,7 @@ const start = async (): Promise<void> => {
       }
 
       case "restartToUpdate": {
-        updater.restart();
+        restartToUpdate();
         break;
       }
 
@@ -1845,34 +1907,36 @@ const start = async (): Promise<void> => {
     picker.load(),
   ]);
 
-  let quitting = false;
-
   /**
-   * Writes a pending note, then exits. A second app.quit() after a held-back
-   * quit closes the windows but does not end the app on macOS when the quit
-   * came from the Quit menu item, so the app exits itself.
+   * A second app.quit() after a held-back quit closes the windows but does
+   * not end the app on macOS when the quit came from the Quit menu item, so
+   * the app exits itself.
    */
-  const finishQuit = async (): Promise<void> => {
-    try {
-      await controller.flush();
-    } finally {
-      globalShortcut.unregisterAll();
-      app.exit(0);
-    }
-  };
-
-  app.on("before-quit", (event) => {
-    event.preventDefault();
-
-    if (quitting) {
-      return;
-    }
-
-    quitting = true;
+  const exitNow = (): void => {
     keyMonitor.stop();
     screenshots.stop();
     staging.clear();
-    void finishQuit();
+    globalShortcut.unregisterAll();
+    app.exit(0);
+  };
+
+  // The Quit items, the OS quitting the app, and the installer's quit after the update restart.
+  app.on("before-quit", (event) => {
+    event.preventDefault();
+
+    if (quitHold.exiting()) {
+      exitNow();
+    } else {
+      quitHold.request(exitNow);
+    }
+  });
+
+  // Windows shutting down or signing out asks every window first.
+  shelf.dialogParent.on("query-session-end", (event) => {
+    if (controller.unsaved() > 0 && !controller.view().status.readOnly) {
+      event.preventDefault();
+      quitHold.request(exitNow);
+    }
   });
 
   if (settings.current().screenshotCards) {
