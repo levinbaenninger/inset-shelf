@@ -40,6 +40,8 @@ export interface ShelfWindow {
   readonly focus: () => void;
   /** The window a file dialog belongs to, so it opens above the shelf. */
   readonly dialogParent: BrowserWindow;
+  /** While the quit prompt shows, the shelf floats above every Inset window. */
+  readonly raiseForPrompt: (on: boolean) => void;
   readonly allowClose: () => void;
   /** On by default; the Window menu turns it off. */
   readonly setFloatOnTop: (on: boolean) => void;
@@ -163,6 +165,14 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
     setFloatOnTop: (on) => {
       floating = on;
       window.setAlwaysOnTop(on, "floating");
+    },
+    raiseForPrompt: (on) => {
+      // One level above the drawing window, which floats one above the shelf.
+      if (on) {
+        window.setAlwaysOnTop(true, "floating", 2);
+      } else {
+        window.setAlwaysOnTop(floating, "floating");
+      }
     },
     show: (target) => {
       window.setBounds(placement(target));

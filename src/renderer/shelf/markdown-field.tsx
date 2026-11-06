@@ -90,6 +90,7 @@ export const MarkdownField = ({
   autoFocus = false,
   className,
   controlSlot = false,
+  followValue = true,
   headingRules = true,
   keys,
   onBlur,
@@ -110,6 +111,8 @@ export const MarkdownField = ({
   readonly controlSlot?: boolean;
   /** Whether "# " turns a line into a heading as it is typed. */
   readonly headingRules?: boolean;
+  /** False: `value` only starts the field, and a later one (main's echo of the edit) leaves what is typed alone. */
+  readonly followValue?: boolean;
   readonly onBlur?: (markdown: string) => void;
   readonly ref?: Ref<MarkdownFieldHandle>;
 }) => {
@@ -221,11 +224,11 @@ export const MarkdownField = ({
 
   // The value set from outside (cleared after adding a note) replaces what is typed.
   useEffect(() => {
-    if (editor !== null && value !== emitted.current) {
+    if (followValue && editor !== null && value !== emitted.current) {
       emitted.current = value;
       editor.commands.setContent(value, { contentType: "markdown" });
     }
-  }, [editor, value]);
+  }, [editor, followValue, value]);
 
   useImperativeHandle(
     ref,

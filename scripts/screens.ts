@@ -372,8 +372,10 @@ type ShelfFixture = typeof DOC | typeof EMPTY_DOC;
 
 const shelfView = (doc: ShelfFixture = DOC) => ({
   canUndo: false,
+  discarded: null,
   doc,
   focus: null,
+  notSaved: [],
   status: STATUS,
 });
 
@@ -949,11 +951,13 @@ const typeInEntryA = async (page: Page): Promise<void> => {
   await page.keyboard.type(" at 9");
 };
 
-/** With A's edit still being typed (the scene's act), A's menu copies the edited words. */
+/** With A's edit still being typed, inside the pause before it is sent, A's menu copies the edited words. */
 const pendingEditCheck = async (page: Page): Promise<string | null> => {
   const mod = await commandKey(page);
   const a = uuid(ENTRY_A);
   const before = await callCount(page);
+
+  await page.keyboard.type(" sharp");
 
   // On the card's edge, outside the text being edited.
   await item(page, ENTRY_A).click({
@@ -968,7 +972,11 @@ const pendingEditCheck = async (page: Page): Promise<string | null> => {
 
   const want = [
     {
-      arg: { id: a, text: "Book the movers for Monday at 9", type: "editText" },
+      arg: {
+        id: a,
+        text: "Book the movers for Monday at 9 sharp",
+        type: "editText",
+      },
       call: "apply",
     },
     { arg: a, call: "copy" },
@@ -1212,11 +1220,10 @@ const pickAAndC = async (page: Page): Promise<void> => {
     .click({ modifiers: ["Shift"] });
 };
 
-/** Main's message when the shelf can't be saved: the banner shows it, and every copy is refused with it. */
-const SAVE_FAILED =
-  "The shelf could not be saved: ENOSPC: no space left on device, write";
+/** Main's message when the shelf can't be saved (src/main/save-error.ts): the banner shows it, and every copy is refused with it. */
+const SAVE_FAILED = "The disk is full.";
 
-const NOT_COPIED = `Not copied. ${SAVE_FAILED}`;
+const NOT_COPIED = `Not copied: changes aren't saved. ${SAVE_FAILED}`;
 
 const DRAFT_DESCRIPTION = "Keys from the caretaker";
 const DRAFT_TEXT = "The upload test fails one run in ten on CI today";
@@ -1255,13 +1262,12 @@ const keepDraftsCheck = async (page: Page): Promise<string | null> => {
     return `A's details show ${JSON.stringify(description)} after leaving them with saves failing, not the description typed`;
   }
 
-  if (
-    !(await page
-      .locator("[data-details-view]")
-      .getByText("Not saved to disk")
-      .isVisible())
-  ) {
-    return "A's details, opened again with saves failing, don't say the shelf isn't saved";
+  const banner = page.locator("[data-details-view]").getByText("Not saved", {
+    exact: true,
+  });
+
+  if (!(await banner.isVisible())) {
+    return "A's details, opened again with saves failing, don't say A isn't saved";
   }
 
   await page.getByRole("button", { name: "Back to the list" }).click();
@@ -1274,7 +1280,9 @@ const keepDraftsCheck = async (page: Page): Promise<string | null> => {
 
   const before = await callCount(page);
 
-  await page.getByRole("button", { exact: true, name: "Retry" }).click();
+  await item(page, ROW_B)
+    .getByRole("button", { name: /^Retry: /u })
+    .click();
   await page.getByText(`Still not saved. ${SAVE_FAILED}`).waitFor();
 
   const sent = await calls(page, before);
@@ -1282,7 +1290,359 @@ const keepDraftsCheck = async (page: Page): Promise<string | null> => {
 
   return isDeepStrictEqual(retried, ["retrySave"])
     ? null
-    : `Retry in the banner sent ${JSON.stringify(retried)}, not retrySave`;
+    : `Retry on B's row sent ${JSON.stringify(retried)}, not retrySave`;
+};
+
+/** A capture made while saves fail: the disk has never held it, so it offers Delete, not Discard changes. */
+const NEW_CAPTURE = {
+  ...base(20, 2),
+  html: null,
+  kind: "text",
+  links: [],
+  text: "Call the caretaker about the spare keys",
+  via: "typed",
+};
+
+const EDITED_A = "Book the movers for Monday at 9";
+
+/** Main's view after a failed save: A's words edited, and a new capture, each marked Not saved. */
+const NOT_SAVED_VIEW = {
+  ...shelfView({
+    ...MENU_DOC,
+    items: [
+      NEW_CAPTURE,
+      ...MENU_DOC.items.map((entry) =>
+        entry.id === uuid(ENTRY_A) ? { ...entry, text: EDITED_A } : entry
+      ),
+    ],
+  }),
+  notSaved: [
+    { id: uuid(20), undo: "delete" },
+    { id: uuid(ENTRY_A), undo: "discard" },
+  ],
+  status: { ...STATUS, saveError: SAVE_FAILED },
+};
+
+const NotSavedRowsSchema = z.object({
+  a: z.number(),
+  capture: z.number(),
+  captureDelete: z.number(),
+  captureDiscard: z.number(),
+});
+
+/** How many "Not saved" lines A and the new capture show, and what the capture offers. */
+const notSavedRows = async (page: Page) =>
+  NotSavedRowsSchema.parse({
+    a: await item(page, ENTRY_A)
+      .getByText("Not saved", { exact: true })
+      .count(),
+    capture: await item(page, 20)
+      .getByText("Not saved", { exact: true })
+      .count(),
+    captureDelete: await item(page, 20)
+      .getByRole("button", { name: /^Delete: Call the caretaker/u })
+      .count(),
+    captureDiscard: await item(page, 20)
+      .getByRole("button", { name: "Discard changes" })
+      .count(),
+  });
+
+/**
+ * Round 7: each item a failed save left unwritten says "Not saved" on its
+ * row. Discard changes on A puts back only A's saved words; the new capture
+ * keeps its line, and offers Delete instead, as the disk has never held it.
+ */
+const notSavedCheck = async (page: Page): Promise<string | null> => {
+  const before = await notSavedRows(page);
+
+  if (
+    !isDeepStrictEqual(before, {
+      a: 1,
+      capture: 1,
+      captureDelete: 1,
+      captureDiscard: 0,
+    })
+  ) {
+    return `the rows show ${JSON.stringify(before)}: A and the new capture should each say Not saved, the capture with Delete and no Discard changes`;
+  }
+
+  // The row's own keys leave its buttons alone: Return and Space press them, never Edit or Check off.
+  const keyed = await callCount(page);
+
+  const retry = item(page, 20).getByRole("button", {
+    name: /^Retry: Call the caretaker/u,
+  });
+
+  await retry.focus();
+
+  const shown = z.object({ height: z.number(), ring: z.string() }).parse(
+    await retry.evaluate((button) => ({
+      height: button.getBoundingClientRect().height,
+      ring: getComputedStyle(button).boxShadow,
+    }))
+  );
+
+  if (shown.height < 24 || shown.ring === "none") {
+    return `the capture's Retry is ${shown.height} px high with ring ${shown.ring}: it needs 24 px and a visible focus ring`;
+  }
+
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
+
+  const pressed = await calls(page, keyed);
+
+  if (
+    !isDeepStrictEqual(
+      pressed.map((call) => call.call),
+      ["retrySave", "retrySave"]
+    )
+  ) {
+    return `Return and Space on the capture's Retry sent ${JSON.stringify(pressed)}, not two retrySave`;
+  }
+
+  const from = await callCount(page);
+
+  await item(page, ENTRY_A)
+    .getByRole("button", { name: "Discard changes" })
+    .click();
+  await page.getByText("Changes discarded").waitFor();
+  // Main's view with A put back arrives a moment later (`echo: "later"`).
+  await page.waitForTimeout(400);
+
+  const sent = await calls(page, from);
+  const after = await notSavedRows(page);
+  const words = (await item(page, ENTRY_A).textContent()) ?? "";
+
+  if (
+    !isDeepStrictEqual(sent, [{ arg: uuid(ENTRY_A), call: "discardChanges" }])
+  ) {
+    return `Discard changes on A sent ${JSON.stringify(sent)}, not discardChanges for A`;
+  }
+
+  if (
+    words.includes(EDITED_A) ||
+    !words.includes("Book the movers for Monday")
+  ) {
+    return `A's row reads ${JSON.stringify(words)} after Discard changes, not its saved words`;
+  }
+
+  return isDeepStrictEqual(after, { ...before, a: 0 })
+    ? null
+    : `after Discard changes on A the rows show ${JSON.stringify(after)}: only A's line should go`;
+};
+
+/** The file's details as typed while saves failed: every field differs from what the disk holds. */
+const DRAFT_FILE = {
+  ...MENU_DOC.items.find((entry) => entry.id === uuid(ROW_C)),
+  description: "Ask facilities where the second exit goes",
+  due: isoDay(3),
+  steps: [step(11, "Print two copies for the movers")],
+  title: "Floor plan, level 3, with the new desks",
+};
+
+const DETAILS_DISCARD_VIEW = {
+  ...shelfView({
+    ...MENU_DOC,
+    items: MENU_DOC.items.map((entry) =>
+      entry.id === uuid(ROW_C) ? DRAFT_FILE : entry
+    ),
+  }),
+  notSaved: [{ id: uuid(ROW_C), undo: "discard" }],
+  status: { ...STATUS, saveError: SAVE_FAILED },
+};
+
+const DetailsFieldsSchema = z.object({
+  banner: z.number(),
+  description: z.number(),
+  due: z.number(),
+  steps: z.number(),
+  title: z.string(),
+});
+
+/** What the open details show: the title, and whether the other fields are there. */
+const detailsFields = async (page: Page) => {
+  const view = page.locator("[data-details-view]");
+
+  return DetailsFieldsSchema.parse({
+    banner: await view.getByText("Not saved", { exact: true }).count(),
+    description: await view
+      .getByRole("textbox", { name: "Description" })
+      .count(),
+    due: await view.locator('section[aria-label="Due"]').count(),
+    steps: await view.getByRole("textbox", { name: /^Step /u }).count(),
+    title: await view.getByRole("textbox", { name: "Title" }).inputValue(),
+  });
+};
+
+/**
+ * Round 7: Discard changes in the open details puts every field back as the
+ * disk holds it at once (title, description, steps and Due) and its error goes.
+ */
+const detailsDiscardCheck = async (page: Page): Promise<string | null> => {
+  const draft = await detailsFields(page);
+
+  if (
+    !isDeepStrictEqual(draft, {
+      banner: 1,
+      description: 1,
+      due: 1,
+      steps: 1,
+      title: DRAFT_FILE.title,
+    })
+  ) {
+    return `the file's details show ${JSON.stringify(draft)}, not the draft with its Not saved banner`;
+  }
+
+  await page
+    .locator("[data-details-view]")
+    .getByRole("button", { name: "Discard changes" })
+    .click();
+  await page.getByText("Changes discarded").waitFor();
+
+  const saved = await detailsFields(page);
+
+  return isDeepStrictEqual(saved, {
+    banner: 0,
+    description: 0,
+    due: 0,
+    steps: 0,
+    title: "Floor plan, level 3",
+  })
+    ? null
+    : `after Discard changes the open details show ${JSON.stringify(saved)}, not the saved file with no banner`;
+};
+
+/**
+ * Round 7: a refused copy says why and offers Retry; Retry saves, and the
+ * shelf says the item can be copied now. Nothing is copied by itself.
+ */
+const copyRetryCheck = async (page: Page): Promise<string | null> => {
+  const from = await callCount(page);
+
+  await page
+    .locator("[data-sonner-toast]")
+    .getByRole("button", { name: "Retry" })
+    .click();
+  await page.getByText("Saved. You can copy it now.").waitFor();
+
+  const sent = await calls(page, from);
+
+  return isDeepStrictEqual(
+    sent.map((call) => call.call),
+    ["retrySave"]
+  )
+    ? null
+    : `Retry on the refused copy sent ${JSON.stringify(sent)}, not one retrySave and no copy`;
+};
+
+/** Office move renamed, as the page asks main for it. */
+const rename = (name: string) => ({
+  arg: { id: OFFICE, name, type: "renameSection" },
+  call: "apply",
+});
+
+/** A section being renamed is an edit like any other: main's settle gets the name still being typed, and Escape puts the old one back. */
+const liveRenameCheck = async (page: Page): Promise<string | null> => {
+  await page
+    .getByRole("button", { exact: true, name: "Office move" })
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: /^Rename/u }).click();
+  await page.getByRole("textbox", { name: "Rename section" }).waitFor();
+
+  const from = await callCount(page);
+
+  await page.keyboard.press("End");
+  await page.keyboard.type(" 2026");
+  await page.evaluate('globalThis.__emit("settle", 9)');
+  await page.keyboard.press("Escape");
+
+  const sent = await calls(page, from);
+
+  return isDeepStrictEqual(sent, [
+    rename("Office move 2026"),
+    { arg: 9, call: "settled" },
+    rename("Office move"),
+  ])
+    ? null
+    : `renaming with settle and then Escape sent ${JSON.stringify(sent)}, not the typed name, settled 9, then the old name`;
+};
+
+const DraftsSchema = z.array(z.number());
+
+/**
+ * Round 7, Sol's round 6 probe: words typed into a text item reach main
+ * after a pause, with focus still in the field and main's echo leaving
+ * them alone. Main's settle before a quit gets the words still waiting,
+ * then the answer. Escape puts the saved words back.
+ */
+const liveEditCheck = async (page: Page): Promise<string | null> => {
+  const a = uuid(ENTRY_A);
+  const typed = await calls(page);
+  const field = item(page, ENTRY_A).getByRole("textbox", { name: "Edit item" });
+
+  if (
+    !isDeepStrictEqual(typed, [
+      { arg: { id: a, text: EDITED_A, type: "editText" }, call: "apply" },
+    ])
+  ) {
+    return `typing in A without leaving the field sent ${JSON.stringify(typed)}, not one editText with the words`;
+  }
+
+  // Main's echo of that edit has landed by now.
+  await page.waitForTimeout(300);
+
+  const inField = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? ''"
+  );
+
+  const words = (await field.textContent()) ?? "";
+
+  if (inField !== "Edit item" || words.trim() !== EDITED_A) {
+    return `after main's echo A's field reads ${JSON.stringify(words)} and focus is on ${JSON.stringify(inField)}`;
+  }
+
+  const from = await callCount(page);
+
+  await page.keyboard.type(" sharp");
+  await page.evaluate('globalThis.__emit("settle", 7)');
+
+  const settled = await calls(page, from);
+
+  const drafts = DraftsSchema.parse(
+    await page.evaluate("globalThis.__drafts")
+  ).at(-1);
+
+  if (
+    !isDeepStrictEqual(settled, [
+      {
+        arg: { id: a, text: `${EDITED_A} sharp`, type: "editText" },
+        call: "apply",
+      },
+      { arg: 7, call: "settled" },
+    ]) ||
+    drafts !== 0
+  ) {
+    return `settle sent ${JSON.stringify(settled)} with ${drafts} drafts left, not the waiting words and then settled 7`;
+  }
+
+  const escaped = await callCount(page);
+
+  await page.keyboard.press("Escape");
+
+  const reverted = await calls(page, escaped);
+
+  if (
+    !isDeepStrictEqual(reverted, [
+      {
+        arg: { id: a, text: "Book the movers for Monday", type: "editText" },
+        call: "apply",
+      },
+    ])
+  ) {
+    return `Escape after the words were sent sent ${JSON.stringify(reverted)}, not A's saved words`;
+  }
+
+  return await liveRenameCheck(page);
 };
 
 /** Main's view once a quit is held: the shelf as it was, with the prompt. */
@@ -1308,13 +1668,23 @@ const QuitLayoutSchema = z.object({
   focused: z.string(),
   inside: z.boolean(),
   overflowing: z.array(z.string()),
+  ring: z.string(),
 });
 
+/** Focuses the quit prompt's button with that name and presses the key on it. */
+const pressOn = async (page: Page, name: string, key: string) => {
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { exact: true, name })
+    .focus();
+  await page.keyboard.press(key);
+};
+
 /**
- * Round 6b: Retry has the keyboard, every button fits at the shelf's
- * narrowest, Return retries even from Quit without saving, Esc cancels,
- * and the list behind keeps its keys: → doesn't open the picked item's
- * details.
+ * Round 6b and 7: Retry has the keyboard and shows its focus ring, every
+ * button fits at the shelf's narrowest, Return retries whichever button
+ * has focus, Esc cancels, Space presses the focused button, and the list
+ * behind keeps its keys: → doesn't open the picked item's details.
  */
 const quitHeldCheck = async (page: Page): Promise<string | null> => {
   const layout = QuitLayoutSchema.parse(
@@ -1328,12 +1698,17 @@ const quitHeldCheck = async (page: Page): Promise<string | null> => {
         overflowing: [...dialog.querySelectorAll("button")]
           .filter((button) => button.scrollWidth > button.clientWidth)
           .map((button) => button.textContent),
+        ring: getComputedStyle(document.activeElement).boxShadow,
       };
     })()`)
   );
 
   if (layout.focused !== "Retry") {
     return `the quit prompt opened with focus on ${JSON.stringify(layout.focused)}, not Retry`;
+  }
+
+  if (layout.ring === "none" || layout.ring === "") {
+    return "Retry has focus as the prompt opens but shows no focus ring";
   }
 
   if (!layout.inside || layout.overflowing.length > 0) {
@@ -1343,10 +1718,22 @@ const quitHeldCheck = async (page: Page): Promise<string | null> => {
   const before = await callCount(page);
 
   await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Escape");
+
+  // Main keeps the prompt up until it decides, so every key below meets the same prompt.
+  const presses = [
+    { answer: "retry", key: "Enter", name: "Retry" },
+    { answer: "retry", key: "Enter", name: "Quit without saving" },
+    { answer: "retry", key: "Enter", name: "Cancel" },
+    { answer: "cancel", key: "Escape", name: "Quit without saving" },
+    { answer: "retry", key: "Space", name: "Retry" },
+    { answer: "discard", key: "Space", name: "Quit without saving" },
+    { answer: "cancel", key: "Space", name: "Cancel" },
+  ] as const;
+
+  for (const { key, name } of presses) {
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    await pressOn(page, name, key);
+  }
 
   const sent = await calls(page, before);
 
@@ -1354,13 +1741,14 @@ const quitHeldCheck = async (page: Page): Promise<string | null> => {
     return "→ in the quit prompt opened the picked item's details behind it";
   }
 
-  return isDeepStrictEqual(sent, [
-    { arg: "retry", call: "answerQuit" },
-    { arg: "retry", call: "answerQuit" },
-    { arg: "cancel", call: "answerQuit" },
-  ])
+  const want = presses.map(({ answer }) => ({
+    arg: answer,
+    call: "answerQuit",
+  }));
+
+  return isDeepStrictEqual(sent, want)
     ? null
-    : `→, Return, Tab and Return, then Esc in the quit prompt sent ${JSON.stringify(sent)}, not retry, retry, cancel`;
+    : `keys in the quit prompt sent ${JSON.stringify(sent.map((call) => call.arg))}, not ${JSON.stringify(want.map((call) => call.arg))} (${presses.map(({ key, name }) => `${key} on ${name}`).join(", ")})`;
 };
 
 /**
@@ -2062,6 +2450,98 @@ const SCENES: readonly Scene[] = [
     width: 300,
   },
   {
+    check: notSavedCheck,
+    data: { echo: "later", savedDoc: MENU_DOC, view: NOT_SAVED_VIEW },
+    layoutCheck: true,
+    name: "shelf-not-saved",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, ROW_C);
+    },
+    check: detailsDiscardCheck,
+    data: { savedDoc: MENU_DOC, view: DETAILS_DISCARD_VIEW },
+    layoutCheck: true,
+    name: "shelf-details-discard",
+    page: "shelf",
+  },
+  {
+    // One click on Discard changes while A's text is open: the words sent and the ones still waiting both go (red-team round 7).
+    act: async (page) => {
+      await select(page, ENTRY_A);
+      await page.keyboard.press("Enter");
+
+      const field = item(page, ENTRY_A).getByRole("textbox", {
+        name: "Edit item",
+      });
+
+      await field.fill("A changed once more");
+      await page.waitForTimeout(350);
+      await field.pressSequentially(" and more");
+      await page.evaluate("globalThis.__mark = globalThis.__calls.length");
+      await item(page, ENTRY_A)
+        .getByRole("button", { name: /^Discard changes:/u })
+        .click();
+      await page.waitForTimeout(400);
+    },
+    check: async (page) => {
+      const from = Number(await page.evaluate("globalThis.__mark"));
+      const sent = await calls(page, from);
+      const row = (await item(page, ENTRY_A).textContent()) ?? "";
+
+      const editors = await item(page, ENTRY_A)
+        .getByRole("textbox", { name: "Edit item" })
+        .count();
+
+      const expected = [{ arg: uuid(ENTRY_A), call: "discardChanges" }];
+
+      if (!isDeepStrictEqual(sent, expected)) {
+        return `one click on Discard changes sent ${JSON.stringify(sent)}, not ${JSON.stringify(expected)}`;
+      }
+
+      return editors === 0 &&
+        row.includes("Book the movers for Monday") &&
+        !row.includes("changed once more")
+        ? null
+        : `after Discard changes the row shows ${JSON.stringify(row)} with ${editors} editor open`;
+    },
+    data: { savedDoc: MENU_DOC, view: NOT_SAVED_VIEW },
+    name: "shelf-discard-while-editing",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      const mod = await commandKey(page);
+
+      await openAThenMenuOnB(page);
+      await page.keyboard.press(`${mod}+c`);
+      await page
+        .locator("[data-sonner-toast]")
+        .getByRole("button", { name: "Retry" })
+        .waitFor();
+    },
+    check: copyRetryCheck,
+    data: {
+      copyFails: NOT_COPIED,
+      echo: "later",
+      retryWorks: true,
+      view: {
+        ...shelfView(MENU_DOC),
+        status: { ...STATUS, saveError: SAVE_FAILED },
+      },
+    },
+    name: "shelf-copy-refused-retry",
+    page: "shelf",
+  },
+  {
+    act: typeInEntryA,
+    check: liveEditCheck,
+    data: { echo: "later", view: shelfView(MENU_DOC) },
+    name: "shelf-inline-live-edit",
+    page: "shelf",
+  },
+  {
     act: typeInEntryA,
     check: pendingEditCheck,
     data: { echo: "later", view: shelfView(MENU_DOC) },
@@ -2278,9 +2758,21 @@ const SCENES: readonly Scene[] = [
         return `with focus on the toolbar: ${selectedAfterLeaving} pins selected, ${pinsAfterLeaving} of 3 left after ⌫`;
       }
 
-      return pinsAfterRemoving === 2
+      if (pinsAfterRemoving !== 2) {
+        return `2 then ⌫ left ${pinsAfterRemoving} pins, not 2`;
+      }
+
+      // Round 7: Retry in a held quit saves the marks, as Save does.
+      await page.evaluate('globalThis.__emit("saveForQuit", null)');
+      await page.waitForTimeout(200);
+
+      const sent = await calls(page);
+
+      return isDeepStrictEqual(sent, [
+        { arg: { copy: false, forQuit: true, pins: 2 }, call: "save" },
+      ])
         ? null
-        : `2 then ⌫ left ${pinsAfterRemoving} pins, not 2`;
+        : `saveForQuit with a pin removed sent ${JSON.stringify(sent)}, not one save of 2 pins`;
     },
     data: { view: drawingView(IMAGE.pins, false) },
     name: "drawing-pin-focus",
@@ -2317,6 +2809,49 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: drawingView(IMAGE.pins, false) },
     name: "drawing-held-nudge",
+    page: "drawing",
+  },
+  {
+    // Words still in the open text field are a mark the quit counts and Retry saves (red-team round 7).
+    act: async (page) => {
+      await page.getByRole("button", { exact: true, name: "Text" }).click();
+      await page
+        .locator("canvas")
+        .first()
+        .click({ position: { x: 150, y: 100 } });
+      await page
+        .getByRole("textbox", { exact: true, name: "Text" })
+        .fill("Words still being typed");
+    },
+    check: async (page) => {
+      const dirty = await page.evaluate("globalThis.__dirty.at(-1)");
+      const field = await page.evaluate("document.activeElement?.value");
+
+      if (dirty !== true || field !== "Words still being typed") {
+        return `with words in the open text field the page reported dirty ${String(dirty)}, field ${String(field)}`;
+      }
+
+      await page.evaluate('globalThis.__emit("saveForQuit", null)');
+      await page.waitForTimeout(200);
+      const retry = await calls(page);
+
+      // The user's own Save is not one a cancelled quit can stop.
+      await page.getByRole("button", { exact: true, name: "Save" }).click();
+      await page.waitForTimeout(200);
+      const both = await calls(page);
+
+      const expected = [
+        { arg: { copy: false, forQuit: true, pins: 0 }, call: "save" },
+        { arg: { copy: false, forQuit: false, pins: 0 }, call: "save" },
+      ];
+
+      return isDeepStrictEqual(retry, expected.slice(0, 1)) &&
+        isDeepStrictEqual(both, expected)
+        ? null
+        : `saveForQuit then Save sent ${JSON.stringify(both)}, not ${JSON.stringify(expected)}`;
+    },
+    data: { view: { image: null, seq: 1 } },
+    name: "drawing-text-draft",
     page: "drawing",
   },
 ];

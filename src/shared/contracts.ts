@@ -40,13 +40,34 @@ export interface QuitPrompt {
   readonly state: QuitPromptState;
 }
 
+/** The prompt's title, in the shelf and in main's own dialog. */
+export const quitTitle = (count: number): string =>
+  count === 1
+    ? "1 change couldn't be saved"
+    : `${count} changes couldn't be saved`;
+
 export const QuitAnswerSchema = z.enum(["retry", "discard", "cancel"]);
 
 export type QuitAnswer = z.output<typeof QuitAnswerSchema>;
 
+/** An item a failed save left unwritten: it shows "Not saved", with Retry and Discard changes. */
+export interface NotSavedItem {
+  readonly id: ItemId;
+  /**
+   * What sits next to Retry. `delete` for an item the disk has never held,
+   * which has no saved version; null when the item already shows its saved
+   * version and only the disk is behind.
+   */
+  readonly undo: "discard" | "delete" | null;
+}
+
 export interface ShelfView {
   readonly doc: ShelfDoc;
   readonly status: ShelfStatus;
+  /** Items whose changes a failed save left unwritten, in shelf order. */
+  readonly notSaved: readonly NotSavedItem[];
+  /** The last Discard changes; open details put their own fields back when it changes. */
+  readonly discarded: { readonly id: ItemId; readonly seq: number } | null;
   /**
    * The item to select and scroll to, set by a capture. Changes with every
    * capture. `edit` opens its text for typing, as after a new window link.
@@ -99,13 +120,20 @@ export type ShelfCommand =
 
 export type ActionResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      /** A copy refused because its items aren't saved: Retry saves them, then it can be copied. */
+      readonly retrySave?: true;
+    };
 
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
 export const shelfContract = defineContract({
   events: {
     command: event<ShelfCommand>(),
+    /** Quitting: the page sends every edit it still holds, then answers with `settled` and this number. */
+    settle: event<number>(),
     /** A short note on something main did, shown as a toast: a confirmation, or why it failed. */
     notice: event<{ readonly message: string; readonly tone: NoticeTone }>(),
     view: event<ShelfView>(),
@@ -148,6 +176,12 @@ export const shelfContract = defineContract({
     retrySave: invoke(z.void(), out<ActionResult>()),
     /** The held quit's prompt: Retry, Quit without saving, or Cancel. */
     answerQuit: send(QuitAnswerSchema),
+    /** Discard changes on an item a failed save left unwritten: it goes back to what the disk holds. */
+    discardChanges: send(ItemIdSchema),
+    /** The page has sent every edit it held when `settle` asked, up to this number. */
+    settled: send(z.number().int().min(0)),
+    /** How many edits the page holds that it hasn't sent yet; it says so whenever the number changes. */
+    drafts: send(z.number().int().min(0).max(1000)),
     getView: invoke(z.void(), out<ShelfView>()),
     hide: send(z.void()),
     /** Copy and Undo inside a text field, done by the window's own edit commands. */
@@ -262,6 +296,8 @@ export const drawingContract = defineContract({
     confirmClose: event<null>(),
     /** Undo and Redo from the menu bar, which takes ⌘Z before the page sees it. */
     edit: event<"undo" | "redo">(),
+    /** Retry in a held quit: the page saves its marks to the shelf, as Save does. */
+    saveForQuit: event<null>(),
     view: event<DrawingView>(),
   },
   global: "insetDrawing",
@@ -276,6 +312,8 @@ export const drawingContract = defineContract({
       z.object({
         /** Also put the drawing on the clipboard, for pasting into a prompt. */
         copy: z.boolean(),
+        /** Retry in a held quit asked for it: Cancel or Quit without saving stops it. */
+        forQuit: z.boolean(),
         /** Null when only the pins changed: the image stays as it is. */
         png: z
           .instanceof(Uint8Array)

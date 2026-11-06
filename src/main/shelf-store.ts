@@ -17,7 +17,8 @@ import {
   parseShelfDocument,
 } from "@shared/shelf";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
-import { z } from "zod";
+
+import { FsErrorSchema, saveErrorText } from "./save-error";
 
 const DOC_FILE = "shelf.json";
 const ATTACHMENTS = "attachments";
@@ -99,7 +100,9 @@ export const failNextWrite = (fs: StoreFs): StoreFs => {
     writeAtomic: async (file, data) => {
       if (armed && file.endsWith(DOC_FILE)) {
         armed = false;
-        throw new Error("Simulated write failure.");
+        throw Object.assign(new Error("Simulated write failure."), {
+          code: "ENOSPC",
+        });
       }
 
       await fs.writeAtomic(file, data);
@@ -131,9 +134,6 @@ type Loaded =
   | { readonly kind: "read"; readonly doc: ShelfDoc }
   | { readonly kind: "setAside"; readonly doc: ShelfDoc; readonly note: string }
   | { readonly kind: "blocked"; readonly doc: ShelfDoc; readonly note: string };
-
-/** The system's code for a failed file operation, such as ENOENT. */
-const FsErrorSchema = z.object({ code: z.string() });
 
 const BLOCKED_SAVE =
   "Nothing is saved this session, so the shelf file that could not be opened stays as it was.";
@@ -286,7 +286,9 @@ export const openShelfStore = async (
       return { ok: true };
     } catch (error) {
       return {
-        message: `The shelf could not be saved: ${error instanceof Error ? error.message : "unknown error"}`,
+        message: saveErrorText(
+          FsErrorSchema.safeParse(error).data?.code ?? null
+        ),
         ok: false,
       };
     }

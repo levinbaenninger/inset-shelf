@@ -34,6 +34,8 @@ export interface Details {
   readonly pushUndo: (undo: DetailsUndo) => void;
   /** ⌘Z in details: the last removed step or window, or a pin's last label, comes back; false when there is none. */
   readonly undo: () => boolean;
+  /** Discard changes put the item back as saved: nothing removed before can come back. */
+  readonly forgetUndo: () => void;
 }
 
 /** Level 2: which item's details show, the field asked for, and what ⌘Z can put back there. */
@@ -86,6 +88,10 @@ export const useDetails = ({
         // Back on the row itself, so Return edits and Space checks off again.
         focusRow(document.querySelector(`[data-item-id="${id}"]`));
       });
+    },
+    forgetUndo: () => {
+      undoable.current = [];
+      toast.dismiss("details-undo");
     },
     item,
     open: (next, field) => {

@@ -1,15 +1,17 @@
 import type { ActionResult } from "@shared/contracts";
-import type { ShelfDoc } from "@shared/shelf";
+import type { ItemId, ShelfDoc } from "@shared/shelf";
 import type { ClipboardItem, WebContents } from "electron";
 
-import type { Revision } from "./shelf-controller";
+import type { CopyState, Revision } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
 
 /**
  * The only file that writes the clipboard (Round 5). A copy of shelf items
  * takes the shelf as it is when the copy starts, waits until the disk holds
  * that revision, and copies exactly that, so what it copies is what is
- * saved; it copies nothing when the save failed (Round 6).
+ * saved; it copies nothing when the save failed (Round 6). An item whose
+ * save already failed is refused at once, with no new write: Retry is the
+ * user's to choose (Round 7).
  * clipboard-writers.test.ts fails when any other file writes the clipboard.
  */
 
@@ -35,6 +37,8 @@ export interface CopyGateDeps<Item> {
   readonly snapshot: () => Revision;
   /** Resolves once the disk holds that revision or a later one, or with why it doesn't. */
   readonly persisted: (rev: number) => Promise<WriteResult>;
+  /** Whether the disk holds these items of the snapshot, will soon, or failed to. */
+  readonly copyState: (ids: readonly ItemId[], doc: ShelfDoc) => CopyState;
   /**
    * The shelf file could not be read or set aside at launch, so this session
    * saves nothing (the banner says so). Copies don't wait for a save that
@@ -50,11 +54,13 @@ export interface CopyGateDeps<Item> {
 
 export interface CopyGate {
   /**
-   * Builds the payload from the shelf as it is now, waits until the disk
-   * holds that revision, then copies that payload. An edit made meanwhile is
-   * not copied. With a failed save it copies nothing and says why.
+   * Builds the payload of items `ids` from the shelf as it is now, waits
+   * until the disk holds them, then copies that payload. An edit made
+   * meanwhile is not copied. Items the disk holds already copy at once;
+   * an item whose save failed copies nothing, says why and offers Retry.
    */
   readonly copy: (
+    ids: readonly ItemId[],
     payload: (doc: ShelfDoc) => Payload | Promise<Payload>
   ) => Promise<ActionResult>;
   /**
@@ -78,6 +84,13 @@ export interface CopyGate {
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Unknown error";
 
+/** A copy refused because what it would copy isn't on the disk. */
+export const notSaved = (cause: string): ActionResult => ({
+  message: `Not copied: changes aren't saved. ${cause}`,
+  ok: false,
+  retrySave: true,
+});
+
 export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
   const write = async (data: ClipboardData): Promise<ActionResult> => {
     try {
@@ -99,9 +112,15 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
       deps.onWrite();
       contents.copy();
     },
-    copy: async (payload) => {
+    copy: async (ids, payload) => {
       // Taken before anything waits: a later edit makes a new document and leaves this one as it is.
       const { doc, rev } = deps.snapshot();
+      const state = deps.readOnly ? null : deps.copyState(ids, doc);
+
+      if (state?.kind === "failed") {
+        return notSaved(state.message);
+      }
+
       let built: Payload;
 
       try {
@@ -114,11 +133,11 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
         return { message: built.problem, ok: false };
       }
 
-      if (!deps.readOnly) {
+      if (state?.kind === "pending") {
         const saved = await deps.persisted(rev);
 
         if (!saved.ok) {
-          return { message: `Not copied. ${saved.message}`, ok: false };
+          return notSaved(saved.message);
         }
       }
 

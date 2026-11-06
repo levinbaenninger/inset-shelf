@@ -4,7 +4,9 @@ import type {
   ActionResult,
   DetailField,
   ItemAction,
+  NotSavedItem,
   ShelfCommand,
+  ShelfStatus,
   ShelfView,
 } from "@shared/contracts";
 import { parseSearch } from "@shared/due";
@@ -36,11 +38,12 @@ import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 
-import { Banners, SaveErrorBanner } from "./banners";
+import { Banners, NotSavedBanner } from "./banners";
 import { Composer } from "./composer";
 import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
 import { DetailsView } from "./details-view";
+import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
 import { focusRow, ItemRow } from "./item-row";
 import { Markdown } from "./markdown";
@@ -313,6 +316,8 @@ const useFileDrops = (ownDrag: () => boolean): boolean => {
  * blur, before the next message to main.
  */
 const flushEdits = (): void => {
+  liveEdits.flushAll();
+
   const active = document.activeElement;
 
   if (
@@ -324,10 +329,28 @@ const flushEdits = (): void => {
   }
 };
 
+/** Retry in the banners and on a row; they go once the disk holds every change. True when it did. */
+const retrySave = async (): Promise<boolean> => {
+  const saved = await api.retrySave();
+
+  if (!saved.ok) {
+    toast.error(`Still not saved. ${saved.message}`, { duration: NOTICE_MS });
+  }
+
+  return saved.ok;
+};
+
+/** How long a refused copy's Retry stays on screen. */
+const REFUSED_MS = 8000;
+
+let refusedToast: string | number | undefined;
+
 /**
  * Every copy the shelf asks for goes through here: an edit still open is
  * saved first, main copies only once the disk holds it (src/main/copy-gate.ts),
  * and a copy that couldn't be made says why and shows nothing as copied.
+ * One refused because its changes aren't saved offers Retry, which saves;
+ * then it can be copied again.
  */
 const requestCopy = async (
   send: () => Promise<ActionResult>
@@ -336,20 +359,31 @@ const requestCopy = async (
 
   const outcome = await send();
 
-  if (!outcome.ok) {
+  if (outcome.ok) {
+    return true;
+  }
+
+  if (outcome.retrySave === true) {
+    // A new refusal replaces the last one, so they never pile up and each shows as new.
+    toast.dismiss(refusedToast);
+    refusedToast = toast.error(outcome.message, {
+      action: {
+        label: "Retry",
+        onClick: () => {
+          void (async () => {
+            if (await retrySave()) {
+              noticeToast("Saved. You can copy it now.");
+            }
+          })();
+        },
+      },
+      duration: REFUSED_MS,
+    });
+  } else {
     toast.error(outcome.message, { duration: NOTICE_MS });
   }
 
-  return outcome.ok;
-};
-
-/** Retry in the "Not saved to disk" banner; the banner goes once the disk holds every change. */
-const retrySave = async (): Promise<void> => {
-  const saved = await api.retrySave();
-
-  if (!saved.ok) {
-    toast.error(`Still not saved. ${saved.message}`, { duration: NOTICE_MS });
-  }
+  return false;
 };
 
 /** Several items as one numbered list. */
@@ -481,11 +515,49 @@ const returnFocus = ({ opener, owner }: MenuReturn): void => {
   }
 };
 
+/** Discard changes takes back what details could undo. */
+const useForgetOnDiscard = (
+  discarded: ShelfView["discarded"],
+  forget: () => void
+): void => {
+  const onDiscarded = useEffectEvent(forget);
+  const seq = discarded?.seq ?? 0;
+
+  useEffect(() => {
+    if (seq > 0) {
+      onDiscarded();
+    }
+  }, [seq]);
+};
+
+/** The open item's own "Not saved", when a failed save left its changes unwritten. */
+const DetailsNotSaved = ({
+  entry,
+  onDiscard,
+  status,
+}: {
+  readonly entry: NotSavedItem | undefined;
+  readonly status: ShelfStatus;
+  readonly onDiscard: () => void;
+}) =>
+  entry === undefined ? null : (
+    <NotSavedBanner
+      undo={entry.undo}
+      message={status.saveError ?? "The shelf could not be saved to disk."}
+      onDiscard={onDiscard}
+      onRetry={() => {
+        void retrySave();
+      }}
+    />
+  );
+
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
   const [query, setQuery] = useState("");
   const now = useNow();
-  const groups = groupItems(doc, query, now);
+  const [editingId, setEditingId] = useState<ItemId | null>(null);
+  // The item being typed in stays shown while its words stop matching the search.
+  const groups = groupItems(doc, query, now, editingId);
   const { collapsed, setOpen } = useCollapsedSections();
   // A search shows its matches in folded sections too.
   const searching = query.trim() !== "";
@@ -564,7 +636,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     "";
 
   const [selectedId, setSelectedId] = useState<ItemId | null>(null);
-  const [editingId, setEditingId] = useState<ItemId | null>(null);
   const [draft, setDraft] = useState("");
   const [handledFocus, setHandledFocus] = useState(0);
   const [copiedId, setCopiedId] = useExpiringState<ItemId>(COPIED_MS);
@@ -600,6 +671,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useSearchHighlight(listRef, query);
+
+  const notSaved = new Map(view.notSaved.map((entry) => [entry.id, entry]));
+
+  useForgetOnDiscard(view.discarded, details.forgetUndo);
 
   const countOf = (sectionId: SectionId, done: boolean | null): number =>
     doc.items.filter(
@@ -842,6 +917,29 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       run,
       title: `Delete ${list.length} items?`,
     });
+  };
+
+  /** Discard changes on an item a failed save left unwritten; one the disk never held is deleted, with Undo. */
+  const discardChanges = (id: ItemId): void => {
+    const undo = notSaved.get(id)?.undo;
+
+    if (undo === undefined || undo === null) {
+      return;
+    }
+
+    // Words still being typed into the item go with the rest of its changes, and its field closes on the saved words.
+    liveEdits.drop(id);
+
+    if (undo === "discard") {
+      api.discardChanges(id);
+      noticeToast("Changes discarded");
+    } else {
+      remove(id);
+    }
+
+    if (editingId === id) {
+      setEditingId(null);
+    }
   };
 
   /** ⌘Z: the last deletion comes back. */
@@ -1380,13 +1478,15 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       {detailsItem === undefined ? null : (
         <DetailsView
           banner={
-            <SaveErrorBanner
-              onRetry={() => {
-                void retrySave();
+            <DetailsNotSaved
+              entry={notSaved.get(detailsItem.id)}
+              onDiscard={() => {
+                discardChanges(detailsItem.id);
               }}
               status={status}
             />
           }
+          discarded={view.discarded}
           editing={editingId === detailsItem.id}
           item={detailsItem}
           key={detailsItem.id}
@@ -1655,6 +1755,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                         }}
                         onShowDetails={() => {
                           openDetails(item.id);
+                        }}
+                        notSaved={notSaved.get(item.id)}
+                        onDiscardChanges={() => {
+                          discardChanges(item.id);
+                        }}
+                        onRetrySave={() => {
+                          void retrySave();
                         }}
                         now={now}
                         selected={selectedId === item.id}

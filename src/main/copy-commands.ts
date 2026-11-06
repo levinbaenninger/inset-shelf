@@ -163,7 +163,7 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     id: ItemId,
     format: (item: ShelfItem) => string
   ): Promise<ActionResult> =>
-    await deps.gate.copy((doc) => {
+    await deps.gate.copy([id], (doc) => {
       const item = itemIn(doc, id);
 
       return item === undefined
@@ -175,7 +175,7 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     copy: async (id) => {
       let copied: ShelfItem | undefined;
 
-      const result = await deps.gate.copy((doc) => {
+      const result = await deps.gate.copy([id], (doc) => {
         copied = itemIn(doc, id);
 
         return copied === undefined ? GONE : itemData(copied);
@@ -191,7 +191,7 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     copyList: async (ids) => {
       let copied: readonly ShelfItem[] = [];
 
-      const result = await deps.gate.copy((doc) => {
+      const result = await deps.gate.copy(ids, (doc) => {
         copied = ids.flatMap((id) => {
           const item = itemIn(doc, id);
 

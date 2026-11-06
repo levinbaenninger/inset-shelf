@@ -1,6 +1,6 @@
 import type { DrawingImage, DrawingView } from "@shared/contracts";
 import type { Pin } from "@shared/shelf";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import {
   AlertDialog,
@@ -121,6 +121,7 @@ const exportMarks = async (
 /** Resolves to a problem to show, or null once main has the drawing. */
 const saveDrawing = async (
   copy: boolean,
+  forQuit: boolean,
   marks: readonly Mark[],
   image: DrawingImage | null,
   dark: boolean
@@ -132,7 +133,12 @@ const saveDrawing = async (
       return null;
     }
 
-    const result = await api.save({ copy, pins: saved.pins, png: saved.png });
+    const result = await api.save({
+      copy,
+      forQuit,
+      pins: saved.pins,
+      png: saved.png,
+    });
 
     return result.ok ? null : result.message;
   } catch {
@@ -238,14 +244,18 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // Words in the open text field, not yet a mark in the history.
+  const [draft, setDraft] = useState<Mark | null>(null);
   // On an image the marks keep the colours they are saved in, whatever the theme.
   const dark = useDark() && image === null;
   const marks = history.present;
   const pins = pinsOf(marks);
   const empty = marks.every((mark) => mark.kind === "pin");
   const pinsChanged = JSON.stringify(pins) !== JSON.stringify(pinsOf(initial));
-  // Something to save: new marks, or pins added, moved or removed.
-  const dirty = !empty || pinsChanged;
+  // Something to save: new marks, words still being typed, or pins added, moved or removed.
+  const dirty = !empty || draft !== null || pinsChanged;
+  // What a save sends: the marks, and the words still being typed.
+  const toSave = draft === null ? marks : [...marks, draft];
 
   const bounds =
     image === null
@@ -279,15 +289,16 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   // Takes the marks to save, so ⌘↩ in the text field can include the text it just added.
   const save = async (
     copy: boolean,
-    toSave: readonly Mark[]
+    list: readonly Mark[],
+    forQuit = false
   ): Promise<void> => {
-    if (saving || (toSave.length === 0 && !pinsChanged)) {
+    if (saving || (list.length === 0 && !pinsChanged)) {
       return;
     }
 
     setSaving(true);
     setProblem(null);
-    setProblem(await saveDrawing(copy, toSave, image, dark));
+    setProblem(await saveDrawing(copy, forQuit, list, image, dark));
     setSaving(false);
   };
 
@@ -309,13 +320,26 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
       }
     },
     onSave: () => {
-      void save(false, marks);
+      void save(false, toSave);
     },
   });
 
   useEffect(() => {
     api.setDirty(dirty);
   }, [dirty]);
+
+  // Retry in a held quit saves the marks to the shelf, as Save does; a save already running finishes on its own.
+  const saveForQuit = useEffectEvent(() => {
+    void save(false, toSave, true);
+  });
+
+  useEffect(
+    () =>
+      api.on("saveForQuit", () => {
+        saveForQuit();
+      }),
+    []
+  );
 
   // Closing the window with marks asks here, in the page's own dialog.
   useEffect(
@@ -430,6 +454,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
             onAdd={(mark) => {
               add(mark);
             }}
+            onDraft={setDraft}
             onMovePin={(index, to) => {
               change(movePin(marks, index, to, bounds));
             }}
@@ -465,13 +490,13 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
             }}
             onColor={setColor}
             onCopyAndSave={() => {
-              void save(true, marks);
+              void save(true, toSave);
             }}
             onRedo={() => {
               setHistory(redo(history));
             }}
             onSave={() => {
-              void save(false, marks);
+              void save(false, toSave);
             }}
             onStroke={setStroke}
             onTool={pickTool}

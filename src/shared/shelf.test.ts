@@ -5,6 +5,7 @@ import {
   groupItems,
   itemsAsList,
   listHtmlWithImage,
+  itemText,
   itemTextWithLink,
   parseShelfDocument,
   emptyShelf,
@@ -390,6 +391,21 @@ describe(groupItems, () => {
         group.items.length,
       ])
     ).toStrictEqual([["Later", 1]]);
+  });
+
+  it("keeps the item being typed in when its words stop matching", () => {
+    const typing = filled.items.find(
+      (item) => item.kind === "text" && item.text.startsWith("Check")
+    );
+
+    expect(
+      groupItems(filled, "discount", new Date(), typing?.id ?? null).map(
+        (group) => [group.section.name, group.items.map(itemText)]
+      )
+    ).toStrictEqual([
+      ["Inbox", ["Total ignores the discount"]],
+      ["Later", ["Check the plan picker copy"]],
+    ]);
   });
 });
 

@@ -181,7 +181,7 @@ describe(openShelfStore, () => {
 
     const reopened = await openShelfStore(dir, options);
 
-    expect(result.ok).toBeFalsy();
+    expect(result).toStrictEqual({ message: "The disk is full.", ok: false });
     expect(reopened.initial.items).toHaveLength(1);
   });
 

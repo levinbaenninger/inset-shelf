@@ -49,6 +49,8 @@ export interface PageProps {
   readonly onAdd: (mark: Mark) => void;
   /** ⌘↩ in the text field: keep the text, if any, and save. */
   readonly onSubmit: (mark: Mark | null) => void;
+  /** The words in the open text field as a mark, or null when there are none: they count as marks before they are committed. */
+  readonly onDraft: (mark: TextMark | null) => void;
   /** The selected pin (0-based), which ⌫ removes and the arrow keys nudge. */
   readonly selectedPin: number | null;
   readonly onSelectPin: (index: number | null) => void;
@@ -244,6 +246,7 @@ export const Page = ({
   image,
   marks,
   onAdd,
+  onDraft,
   onMovePin,
   onSelectPin,
   onSubmit,
@@ -267,6 +270,15 @@ export const Page = ({
   const [text, setText] = useState<TextDraft | null>(null);
   // Removing a focused field can also blur it; the text must only be added once.
   const textClosed = useRef(false);
+
+  // The editor hears of the open text with every change, so a save or a quit includes it.
+  const showText = (next: TextDraft | null): void => {
+    setText(next);
+
+    const mark = next === null ? null : textMark(next);
+
+    onDraft(mark !== null && isVisible(mark) ? mark : null);
+  };
 
   const placed =
     image === null || size === null ? null : viewerImageRect(size, image);
@@ -344,7 +356,7 @@ export const Page = ({
     }
 
     textClosed.current = true;
-    setText(null);
+    showText(null);
 
     const mark = textMark(text);
 
@@ -437,7 +449,7 @@ export const Page = ({
       const textSize = TEXT_SIZE[stroke] / view.scale;
 
       textClosed.current = false;
-      setText({
+      showText({
         at: { x: at.x, y: at.y - (textSize * TEXT_LEADING) / 2 },
         color,
         size: textSize,
@@ -541,10 +553,10 @@ export const Page = ({
           draft={text}
           onCancel={() => {
             textClosed.current = true;
-            setText(null);
+            showText(null);
           }}
           onChange={(value) => {
-            setText({ ...text, value });
+            showText({ ...text, value });
           }}
           onCommit={commitText}
           onSubmit={() => {

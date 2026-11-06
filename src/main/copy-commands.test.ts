@@ -79,6 +79,13 @@ const formats = async (
   return Object.fromEntries(entries);
 };
 
+/** How a copy of items is refused while what it would copy isn't on the disk. */
+const NOT_SAVED = {
+  message: "Not copied: changes aren't saved. disk full",
+  ok: false,
+  retrySave: true,
+};
+
 const added = (id: ItemId | null): ItemId => {
   if (id === null) {
     throw new Error("not added");
@@ -164,7 +171,7 @@ const setup = async (
       keys: "granted",
       problem: null,
       quitPrompt: null,
-      readOnly: false,
+      readOnly: store.readOnly ?? false,
       saveError: null,
       selectionCapture: true,
     },
@@ -181,6 +188,7 @@ const setup = async (
         await Promise.resolve();
       },
     },
+    copyState: controller.copyState,
     onWrite: () => {},
     persisted: controller.persisted,
     readOnly: store.readOnly ?? false,
@@ -298,7 +306,7 @@ const setup = async (
 
 describe(createCopyCommands, () => {
   it("copies no shelf item while the shelf can't be saved, but still copies a screenshot or a new drawing", async () => {
-    const { commands, controller, copied, disk, items, written } =
+    const { commands, controller, copied, disk, events, items, written } =
       await setup();
 
     disk.full = true;
@@ -316,22 +324,15 @@ describe(createCopyCommands, () => {
     }
 
     expect(results).toStrictEqual([
-      { name: "copy", result: { message: "Not copied. disk full", ok: false } },
-      {
-        name: "copyDetails",
-        result: { message: "Not copied. disk full", ok: false },
-      },
+      { name: "copy", result: NOT_SAVED },
+      { name: "copyDetails", result: NOT_SAVED },
       { name: "copyDrawing", result: { ok: true } },
-      {
-        name: "copyList",
-        result: { message: "Not copied. disk full", ok: false },
-      },
+      { name: "copyList", result: NOT_SAVED },
       { name: "copyScreenshot", result: { ok: true } },
-      {
-        name: "copyWithLink",
-        result: { message: "Not copied. disk full", ok: false },
-      },
+      { name: "copyWithLink", result: NOT_SAVED },
     ]);
+    // The first copy wrote the edit still waiting for its pause; once that failed, no copy writes again.
+    expect(events.filter((event) => event === "save")).toStrictEqual(["save"]);
     await expect(
       Promise.all(written.map(async (contents) => await formats(contents[0])))
     ).resolves.toStrictEqual([{ "image/png": "PNG" }, { "image/png": "PNG" }]);
@@ -340,8 +341,9 @@ describe(createCopyCommands, () => {
     expect(controller.view().status.saveError).toBe("disk full");
   });
 
-  it("copies from every entry point once the disk holds the change", async () => {
-    const { commands, controller, disk, items, written } = await setup();
+  it("refuses a failed edit at once even when the disk has room again, and copies from every entry point once Retry has saved it", async () => {
+    const { commands, controller, disk, events, items, savedText, written } =
+      await setup();
 
     disk.full = true;
     controller.apply({
@@ -349,11 +351,20 @@ describe(createCopyCommands, () => {
       text: "Call Rieder at 9",
       type: "editText",
     });
-    await expect(commands.copy(items.text)).resolves.toMatchObject({
-      ok: false,
-    });
+    await expect(controller.flush()).resolves.toMatchObject({ ok: false });
 
     disk.full = false;
+    events.length = 0;
+
+    await expect(commands.copy(items.text)).resolves.toStrictEqual(NOT_SAVED);
+    expect({ events, onDisk: savedText(items.text), written }).toStrictEqual({
+      events: [],
+      onDisk: "Call Rieder",
+      written: [],
+    });
+
+    // Retry, in the refusal's toast or the banner.
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
 
     for (const [name, entry] of Object.entries(ENTRY_POINTS)) {
       // oxlint-disable-next-line no-await-in-loop -- each entry point on its own.
@@ -362,8 +373,55 @@ describe(createCopyCommands, () => {
       expect({ name, result }).toStrictEqual({ name, result: { ok: true } });
     }
 
-    expect(written).toHaveLength(Object.keys(ENTRY_POINTS).length);
-    expect(controller.view().status.saveError).toBeNull();
+    expect({
+      copies: written.length,
+      saveError: controller.view().status.saveError,
+      saves: events.filter((event) => event === "save"),
+    }).toStrictEqual({
+      copies: Object.keys(ENTRY_POINTS).length,
+      saveError: null,
+      saves: ["save"],
+    });
+  });
+
+  it("copies an item the disk holds at once, with no write, while another item's save has failed", async () => {
+    const { commands, controller, disk, events, items, written } =
+      await setup();
+
+    disk.full = true;
+    controller.apply({ id: items.image, note: "Floor plan", type: "editNote" });
+    await controller.flush();
+    events.length = 0;
+
+    await expect(commands.copyWithLink(items.text)).resolves.toStrictEqual({
+      ok: true,
+    });
+    await expect(
+      commands.copyList([items.text, items.image])
+    ).resolves.toStrictEqual(NOT_SAVED);
+    expect(events).toStrictEqual(["write"]);
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "Call Rieder\n\nBefore Friday",
+    });
+  });
+
+  it("copies an item as the disk holds it once its changes are discarded", async () => {
+    const { commands, controller, disk, events, items, written } =
+      await setup();
+
+    disk.full = true;
+    controller.apply({ id: items.text, text: "Lost words", type: "editText" });
+    await controller.flush();
+    events.length = 0;
+
+    expect(controller.discard(items.text)).toBeTruthy();
+    await expect(commands.copy(items.text)).resolves.toStrictEqual({
+      ok: true,
+    });
+    expect(events).toStrictEqual(["write"]);
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "Call Rieder",
+    });
   });
 
   it("writes a note still being typed to the disk before it copies it", async () => {
@@ -469,10 +527,7 @@ describe(createCopyCommands, () => {
     });
     held.release({ message: "disk full", ok: false });
 
-    await expect(copying).resolves.toStrictEqual({
-      message: "Not copied. disk full",
-      ok: false,
-    });
+    await expect(copying).resolves.toStrictEqual(NOT_SAVED);
     expect(written).toStrictEqual([]);
   });
 
@@ -513,8 +568,8 @@ describe(createCopyCommands, () => {
     ]);
   });
 
-  it("keeps an edit whose save failed, refuses to copy it until the disk takes it, then copies it", async () => {
-    const { commands, controller, disk, items, savedText, written } =
+  it("keeps an edit whose save failed and refuses to copy it from a row's menu later, with no new write, until Retry saves it", async () => {
+    const { commands, controller, disk, events, items, savedText, written } =
       await setup();
 
     disk.full = true;
@@ -528,20 +583,30 @@ describe(createCopyCommands, () => {
       ok: false,
     });
 
-    // Later, from the item's menu, with another item open.
+    // Later, from the item's menu, with another item open, after the disk has room again.
+    controller.apply({ id: items.image, note: "Floor plan", type: "editNote" });
+    disk.full = false;
+    events.length = 0;
+
     const refused = await commands.copyDetails(items.text);
 
+    const draft = controller.item(items.text);
+
     expect({
-      draft: controller.item(items.text),
+      draft: draft?.kind === "text" ? draft.text : null,
+      events,
+      notSaved: controller.view().notSaved,
       refused,
       written,
-    }).toMatchObject({
-      draft: { text: "UNSAVED AFTER FAILURE" },
-      refused: { message: "Not copied. disk full", ok: false },
+    }).toStrictEqual({
+      draft: "UNSAVED AFTER FAILURE",
+      events: [],
+      notSaved: [{ undo: "discard", id: items.text }],
+      refused: NOT_SAVED,
       written: [],
     });
 
-    disk.full = false;
+    await expect(controller.flush()).resolves.toStrictEqual({ ok: true });
 
     const copied = await commands.copyDetails(items.text);
 
@@ -607,9 +672,15 @@ describe(createCopyCommands, () => {
       { "text/plain": "Call Rieder at 9\n\nBefore Friday" },
     ]);
     await controller.flush();
-    expect(controller.view().status.saveError).toBe(
-      "Nothing is saved this session, so the shelf file that could not be opened stays as it was."
-    );
+    // The banner says it for the whole session: no row offers a Retry that can't work.
+    expect({
+      notSaved: controller.view().notSaved,
+      saveError: controller.view().status.saveError,
+    }).toStrictEqual({
+      notSaved: [],
+      saveError:
+        "Nothing is saved this session, so the shelf file that could not be opened stays as it was.",
+    });
   });
 
   it("puts each format on the clipboard as before", async () => {
@@ -663,6 +734,7 @@ describe(createCopyGate, () => {
           await Promise.resolve();
         },
       },
+      copyState: () => ({ kind: "pending" }),
       onWrite: () => {},
       persisted: async () => {
         waited += 1;

@@ -1,3 +1,5 @@
+import { once } from "node:events";
+
 import type { DrawingImage, DrawingView } from "@shared/contracts";
 import { rect, size, VIEWER_MIN, viewerWindowSize } from "@shared/geometry";
 import { app, BrowserWindow, nativeTheme, screen } from "electron";
@@ -25,6 +27,12 @@ export interface DrawingWindow {
   /** Closes like the window's close button, asking first when there are marks. */
   readonly requestClose: () => void;
   readonly setDirty: (dirty: boolean) => void;
+  /** Marks on the page that aren't on the shelf; a quit counts them as one unsaved change. */
+  readonly isDirty: () => boolean;
+  /** Resolves once the page holds nothing unsaved, or once a save of its marks has ended, saved or not. */
+  readonly whenSaved: () => Promise<void>;
+  /** A save the page asked for has ended, saved or not. */
+  readonly saveEnded: () => void;
   readonly isFocused: () => boolean;
   readonly isVisible: () => boolean;
   readonly view: () => DrawingView;
@@ -45,6 +53,7 @@ export const createDrawingWindow = (options: {
 }): DrawingWindow => {
   let closable = false;
   let dirty = false;
+  const settled = new EventTarget();
   let current: DrawingView = { image: null, seq: 0 };
   let onView: (view: DrawingView) => void = ignore;
   let onCloseRequest: () => void = ignore;
@@ -70,6 +79,17 @@ export const createDrawingWindow = (options: {
     window.setAlwaysOnTop(true, "floating", 1);
   };
 
+  const markClean = (): void => {
+    dirty = false;
+    settled.dispatchEvent(new Event("settled"));
+  };
+
+  // Hidden, the page's marks are gone: the next opening starts over.
+  const hide = (): void => {
+    markClean();
+    hideWindow(window, { handOff: options.handOff, raise });
+  };
+
   raise();
   keepOnTop(window, { raise, wanted: () => true });
   harden(window.webContents, "drawing");
@@ -85,7 +105,7 @@ export const createDrawingWindow = (options: {
     if (dirty) {
       onCloseRequest();
     } else {
-      hideWindow(window, { handOff: options.handOff, raise });
+      hide();
     }
   });
 
@@ -93,16 +113,29 @@ export const createDrawingWindow = (options: {
     allowClose: () => {
       closable = true;
     },
-    close: () => {
-      hideWindow(window, { handOff: options.handOff, raise });
-    },
+    close: hide,
+    isDirty: () => dirty,
     isFocused: () => window.isVisible() && window.isFocused(),
     isVisible: () => window.isVisible(),
     requestClose: () => {
       window.close();
     },
     setDirty: (next) => {
-      dirty = next;
+      if (next) {
+        dirty = true;
+      } else {
+        markClean();
+      }
+    },
+    saveEnded: () => {
+      settled.dispatchEvent(new Event("settled"));
+    },
+    whenSaved: async () => {
+      if (!dirty) {
+        return;
+      }
+
+      await once(settled, "settled");
     },
     load: async () => {
       await window.loadURL(options.url);
@@ -129,7 +162,7 @@ export const createDrawingWindow = (options: {
               rect(workArea.x, workArea.y, workArea.width, workArea.height)
             );
 
-      dirty = false;
+      markClean();
       current = { image, seq: current.seq + 1 };
       onView(current);
       window.setTitle(image === null ? "New Drawing" : "Image");

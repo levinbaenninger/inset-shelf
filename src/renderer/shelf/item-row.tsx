@@ -16,8 +16,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
+import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
-import { TEXT_MAX } from "@shared/shelf";
+import { itemText, TEXT_MAX } from "@shared/shelf";
 import type {
   FileItem,
   ImageItem,
@@ -45,6 +46,8 @@ import { cn } from "@/lib/utils";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
+import { NotSavedLine } from "./banners";
+import { liveEdits } from "./drafts";
 import { whenText } from "./format";
 import {
   filledSteps,
@@ -53,6 +56,7 @@ import {
   StepChecklist,
   WindowStrip,
 } from "./item-meta";
+import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
@@ -333,6 +337,10 @@ export interface RowHandlers {
   readonly onReopenWindow: (window: WindowRef) => void;
   /** The details view (→). */
   readonly onShowDetails: () => void;
+  /** Not saved: saves the shelf again. */
+  readonly onRetrySave: () => void;
+  /** Not saved: Discard changes, or Delete for an item the disk has never held. */
+  readonly onDiscardChanges: () => void;
 }
 
 export interface ItemRowProps extends RowHandlers {
@@ -350,7 +358,13 @@ export interface ItemRowProps extends RowHandlers {
   readonly onPick: (mode: "toggle" | "range") => void;
   /** Today, for the Due chip. */
   readonly now: Date;
+  /** A failed save left this item's changes unwritten. */
+  readonly notSaved: NotSavedItem | undefined;
 }
+
+/** What an item is called on its row's buttons: its words, or its title when it has one. */
+const rowName = (item: ShelfItem): string =>
+  item.kind === "text" ? item.text : (item.title ?? itemText(item));
 
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
@@ -394,6 +408,8 @@ const metaText = (item: ShelfItem): string => {
 /**
  * Edits a text item in place, with its Markdown formatted as it is typed;
  * ⌘↩ or Return saves, ⇧↩ adds a line or list item, Escape keeps the old text.
+ * The words reach main as they are typed, after a short pause, so main
+ * holds them as it holds every other edit (Round 7).
  */
 export const TextEditor = ({
   item,
@@ -407,6 +423,26 @@ export const TextEditor = ({
   const [text, setText] = useState(item.text);
   // Escape throws the edit away; the blur that follows must not save it.
   const cancelled = useRef(false);
+  const live = useRef<LiveEdit | null>(null);
+
+  // Opened at the first key, while the item still holds the words the field opened with.
+  const edit = (): LiveEdit => {
+    const current =
+      live.current ??
+      liveEdits.open({ original: item.text, owner: item.id, send: onSave });
+
+    live.current = current;
+
+    return current;
+  };
+
+  // A row that goes away mid-edit still sends what was typed.
+  useEffect(
+    () => () => {
+      live.current?.flush();
+    },
+    []
+  );
 
   const finish = (markdown: string): void => {
     if (cancelled.current) {
@@ -414,13 +450,7 @@ export const TextEditor = ({
     }
 
     cancelled.current = true;
-
-    const next = markdown.trim().slice(0, TEXT_MAX);
-
-    if (next !== "" && next !== item.text) {
-      onSave(next);
-    }
-
+    edit().finish(markdown);
     onDone();
   };
 
@@ -432,6 +462,7 @@ export const TextEditor = ({
         keys={{
           onEscape: () => {
             cancelled.current = true;
+            live.current?.cancel();
             onDone();
           },
           onSubmit: finish,
@@ -440,7 +471,11 @@ export const TextEditor = ({
           // An untouched note keeps its own Markdown, not the field's rewrite of it.
           finish(markdown === text ? markdown : text);
         }}
-        onChange={setText}
+        followValue={false}
+        onChange={(markdown) => {
+          setText(markdown);
+          edit().change(markdown);
+        }}
         value={item.text}
       />
     </div>
@@ -1064,6 +1099,14 @@ export const ItemRow = (props: ItemRowProps) => {
             props.onOpenLink();
           }}
         />
+        {props.notSaved === undefined ? null : (
+          <NotSavedLine
+            name={rowName(item)}
+            undo={props.notSaved.undo}
+            onDiscard={props.onDiscardChanges}
+            onRetry={props.onRetrySave}
+          />
+        )}
         {selected ? (
           <div className="flex min-h-6 items-center gap-2">
             <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">

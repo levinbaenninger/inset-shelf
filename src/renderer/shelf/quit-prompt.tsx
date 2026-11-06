@@ -1,3 +1,4 @@
+import { quitTitle } from "@shared/contracts";
 import type { QuitAnswer, QuitPrompt } from "@shared/contracts";
 import { useRef, useState } from "react";
 
@@ -11,15 +12,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
-const title = (count: number): string =>
-  count === 1
-    ? "1 change couldn't be saved"
-    : `${count} changes couldn't be saved`;
-
 /**
  * A quit held because the disk doesn't hold every change. Return retries
- * and Esc cancels, whichever button has focus. While a Retry runs, main
- * ignores the answers, so the buttons stay where they are.
+ * and Esc cancels, whichever button has focus; Space presses the focused
+ * button, so Quit without saving stays a deliberate choice. While a Retry
+ * runs, Cancel and Quit without saving still act at once.
  */
 export const QuitPromptDialog = ({
   onAnswer,
@@ -52,9 +49,12 @@ export const QuitPromptDialog = ({
         onKeyDown={(event) => {
           // The list behind the prompt keeps its keys to itself.
           event.stopPropagation();
-
-          if (event.key === "Enter") {
+        }}
+        onKeyDownCapture={(event) => {
+          // Before the focused button sees it, so Return never presses Quit without saving or Cancel (Round 7).
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
             event.preventDefault();
+            event.stopPropagation();
             onAnswer("retry");
           }
         }}
@@ -64,14 +64,15 @@ export const QuitPromptDialog = ({
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>{title(shown?.count ?? 1)}</AlertDialogTitle>
+          <AlertDialogTitle>{quitTitle(shown?.count ?? 1)}</AlertDialogTitle>
           <AlertDialogDescription>
             {shown?.state === "stillFailing"
               ? `Still not saved. ${shown.message}`
               : shown?.message}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="flex flex-col gap-2">
+        {/* The buttons keep their focus ring however focus came to them (styles.css). */}
+        <div className="quit-prompt flex flex-col gap-2">
           <Button
             onClick={() => {
               onAnswer("retry");

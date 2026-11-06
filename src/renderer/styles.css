@@ -321,6 +321,22 @@ body:has(.shelf-panel),
   }
 }
 
+/*
+ * The quit prompt's buttons show their ring whenever they have focus. Retry
+ * takes focus as the prompt opens, often right after a click on Quit, and a
+ * browser shows no focus-visible ring after a click (Round 7).
+ */
+@layer components {
+  .quit-prompt
+    :is([data-slot="button"], [data-slot="alert-dialog-cancel"]):focus {
+    @apply border-ring ring-ring/50 ring-3;
+  }
+
+  .quit-prompt [data-variant="destructive"]:focus {
+    @apply border-destructive/40 ring-destructive/20 dark:ring-destructive/40;
+  }
+}
+
 /* The list keeps room for its scrollbar, so nothing shifts when a long section opens. */
 @layer components {
   .shelf-list {

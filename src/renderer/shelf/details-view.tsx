@@ -15,7 +15,7 @@ import {
   TextIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { DetailField } from "@shared/contracts";
+import type { DetailField, ShelfView } from "@shared/contracts";
 import { dateText, dueChipText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import {
@@ -118,6 +118,8 @@ export interface DetailsProps {
   readonly onHide: () => void;
   /** A failed save's banner, under the header. */
   readonly banner: ReactNode;
+  /** The last Discard changes: when it is this item's, every field shows what is saved again. */
+  readonly discarded: ShelfView["discarded"];
 }
 
 const newStep = (): Step => ({
@@ -1227,6 +1229,20 @@ export const DetailsView = (props: DetailsProps) => {
   if (props.stepsReset !== null && props.stepsReset.seq !== seenReset) {
     setSeenReset(props.stepsReset.seq);
     setSteps(props.stepsReset.steps);
+  }
+
+  // The view that brings the discard also brings the saved item, so the fields take its values at once.
+  const [seenDiscard, setSeenDiscard] = useState(props.discarded?.seq ?? 0);
+
+  if (
+    props.discarded !== null &&
+    props.discarded.id === item.id &&
+    props.discarded.seq !== seenDiscard
+  ) {
+    setSeenDiscard(props.discarded.seq);
+    setSteps(item.steps);
+    setAdded(new Set());
+    setDueOpen(false);
   }
 
   const shown: Readonly<Record<DetailField, boolean>> = {

@@ -74,11 +74,14 @@ const logged = (call, answer) => (arg) => {
 const resolved = (value) => () => Promise.resolve(value);
 const ok = resolved({ ok: true });
 
-/** `copyFails`: main refuses every copy with this message, as when the shelf can't be saved. */
+/** `copyFails`: main refuses every copy with this message, as when the shelf can't be saved, and offers Retry. */
 const copied =
   data?.copyFails === undefined
     ? ok
-    : resolved({ message: data.copyFails, ok: false });
+    : resolved({ message: data.copyFails, ok: false, retrySave: true });
+
+/** Each count of unsent text edits the page told main, in order. */
+globalThis.__drafts = [];
 
 /** Each time the page told main a menu opened (true) or the last one closed (false). */
 globalThis.__menuOpen = [];
@@ -154,7 +157,33 @@ const applyOp = (doc, op) => {
 };
 
 if (page === "shelf") {
-  let { view } = data;
+  let view = { discarded: null, notSaved: [], ...data.view };
+
+  // What the disk holds: Discard changes puts an item back as it is here.
+  const savedDoc = data.savedDoc ?? data.view.doc;
+
+  // A save error outside a read-only session: every change stays unsaved, as main marks it.
+  const failing =
+    (data.view.status?.saveError ?? null) !== null &&
+    data.view.status?.readOnly !== true;
+
+  const markNotSaved = (op) => {
+    if (!failing || op.id === undefined) {
+      return view.notSaved;
+    }
+
+    const others = view.notSaved.filter((entry) => entry.id !== op.id);
+
+    if (op.type === "remove") {
+      return others;
+    }
+
+    const known = savedDoc.items.some((entry) => entry.id === op.id);
+
+    return view.notSaved.some((entry) => entry.id === op.id)
+      ? view.notSaved
+      : [...view.notSaved, { id: op.id, undo: known ? "discard" : "delete" }];
+  };
 
   // `echo: "later"` sends the new view a moment after an operation, as main does over IPC.
   const echo = (next) => {
@@ -171,9 +200,28 @@ if (page === "shelf") {
     {
       apply: logged("apply", (op) => {
         globalThis.__applied.push(op);
-        view = { ...view, doc: applyOp(view.doc, op) };
+        view = {
+          ...view,
+          doc: applyOp(view.doc, op),
+          notSaved: markNotSaved(op),
+        };
         echo(view);
       }),
+      discardChanges: logged("discardChanges", (id) => {
+        const before = savedDoc.items.find((entry) => entry.id === id);
+
+        view = {
+          ...view,
+          discarded: { id, seq: (view.discarded?.seq ?? 0) + 1 },
+          doc: updateItem(view.doc, id, (current) => before ?? current),
+          notSaved: view.notSaved.filter((entry) => entry.id !== id),
+        };
+        echo(view);
+      }),
+      drafts: (count) => {
+        globalThis.__drafts.push(count);
+      },
+      settled: logged("settled", nothing),
       copy: logged("copy", copied),
       copyDetails: logged("copyDetails", copied),
       copyList: logged("copyList", copied),
@@ -184,10 +232,24 @@ if (page === "shelf") {
         globalThis.__menuOpen.push(open);
       },
       newWindowLink: logged("newWindowLink", nothing),
-      retrySave: logged(
-        "retrySave",
-        resolved({ message: data.view.status?.saveError ?? "", ok: false })
-      ),
+      // `retryWorks`: the disk has room again, so Retry saves every change.
+      retrySave: logged("retrySave", () => {
+        if (data.retryWorks !== true) {
+          return Promise.resolve({
+            message: data.view.status?.saveError ?? "",
+            ok: false,
+          });
+        }
+
+        view = {
+          ...view,
+          notSaved: [],
+          status: { ...view.status, saveError: null },
+        };
+        echo(view);
+
+        return Promise.resolve({ ok: true });
+      }),
       on,
       openImage: logged("openImage", nothing),
       openLink: logged("openLink", nothing),
@@ -209,12 +271,28 @@ if (page === "picker") {
 }
 
 if (page === "drawing") {
+  globalThis.__dirty = [];
   globalThis.insetDrawing = withFallback(
     {
       getImage: resolved(null),
       getView: resolved(data.view),
       on,
-      save: ok,
+      save: (drawing) => {
+        globalThis.__calls.push({
+          arg: {
+            copy: drawing.copy,
+            forQuit: drawing.forQuit,
+            pins: drawing.pins.length,
+          },
+          call: "save",
+        });
+
+        return ok();
+      },
+      // Kept apart from the calls, which the drawing scenes compare whole.
+      setDirty: (dirty) => {
+        globalThis.__dirty.push(dirty);
+      },
     },
     nothing
   );

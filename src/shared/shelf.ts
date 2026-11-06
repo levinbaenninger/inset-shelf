@@ -1359,12 +1359,18 @@ const searchableText = (item: ShelfItem): string =>
 export const groupItems = (
   doc: ShelfDoc,
   query: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  /** An item shown whatever the search: the one being typed in, whose words may stop matching. */
+  keep: ItemId | null = null
 ): readonly ItemGroup[] => {
   const { due, terms } = parseSearch(query);
   const filtering = terms.length > 0 || due !== null;
 
   const matches = (item: ShelfItem): boolean => {
+    if (item.id === keep) {
+      return true;
+    }
+
     if (due !== null && !matchesDue(item.due, due, now)) {
       return false;
     }
