@@ -2757,6 +2757,47 @@ const SCENES: readonly Scene[] = [
     name: "shelf-search-empty",
     page: "shelf",
   },
+  ...[
+    {
+      marked: ["mir", "mir"],
+      name: "suffix",
+      query: "mir",
+      text: "\u0130zmir 😀\u0130zmir",
+    },
+    {
+      marked: ["\u0130", "i"],
+      name: "expanded",
+      query: "i",
+      text: "\u0130zmir",
+    },
+    { marked: ["ΟΣ"], name: "context", query: "ος", text: "ΟΣ \u0130" },
+  ].map(({ marked, name, query, text }): Scene => ({
+    act: async (page) => {
+      await page.getByRole("textbox", { name: "Search the shelf" }).fill(query);
+    },
+    check: async (page) => {
+      const matches = await page.evaluate(() =>
+        [...(CSS.highlights.get("shelf-search") ?? [])].flatMap((range) =>
+          range instanceof Range &&
+          range.startContainer.parentElement?.closest("[data-item-id]")
+            ? [range.toString()]
+            : []
+        )
+      );
+
+      return isDeepStrictEqual(matches, marked)
+        ? null
+        : `Unicode search highlighted ${JSON.stringify(matches)}, not ${JSON.stringify(marked)}`;
+    },
+    data: {
+      view: shelfView({
+        ...DOC,
+        items: [{ ...FULL, ...META, context: null, text }],
+      }),
+    },
+    name: `shelf-search-unicode-${name}`,
+    page: "shelf",
+  })),
   {
     act: async (page) => {
       await page.evaluate(
@@ -2822,6 +2863,18 @@ const SCENES: readonly Scene[] = [
     page: "picker",
   },
   {
+    check: async (page) => {
+      const instructions = page.locator("[data-slot=empty-description]");
+      const text = (await instructions.textContent()) ?? "";
+
+      return text.includes(
+        "If Inset Shelf is not listed, click Add (+), select Inset Shelf from Applications, and click Open. Turn on Inset Shelf, then quit and reopen the app."
+      ) &&
+        (await instructions.isVisible()) &&
+        (await page.getByRole("button", { name: "Open Settings" }).isEnabled())
+        ? null
+        : "the permission scene must explain adding an absent app, granting access and restarting, with Open Settings available";
+    },
     data: { view: pickerView({ kind: "permission" }) },
     name: "picker-permission",
     page: "picker",
@@ -3390,6 +3443,7 @@ const shoot = async (
   const context = await browser.newContext({
     colorScheme: theme,
     deviceScaleFactor: 2,
+    locale: "en-US",
     userAgent: USER_AGENT[platform],
     viewport: size,
   });

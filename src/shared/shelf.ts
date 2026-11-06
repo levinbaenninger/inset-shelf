@@ -1500,13 +1500,11 @@ export const itemTextWithLink = (item: ShelfItem): string =>
 export const itemDetailsText = (item: ShelfItem): string =>
   withDetails(withUrl(titled(item), item), detailLines(item, true));
 
-/** The words an item adds to a list: images only with a title or a note, files with their name. */
+/** The words an item adds to a list: images only with a title, note or details, files with their name. */
 const listText = (item: ShelfItem): string | null => {
   const words = titled(item).trim();
 
-  return item.kind === "image" &&
-    titleOf(item) === null &&
-    item.note.trim() === ""
+  return item.kind === "image" && !hasDetails(item) && item.note.trim() === ""
     ? null
     : words;
 };
@@ -1538,7 +1536,7 @@ export interface ItemList {
 
 /**
  * Items as a numbered list, in the order given, each with its page link.
- * Images without a note add no line; they travel as the image itself.
+ * Images without a title, note or details add no line; they travel as the image itself.
  */
 export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
   const entries = items.flatMap((item) => {

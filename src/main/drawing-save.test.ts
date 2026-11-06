@@ -351,6 +351,7 @@ describe(createDrawingSaves, () => {
       removed: "none",
       saved: "asIs",
     });
+    await app.controller.flush();
   });
 
   it("stays open and unsaved until shelf.json holds the drawing, and puts it on the shelf once however often Retry runs", async () => {

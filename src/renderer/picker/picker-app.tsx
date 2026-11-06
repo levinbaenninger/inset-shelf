@@ -207,7 +207,10 @@ const Picker = ({ view }: { readonly view: PickerView }) => {
               <EmptyTitle>Allow Screen Recording</EmptyTitle>
               <EmptyDescription>
                 Inset Shelf needs Screen &amp; System Audio Recording to show
-                your windows. Turn it on, then quit and reopen the app.
+                your windows. Open System Settings &gt; Privacy &amp; Security
+                &gt; Screen &amp; System Audio Recording. If Inset Shelf is not
+                listed, click Add (+), select Inset Shelf from Applications, and
+                click Open. Turn on Inset Shelf, then quit and reopen the app.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>

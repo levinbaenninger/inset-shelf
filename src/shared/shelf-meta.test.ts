@@ -430,6 +430,79 @@ describe("copying", () => {
     expect(itemDetailsText(image)).toBe("Image");
   });
 
+  it.each(["description-only", "labelled-pin-only"])(
+    "includes an untitled, uncaptioned %s image in image-only and mixed lists",
+    (metadata) => {
+      const { doc, image, note } = withItems();
+
+      const { doc: next } = applyOp(
+        doc,
+        metadata === "description-only"
+          ? {
+              description: "Check <header> & footer\nBefore Friday",
+              id: image.id,
+              type: "setDescription",
+            }
+          : {
+              id: image.id,
+              pins: [
+                { x: 1, y: 1 },
+                { label: "Check <header> & footer", x: 2, y: 2 },
+              ],
+              type: "setPins",
+            },
+        env(),
+        []
+      );
+
+      const [, item] = next.items;
+
+      if (item === undefined) {
+        throw new Error("missing item");
+      }
+
+      const details =
+        metadata === "description-only"
+          ? "Check <header> & footer\n   Before Friday"
+          : "2 · Check <header> & footer";
+
+      const html =
+        metadata === "description-only"
+          ? "Check &lt;header&gt; &amp; footer<br>Before Friday"
+          : "2 · Check &lt;header&gt; &amp; footer";
+
+      expect(itemsAsList([item])).toStrictEqual({
+        count: 1,
+        html: `<ol><li>Image<br>${html}</li></ol>`,
+        text: `1. Image\n   ${details}`,
+      });
+      expect(itemsAsList([item, note])).toStrictEqual({
+        count: 2,
+        html: `<ol><li>Image<br>${html}</li><li>Chairs are over budget (<a href="https://example.com/quote">https://example.com/quote</a>)</li></ol>`,
+        text: `1. Image\n   ${details}\n2. Chairs are over budget (https://example.com/quote)`,
+      });
+    }
+  );
+
+  it("omits images with only blank details and unlabelled pins from lists", () => {
+    const { image, note } = withItems();
+
+    if (image.kind !== "image") {
+      throw new Error("not an image");
+    }
+
+    const item = {
+      ...image,
+      description: " \n ",
+      note: " \n ",
+      pins: [{ x: 1, y: 1 }],
+      steps: [{ done: false, id: uuid(80), text: " \n " }],
+    };
+
+    expect(itemsAsList([item])).toStrictEqual({ count: 0, html: "", text: "" });
+    expect(itemsAsList([item, note])).toStrictEqual(itemsAsList([note]));
+  });
+
   it("adds the description, steps, due day and windows", () => {
     const { doc, note } = withItems();
 

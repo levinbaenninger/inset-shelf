@@ -734,6 +734,59 @@ describe(createCopyCommands, () => {
     expect(copied).toStrictEqual(["item:1", "list:2"]);
   });
 
+  it.each(["description-only", "labelled-pin-only"])(
+    "copies an untitled, uncaptioned %s image with its details in image-only and mixed lists",
+    async (metadata) => {
+      const { commands, controller, items, written } = await setup();
+
+      controller.apply(
+        metadata === "description-only"
+          ? {
+              description: "Check header",
+              id: items.image,
+              type: "setDescription",
+            }
+          : {
+              id: items.image,
+              pins: [{ label: "Check header", x: 1, y: 1 }],
+              type: "setPins",
+            }
+      );
+
+      await expect(commands.copyList([items.image])).resolves.toStrictEqual({
+        ok: true,
+      });
+      await expect(
+        commands.copyList([items.image, items.text])
+      ).resolves.toStrictEqual({ ok: true });
+
+      const details =
+        metadata === "description-only" ? "Check header" : "1 · Check header";
+
+      const picture = `<p><img src="data:image/png;base64,${Buffer.from("PNG").toString("base64")}" width="40" alt="Image"></p>`;
+
+      await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+        "text/html": `<ol><li>Image<br>${details}</li></ol>${picture}`,
+        "text/plain": `1. Image\n   ${details}`,
+      });
+      await expect(formats(written[1]?.[0])).resolves.toStrictEqual({
+        "text/html": `<ol><li>Image<br>${details}</li><li>Call Rieder<br>Before Friday</li></ol>${picture}`,
+        "text/plain": `1. Image\n   ${details}\n2. Call Rieder\n   Before Friday`,
+      });
+    }
+  );
+
+  it("copies only the image when a list has no text or details", async () => {
+    const { commands, items, written } = await setup();
+
+    await expect(commands.copyList([items.image])).resolves.toStrictEqual({
+      ok: true,
+    });
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "image/png": "PNG",
+    });
+  });
+
   it("says when the item has gone and copies nothing", async () => {
     const { commands, controller, items, written } = await setup();
 
