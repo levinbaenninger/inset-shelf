@@ -61,6 +61,15 @@ globalThis.__emit = (name, payload) => {
 
 globalThis.__applied = [];
 
+/** Every operation and copy the shelf asked main for, in order: `{ call: "copy", arg: id }`. */
+globalThis.__calls = [];
+
+const logged = (call, answer) => (arg) => {
+  globalThis.__calls.push({ arg, call });
+
+  return answer(arg);
+};
+
 const resolved = (value) => () => Promise.resolve(value);
 const ok = resolved({ ok: true });
 const nothing = Function.prototype;
@@ -108,6 +117,10 @@ const applyOp = (doc, op) => {
       }));
     }
 
+    case "remove": {
+      return { ...doc, items: doc.items.filter((item) => item.id !== op.id) };
+    }
+
     case "setTitle": {
       return updateItem(doc, op.id, (item) => ({
         ...item,
@@ -124,17 +137,32 @@ const applyOp = (doc, op) => {
 if (page === "shelf") {
   let { view } = data;
 
+  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC.
+  const echo = (next) => {
+    if (data.echo === "later") {
+      setTimeout(() => {
+        globalThis.__emit("view", next);
+      }, 250);
+    } else {
+      globalThis.__emit("view", next);
+    }
+  };
+
   globalThis.insetShelf = withFallback(
     {
-      apply: (op) => {
+      apply: logged("apply", (op) => {
         globalThis.__applied.push(op);
         view = { ...view, doc: applyOp(view.doc, op) };
-        globalThis.__emit("view", view);
-      },
-      copy: ok,
-      copyList: ok,
+        echo(view);
+      }),
+      copy: logged("copy", ok),
+      copyDetails: logged("copyDetails", ok),
+      copyList: logged("copyList", ok),
+      copyWithLink: logged("copyWithLink", ok),
       getView: () => Promise.resolve(view),
       on,
+      openImage: logged("openImage", nothing),
+      openLink: logged("openLink", nothing),
     },
     nothing
   );

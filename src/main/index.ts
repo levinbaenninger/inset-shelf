@@ -907,6 +907,28 @@ const start = async (): Promise<void> => {
     }
   };
 
+  /** An item as text: with its link, or with every detail. */
+  const copyText = async (
+    id: ItemId,
+    text: (item: ShelfItem) => string
+  ): Promise<ActionResult> => {
+    screenshots.ignoreClipboard();
+
+    const item = controller.item(id);
+
+    if (item === undefined) {
+      return { message: "This item no longer exists.", ok: false };
+    }
+
+    try {
+      await clipboard.writeText(text(item));
+
+      return { ok: true };
+    } catch (error) {
+      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
+    }
+  };
+
   const copyItem = async (id: ItemId): Promise<ActionResult> => {
     screenshots.ignoreClipboard();
 
@@ -1174,25 +1196,9 @@ const start = async (): Promise<void> => {
         void pickFiles();
       },
       copy: copyItem,
-      copyDetails: (id) => {
-        screenshots.ignoreClipboard();
-
-        const item = controller.item(id);
-
-        if (item !== undefined) {
-          void clipboard.writeText(itemDetailsText(item));
-        }
-      },
+      copyDetails: async (id) => await copyText(id, itemDetailsText),
       copyList,
-      copyWithLink: (id) => {
-        screenshots.ignoreClipboard();
-
-        const item = controller.item(id);
-
-        if (item !== undefined) {
-          void clipboard.writeText(itemTextWithLink(item));
-        }
-      },
+      copyWithLink: async (id) => await copyText(id, itemTextWithLink),
       linkWindows: (id) => {
         openPicker(id);
       },

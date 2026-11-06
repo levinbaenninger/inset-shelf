@@ -424,3 +424,76 @@ export const pickedMenu = (
     },
   ];
 };
+
+/** The parts of a KeyboardEvent a menu reads. */
+export interface MenuKeyPress {
+  readonly key: string;
+  /** The physical key, which macOS keeps when ⌥ turns C into ç. */
+  readonly code: string;
+  readonly metaKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly shiftKey: boolean;
+  readonly repeat: boolean;
+}
+
+/** The keys an accelerator's last part stands for; ⌫ and Delete both delete, as in the list. */
+const NAMED_KEYS = new Map<string, readonly string[]>([
+  ["Backspace", ["Backspace", "Delete"]],
+  ["Right", ["ArrowRight"]],
+  ["Space", [" "]],
+]);
+
+const pressesKey = (press: MenuKeyPress, key: string, mac: boolean): boolean =>
+  NAMED_KEYS.get(key)?.includes(press.key) ??
+  (key.length === 1 &&
+    (press.key.toLowerCase() === key.toLowerCase() ||
+      (mac && press.code === `Key${key.toUpperCase()}`)));
+
+const matches = (
+  press: MenuKeyPress,
+  accelerator: string,
+  mac: boolean
+): boolean => {
+  const parts = accelerator.split("+");
+  const key = parts.at(-1) ?? "";
+  const command = mac ? press.metaKey : press.ctrlKey;
+  const other = mac ? press.ctrlKey : press.metaKey;
+
+  return (
+    !other &&
+    command === parts.includes("CommandOrControl") &&
+    press.altKey === parts.includes("Alt") &&
+    press.shiftKey === parts.includes("Shift") &&
+    pressesKey(press, key, mac)
+  );
+};
+
+/**
+ * The choice a key press runs while an item's menu is open: the entry that
+ * shows that key, for the item the menu belongs to. Return is left to the
+ * menu, which chooses the highlighted entry with it, and a held key acts once.
+ */
+export const menuChoiceForKey = (
+  entries: readonly MenuEntry[],
+  press: MenuKeyPress,
+  mac: boolean
+): MenuChoice | null => {
+  if (press.repeat) {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (
+      entry.kind === "choice" &&
+      entry.enabled &&
+      entry.accelerator !== undefined &&
+      entry.accelerator !== "Enter" &&
+      matches(press, entry.accelerator, mac)
+    ) {
+      return entry.choice;
+    }
+  }
+
+  return null;
+};

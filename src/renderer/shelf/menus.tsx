@@ -27,6 +27,7 @@ import { COLOR_HEX } from "@shared/colors";
 import {
   COLOR_NAMES,
   itemMenu,
+  menuChoiceForKey,
   pickedMenu,
   sectionMenu,
   shelfMenu,
@@ -36,7 +37,7 @@ import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
 import { useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
 import {
   DropdownMenu,
@@ -157,7 +158,15 @@ const Entries = ({
       case "group": {
         return (
           <DropdownMenuItem
+            data-menu-group
             key={entry.label}
+            // → opens it, as it would a submenu.
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight") {
+                event.preventDefault();
+                onOpenGroup(entry);
+              }
+            }}
             onSelect={(event) => {
               // The menu stays open and shows the group's entries instead.
               event.preventDefault();
@@ -206,22 +215,57 @@ const keepFocus = (event: Event): void => {
   event.preventDefault();
 };
 
-/** A menu's content, showing one group's entries in place when it is opened. */
+/**
+ * A menu's content, showing one group's entries in place when it is opened.
+ * With `onKey`, the keys its entries show run them from anywhere in the menu,
+ * before the highlighted entry sees the key: Space checks the item off rather
+ * than choosing that entry.
+ */
 const MenuContent = ({
   entries,
   onChoose,
+  onKey,
   ...props
 }: {
   readonly entries: readonly MenuEntry[];
   readonly onChoose: (choice: MenuChoice) => void;
+  readonly onKey?: (choice: MenuChoice) => void;
 } & Omit<ComponentProps<typeof DropdownMenuContent>, "children">) => {
   const [group, setGroup] = useState<GroupEntry | null>(null);
+
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "ArrowLeft" && group !== null) {
+      event.preventDefault();
+      setGroup(null);
+
+      return;
+    }
+
+    // → belongs to "Move to" while it is highlighted or open.
+    const walking =
+      event.key === "ArrowRight" &&
+      (group !== null ||
+        (event.target instanceof Element &&
+          event.target.closest("[data-menu-group]") !== null));
+
+    const choice =
+      onKey === undefined || walking
+        ? null
+        : menuChoiceForKey(entries, event, isMac);
+
+    if (choice !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      onKey?.(choice);
+    }
+  };
 
   return (
     <DropdownMenuContent
       // Each page places itself again, so a taller page never ends up clipped.
       key={group?.label ?? ""}
       onCloseAutoFocus={keepFocus}
+      onKeyDownCapture={onKeyDownCapture}
       {...props}
     >
       {group === null ? (
@@ -305,7 +349,9 @@ const entriesFor = (
 /**
  * One menu for every right-click and every item's ⋯, opened at an anchor the
  * shelf reports. Not modal, so a dialog it opens (deleting a section) never
- * leaves the page unclickable.
+ * leaves the page unclickable. An item's menu belongs to its item: the keys
+ * it shows act on that item while it is open, never on another one, and the
+ * shelf puts focus back (`onClosed`) once it has gone.
  */
 export const PointerMenu = ({
   doc,
@@ -313,15 +359,28 @@ export const PointerMenu = ({
   menu,
   onChoose,
   onClose,
+  onClosed,
 }: {
   readonly menu: OpenMenu | null;
   readonly doc: ShelfDoc;
   readonly floatOnTop: boolean;
   readonly onChoose: (choice: MenuChoice) => void;
   readonly onClose: () => void;
+  /** The menu has left the page, by Escape, a click elsewhere or a choice. */
+  readonly onClosed: () => void;
 }) => {
   const entries =
     menu === null ? null : entriesFor(menu.target, doc, floatOnTop);
+
+  const kind = menu?.target.kind;
+
+  const onKey =
+    kind === "item" || kind === "items"
+      ? (choice: MenuChoice): void => {
+          onChoose(choice);
+          onClose();
+        }
+      : undefined;
 
   return (
     <DropdownMenu
@@ -356,6 +415,17 @@ export const PointerMenu = ({
               : `${menu.target.kind}-${"id" in menu.target ? menu.target.id : ""}-${menu.x}-${menu.y}`
           }
           onChoose={onChoose}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onClosed();
+          }}
+          onKey={onKey}
+          // A quick right-click lets go over the menu while it slides in under the pointer; that never chooses an entry.
+          onPointerUpCapture={(event) => {
+            if (event.button === 2) {
+              event.stopPropagation();
+            }
+          }}
           sideOffset={menu?.height === 0 ? 2 : 4}
         />
       )}

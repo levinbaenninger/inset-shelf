@@ -16,6 +16,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
@@ -433,6 +434,8 @@ interface Scene {
   readonly page: PageName;
   readonly data: object;
   readonly platforms?: readonly Platform[];
+  /** The window's width, where it differs from the page's usual size: the shelf's narrowest is 300. */
+  readonly width?: number;
   /** Fails the scene when anything in the list or details overflows or wraps badly. */
   readonly layoutCheck?: boolean;
   readonly act?: (page: Page) => Promise<void>;
@@ -478,6 +481,431 @@ const removes = async (page: Page): Promise<number> => {
   return ops.filter((op) => op.type === "remove").length;
 };
 
+const CallsSchema = z.array(z.object({ arg: z.unknown(), call: z.string() }));
+
+/** What the page asked the fake main process for so far, in order: operations, copies, opens. */
+const calls = async (page: Page, from = 0) => {
+  const all = CallsSchema.parse(
+    JSON.parse(
+      String(await page.evaluate("JSON.stringify(globalThis.__calls)"))
+    )
+  );
+
+  return all.slice(from);
+};
+
+const FocusSchema = z.object({
+  onRow: z.boolean(),
+  row: z.string().nullable(),
+  tag: z.string(),
+});
+
+/** The item focus is in, and whether it is on the item itself rather than a control inside it. */
+const focused = async (page: Page) =>
+  FocusSchema.parse(
+    await page.evaluate(`(() => {
+      const active = document.activeElement;
+
+      return {
+        onRow: active?.hasAttribute("data-row-keys") ?? false,
+        row: active?.closest("[data-item-id]")?.getAttribute("data-item-id") ?? null,
+        tag: active?.tagName ?? "",
+      };
+    })()`)
+  );
+
+/** The command key the page reads: ⌘ on a Mac, Ctrl elsewhere. */
+const commandKey = async (page: Page): Promise<"Meta" | "Control"> => {
+  const mac = await page.evaluate("navigator.userAgent.includes('Mac')");
+
+  return mac === true ? "Meta" : "Control";
+};
+
+/** How many calls the page has made so far. */
+const callCount = async (page: Page): Promise<number> =>
+  Number(await page.evaluate("globalThis.__calls.length"));
+
+/** Right-clicks an item's words, as a user opens its menu. */
+const openMenuOn = async (page: Page, n: number): Promise<void> => {
+  await item(page, n)
+    .locator("[data-row-keys]")
+    .first()
+    .click({ button: "right" });
+  await page.getByRole("menu").waitFor();
+};
+
+/** The menu has faded out and handed focus back. */
+const menuClosed = async (page: Page): Promise<void> => {
+  await page.getByRole("menu").waitFor({ state: "detached" });
+  await page.waitForTimeout(150);
+};
+
+/** The longest Due chip there is, overdue since last year, on items with every badge and a long source. */
+const NARROW_DOC = {
+  ...DOC,
+  items: [
+    { ...FULL, due: isoDay(-400) },
+    { ...IMAGE, due: isoDay(-400) },
+    ...ITEMS.flatMap((entry) =>
+      entry.id === uuid(13) ? [{ ...entry, due: isoDay(-400) }] : []
+    ),
+    ...ITEMS.filter((entry) => entry.id === uuid(14)),
+  ],
+};
+
+/** A short list, so every row stays clear of the toasts at the bottom. */
+const MENU_DOC = {
+  ...DOC,
+  items: [12, 14, 13, 15].flatMap((n) =>
+    ITEMS.filter((entry) => entry.id === uuid(n))
+  ),
+};
+
+/** Item A is the open entry; item B is the row whose menu is open; C is picked with A. */
+const ENTRY_A = 12;
+const ROW_B = 14;
+const ROW_C = 13;
+
+/** Opens entry A with focus on it, then B's menu, as in Sol's round 3 report. */
+const openAThenMenuOnB = async (page: Page): Promise<void> => {
+  await select(page, ENTRY_A);
+  await item(page, ENTRY_A).locator("[data-row-keys]").first().focus();
+  await openMenuOn(page, ROW_B);
+};
+
+/** A command main sends when a menu bar item runs (src/shared/contracts.ts ShelfCommand). */
+interface MenuCommand {
+  readonly kind: "copy" | "item";
+  readonly action?: "copyDetails" | "copyList" | "open";
+}
+
+interface MenuStep {
+  readonly name: string;
+  readonly run: (page: Page) => Promise<void>;
+  /** What the page asks main for, exactly and in order. */
+  readonly sends: readonly unknown[];
+  /** After a delete, focus belongs on the item selected next, once main's late view has removed the row. */
+  readonly focus?: "selected";
+}
+
+/** A step that presses a key. */
+const pressing = (combo: string) => async (on: Page) => {
+  await on.keyboard.press(combo);
+};
+
+/** A step that runs a menu bar command, as main sends it. */
+const command = (payload: MenuCommand) => async (on: Page) => {
+  await on.evaluate(`globalThis.__emit("command", ${JSON.stringify(payload)})`);
+};
+
+const selectedRow = async (page: Page): Promise<string | null> =>
+  z
+    .string()
+    .nullable()
+    .parse(
+      await page.evaluate(
+        `document.querySelector('[data-item-id][aria-current="true"]')?.getAttribute("data-item-id") ?? null`
+      )
+    );
+
+/**
+ * Opens a menu, runs one step, and checks what the page sent and where
+ * focus is once the menu has gone, step by step: what went wrong, or null.
+ */
+const runMenuSteps = async (
+  page: Page,
+  steps: readonly MenuStep[],
+  menu: {
+    readonly open: () => Promise<void>;
+    readonly owner: string;
+    readonly name: string;
+  }
+): Promise<string | null> => {
+  for (const menuStep of steps) {
+    // oxlint-disable-next-line no-await-in-loop -- one step after another, on purpose.
+    await menu.open();
+    // oxlint-disable-next-line no-await-in-loop -- counted before the menuStep.
+    const before = await callCount(page);
+    // oxlint-disable-next-line no-await-in-loop -- one step after another, on purpose.
+    await menuStep.run(page);
+    // oxlint-disable-next-line no-await-in-loop -- the menu must be gone before focus is read.
+    await menuClosed(page);
+    // oxlint-disable-next-line no-await-in-loop -- read after the menuStep.
+    const sent = await calls(page, before);
+
+    if (!isDeepStrictEqual(sent, menuStep.sends)) {
+      return `${menuStep.name} in ${menu.name} sent ${JSON.stringify(sent)}, not ${JSON.stringify(menuStep.sends)}`;
+    }
+
+    if (menuStep.focus === "selected") {
+      // oxlint-disable-next-line no-await-in-loop -- main's view arrives 250 ms late.
+      await page.waitForTimeout(300);
+    }
+
+    const want =
+      menuStep.focus === "selected"
+        ? // oxlint-disable-next-line no-await-in-loop -- read after the menuStep.
+          await selectedRow(page)
+        : menu.owner;
+
+    // oxlint-disable-next-line no-await-in-loop -- read after the menuStep.
+    const focus = await focused(page);
+
+    if (want === null || focus.row !== want || !focus.onRow) {
+      return `after ${menuStep.name} in ${menu.name}, focus is on ${focus.tag} in ${focus.row ?? "no item"}, not on the row ${want ?? "selected"}`;
+    }
+  }
+
+  return null;
+};
+
+/** → in B's menu opens B's details, and Back returns focus to B. */
+const detailsFromMenu = async (page: Page): Promise<string | null> => {
+  await openAThenMenuOnB(page);
+  await page.keyboard.press("ArrowRight");
+  await page.getByRole("button", { name: "Back to the list" }).waitFor();
+
+  const shown = (await page.locator("[data-details]").textContent()) ?? "";
+
+  if (!shown.includes("The upload test fails")) {
+    return "→ with B's menu open showed details for another item";
+  }
+
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await page.waitForTimeout(150);
+
+  const focus = await focused(page);
+
+  return focus.row === uuid(ROW_B) && focus.onRow
+    ? null
+    : `after → and Back, focus is on ${focus.tag} in ${focus.row ?? "no item"}, not on B`;
+};
+
+/** → on "Move to ›" opens its list rather than B's details; ← goes back. */
+const moveToArrows = async (page: Page): Promise<string | null> => {
+  await openAThenMenuOnB(page);
+  await page.getByRole("menuitem", { name: "Move to" }).hover();
+  await page.keyboard.press("ArrowRight");
+
+  const opened = await page.getByRole("menuitem", { name: "Back" }).count();
+
+  await page.keyboard.press("ArrowLeft");
+
+  const closedAgain = await page
+    .getByRole("menuitem", { name: "Move to" })
+    .count();
+
+  await page.keyboard.press("Escape");
+  await menuClosed(page);
+
+  return opened === 1 && closedAgain === 1
+    ? null
+    : `→ and ← on “Move to” showed the sections ${opened} times and the menu again ${closedAgain} times`;
+};
+
+/** The operations the shelf sends for ⌫ and Space on an item. */
+const removing = (id: string) => ({
+  arg: { id, type: "remove" },
+  call: "apply",
+});
+
+const toggling = (id: string) => ({
+  arg: { id, type: "toggleDone" },
+  call: "apply",
+});
+
+/**
+ * Round 4: a row's menu belongs to its row. Each step opens entry A, then
+ * row B's menu, and runs a key or a menu bar command. It asserts what the
+ * page asked main for, then where focus is once the menu is gone. Then the
+ * same for the menu of A and C picked together.
+ */
+const menuOwnershipCheck = async (page: Page): Promise<string | null> => {
+  const mod = await commandKey(page);
+  const a = uuid(ENTRY_A);
+  const b = uuid(ROW_B);
+  const c = uuid(ROW_C);
+
+  const onB = {
+    name: "B's menu over A",
+    open: async () => {
+      await openAThenMenuOnB(page);
+    },
+    owner: b,
+  };
+
+  const onPicked = {
+    name: "the menu for A and C",
+    open: async () => {
+      await openMenuOn(page, ROW_C);
+    },
+    owner: c,
+  };
+
+  const phases: readonly (() => Promise<string | null>)[] = [
+    // The scene left B's menu open over the open entry A.
+    async () =>
+      await runMenuSteps(
+        page,
+        [{ name: "Escape", run: pressing("Escape"), sends: [] }],
+        {
+          ...onB,
+          open: async () => {
+            await page.getByRole("menu").waitFor();
+          },
+        }
+      ),
+    async () =>
+      await runMenuSteps(
+        page,
+        [
+          {
+            name: `${mod}+C`,
+            run: pressing(`${mod}+c`),
+            sends: [{ arg: b, call: "copy" }],
+          },
+          {
+            name: `Alt+${mod}+C`,
+            run: pressing(`Alt+${mod}+c`),
+            sends: [{ arg: b, call: "copyDetails" }],
+          },
+          { name: "Space", run: pressing("Space"), sends: [toggling(b)] },
+          {
+            name: `${mod}+O`,
+            run: pressing(`${mod}+o`),
+            sends: [{ arg: { id: b }, call: "openLink" }],
+          },
+          { name: "Escape", run: pressing("Escape"), sends: [] },
+          // The menu bar's own keys: Edit › Copy on a Mac; on Windows main answers Ctrl+Alt+C and Ctrl+O before the page.
+          {
+            name: "Edit › Copy",
+            run: command({ kind: "copy" }),
+            sends: [{ arg: b, call: "copy" }],
+          },
+          {
+            name: "Edit › Copy with Details",
+            run: command({ action: "copyDetails", kind: "item" }),
+            sends: [{ arg: b, call: "copyDetails" }],
+          },
+          {
+            name: "Item › Open",
+            run: command({ action: "open", kind: "item" }),
+            sends: [{ arg: { id: b }, call: "openLink" }],
+          },
+        ],
+        onB
+      ),
+    async () => await detailsFromMenu(page),
+    async () => await moveToArrows(page),
+    // Main's view arrives late here, so B is still listed when the menu has gone.
+    async () =>
+      await runMenuSteps(
+        page,
+        [
+          {
+            focus: "selected",
+            name: "Backspace",
+            run: pressing("Backspace"),
+            sends: [removing(b)],
+          },
+        ],
+        onB
+      ),
+    // ⇧-click picks A and C, as ⌃-click is a right-click on a Mac.
+    async () => {
+      await select(page, ENTRY_A);
+      await item(page, ROW_C)
+        .locator("[data-row-keys]")
+        .first()
+        .click({ modifiers: ["Shift"] });
+
+      return await runMenuSteps(
+        page,
+        [
+          {
+            name: `Shift+${mod}+C`,
+            run: pressing(`Shift+${mod}+c`),
+            sends: [{ arg: [a, c], call: "copyList" }],
+          },
+          {
+            name: "Space",
+            run: pressing("Space"),
+            sends: [toggling(a), toggling(c)],
+          },
+          {
+            name: "Item › Copy as List",
+            run: command({ action: "copyList", kind: "item" }),
+            sends: [{ arg: [a, c], call: "copyList" }],
+          },
+          { name: "Escape", run: pressing("Escape"), sends: [] },
+          {
+            focus: "selected",
+            name: "Backspace",
+            run: pressing("Backspace"),
+            sends: [removing(a), removing(c)],
+          },
+        ],
+        onPicked
+      );
+    },
+  ];
+
+  for (const phase of phases) {
+    // oxlint-disable-next-line no-await-in-loop -- one phase after another, on purpose.
+    const failed = await phase();
+
+    if (failed !== null) {
+      return failed;
+    }
+  }
+
+  return null;
+};
+
+/** Opens entry A's text for editing and types into it, without leaving the field. */
+const typeInEntryA = async (page: Page): Promise<void> => {
+  await select(page, ENTRY_A);
+  await page.keyboard.press("Enter");
+  await item(page, ENTRY_A)
+    .getByRole("textbox", { name: "Edit item" })
+    .waitFor();
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+  await page.keyboard.press("End");
+  await page.keyboard.type(" at 9");
+};
+
+/** With A's edit still being typed (the scene's act), A's menu copies the edited words. */
+const pendingEditCheck = async (page: Page): Promise<string | null> => {
+  const mod = await commandKey(page);
+  const a = uuid(ENTRY_A);
+  const before = await callCount(page);
+
+  // On the card's edge, outside the text being edited.
+  await item(page, ENTRY_A).click({
+    button: "right",
+    position: { x: 4, y: 4 },
+  });
+  await page.getByRole("menu").waitFor();
+  await page.keyboard.press(`${mod}+c`);
+  await menuClosed(page);
+
+  const sent = await calls(page, before);
+
+  const want = [
+    {
+      arg: { id: a, text: "Book the movers for Monday at 9", type: "editText" },
+      call: "apply",
+    },
+    { arg: a, call: "copy" },
+  ];
+
+  return isDeepStrictEqual(sent, want)
+    ? null
+    : `copying an item being edited sent ${JSON.stringify(sent)}, not the edit and then the copy`;
+};
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -506,6 +934,14 @@ const SCENES: readonly Scene[] = [
     name: "shelf-list",
     page: "shelf",
     platforms: ["macos", "windows"],
+  },
+  {
+    data: { view: shelfView(NARROW_DOC) },
+    layoutCheck: true,
+    name: "shelf-list-narrow",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+    width: 300,
   },
   {
     act: async (page) => {
@@ -942,6 +1378,22 @@ const SCENES: readonly Scene[] = [
     platforms: ["macos", "windows"],
   },
   {
+    act: openAThenMenuOnB,
+    check: menuOwnershipCheck,
+    data: { echo: "later", view: shelfView(MENU_DOC) },
+    name: "shelf-row-menu-keys",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    act: typeInEntryA,
+    check: pendingEditCheck,
+    data: { echo: "later", view: shelfView(MENU_DOC) },
+    name: "shelf-copy-pending-edit",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
     act: async (page) => {
       await page.getByRole("button", { exact: true, name: "Add" }).click();
       await page.getByRole("menuitem", { name: /^New Window Link/u }).waitFor();
@@ -1317,6 +1769,23 @@ const layoutProblems = async (page: Page): Promise<readonly string[]> =>
     return [...new Set(problems)];
   }, 30);
 
+/** A badge on its line shows whole, its icon included; one that doesn't fit wraps out of sight. */
+const cutBadges = async (page: Page): Promise<readonly string[]> =>
+  await page.evaluate(() =>
+    [...document.querySelectorAll("[data-badges]")].flatMap((badges) => {
+      const line = badges.getBoundingClientRect();
+
+      return [...badges.children].flatMap((badge) => {
+        const box = badge.getBoundingClientRect();
+
+        return box.top < line.bottom &&
+          (box.left < line.left - 0.5 || box.right > line.right + 0.5)
+          ? [`“${badge.textContent ?? ""}” is cut off`]
+          : [];
+      });
+    })
+  );
+
 const shoot = async (
   browser: Browser,
   origin: string,
@@ -1324,7 +1793,10 @@ const shoot = async (
   platform: Platform,
   theme: Theme
 ): Promise<string> => {
-  const size = SIZES[scene.page];
+  const size = {
+    ...SIZES[scene.page],
+    width: scene.width ?? SIZES[scene.page].width,
+  };
 
   const context = await browser.newContext({
     colorScheme: theme,
@@ -1376,7 +1848,10 @@ const shoot = async (
 
   await page.screenshot({ path: file });
 
-  const problems = scene.layoutCheck === true ? await layoutProblems(page) : [];
+  const problems =
+    scene.layoutCheck === true
+      ? [...(await layoutProblems(page)), ...(await cutBadges(page))]
+      : [];
 
   const failed = scene.check === undefined ? null : await scene.check(page);
 

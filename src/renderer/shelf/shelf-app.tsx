@@ -1,6 +1,7 @@
 import { Cancel01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
+  ActionResult,
   DetailField,
   ItemAction,
   ShelfCommand,
@@ -40,7 +41,7 @@ import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
 import { DetailsView } from "./details-view";
 import { EmptyShelf } from "./empty-shelf";
-import { ItemRow } from "./item-row";
+import { focusRow, ItemRow } from "./item-row";
 import { Markdown } from "./markdown";
 import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
@@ -317,15 +318,24 @@ const flushEdits = (): void => {
   }
 };
 
+/** Whether main copied; when it couldn't, a toast says why and nothing shows as copied. */
+const copied = async (result: Promise<ActionResult>): Promise<boolean> => {
+  const outcome = await result;
+
+  if (!outcome.ok) {
+    toast.error(outcome.message, { duration: NOTICE_MS });
+  }
+
+  return outcome.ok;
+};
+
 /** Several items as one numbered list. */
 const copyList = async (list: readonly ShelfItem[]): Promise<void> => {
   if (list.length === 0) {
     return;
   }
 
-  const result = await api.copyList(list.map((item) => item.id));
-
-  if (result.ok) {
+  if (await copied(api.copyList(list.map((item) => item.id)))) {
     noticeToast(
       list.length === 1
         ? "Copied as a list"
@@ -411,6 +421,39 @@ const undoableToast = (message: string, undo: () => boolean): void => {
 /** Opens a linked window again, or every window of the item when none is given. */
 const reopenWindow = (id: ItemId, window?: WindowRef): void => {
   api.reopenWindow(window === undefined ? { id } : { id, windowId: window.id });
+};
+
+/** Where focus goes back to when a menu closes: the button that opened it, else the item it belongs to. */
+interface MenuReturn {
+  readonly opener: HTMLElement | null;
+  readonly owner: ItemId | null;
+}
+
+/**
+ * Puts focus back after a menu has gone, unless a choice or a click already
+ * put it somewhere (an editor, details, the search field). The selected item
+ * comes first: after ⌫ it is the one after the deleted owner, which may not
+ * have left the list yet.
+ */
+const returnFocus = ({ opener, owner }: MenuReturn): void => {
+  const active = document.activeElement;
+
+  if (active !== null && active !== document.body) {
+    return;
+  }
+
+  if (opener?.isConnected === true && opener.checkVisibility()) {
+    opener.focus({ preventScroll: true });
+
+    return;
+  }
+
+  if (
+    !focusRow(document.querySelector('[data-item-id][aria-current="true"]')) &&
+    owner !== null
+  ) {
+    focusRow(document.querySelector(`[data-item-id="${owner}"]`));
+  }
 };
 
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
@@ -503,6 +546,23 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   // The deletions shown as toasts, newest last, so ⌘Z can close the one it undoes.
   const [deletions, setDeletions] = useState<readonly ItemId[]>([]);
   const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
+  // A ref: the menu reports it has closed after its fade, long after the render that opened it.
+  const menuReturn = useRef<MenuReturn>({ opener: null, owner: null });
+
+  /**
+   * Opens a menu at an anchor. A button that opened it (⋯) gets focus back
+   * when it closes; a right-click gives it to the item the menu belongs to.
+   */
+  const showMenu = (menu: OpenMenu, owner: ItemId | null = null): void => {
+    const active = document.activeElement;
+
+    menuReturn.current = {
+      opener: menu.width > 0 && active instanceof HTMLElement ? active : null,
+      owner,
+    };
+    setOpenMenu(menu);
+  };
+
   const [renamingId, setRenamingId] = useState<SectionId | null>(null);
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
   const [namingSection, setNamingSection] = useState(false);
@@ -660,10 +720,22 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   };
 
   const copy = async (id: ItemId): Promise<void> => {
-    const result = await api.copy(id);
-
-    if (result.ok) {
+    if (await copied(api.copy(id))) {
       setCopiedId(id);
+    }
+  };
+
+  /** ⌥⌘C and Copy with Link: the item as text, with its link or every detail. */
+  const copyAsText = async (
+    id: ItemId,
+    kind: "copyDetails" | "copyWithLink"
+  ): Promise<void> => {
+    if (await copied(api[kind](id))) {
+      setCopiedId(id);
+
+      if (kind === "copyDetails") {
+        noticeToast("Copied with details");
+      }
     }
   };
 
@@ -678,7 +750,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const remove = (id: ItemId): void => {
     const item = doc.items.find((candidate) => candidate.id === id);
 
-    setSelectedId(selectionAfterRemoval(ids, id));
+    setSelectedId(selectionAfterRemoval(ids, [id]));
     setEditingId(null);
     apply({ id, type: "remove" });
     setDeletions((current) => [...current, id].slice(-UNDO_MAX));
@@ -703,7 +775,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const removeMany = (list: readonly ItemId[]): void => {
     const run = (): void => {
       unpick();
-      setSelectedId(null);
+      // The next item still shown takes the selection, and with it the focus a closing menu gives back.
+      setSelectedId(selectionAfterRemoval(ids, list));
       setEditingId(null);
 
       for (const id of list) {
@@ -879,20 +952,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         break;
       }
 
-      case "copyDetails": {
-        api.copyDetails(choice.id);
-        setCopiedId(choice.id);
-        noticeToast("Copied with details");
+      case "copyDetails":
+      case "copyWithLink": {
+        void copyAsText(choice.id, choice.kind);
         break;
       }
 
       case "copy": {
         void copy(choice.id);
-        break;
-      }
-
-      case "copyWithLink": {
-        api.copyWithLink(choice.id);
         break;
       }
 
@@ -1039,9 +1106,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     flushEdits();
 
     switch (action) {
+      case "copyDetails":
       case "copyWithLink": {
-        api.copyWithLink(id);
-        setCopiedId(id);
+        void copyAsText(id, action);
         break;
       }
 
@@ -1067,13 +1134,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
       case "linkWindow": {
         api.linkWindows(id);
-        break;
-      }
-
-      case "copyDetails": {
-        api.copyDetails(id);
-        setCopiedId(id);
-        noticeToast("Copied with details");
         break;
       }
 
@@ -1142,13 +1202,18 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         setPicked(ids);
       }
     } else if (pickedItems.length > 1) {
+      flushEdits();
       void copyList(pickedItems);
     } else if (selected !== undefined) {
+      flushEdits();
       void copy(selected.id);
     }
   };
 
   const onCommand = useEffectEvent((command: ShelfCommand) => {
+    // A menu key main answered (Windows), or a menu bar choice: an open menu is done with.
+    setOpenMenu(null);
+
     switch (command.kind) {
       case "item": {
         onItemAction(command.action);
@@ -1304,10 +1369,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             api.linkWindows(detailsItem.id);
           }}
           onMenu={(anchor) => {
-            setOpenMenu({
-              ...anchor,
-              target: { id: detailsItem.id, kind: "item" },
-            });
+            showMenu(
+              { ...anchor, target: { id: detailsItem.id, kind: "item" } },
+              detailsItem.id
+            );
           }}
           onOpenImage={() => {
             api.openImage(detailsItem.id);
@@ -1377,7 +1442,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             // Items and section headings open their own menus.
             if (!event.defaultPrevented) {
               event.preventDefault();
-              setOpenMenu({
+              showMenu({
                 align: "start",
                 height: 0,
                 target: { kind: "shelf" },
@@ -1427,7 +1492,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                     apply({ id: group.section.id, type: "selectSection" });
                   }}
                   onOpenMenu={(anchor) => {
-                    setOpenMenu({
+                    showMenu({
                       ...anchor,
                       target: { id: group.section.id, kind: "section" },
                     });
@@ -1468,27 +1533,29 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                         item={item}
                         key={item.id}
                         onContextMenu={(anchor) => {
+                          // On one of several picked items, the menu acts on all of them.
+                          const several =
+                            picked.length > 1 && picked.includes(item.id);
+
+                          showMenu(
+                            {
+                              ...anchor,
+                              target: several
+                                ? { ids: picked, kind: "items" }
+                                : { id: item.id, kind: "item" },
+                            },
+                            item.id
+                          );
+
                           // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
                           if (document.activeElement instanceof HTMLElement) {
                             document.activeElement.blur();
                           }
 
-                          // On one of several picked items, the menu acts on all of them.
-                          if (picked.length > 1 && picked.includes(item.id)) {
-                            setOpenMenu({
-                              ...anchor,
-                              target: { ids: picked, kind: "items" },
-                            });
-
-                            return;
+                          if (!several) {
+                            unpick();
+                            setSelectedId(item.id);
                           }
-
-                          unpick();
-                          setSelectedId(item.id);
-                          setOpenMenu({
-                            ...anchor,
-                            target: { id: item.id, kind: "item" },
-                          });
                         }}
                         onDragImage={() => {
                           flushEdits();
@@ -1585,6 +1652,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         onChoose={choose}
         onClose={() => {
           setOpenMenu(null);
+        }}
+        onClosed={() => {
+          returnFocus(menuReturn.current);
         }}
       />
       <ConfirmDialog

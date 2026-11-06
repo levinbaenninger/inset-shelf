@@ -6,6 +6,7 @@ import type { RefObject } from "react";
 import { toast } from "sonner";
 
 import type { DetailsUndo, FieldRequest, StepsReset } from "./details-view";
+import { focusRow } from "./item-row";
 
 /** Removals and label edits in details that ⌘Z can still put back. */
 const UNDO_DEPTH = 20;
@@ -83,12 +84,7 @@ export const useDetails = ({
         }
 
         // Back on the row itself, so Return edits and Space checks off again.
-        const row = document.querySelector(`[data-item-id="${id}"]`);
-
-        (
-          row?.querySelector<HTMLElement>("[data-row-keys]") ??
-          row?.querySelector<HTMLElement>("[data-details-button]")
-        )?.focus({ preventScroll: true });
+        focusRow(document.querySelector(`[data-item-id="${id}"]`));
       });
     },
     item,

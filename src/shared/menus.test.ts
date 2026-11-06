@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { itemMenu, pickedMenu, sectionMenu, shelfMenu } from "./menus";
-import type { MenuEntry } from "./menus";
+import {
+  itemMenu,
+  menuChoiceForKey,
+  pickedMenu,
+  sectionMenu,
+  shelfMenu,
+} from "./menus";
+import type { MenuEntry, MenuKeyPress } from "./menus";
 import { emptyShelf, ItemIdSchema, SectionIdSchema, NO_META } from "./shelf";
 import type { ImageItem, ShelfDoc } from "./shelf";
 
@@ -283,5 +289,144 @@ describe(pickedMenu, () => {
     expect(entries[0]).toMatchObject({
       choice: { ids: [doc.items[0]?.id, image.id], kind: "copyList" },
     });
+  });
+});
+
+const press = (
+  key: string,
+  modifiers: Partial<MenuKeyPress> = {}
+): MenuKeyPress => ({
+  altKey: false,
+  code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+  ctrlKey: false,
+  metaKey: false,
+  repeat: false,
+  shiftKey: false,
+  ...modifiers,
+  key,
+});
+
+describe(menuChoiceForKey, () => {
+  const described: ImageItem = { ...image, description: "Three problems" };
+  const shelf = { ...doc, items: [...doc.items, described] };
+  const menu = itemMenu(described, shelf);
+  const { id } = described;
+
+  it("runs the entry that shows the key, on the menu's own item", () => {
+    expect(
+      menuChoiceForKey(menu, press("c", { metaKey: true }), true)
+    ).toStrictEqual({
+      id,
+      kind: "copy",
+    });
+    expect(menuChoiceForKey(menu, press(" "), true)).toStrictEqual({
+      id,
+      kind: "toggleDone",
+    });
+    expect(menuChoiceForKey(menu, press("ArrowRight"), true)).toStrictEqual({
+      id,
+      kind: "details",
+    });
+    expect(
+      menuChoiceForKey(menu, press("o", { metaKey: true }), true)
+    ).toStrictEqual({
+      id,
+      kind: "open",
+    });
+  });
+
+  it("reads ⌥⌘C by its physical key when ⌥ changes the character on a Mac", () => {
+    expect(
+      menuChoiceForKey(
+        menu,
+        { ...press("ç", { altKey: true, metaKey: true }), code: "KeyC" },
+        true
+      )
+    ).toStrictEqual({ id, kind: "copyDetails" });
+  });
+
+  it("takes Delete as ⌫, as the list does", () => {
+    expect(menuChoiceForKey(menu, press("Delete"), true)).toStrictEqual({
+      id,
+      kind: "remove",
+    });
+    expect(menuChoiceForKey(menu, press("Backspace"), true)).toStrictEqual({
+      id,
+      kind: "remove",
+    });
+  });
+
+  it("uses Ctrl elsewhere than macOS, and not on a Mac", () => {
+    expect(
+      menuChoiceForKey(menu, press("c", { ctrlKey: true }), false)
+    ).toStrictEqual({
+      id,
+      kind: "copy",
+    });
+    expect(
+      menuChoiceForKey(menu, press("c", { ctrlKey: true }), true)
+    ).toBeNull();
+    expect(
+      menuChoiceForKey(menu, press("c", { metaKey: true }), false)
+    ).toBeNull();
+  });
+
+  it("leaves Return and the arrows to the menu, and acts once on a held key", () => {
+    expect(menuChoiceForKey(menu, press("Enter"), true)).toBeNull();
+    expect(menuChoiceForKey(menu, press("ArrowDown"), true)).toBeNull();
+    expect(menuChoiceForKey(menu, press("Escape"), true)).toBeNull();
+    expect(
+      menuChoiceForKey(menu, press("Backspace", { repeat: true }), true)
+    ).toBeNull();
+  });
+
+  it("needs exactly the modifiers shown", () => {
+    expect(
+      menuChoiceForKey(
+        menu,
+        press("c", { metaKey: true, shiftKey: true }),
+        true
+      )
+    ).toBeNull();
+    expect(menuChoiceForKey(menu, press("c"), true)).toBeNull();
+  });
+
+  it("ignores a key its menu doesn't show", () => {
+    const plain = { ...image, id: ItemIdSchema.parse(uuid(12)) };
+
+    expect(
+      menuChoiceForKey(
+        itemMenu(plain, { ...doc, items: [plain] }),
+        press("c", { altKey: true, metaKey: true }),
+        true
+      )
+    ).toBeNull();
+  });
+
+  it("checks off and deletes every picked item with Space and ⌫", () => {
+    const items = [...doc.items, image];
+    const picked = pickedMenu(items, { ...doc, items });
+    const ids = [doc.items[0]?.id, image.id];
+
+    expect(menuChoiceForKey(picked, press(" "), true)).toStrictEqual({
+      ids,
+      kind: "toggleMany",
+    });
+    expect(menuChoiceForKey(picked, press("Backspace"), false)).toStrictEqual({
+      ids,
+      kind: "removeMany",
+    });
+  });
+
+  it("copies every picked item as a list with ⇧⌘C", () => {
+    const items = [...doc.items, image];
+
+    expect(
+      menuChoiceForKey(
+        pickedMenu(items, { ...doc, items }),
+        press("c", { metaKey: true, shiftKey: true }),
+        true
+      )
+    ).toStrictEqual({ ids: [doc.items[0]?.id, image.id], kind: "copyList" });
   });
 });

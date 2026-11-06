@@ -109,9 +109,9 @@ export const shelfContract = defineContract({
       out<ActionResult>()
     ),
     /** The item's words and the page it came from, as text, with its metadata when it has any. */
-    copyWithLink: send(ItemIdSchema),
+    copyWithLink: invoke(ItemIdSchema, out<ActionResult>()),
     /** The item's title, words, page and every piece of metadata, as text. */
-    copyDetails: send(ItemIdSchema),
+    copyDetails: invoke(ItemIdSchema, out<ActionResult>()),
     /** File › New Window Link…: the picker, in its own window; picking makes a note. */
     newWindowLink: send(z.void()),
     /** Link Window… in details: the picker, adding to this item. */

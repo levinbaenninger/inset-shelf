@@ -59,6 +59,21 @@ import type { MenuAnchor } from "./menus";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
 
+/**
+ * Focus on an item's row itself, where Return edits, Space checks off and ⌫
+ * deletes. False when the row is gone or hidden.
+ */
+export const focusRow = (row: Element | null): boolean => {
+  const target =
+    row?.querySelector<HTMLElement>("[data-row-keys]") ??
+    row?.querySelector<HTMLElement>("[data-details-button]") ??
+    null;
+
+  target?.focus({ preventScroll: true });
+
+  return target !== null && document.activeElement === target;
+};
+
 /** A right-click on any part of an item opens its menu at the pointer. */
 const contextMenuAt =
   (open: RowHandlers["onContextMenu"]) =>
@@ -87,6 +102,27 @@ const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
 };
 
 /**
+ * "site · page": the page's part leaves the line whole, its " · " with it,
+ * when too little of it would fit to read, so no line ends on a bare "· …".
+ */
+const SourceText = ({ label }: { readonly label: string }) => {
+  const at = label.indexOf(" · ");
+
+  if (at === -1) {
+    return <span className="truncate">{label}</span>;
+  }
+
+  return (
+    <span className="flex h-4 min-w-0 flex-wrap overflow-hidden">
+      <span className="truncate">{label.slice(0, at)}</span>
+      <span className="min-w-[7ch] flex-[1_1_0] truncate ps-1">
+        · {label.slice(at + 3)}
+      </span>
+    </span>
+  );
+};
+
+/**
  * Where an item came from, in one quiet line: the site and what on it for
  * pages the shelf knows, else the app and window. A page address opens in the
  * browser.
@@ -109,7 +145,7 @@ export const SourceLine = ({
         {service === null ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
         )}
-        <span className="truncate">{label}</span>
+        <SourceText label={label} />
       </p>
     );
   }
@@ -122,7 +158,7 @@ export const SourceLine = ({
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
-      <span className="truncate">{label === "" ? context.url : label}</span>
+      <SourceText label={label === "" ? (context.url ?? "") : label} />
     </button>
   );
 };
@@ -262,7 +298,8 @@ const BadgeLine = ({
       {words ? <div className="flex min-w-0 flex-1">{children}</div> : null}
       <div
         className={cn(
-          "ml-auto flex h-5 shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
+          // Never narrower than its widest badge, the Due chip: the words give way first.
+          "ml-auto flex h-5 min-w-min shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
           words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
         )}
         data-badges
