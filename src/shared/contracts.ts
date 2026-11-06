@@ -43,8 +43,8 @@ export interface QuitPrompt {
 /** The prompt's title, in the shelf and in main's own dialog. */
 export const quitTitle = (count: number): string =>
   count === 1
-    ? "1 change couldn't be saved"
-    : `${count} changes couldn't be saved`;
+    ? "1 change couldn’t be saved"
+    : `${count} changes couldn’t be saved`;
 
 export const QuitAnswerSchema = z.enum(["retry", "discard", "cancel"]);
 
@@ -287,6 +287,8 @@ export interface DrawingView {
   readonly seq: number;
   /** Null for a new drawing on a blank page. */
   readonly image: DrawingImage | null;
+  /** A quit is under way: the marks can't change until it is answered (Round 8). Keeps `seq`, so the page keeps its marks. */
+  readonly quitting: boolean;
 }
 
 /** The drawing window: a blank canvas that saves one PNG to the shelf, or an image item drawn on. */

@@ -693,7 +693,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     setConfirming({
       action: "Clear",
-      description: `${itemCount(count)} checked off in ${name ?? "this section"} will be deleted. This can't be undone.`,
+      description: `${itemCount(count)} checked off in ${name ?? "this section"} will be deleted. This can’t be undone.`,
       run: () => {
         apply({ sectionId, type: "clearDone" });
         noticeToast(`Cleared ${itemCount(count)}`);
@@ -715,7 +715,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     setConfirming({
       action: "Delete",
-      description: `Its ${itemCount(count)} will be deleted too. This can't be undone.`,
+      description: `Its ${itemCount(count)} will be deleted too. This can’t be undone.`,
       run: () => {
         apply({ id: sectionId, type: "removeSection" });
       },
@@ -913,7 +913,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     setConfirming({
       action: "Delete",
-      description: `${itemCount(list.length)} will be deleted. This can't be undone.`,
+      description: `${itemCount(list.length)} will be deleted. This can’t be undone.`,
       run,
       title: `Delete ${list.length} items?`,
     });
@@ -1331,6 +1331,11 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   };
 
   const onCommand = useEffectEvent((command: ShelfCommand) => {
+    // The quit prompt holds the shelf: a menu bar choice or a key main answered can't open or change anything behind it (Round 8).
+    if (status.quitPrompt !== null) {
+      return;
+    }
+
     // A menu key main answered (Windows), or a menu bar choice: an open menu is done with.
     setOpenMenu(null);
 

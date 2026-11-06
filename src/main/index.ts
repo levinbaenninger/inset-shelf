@@ -26,7 +26,6 @@ import type {
   ItemContext,
   ItemId,
   MainOp,
-  Pin,
   ShelfItem,
   WindowRef,
 } from "@shared/shelf";
@@ -61,6 +60,7 @@ import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
 import type { ClipboardContents } from "./copy-gate";
 import { copySource } from "./copy-source";
+import { createDrawingSaves } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
@@ -74,16 +74,17 @@ import {
   holdMenuBarKeys,
 } from "./menu-open";
 import { openApp, openAppAt } from "./open-app";
-import { createPageSettle } from "./page-settle";
+import { createPageSettle, followPage } from "./page-settle";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import {
   createQuitHold,
+  drawingMarks,
   NATIVE_ANSWERS,
   nativeDialog,
   withinWait,
 } from "./quit-hold";
-import { causeText, FsErrorSchema, reportSaveError } from "./save-error";
+import { causeText, FsErrorSchema } from "./save-error";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
@@ -146,9 +147,6 @@ const keyPermission = (running: boolean, trusted: boolean): Permission => {
 const logRejected = (channel: string, reason: string): void => {
   console.warn(`Rejected IPC on ${channel}: ${reason}`);
 };
-
-/** A held quit's Retry was cancelled while this drawing save was on its way: it changes nothing. */
-const stopped = (stop: AbortSignal | null): boolean => stop?.aborted === true;
 
 /** A common disk problem reads as its sentence (Round 7); anything else in its own words. */
 const errorMessage = (cause: unknown): string =>
@@ -396,6 +394,7 @@ const start = async (): Promise<void> => {
       now: () => new Date(),
     },
     initial: store.initial,
+    restore: store.restorePrevious,
     save: store.save,
     setTimer,
     status: {
@@ -481,113 +480,13 @@ const start = async (): Promise<void> => {
   // Set once the IPC servers exist; nothing can quit before then.
   let askPageToSettle: (seq: number) => void = ignore;
   let askDrawingToSave: () => void = ignore;
-  // What stops the drawing's save a held quit's Retry asked for: Cancel and Quit without saving.
-  let quitSaveStop: AbortSignal | null = null;
 
   // Quitting first asks the shelf page for an edit still being typed; it answers once it has sent it.
   const pageSettle = createPageSettle((seq) => {
     askPageToSettle(seq);
   });
 
-  shelf.webContents.on("did-start-loading", pageSettle.reset);
-  shelf.webContents.on("render-process-gone", pageSettle.reset);
-  shelf.webContents.on("destroyed", pageSettle.reset);
-  // A fresh page holds no edits yet; until it is up, a quit asks about the ones the old page may have held.
-  shelf.webContents.on("did-finish-load", () => {
-    pageSettle.setDrafts(0);
-  });
-
-  /**
-   * Quitting and the update restart wait here for the page, the drawing
-   * window and the disk. Changes they still don't hold keep the app open
-   * and the shelf asks what to do, or main does when the page can't.
-   */
-  const quitHold = createQuitHold({
-    ask: async (question) => {
-      const text = nativeDialog(question, PRODUCT_NAME);
-
-      if (isMac) {
-        app.focus({ steal: true });
-      }
-
-      const { response } = await dialog.showMessageBox({
-        buttons: [...text.buttons],
-        cancelId: 2,
-        defaultId: 0,
-        detail: text.detail,
-        message: text.message,
-        noLink: true,
-        type: "warning",
-      });
-
-      return NATIVE_ANSWERS[response] ?? "cancel";
-    },
-    flush: controller.flush,
-    pageDrafts: pageSettle.drafts,
-    prompt: (quitPrompt) => {
-      controller.setStatus({ quitPrompt });
-      // Above the drawing window, which floats over the shelf.
-      shelf.raiseForPrompt(quitPrompt !== null);
-
-      if (quitPrompt === null) {
-        return;
-      }
-
-      // From the notification area, the window in front is a part of the taskbar.
-      if (shelf.isVisible()) {
-        shelf.focus();
-      } else {
-        void showShelf({ dock: isMac });
-      }
-    },
-    saveDrawing: async (stop) => {
-      const saved = drawing.whenSaved();
-
-      quitSaveStop = stop;
-
-      askDrawingToSave();
-      await saved;
-    },
-    settlePage: pageSettle.request,
-    setTimer,
-    state: () => {
-      const { status } = controller.view();
-
-      return {
-        drawing: drawing.isDirty(),
-        readOnly: status.readOnly,
-        saveError: status.saveError,
-        unsaved: controller.unsaved(),
-      };
-    },
-  });
-
-  // The image item open in the drawing window; null for a new drawing.
-  let drawingItem: ItemId | null = null;
-
-  const newDrawing = (): void => {
-    drawingItem = null;
-    drawing.open(null);
-  };
-
-  const openImage = (id: ItemId, pinMode = false): void => {
-    const item = controller.item(id);
-
-    if (item?.kind !== "image") {
-      return;
-    }
-
-    drawingItem = id;
-    e2eLog("drawingShown", { itemId: id });
-    drawing.open({
-      heightPx: item.image.heightPx,
-      pinMode,
-      pins: item.pins,
-      pixelsPerDip: item.image.pixelsPerDip,
-      url: insetUrl.attachment(item.image.file),
-      widthPx: item.image.widthPx,
-    });
-  };
+  followPage(shelf.webContents, pageSettle);
 
   const toast = createToastWindow({
     preload: preloadPath("toast"),
@@ -656,6 +555,7 @@ const start = async (): Promise<void> => {
   const gate = createCopyGate({
     clipboard,
     copyState: controller.copyState,
+    discards: controller.discards,
     onWrite: screenshots.ignoreClipboard,
     persisted: async (rev) =>
       await withinWait(controller.persisted(rev), setTimer),
@@ -848,7 +748,7 @@ const start = async (): Promise<void> => {
         type: "addFile",
       };
     } catch {
-      return { problem: `${added.name} couldn't be read.` };
+      return { problem: `${added.name} couldn’t be read.` };
     }
   };
 
@@ -1038,7 +938,7 @@ const start = async (): Promise<void> => {
       setPickerView({
         state: {
           kind: "failed",
-          message: `The open windows couldn't be listed: ${errorMessage(error)}`,
+          message: `The open windows couldn’t be listed: ${errorMessage(error)}`,
         },
       });
     }
@@ -1117,7 +1017,7 @@ const start = async (): Promise<void> => {
       setPickerView({ linking: false });
 
       return {
-        message: `The windows couldn't be linked: ${errorMessage(error)}`,
+        message: `The windows couldn’t be linked: ${errorMessage(error)}`,
         ok: false,
       };
     }
@@ -1159,6 +1059,176 @@ const start = async (): Promise<void> => {
   const setFloatOnTop = (on: boolean): void => {
     shelf.setFloatOnTop(on);
     controller.setStatus({ floatOnTop: on });
+  };
+
+  /**
+   * Shows the shelf with the saved image; when Copy and Save could not copy,
+   * it says why there. `saving`: a new drawing copied before it reached the
+   * disk, which says so if it never does.
+   */
+  const showSaved = async (
+    copied: ActionResult | null,
+    saving: Promise<WriteResult> | null = null
+  ): Promise<void> => {
+    await showShelf();
+
+    if (copied !== null && !copied.ok) {
+      notify(copied.message, "failed");
+
+      return;
+    }
+
+    const saved = await saving;
+
+    if (saved !== null && !saved.ok) {
+      notify(`Copied, but not saved to disk. ${saved.message}`, "failed");
+    }
+  };
+
+  const drawingSaves = createDrawingSaves({
+    added: (id, via) => {
+      e2eLog("itemAdded", { itemId: id, kind: "image", via });
+      controller.focus(id);
+    },
+    clearStaging: (id) => {
+      staging.clear(id);
+    },
+    close: () => {
+      drawing.close();
+    },
+    controller,
+    copies,
+    decode: (png) => {
+      const image = nativeImage.createFromBuffer(Buffer.from(png));
+
+      if (image.isEmpty()) {
+        return null;
+      }
+
+      const { height, width } = image.getSize();
+
+      return { heightPx: height, png: image.toPNG(), widthPx: width };
+    },
+    ended: () => {
+      drawing.saveEnded();
+    },
+    readFile: async (file) => {
+      try {
+        return new Uint8Array(await readFile(file));
+      } catch {
+        return null;
+      }
+    },
+    show: (copied, saving) => {
+      void showSaved(copied, saving);
+    },
+    store,
+  });
+
+  /**
+   * Quitting and the update restart wait here for the page, the drawing
+   * window and the disk. Changes they still don't hold keep the app open
+   * and the shelf asks what to do, or main does when the page can't.
+   */
+  const quitHold = createQuitHold({
+    ask: async (question) => {
+      const text = nativeDialog(question, PRODUCT_NAME);
+
+      if (isMac) {
+        app.focus({ steal: true });
+      }
+
+      const { response } = await dialog.showMessageBox({
+        buttons: [...text.buttons],
+        cancelId: 2,
+        defaultId: 0,
+        detail: text.detail,
+        message: text.message,
+        noLink: true,
+        type: "warning",
+      });
+
+      return NATIVE_ANSWERS[response] ?? "cancel";
+    },
+    flush: controller.flush,
+    pageDrafts: pageSettle.drafts,
+    prompt: (quitPrompt) => {
+      controller.setStatus({ quitPrompt });
+      // Above the drawing window, which floats over the shelf.
+      shelf.raiseForPrompt(quitPrompt !== null);
+
+      if (quitPrompt === null) {
+        return;
+      }
+
+      // From the notification area, the window in front is a part of the taskbar.
+      if (shelf.isVisible()) {
+        shelf.focus();
+      } else {
+        void showShelf({ dock: isMac });
+      }
+    },
+    quitting: (busy) => {
+      drawing.setQuitting(busy);
+    },
+    saveDrawing: async (stop) => {
+      const saved = drawing.whenSaved();
+
+      drawingSaves.forQuit(stop);
+      askDrawingToSave();
+      await saved;
+    },
+    settlePage: pageSettle.request,
+    setTimer,
+    state: () => {
+      const { status } = controller.view();
+      const marks = drawingSaves.state();
+
+      return {
+        drawing: drawingMarks(drawing.isDirty(), marks.onShelf),
+        drawingError: marks.error,
+        readOnly: status.readOnly,
+        saveError: status.saveError,
+        unsaved: controller.unsaved(),
+      };
+    },
+  });
+
+  // Unsaved marks are never replaced by another drawing: their window comes forward instead.
+  const newDrawing = (): void => {
+    if (drawing.isDirty()) {
+      drawing.bringForward();
+
+      return;
+    }
+
+    drawingSaves.open(null);
+    drawing.open(null);
+  };
+
+  const openImage = (id: ItemId, pinMode = false): void => {
+    const item = controller.item(id);
+
+    if (item?.kind !== "image") {
+      return;
+    }
+
+    if (drawing.isDirty()) {
+      drawing.bringForward();
+
+      return;
+    }
+
+    drawingSaves.open(id);
+    e2eLog("drawingShown", { itemId: id });
+    drawing.open({
+      heightPx: item.image.heightPx,
+      pinMode,
+      pins: item.pins,
+      pixelsPerDip: item.image.pixelsPerDip,
+      url: insetUrl.attachment(item.image.file),
+      widthPx: item.image.widthPx,
+    });
   };
 
   const shelfServer = serveContract(
@@ -1301,184 +1371,20 @@ const start = async (): Promise<void> => {
     }
   );
 
-  /**
-   * Shows the shelf with the saved image; when Copy and Save could not copy,
-   * it says why there. `saving`: a new drawing copied before it reached the
-   * disk, which says so if it never does.
-   */
-  const showSaved = async (
-    copied: ActionResult | null,
-    saving: Promise<WriteResult> | null = null
-  ): Promise<void> => {
-    await showShelf();
-
-    if (copied !== null && !copied.ok) {
-      notify(copied.message, "failed");
-
-      return;
-    }
-
-    const saved = await saving;
-
-    if (saved !== null && !saved.ok) {
-      notify(`Copied, but not saved to disk. ${saved.message}`, "failed");
-    }
-  };
-
-  /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
-  const DRAWING_PIXELS_PER_DIP = 2;
-
-  /**
-   * Puts the annotated image in place of the old one, which is deleted once
-   * the shelf is saved, and keeps its pins; without new marks (`image`
-   * null) only the pins change.
-   */
-  const saveAnnotation = async (
-    id: ItemId,
-    image: NativeImage | null,
-    pins: readonly Pin[],
-    copy: boolean,
-    stop: AbortSignal | null
-  ): Promise<ActionResult> => {
-    const item = controller.item(id);
-
-    if (item?.kind !== "image") {
-      return { message: "This image is no longer on the shelf.", ok: false };
-    }
-
-    if (image !== null) {
-      const { height, width } = image.getSize();
-      const file = await store.writeAttachment(image.toPNG());
-
-      if (stopped(stop)) {
-        await store.deleteAttachment(file);
-
-        return { ok: true };
-      }
-
-      controller.apply({
-        id,
-        image: {
-          file,
-          heightPx: height,
-          pixelsPerDip: item.image.pixelsPerDip,
-          widthPx: width,
-        },
-        type: "replaceImage",
-      });
-    }
-
-    controller.apply({ id, pins: [...pins], type: "setPins" });
-    // Copies dragged out earlier show the old picture and pins.
-    staging.clear(id);
-
-    const copied = copy ? await copies.copy(id) : null;
-
-    drawing.close();
-    e2eLog("itemAdded", { itemId: id, kind: "image", via: "annotation" });
-    controller.focus(id);
-    void showSaved(copied);
-
-    return { ok: true };
-  };
-
-  // A failed write says why in the shared words (Round 7).
-  const endsDrawingSave =
-    <Input>(run: (input: Input) => Promise<ActionResult>) =>
-    async (input: Input): Promise<ActionResult> => {
-      try {
-        return await reportSaveError(async () => await run(input));
-      } finally {
-        drawing.saveEnded();
-      }
-    };
-
   const drawingServer = serveContract(
     drawingContract,
     {
       cancel: () => {
         drawing.close();
       },
-      getImage: async () => {
-        const item =
-          drawingItem === null ? undefined : controller.item(drawingItem);
-
-        const file =
-          item?.kind === "image" ? store.attachmentPath(item.image.file) : null;
-
-        return file === null ? null : new Uint8Array(await readFile(file));
-      },
+      // The image the window opened on, whatever a save during a held quit has put on the shelf since.
+      getImage: async () => await drawingSaves.image(),
       getView: () => drawing.view(),
-      setDirty: drawing.setDirty,
-      // A held quit's Retry waits for this save to end, whether it worked or not.
-      save: endsDrawingSave(async ({ copy, forQuit, pins, png }) => {
-        // After Cancel the window keeps its marks, so the page shows no problem either.
-        const stop = forQuit ? quitSaveStop : null;
-
-        if (stopped(stop)) {
-          return { ok: true };
-        }
-
-        if (png === null) {
-          return drawingItem === null
-            ? { message: "There is nothing to save.", ok: false }
-            : await saveAnnotation(drawingItem, null, pins, copy, stop);
-        }
-
-        const image = nativeImage.createFromBuffer(Buffer.from(png));
-
-        if (image.isEmpty()) {
-          return { message: "The drawing could not be read.", ok: false };
-        }
-
-        if (drawingItem !== null) {
-          return await saveAnnotation(drawingItem, image, pins, copy, stop);
-        }
-
-        const { height, width } = image.getSize();
-        const file = await store.writeAttachment(image.toPNG());
-
-        if (stopped(stop)) {
-          await store.deleteAttachment(file);
-
-          return { ok: true };
-        }
-
-        const id = controller.apply({
-          context: null,
-          image: {
-            file,
-            heightPx: height,
-            pixelsPerDip: DRAWING_PIXELS_PER_DIP,
-            widthPx: width,
-          },
-          pins,
-          source: null,
-          type: "addImage",
-          via: "drawing",
-        });
-
-        const added = id === null ? undefined : controller.item(id);
-        const { rev } = controller.snapshot();
-
-        // The drawing is the user's own picture: it is copied even when the shelf can't save it (Round 6).
-        const copied =
-          copy && added?.kind === "image"
-            ? await copies.copyDrawing(added)
-            : null;
-
-        const saving = copied?.ok === true ? controller.persisted(rev) : null;
-
-        drawing.close();
-
-        if (id !== null) {
-          e2eLog("itemAdded", { itemId: id, kind: "image", via: "drawing" });
-          controller.focus(id);
-          void showSaved(copied, saving);
-        }
-
-        return { ok: true };
-      }),
+      setDirty: (dirty) => {
+        drawing.setDirty(dirty);
+        drawingSaves.changed();
+      },
+      save: drawingSaves.save,
     },
     {
       appOrigin: appOrigin(),
@@ -1642,7 +1548,7 @@ const start = async (): Promise<void> => {
             notify("Saved to Downloads");
           } catch (error) {
             controller.setStatus({
-              problem: `The screenshot couldn't be saved: ${errorMessage(error)}`,
+              problem: `The screenshot couldn’t be saved: ${errorMessage(error)}`,
             });
           }
         })();
@@ -2075,7 +1981,7 @@ const startOrExit = async (): Promise<void> => {
     await start();
   } catch (error) {
     dialog.showErrorBox(
-      `${PRODUCT_NAME} couldn't start`,
+      `${PRODUCT_NAME} couldn’t start`,
       `${errorMessage(error)}\n\nOpen ${PRODUCT_NAME} again.`
     );
     app.exit(1);

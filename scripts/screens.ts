@@ -426,6 +426,7 @@ const drawingView = (pins: readonly FixturePin[], pinMode: boolean) => ({
     url: `/.fixtures/${LOGIN.file}`,
     widthPx: LOGIN.widthPx,
   },
+  quitting: false,
   seq: 1,
 });
 
@@ -523,6 +524,85 @@ const commandKey = async (page: Page): Promise<"Meta" | "Control"> => {
   const mac = await page.evaluate("navigator.userAgent.includes('Mac')");
 
   return mac === true ? "Meta" : "Control";
+};
+
+/** A new drawing on a blank page. */
+const BLANK_DRAWING = { image: null, quitting: false, seq: 1 } as const;
+
+/** A pen stroke across the blank page. */
+const drawStroke = async (page: Page, y: number): Promise<void> => {
+  await page.mouse.move(200, y);
+  await page.mouse.down();
+  await page.mouse.move(320, y + 40, { steps: 6 });
+  await page.mouse.up();
+};
+
+/** Retry's save has reached the fake main process, or 3 s went by; then time for a second one that shouldn't come. */
+const retrySent = async (page: Page): Promise<void> => {
+  await page
+    .waitForFunction("globalThis.__calls.length > 0", null, { timeout: 3000 })
+    .catch(() => null);
+  await page.waitForTimeout(200);
+};
+
+/** Each change the page reported to main: one per change of its marks. */
+const dirtyReports = async (page: Page): Promise<number> =>
+  Number(await page.evaluate("globalThis.__dirty.length"));
+
+/**
+ * Round 8: nothing a locked page gets changes its marks. A drag, a click
+ * with Text, the tool keys, ⌘Z, the menu bar's Undo, typing and Return in
+ * the open text field, Esc, and the window's close button. Null when
+ * nothing changed.
+ */
+const lockedPageCheck = async (page: Page): Promise<string | null> => {
+  const mod = await commandKey(page);
+  const field = page.getByRole("textbox", { exact: true, name: "Text" });
+
+  // Clicking Save commits words being typed, so the field may be gone.
+  const words = async (): Promise<string | null> =>
+    (await field.count()) > 0 ? await field.inputValue() : null;
+
+  const fieldBefore = await words();
+  const before = await dirtyReports(page);
+  const pressed = await page.locator("[aria-pressed=true]").count();
+
+  await drawStroke(page, 300);
+  await page.keyboard.press("p");
+  await page.keyboard.press("b");
+  await page.keyboard.press(`${mod}+z`);
+  await page.evaluate('globalThis.__emit("edit", "undo")');
+
+  if (fieldBefore !== null) {
+    await field.focus();
+    await page.keyboard.type(" more");
+    await page.keyboard.press("Enter");
+  }
+
+  await page.keyboard.press("Escape");
+  await page.evaluate('globalThis.__emit("confirmClose", null)');
+  await page.waitForTimeout(150);
+
+  const after = await dirtyReports(page);
+  const fieldAfter = await words();
+  const dialogs = await page.getByRole("alertdialog").count();
+
+  const disabled = await page
+    .getByRole("toolbar", { name: "Drawing tools" })
+    .getByRole("button", { disabled: false })
+    .count();
+
+  if (after !== before || fieldAfter !== fieldBefore) {
+    return `the locked page changed: ${after - before} changes reported, its text ${JSON.stringify(fieldBefore)} became ${JSON.stringify(fieldAfter)}`;
+  }
+
+  if (dialogs > 0 || disabled > 0) {
+    return `the locked page showed ${dialogs} dialogs and kept ${disabled} toolbar buttons enabled`;
+  }
+
+  return pressed === (await page.locator("[aria-pressed=true]").count())
+    ? null
+    : "a tool key picked another tool on the locked page";
 };
 
 /** How many calls the page has made so far. */
@@ -1223,7 +1303,7 @@ const pickAAndC = async (page: Page): Promise<void> => {
 /** Main's message when the shelf can't be saved (src/main/save-error.ts): the banner shows it, and every copy is refused with it. */
 const SAVE_FAILED = "The disk is full.";
 
-const NOT_COPIED = `Not copied: changes aren't saved. ${SAVE_FAILED}`;
+const NOT_COPIED = `Couldn’t save your changes, so nothing was copied. ${SAVE_FAILED}`;
 
 const DRAFT_DESCRIPTION = "Keys from the caretaker";
 const DRAFT_TEXT = "The upload test fails one run in ten on CI today";
@@ -1573,11 +1653,22 @@ const DraftsSchema = z.array(z.number());
  * Round 7, Sol's round 6 probe: words typed into a text item reach main
  * after a pause, with focus still in the field and main's echo leaving
  * them alone. Main's settle before a quit gets the words still waiting,
- * then the answer. Escape puts the saved words back.
+ * then the answer. Escape puts the saved words back. Round 8: the page
+ * reports its count as it loads, so main can stop keeping a crashed
+ * page's count.
  */
 const liveEditCheck = async (page: Page): Promise<string | null> => {
   const a = uuid(ENTRY_A);
   const typed = await calls(page);
+
+  const loaded = DraftsSchema.parse(
+    await page.evaluate("globalThis.__drafts")
+  ).at(0);
+
+  if (loaded !== 0) {
+    return `the page's first report of its unsent edits was ${String(loaded)}, not 0 as it loaded`;
+  }
+
   const field = item(page, ENTRY_A).getByRole("textbox", { name: "Edit item" });
 
   if (
@@ -1719,6 +1810,20 @@ const quitHeldCheck = async (page: Page): Promise<string | null> => {
 
   await page.keyboard.press("ArrowRight");
 
+  // Round 8: menu bar choices, and keys main answers on Windows, can't reach the shelf behind the prompt.
+  for (const choice of [
+    { field: "description", kind: "field" },
+    { action: "toggleDone", kind: "item" },
+    { action: "remove", kind: "item" },
+    { kind: "newNote" },
+    { kind: "find" },
+  ]) {
+    // oxlint-disable-next-line no-await-in-loop -- one command after another, on purpose.
+    await page.evaluate(
+      `globalThis.__emit("command", ${JSON.stringify(choice)})`
+    );
+  }
+
   // Main keeps the prompt up until it decides, so every key below meets the same prompt.
   const presses = [
     { answer: "retry", key: "Enter", name: "Retry" },
@@ -1738,7 +1843,7 @@ const quitHeldCheck = async (page: Page): Promise<string | null> => {
   const sent = await calls(page, before);
 
   if ((await page.locator("[data-details-view]").count()) > 0) {
-    return "→ in the quit prompt opened the picked item's details behind it";
+    return "→ or ⌘D in the quit prompt opened the picked item's details behind it";
   }
 
   const want = presses.map(({ answer }) => ({
@@ -2726,6 +2831,26 @@ const SCENES: readonly Scene[] = [
       await page.keyboard.press("p");
       await page.keyboard.press("2");
     },
+    // Round 8: a quit locking and unlocking the page pushes the view again; that is no change to the marks.
+    check: async (page) => {
+      const before = await dirtyReports(page);
+
+      for (const quitting of [true, false]) {
+        // oxlint-disable-next-line no-await-in-loop -- lock, then unlock.
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify({ ...drawingView(IMAGE.pins, false), quitting })})`
+        );
+        // oxlint-disable-next-line no-await-in-loop -- each push renders before the next.
+        await page.waitForTimeout(100);
+      }
+
+      const after = await dirtyReports(page);
+      const pins = await drawingPins(page).count();
+
+      return after === before && pins === 3
+        ? null
+        : `locking and unlocking the page reported ${after - before} changes and left ${pins} of 3 pins`;
+    },
     data: { view: drawingView(IMAGE.pins, false) },
     name: "drawing-pins",
     page: "drawing",
@@ -2850,8 +2975,177 @@ const SCENES: readonly Scene[] = [
         ? null
         : `saveForQuit then Save sent ${JSON.stringify(both)}, not ${JSON.stringify(expected)}`;
     },
-    data: { view: { image: null, seq: 1 } },
+    data: { view: BLANK_DRAWING },
     name: "drawing-text-draft",
+    page: "drawing",
+  },
+  {
+    // Round 8: while a quit is under way the page is locked; Retry still saves it, words being typed included.
+    act: async (page) => {
+      await drawStroke(page, 160);
+      await page.getByRole("button", { exact: true, name: "Text" }).click();
+      await page
+        .locator("canvas")
+        .first()
+        .click({ position: { x: 150, y: 100 } });
+      await page
+        .getByRole("textbox", { exact: true, name: "Text" })
+        .fill("Words still being typed");
+      await page.evaluate(
+        `globalThis.__emit("view", ${JSON.stringify({ ...BLANK_DRAWING, quitting: true })})`
+      );
+      await page
+        .getByRole("status")
+        .getByText("Locked while Inset asks about quitting")
+        .waitFor();
+    },
+    check: async (page) => {
+      const locked = await lockedPageCheck(page);
+
+      if (locked !== null) {
+        return locked;
+      }
+
+      await page.evaluate('globalThis.__emit("saveForQuit", null)');
+      await retrySent(page);
+      const sent = await calls(page);
+
+      const expected = [
+        { arg: { copy: false, forQuit: true, pins: 0 }, call: "save" },
+      ];
+
+      return isDeepStrictEqual(sent, expected)
+        ? null
+        : `Retry on the locked page sent ${JSON.stringify(sent)}, not ${JSON.stringify(expected)}`;
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-quit-locked",
+    page: "drawing",
+  },
+  {
+    // Round 8: the page is locked while its own save is on its way, and unlocks when it ends.
+    act: async (page) => {
+      await drawStroke(page, 160);
+      await page.getByRole("button", { exact: true, name: "Text" }).click();
+      await page
+        .locator("canvas")
+        .first()
+        .click({ position: { x: 150, y: 100 } });
+      await page
+        .getByRole("textbox", { exact: true, name: "Text" })
+        .fill("Saving these words");
+      await page.getByRole("button", { exact: true, name: "Save" }).click();
+    },
+    check: async (page) => {
+      const locked = await lockedPageCheck(page);
+
+      if (locked !== null) {
+        return `during the save, ${locked}`;
+      }
+
+      await page.evaluate("globalThis.__releaseSave()");
+      await page.waitForTimeout(200);
+
+      const saveEnabled = await page
+        .getByRole("button", { exact: true, name: "Save" })
+        .isEnabled();
+
+      return saveEnabled ? null : "Save stayed disabled once the save ended";
+    },
+    data: { holdSave: true, view: BLANK_DRAWING },
+    name: "drawing-save-locked",
+    page: "drawing",
+  },
+  {
+    // Red-team round 8: a stroke still held down counts before a quit decides, and a quit's lock stops it changing.
+    act: async (page) => {
+      await page.mouse.move(200, 160);
+      await page.mouse.down();
+      await page.mouse.move(320, 200, { steps: 6 });
+      await page.waitForTimeout(100);
+      await page.evaluate(
+        "globalThis.__held = globalThis.__dirty.at(-1) === true"
+      );
+      await page.evaluate(
+        `globalThis.__emit("view", ${JSON.stringify({ ...BLANK_DRAWING, quitting: true })})`
+      );
+      await page
+        .getByRole("status")
+        .getByText("Locked while Inset asks about quitting")
+        .waitFor();
+      await page.waitForTimeout(100);
+    },
+    check: async (page) => {
+      const held = await page.evaluate("globalThis.__held");
+      const canvas = "document.querySelector('canvas').toDataURL()";
+
+      const before = {
+        picture: await page.evaluate(canvas),
+        reports: await dirtyReports(page),
+      };
+
+      await page.mouse.move(440, 300, { steps: 6 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+
+      const after = {
+        picture: await page.evaluate(canvas),
+        reports: await dirtyReports(page),
+      };
+
+      const problems = [
+        held === true
+          ? null
+          : "the page reported its stroke still held down as no change",
+        isDeepStrictEqual(after, before)
+          ? null
+          : `moving and letting go on the locked page changed ${after.picture === before.picture ? "nothing drawn" : "the drawing"} and reported ${after.reports - before.reports} changes`,
+      ].filter((problem) => problem !== null);
+
+      if (problems.length > 0) {
+        return problems.join("; ");
+      }
+
+      await page.evaluate('globalThis.__emit("saveForQuit", null)');
+      await retrySent(page);
+      const sent = await calls(page);
+
+      const expected = [
+        { arg: { copy: false, forQuit: true, pins: 0 }, call: "save" },
+      ];
+
+      return isDeepStrictEqual(sent, expected)
+        ? null
+        : `Retry sent ${JSON.stringify(sent)}, not ${JSON.stringify(expected)}`;
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-quit-mid-stroke",
+    page: "drawing",
+  },
+  {
+    // Red-team round 8: the menu bar's Undo and the keys change nothing behind the Discard confirm.
+    act: async (page) => {
+      await drawStroke(page, 160);
+      await page.evaluate('globalThis.__emit("confirmClose", null)');
+      await page.getByRole("alertdialog").waitFor();
+    },
+    check: async (page) => {
+      const mod = await commandKey(page);
+      const before = await dirtyReports(page);
+
+      await page.evaluate('globalThis.__emit("edit", "undo")');
+      await page.keyboard.press(`${mod}+z`);
+      await page.waitForTimeout(150);
+
+      const after = await dirtyReports(page);
+      const open = await page.getByRole("alertdialog").count();
+
+      return after === before && open === 1
+        ? null
+        : `behind the Discard confirm the page reported ${after - before} changes, and ${open} confirms are open`;
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-confirm-locked",
     page: "drawing",
   },
 ];

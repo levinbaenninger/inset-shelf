@@ -12,7 +12,7 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 
-import type { WriteResult } from "./shelf-store";
+import type { SaveResult, WriteResult } from "./shelf-store";
 
 /** Typing in a note saves after this pause; everything else saves at once. */
 export const EDIT_SAVE_DELAY_MS = 400;
@@ -22,7 +22,10 @@ export const SAVE_FAILED = "The shelf could not be saved to disk.";
 export interface ControllerDeps {
   readonly initial: ShelfDoc;
   readonly env: OpEnv;
-  readonly save: (doc: ShelfDoc) => Promise<WriteResult>;
+  /** Writes the shelf; `current` false just before the file is replaced drops the write (Round 8). */
+  readonly save: (doc: ShelfDoc, current: () => boolean) => Promise<SaveResult>;
+  /** Renames the shelf from before the last write back into place; false when it couldn't. */
+  readonly restore: () => Promise<boolean>;
   readonly deleteAttachment: (file: string) => Promise<void>;
   readonly status: ShelfStatus;
   readonly setTimer: (run: () => void, ms: number) => () => void;
@@ -67,6 +70,8 @@ export interface ShelfController {
   readonly unsaved: () => number;
   /** Where these items of `doc` stand against the disk, for a copy of them. */
   readonly copyState: (ids: readonly ItemId[], doc: ShelfDoc) => CopyState;
+  /** How often Discard changes put these items back so far: a copy waiting for their save refuses once it changes. */
+  readonly discards: (ids: readonly ItemId[]) => number;
   /**
    * Discard changes: the item goes back to what the disk holds, and only
    * that item. False for an item the disk has never held, or one that
@@ -146,7 +151,10 @@ export const createShelfController = (
   let failed: ReadonlySet<ItemId> = new Set();
   let discarded: ShelfView["discarded"] = null;
 
-  // Items Discard changes put back, with the version that did it. Until a write that new lands, a write already on its way may leave the discarded words on the disk, and this stays the item's saved version.
+  // How many times Discard changes put each item back. A write holding an older change of it is stale: it is dropped before it replaces the file, or the file from before it is renamed back (Round 8).
+  let epochs: ReadonlyMap<ItemId, number> = new Map();
+
+  // Items Discard changes put back, with the version that did it. Only when renaming the file back fails does the disk keep the discarded words; until a write that new lands, this stays the item's saved version.
   let kept: ReadonlyMap<
     ItemId,
     { readonly item: ShelfItem; readonly version: number }
@@ -171,23 +179,80 @@ export const createShelfController = (
     emit();
   };
 
-  const persist = async (): Promise<void> => {
+  const epochOf = (id: ItemId): number => epochs.get(id) ?? 0;
+
+  /** The shelf is as the disk holds it: nothing to write, nothing left failed. */
+  const caughtUp = (): void => {
+    saved = version;
+    failed = new Set();
+
+    if (status.saveError !== null && !status.readOnly) {
+      status = { ...status, saveError: null };
+    }
+  };
+
+  /** A write Discard made stale never counts: the disk holds what it held before it. True when the rest is still to be written. */
+  const stale = (deletable: readonly ShelfItem[]): boolean => {
+    toDelete = [...deletable, ...toDelete];
+
+    if (!sameShelf(doc, onDisk)) {
+      return true;
+    }
+
+    caughtUp();
+    emit();
+
+    return false;
+  };
+
+  /** Writes the shelf as it is now; true when it must be written again (Round 8). */
+  const persist = async (): Promise<boolean> => {
     queued = false;
 
     if (saved === version) {
-      return;
+      return false;
+    }
+
+    // A Discard put the last change back: the disk already holds this shelf.
+    if (sameShelf(doc, onDisk)) {
+      caughtUp();
+      emit();
+
+      return false;
     }
 
     const snapshot = doc;
     const snapshotVersion = version;
     const deletable = toDelete;
 
+    // The items this write changes, each with its Discard count now.
+    const changes = differences(snapshot, onDisk).changed.map(
+      (item) => [item.id, epochOf(item.id)] as const
+    );
+
+    const current = (): boolean =>
+      changes.every(([id, epoch]) => epochOf(id) === epoch);
+
     toDelete = [];
     writing = snapshotVersion;
 
-    const result = await deps.save(snapshot);
+    const result = await deps.save(snapshot, current);
+
+    // Dropped before it replaced the file, or failed once Discard had made it stale: the disk holds what it held before it, and its failure is no longer anyone's.
+    if (!result.ok && ("dropped" in result || !current())) {
+      writing = null;
+
+      return stale(deletable);
+    }
+
+    // Discarded while the file was being replaced: the file from before it goes back.
+    const restored = result.ok && !current() && (await deps.restore());
 
     writing = null;
+
+    if (restored) {
+      return stale(deletable);
+    }
 
     if (!result.ok) {
       toDelete = [...deletable, ...toDelete];
@@ -197,7 +262,7 @@ export const createShelfController = (
       ]);
       setStatus({ saveError: result.message });
 
-      return;
+      return false;
     }
 
     saved = Math.max(saved, snapshotVersion);
@@ -233,6 +298,9 @@ export const createShelfController = (
         .filter((file) => !used.has(file))
         .map(deps.deleteAttachment)
     );
+
+    // The file couldn't be renamed back, so the disk holds discarded words: a write of the shelf as shown replaces them.
+    return !current();
   };
 
   const saveNow = (): void => {
@@ -243,7 +311,10 @@ export const createShelfController = (
 
     inFlight = (async () => {
       await previous;
-      await persist();
+
+      if (await persist()) {
+        saveNow();
+      }
     })();
   };
 
@@ -272,9 +343,7 @@ export const createShelfController = (
 
     cancelTimer?.();
     cancelTimer = null;
-    saved = version;
-    failed = new Set();
-    status = { ...status, saveError: null };
+    caughtUp();
 
     return true;
   };
@@ -361,7 +430,17 @@ export const createShelfController = (
       saveNow();
     }
 
-    await inFlight;
+    // A write a Discard made stale is followed by one of the rest: that one counts.
+    for (;;) {
+      const seen = inFlight;
+
+      // oxlint-disable-next-line no-await-in-loop -- each write the last one queued.
+      await seen;
+
+      if (saved >= rev || seen === inFlight) {
+        break;
+      }
+    }
 
     return saved >= rev
       ? { ok: true }
@@ -479,6 +558,8 @@ export const createShelfController = (
         items: doc.items.map((item) => (item.id === id ? restored : item)),
       };
       version += 1;
+      // Synchronously, so a write of the discarded words still on its way never counts (Round 8).
+      epochs = new Map([...epochs, [id, epochOf(id) + 1]]);
       kept = new Map([...kept, [id, { item: restored, version }]]);
       failed = new Set([...failed].filter((other) => other !== id));
       discarded = { id, seq: (discarded?.seq ?? 0) + 1 };
@@ -488,15 +569,13 @@ export const createShelfController = (
         (removed) => removed.itemId !== id
       );
 
-      if (!settleIfClean()) {
-        // A write on its way may still put the discarded words on the disk; this one puts them back.
-        saveNow();
-      }
-
+      // Nothing is written to undo a save: a write on its way is dropped, or the file from before it renamed back.
+      settleIfClean();
       emit();
 
       return true;
     },
+    discards: (ids) => ids.reduce((sum, id) => sum + epochOf(id), 0),
     flush: async () => await persisted(version),
     focus: (id, edit = false) => {
       focusSeq += 1;

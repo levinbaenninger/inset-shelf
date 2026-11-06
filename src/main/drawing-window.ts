@@ -24,6 +24,10 @@ export interface DrawingWindow {
    */
   readonly open: (image: DrawingImage | null) => void;
   readonly close: () => void;
+  /** Brings the open window to the front, marks and all. */
+  readonly bringForward: () => void;
+  /** A quit is under way: the page locks its marks until it ends. */
+  readonly setQuitting: (quitting: boolean) => void;
   /** Closes like the window's close button, asking first when there are marks. */
   readonly requestClose: () => void;
   readonly setDirty: (dirty: boolean) => void;
@@ -54,7 +58,7 @@ export const createDrawingWindow = (options: {
   let closable = false;
   let dirty = false;
   const settled = new EventTarget();
-  let current: DrawingView = { image: null, seq: 0 };
+  let current: DrawingView = { image: null, quitting: false, seq: 0 };
   let onView: (view: DrawingView) => void = ignore;
   let onCloseRequest: () => void = ignore;
 
@@ -109,10 +113,20 @@ export const createDrawingWindow = (options: {
     }
   });
 
+  const bringForward = (): void => {
+    if (isMac) {
+      app.show();
+    }
+
+    window.show();
+    window.focus();
+  };
+
   return {
     allowClose: () => {
       closable = true;
     },
+    bringForward,
     close: hide,
     isDirty: () => dirty,
     isFocused: () => window.isVisible() && window.isFocused(),
@@ -125,6 +139,12 @@ export const createDrawingWindow = (options: {
         dirty = true;
       } else {
         markClean();
+      }
+    },
+    setQuitting: (quitting) => {
+      if (current.quitting !== quitting) {
+        current = { ...current, quitting };
+        onView(current);
       }
     },
     saveEnded: () => {
@@ -163,7 +183,7 @@ export const createDrawingWindow = (options: {
             );
 
       markClean();
-      current = { image, seq: current.seq + 1 };
+      current = { ...current, image, seq: current.seq + 1 };
       onView(current);
       window.setTitle(image === null ? "New Drawing" : "Image");
       window.setContentBounds({
@@ -173,12 +193,7 @@ export const createDrawingWindow = (options: {
         y: Math.round(workArea.y + (workArea.height - content.height) / 3),
       });
 
-      if (isMac) {
-        app.show();
-      }
-
-      window.show();
-      window.focus();
+      bringForward();
     },
     view: () => current,
     webContents: window.webContents,

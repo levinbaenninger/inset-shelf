@@ -11,7 +11,7 @@ import { createCopyGate } from "./copy-gate";
 import type { ClipboardContents } from "./copy-gate";
 import { createShelfController } from "./shelf-controller";
 import { openShelfStore } from "./shelf-store";
-import type { StoreFs, WriteResult } from "./shelf-store";
+import type { SaveResult, StoreFs, WriteResult } from "./shelf-store";
 
 const uuid = (n: number) =>
   `5b2e8c1a-7d3f-4c62-8e1b-2a9f0c4d6e${String(n).padStart(2, "0")}`;
@@ -81,7 +81,7 @@ const formats = async (
 
 /** How a copy of items is refused while what it would copy isn't on the disk. */
 const NOT_SAVED = {
-  message: "Not copied: changes aren't saved. disk full",
+  message: "Couldn’t save your changes, so nothing was copied. disk full",
   ok: false,
   retrySave: true,
 };
@@ -112,7 +112,7 @@ interface Hold {
  */
 const setup = async (
   store: {
-    readonly save?: (doc: ShelfDoc) => Promise<WriteResult>;
+    readonly save?: (doc: ShelfDoc) => Promise<SaveResult>;
     readonly readOnly?: boolean;
   } = {}
 ) => {
@@ -158,6 +158,7 @@ const setup = async (
       now: () => new Date("2026-11-05T10:00:00.000Z"),
     },
     initial: emptyShelf(SectionIdSchema.parse(uuid(1))),
+    restore: async () => await Promise.resolve(false),
     save: store.save ?? save,
     setTimer: (run) => {
       timers.push(run);
@@ -189,6 +190,7 @@ const setup = async (
       },
     },
     copyState: controller.copyState,
+    discards: controller.discards,
     onWrite: () => {},
     persisted: controller.persisted,
     readOnly: store.readOnly ?? false,
@@ -472,6 +474,27 @@ describe(createCopyCommands, () => {
     });
   });
 
+  it("copies nothing when its changes are discarded while it waits for their save", async () => {
+    const { commands, controller, holdNextSave, items, written } =
+      await setup();
+
+    const held = holdNextSave();
+
+    controller.apply({ id: items.text, text: "DISCARDED", type: "editText" });
+
+    const copying = commands.copy(items.text);
+
+    await held.started;
+    controller.discard(items.text);
+    held.release({ ok: true });
+
+    await expect(copying).resolves.toStrictEqual({
+      message: "Its changes were discarded, so nothing was copied.",
+      ok: false,
+    });
+    expect(written).toStrictEqual([]);
+  });
+
   it("waits for a save already on its way instead of writing the edit typed after it", async () => {
     const {
       commands,
@@ -641,7 +664,13 @@ describe(createCopyCommands, () => {
       rename: async () => {
         await Promise.resolve();
       },
+      renameSync: () => {},
       writeAtomic: async () => {
+        await Promise.resolve();
+
+        throw new Error("The shelf file must stay as it was.");
+      },
+      writeTemp: async () => {
         await Promise.resolve();
 
         throw new Error("The shelf file must stay as it was.");
@@ -735,6 +764,7 @@ describe(createCopyGate, () => {
         },
       },
       copyState: () => ({ kind: "pending" }),
+      discards: () => 0,
       onWrite: () => {},
       persisted: async () => {
         waited += 1;

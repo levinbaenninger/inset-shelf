@@ -39,6 +39,8 @@ export interface CopyGateDeps<Item> {
   readonly persisted: (rev: number) => Promise<WriteResult>;
   /** Whether the disk holds these items of the snapshot, will soon, or failed to. */
   readonly copyState: (ids: readonly ItemId[], doc: ShelfDoc) => CopyState;
+  /** How often Discard changes put these items back; it changes when they are discarded. */
+  readonly discards: (ids: readonly ItemId[]) => number;
   /**
    * The shelf file could not be read or set aside at launch, so this session
    * saves nothing (the banner says so). Copies don't wait for a save that
@@ -86,10 +88,13 @@ const errorMessage = (cause: unknown): string =>
 
 /** A copy refused because what it would copy isn't on the disk. */
 export const notSaved = (cause: string): ActionResult => ({
-  message: `Not copied: changes aren't saved. ${cause}`,
+  message: `Couldn’t save your changes, so nothing was copied. ${cause}`,
   ok: false,
   retrySave: true,
 });
+
+/** A copy refused because the changes it waited for were discarded meanwhile: they are never saved. */
+export const DISCARDED = "Its changes were discarded, so nothing was copied.";
 
 export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
   const write = async (data: ClipboardData): Promise<ActionResult> => {
@@ -99,7 +104,7 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
 
       return { ok: true };
     } catch (error) {
-      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
+      return { message: `Couldn’t copy: ${errorMessage(error)}`, ok: false };
     }
   };
 
@@ -116,6 +121,7 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
       // Taken before anything waits: a later edit makes a new document and leaves this one as it is.
       const { doc, rev } = deps.snapshot();
       const state = deps.readOnly ? null : deps.copyState(ids, doc);
+      const discards = deps.discards(ids);
 
       if (state?.kind === "failed") {
         return notSaved(state.message);
@@ -126,7 +132,7 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
       try {
         built = await payload(doc);
       } catch (error) {
-        return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
+        return { message: `Couldn’t copy: ${errorMessage(error)}`, ok: false };
       }
 
       if ("problem" in built) {
@@ -138,6 +144,11 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
 
         if (!saved.ok) {
           return notSaved(saved.message);
+        }
+
+        // Discarded while it waited: the snapshot holds words that are never saved (Round 8).
+        if (deps.discards(ids) !== discards) {
+          return { message: DISCARDED, ok: false };
         }
       }
 

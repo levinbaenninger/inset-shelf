@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { renameSync } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -21,15 +22,31 @@ import type { SectionId, ShelfDoc } from "@shared/shelf";
 import { FsErrorSchema, saveErrorText } from "./save-error";
 
 const DOC_FILE = "shelf.json";
+
+/** The shelf as it was before the last write: Discard changes renames it back (Round 8). */
+const PREV_FILE = `${DOC_FILE}.prev`;
 const ATTACHMENTS = "attachments";
 
 export type WriteResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly message: string };
 
+/** A write a Discard made stale before it took the file's place: the file is as it was (Round 8). */
+export interface DroppedWrite {
+  readonly ok: false;
+  readonly dropped: true;
+}
+
+export type SaveResult = WriteResult | DroppedWrite;
+
 export interface StoreFs {
   readonly mkdir: (dir: string) => Promise<void>;
   readonly readFile: (file: string) => Promise<string>;
+  /** Writes to a new temporary sibling of `file` and syncs it; resolves with its path. */
+  readonly writeTemp: (
+    file: string,
+    data: string | Uint8Array
+  ) => Promise<string>;
   /** Writes to a temporary sibling, syncs it, and renames it over the target. */
   readonly writeAtomic: (
     file: string,
@@ -38,14 +55,16 @@ export interface StoreFs {
   /** Copies to a temporary sibling and renames it into place. */
   readonly copyAtomic: (from: string, to: string) => Promise<void>;
   readonly rename: (from: string, to: string) => Promise<void>;
+  /** Renames before anything else runs: nothing can come between a save's last check and its new file taking the shelf's place (Round 8). */
+  readonly renameSync: (from: string, to: string) => void;
   readonly list: (dir: string) => Promise<readonly string[]>;
   readonly remove: (file: string) => Promise<void>;
 }
 
-const writeAtomic = async (
+const writeTemp = async (
   file: string,
   data: string | Uint8Array
-): Promise<void> => {
+): Promise<string> => {
   const temp = `${file}.${randomUUID()}.tmp`;
 
   try {
@@ -58,6 +77,20 @@ const writeAtomic = async (
       await handle.close();
     }
 
+    return temp;
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+};
+
+const writeAtomic = async (
+  file: string,
+  data: string | Uint8Array
+): Promise<void> => {
+  const temp = await writeTemp(file, data);
+
+  try {
     await rename(temp, file);
   } catch (error) {
     await rm(temp, { force: true });
@@ -88,7 +121,9 @@ export const nodeStoreFs: StoreFs = {
     await rm(file, { force: true });
   },
   rename,
+  renameSync,
   writeAtomic,
+  writeTemp,
 };
 
 /** Fails the next document write once; set by INSET_FAIL_NEXT_WRITE for the desktop test. */
@@ -97,7 +132,7 @@ export const failNextWrite = (fs: StoreFs): StoreFs => {
 
   return {
     ...fs,
-    writeAtomic: async (file, data) => {
+    writeTemp: async (file, data) => {
       if (armed && file.endsWith(DOC_FILE)) {
         armed = false;
         throw Object.assign(new Error("Simulated write failure."), {
@@ -105,7 +140,7 @@ export const failNextWrite = (fs: StoreFs): StoreFs => {
         });
       }
 
-      await fs.writeAtomic(file, data);
+      return await fs.writeTemp(file, data);
     },
   };
 };
@@ -116,8 +151,21 @@ export interface ShelfStore {
   readonly recovered: string | null;
   /** The shelf file could not be read or set aside, so nothing is saved this session and it stays as it was. */
   readonly readOnly: boolean;
-  /** Coalesces: while one write runs, only the newest pending document is written next. */
-  readonly save: (doc: ShelfDoc) => Promise<WriteResult>;
+  /**
+   * Writes the shelf: a temporary file first, then the current file moves
+   * aside as the previous version and the new one takes its place. `current`
+   * is asked just before that: false drops the write (Round 8). One write at
+   * a time; the controller waits for each.
+   */
+  readonly save: (
+    doc: ShelfDoc,
+    current?: () => boolean
+  ) => Promise<SaveResult>;
+  /**
+   * Puts the shelf from before the last write back, by renaming, so a full
+   * disk can't stop it; false when it couldn't (Round 8).
+   */
+  readonly restorePrevious: () => Promise<boolean>;
   readonly writeAttachment: (png: Uint8Array) => Promise<string>;
   /** Copies a file the user added; returns its stored name with the given extension. */
   readonly copyAttachment: (from: string, extension: string) => Promise<string>;
@@ -144,57 +192,75 @@ const load = async (
   newSectionId: () => SectionId,
   now: () => Date
 ): Promise<Loaded> => {
-  const file = path.join(dir, DOC_FILE);
   const empty = emptyShelf(newSectionId());
-  let raw: string;
 
-  try {
-    raw = await fs.readFile(file);
-  } catch (error) {
-    const code = FsErrorSchema.safeParse(error).data?.code ?? "unknown";
+  // A write stopped between its two renames leaves only the previous version.
+  for (const name of [DOC_FILE, PREV_FILE]) {
+    const file = path.join(dir, name);
+    let raw: string;
 
-    return code === "ENOENT"
-      ? { doc: empty, kind: "read" }
-      : {
-          doc: empty,
-          kind: "blocked",
-          note: `The saved shelf could not be opened (${code}). ${BLOCKED_SAVE}`,
-        };
-  }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- the previous version only when the shelf is missing.
+      raw = await fs.readFile(file);
+    } catch (error) {
+      const code = FsErrorSchema.safeParse(error).data?.code ?? "unknown";
 
-  const doc = parseShelfDocument(raw);
+      if (code === "ENOENT") {
+        continue;
+      }
 
-  if (doc !== null) {
-    return { doc, kind: "read" };
-  }
+      return {
+        doc: empty,
+        kind: "blocked",
+        note: `The saved shelf could not be opened (${code}). ${BLOCKED_SAVE}`,
+      };
+    }
 
-  const aside = `shelf.unreadable-${now().toISOString().replaceAll(":", "-")}.json`;
+    const doc = parseShelfDocument(raw);
 
-  try {
-    await fs.rename(file, path.join(dir, aside));
-  } catch {
+    if (doc !== null) {
+      return { doc, kind: "read" };
+    }
+
+    const aside = `shelf.unreadable-${now().toISOString().replaceAll(":", "-")}.json`;
+
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- this file is the one being read.
+      await fs.rename(file, path.join(dir, aside));
+    } catch {
+      return {
+        doc: empty,
+        kind: "blocked",
+        note: `The saved shelf could not be read or set aside. ${BLOCKED_SAVE}`,
+      };
+    }
+
     return {
       doc: empty,
-      kind: "blocked",
-      note: `The saved shelf could not be read or set aside. ${BLOCKED_SAVE}`,
+      kind: "setAside",
+      note: `The saved shelf could not be read, so a new one was started. The old file was kept as ${aside}, with its pictures and files.`,
     };
   }
 
-  return {
-    doc: empty,
-    kind: "setAside",
-    note: `The saved shelf could not be read, so a new one was started. The old file was kept as ${aside}, with its pictures and files.`,
-  };
+  return { doc: empty, kind: "read" };
 };
 
 const SET_ASIDE = /^shelf\.unreadable-.*\.json$/u;
+
+const ignore = (): void => undefined;
+
+const failed = (code: string | null): WriteResult => ({
+  message: saveErrorText(code),
+  ok: false,
+});
 
 const ATTACHMENT_NAMES =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,8}/gu;
 
 /**
- * The attachments that shelf files set aside as unreadable still name, so
- * they are never tidied away; null when one of those files can't be read.
+ * The attachments that shelf files set aside as unreadable, and the
+ * previous version, still name, so they are never tidied away; null when
+ * one of those files can't be read.
  */
 const namedBySetAside = async (
   fs: StoreFs,
@@ -202,7 +268,10 @@ const namedBySetAside = async (
 ): Promise<readonly string[] | null> => {
   try {
     const names = await fs.list(dir);
-    const files = names.filter((name) => SET_ASIDE.test(name));
+
+    const files = names.filter(
+      (name) => SET_ASIDE.test(name) || name === PREV_FILE
+    );
 
     const texts = await Promise.all(
       files.map(async (name) => await fs.readFile(path.join(dir, name)))
@@ -237,8 +306,9 @@ const collectGarbage = async (
         (name) =>
           AttachmentFileSchema.safeParse(name).success && !used.has(name)
       )
+      // One that can't be deleted now is tried again on the next launch.
       .map(async (name) => {
-        await fs.remove(path.join(attachments, name));
+        await fs.remove(path.join(attachments, name)).catch(ignore);
       })
   );
 };
@@ -264,7 +334,29 @@ export const openShelfStore = async (
     await collectGarbage(fs, dir, attachments, loaded.doc);
   }
 
-  const write = async (next: ShelfDoc): Promise<WriteResult> => {
+  const docFile = path.join(dir, DOC_FILE);
+  const prevFile = path.join(dir, PREV_FILE);
+
+  /** A temporary file left behind harms nothing, so failing to delete one never changes how a save ended. */
+  const removeTemp = async (temp: string): Promise<void> => {
+    await fs.remove(temp).catch(ignore);
+  };
+
+  /** Renames the shelf from before the last write back into place. */
+  const restore = async (): Promise<boolean> => {
+    try {
+      await fs.rename(prevFile, docFile);
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const save = async (
+    next: ShelfDoc,
+    current: () => boolean = () => true
+  ): Promise<SaveResult> => {
     if (loaded.kind === "blocked") {
       return { message: BLOCKED_SAVE, ok: false };
     }
@@ -275,51 +367,56 @@ export const openShelfStore = async (
     if (parseShelfDocument(text) === null) {
       return {
         message:
-          "The shelf could not be saved: an entry holds something the saved file can't keep. The last saved copy is unchanged.",
+          "The shelf could not be saved: an entry holds something the saved file can’t keep. The last saved copy is unchanged.",
         ok: false,
       };
+    }
+
+    let temp: string;
+
+    try {
+      temp = await fs.writeTemp(docFile, text);
+    } catch (error) {
+      return failed(FsErrorSchema.safeParse(error).data?.code ?? null);
+    }
+
+    if (!current()) {
+      await removeTemp(temp);
+
+      return { dropped: true, ok: false };
+    }
+
+    // From the check to the new file in the shelf's place nothing waits, so a Discard can't land between them and leave its words on disk.
+    let movedAside = true;
+
+    try {
+      fs.renameSync(docFile, prevFile);
+    } catch (error) {
+      const code = FsErrorSchema.safeParse(error).data?.code ?? null;
+
+      // No shelf yet: there is nothing to keep.
+      if (code !== "ENOENT") {
+        await removeTemp(temp);
+
+        return failed(code);
+      }
+
+      movedAside = false;
     }
 
     try {
-      await fs.writeAtomic(path.join(dir, DOC_FILE), text);
-
-      return { ok: true };
+      fs.renameSync(temp, docFile);
     } catch (error) {
-      return {
-        message: saveErrorText(
-          FsErrorSchema.safeParse(error).data?.code ?? null
-        ),
-        ok: false,
-      };
-    }
-  };
-
-  // Each save waits for the one before; whichever runs first writes the newest document, the rest share its result.
-  let queue: Promise<WriteResult> = Promise.resolve({ ok: true });
-  let newest: ShelfDoc | null = null;
-  let lastResult: WriteResult = { ok: true };
-
-  const save = async (next: ShelfDoc): Promise<WriteResult> => {
-    newest = next;
-
-    const previous = queue;
-
-    queue = (async () => {
-      await previous;
-
-      if (newest === null) {
-        return lastResult;
+      if (movedAside) {
+        await restore();
       }
 
-      const latest = newest;
+      await removeTemp(temp);
 
-      newest = null;
-      lastResult = await write(latest);
+      return failed(FsErrorSchema.safeParse(error).data?.code ?? null);
+    }
 
-      return lastResult;
-    })();
-
-    return await queue;
+    return { ok: true };
   };
 
   return {
@@ -328,13 +425,15 @@ export const openShelfStore = async (
         ? path.join(attachments, file)
         : null,
     deleteAttachment: async (file) => {
+      // One that can't be deleted now goes when the shelf next opens.
       if (AttachmentFileSchema.safeParse(file).success) {
-        await fs.remove(path.join(attachments, file));
+        await fs.remove(path.join(attachments, file)).catch(ignore);
       }
     },
     initial: loaded.doc,
     readOnly: loaded.kind === "blocked",
     recovered: loaded.kind === "read" ? null : loaded.note,
+    restorePrevious: restore,
     save,
     copyAttachment: async (from, extension) => {
       const file = `${randomUUID()}.${extension}`;

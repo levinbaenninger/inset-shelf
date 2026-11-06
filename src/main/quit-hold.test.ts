@@ -6,10 +6,11 @@ import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
 import type { ItemId, ShelfDoc } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
-import { createPageSettle } from "./page-settle";
+import { createPageSettle, followPage } from "./page-settle";
 import {
   createQuitHold,
   decideQuit,
+  nativeDialog,
   QUIT_WAIT_MS,
   SAVE_TOO_SLOW,
   withinWait,
@@ -24,6 +25,14 @@ interface FakePage {
   drafts: number;
   pending: { id: ItemId; text: string } | null;
   settles: number;
+}
+
+/** The drawing window's marks, why its last save failed, and whether its save reaches the shelf. */
+interface FakeDrawing {
+  dirty: boolean;
+  error: string | null;
+  saves: number;
+  saveWorks: boolean;
 }
 
 const uuid = (n: number) =>
@@ -71,6 +80,7 @@ const setup = () => {
       now: () => new Date("2026-11-06T10:00:00.000Z"),
     },
     initial: emptyShelf(SectionIdSchema.parse(uuid(1))),
+    restore: async () => await Promise.resolve(false),
     save: async (doc) => {
       saves += 1;
 
@@ -103,8 +113,15 @@ const setup = () => {
     settles: 0,
   };
 
-  /** The drawing window's marks, and whether its save reaches the shelf. */
-  const drawing = { dirty: false, saves: 0, saveWorks: true };
+  const drawing: FakeDrawing = {
+    dirty: false,
+    error: null,
+    saves: 0,
+    saveWorks: true,
+  };
+
+  // Each time the quit locked (true) or unlocked the drawing's marks.
+  const quitting: boolean[] = [];
   // What each of the drawing's saves was handed to stop it, and a save the test holds back.
   const drawingStops: AbortSignal[] = [];
   let drawingHeld: Promise<unknown> = Promise.resolve();
@@ -157,9 +174,15 @@ const setup = () => {
         asked.push(prompt);
       }
     },
+    quitting: (busy) => {
+      if (quitting.at(-1) !== busy) {
+        quitting.push(busy);
+      }
+    },
     setTimer,
     state: () => ({
-      drawing: drawing.dirty,
+      drawing: drawing.dirty ? "unsaved" : "none",
+      drawingError: drawing.error,
       readOnly: false,
       saveError: controller.view().status.saveError,
       unsaved: controller.unsaved(),
@@ -235,6 +258,7 @@ const setup = () => {
     holdNextSave,
     page,
     questions,
+    quitting,
     quit: () => {
       hold.request(() => {
         finished.push("quit");
@@ -252,7 +276,8 @@ describe(decideQuit, () => {
       expected: { kind: "quit" },
       name: "quits once the disk holds every change",
       state: {
-        drawing: false,
+        drawing: "none",
+        drawingError: null,
         readOnly: false,
         saveError: null,
         timedOut: false,
@@ -263,7 +288,8 @@ describe(decideQuit, () => {
       expected: { count: 2, kind: "hold", message: "disk full" },
       name: "holds with the save's error",
       state: {
-        drawing: false,
+        drawing: "none",
+        drawingError: null,
         readOnly: false,
         saveError: "disk full",
         timedOut: false,
@@ -274,11 +300,12 @@ describe(decideQuit, () => {
       expected: {
         count: 1,
         kind: "hold",
-        message: "Saving didn't finish in time.",
+        message: "Saving didn’t finish in time.",
       },
       name: "holds when the save is still running at the end of the wait",
       state: {
-        drawing: false,
+        drawing: "none",
+        drawingError: null,
         readOnly: false,
         saveError: "disk full",
         timedOut: true,
@@ -289,7 +316,8 @@ describe(decideQuit, () => {
       expected: { kind: "quit" },
       name: "quits in a session that saves nothing",
       state: {
-        drawing: false,
+        drawing: "none",
+        drawingError: null,
         readOnly: true,
         saveError: "Nothing is saved this session.",
         timedOut: false,
@@ -300,11 +328,12 @@ describe(decideQuit, () => {
       expected: {
         count: 1,
         kind: "hold",
-        message: "Your drawing isn't on the shelf yet.",
+        message: "Your drawing isn’t on the shelf yet.",
       },
       name: "holds for a drawing with unsaved marks, on a shelf that is saved",
       state: {
-        drawing: true,
+        drawing: "unsaved",
+        drawingError: null,
         readOnly: false,
         saveError: null,
         timedOut: false,
@@ -315,21 +344,171 @@ describe(decideQuit, () => {
       expected: {
         count: 3,
         kind: "hold",
-        message: "disk full Your drawing isn't on the shelf yet.",
+        message: "disk full Your drawing isn’t on the shelf yet.",
       },
       name: "counts the drawing as one more change",
       state: {
-        drawing: true,
+        drawing: "unsaved",
+        drawingError: null,
         readOnly: false,
         saveError: "disk full",
         timedOut: false,
         unsaved: 2,
       },
     },
-  ])("$name", ({ expected, state }) => {
+    {
+      expected: {
+        count: 1,
+        kind: "hold",
+        message: "The disk is full. Your drawing isn’t on the shelf yet.",
+      },
+      name: "says why the drawing's own save failed",
+      state: {
+        drawing: "unsaved",
+        drawingError: "The disk is full.",
+        readOnly: false,
+        saveError: null,
+        timedOut: false,
+        unsaved: 0,
+      },
+    },
+    {
+      expected: { count: 2, kind: "hold", message: "The disk is full." },
+      name: "counts a drawing already on the shelf with the shelf's items, and says a cause they share once",
+      state: {
+        drawing: "onShelf",
+        drawingError: "The disk is full.",
+        readOnly: false,
+        saveError: "The disk is full.",
+        timedOut: false,
+        unsaved: 2,
+      },
+    },
+    {
+      expected: {
+        count: 1,
+        kind: "hold",
+        message:
+          "Nothing is saved this session. Your drawing isn’t on the shelf yet.",
+      },
+      name: "holds for a drawing put on a shelf that saves nothing this session",
+      state: {
+        drawing: "onShelf",
+        drawingError: "Nothing is saved this session.",
+        readOnly: true,
+        saveError: "Nothing is saved this session.",
+        timedOut: false,
+        unsaved: 1,
+      },
+    },
+  ] as const)("$name", ({ expected, state }) => {
     expect(decideQuit(state)).toStrictEqual(expected);
   });
 });
+
+/**
+ * The shelf page answers each settle by sending the edits it holds; the
+ * first write the quit asks for waits until the test lets it go.
+ */
+/** `countStuck`: the page answers, but its count stays where it was, as a late message from a dying page can leave it. */
+const duringDiskWait = (countStuck = false) => {
+  const typed: string[] = [];
+  const inMain: string[] = [];
+  const onDisk: string[] = [];
+  const questions: NativeQuestion[] = [];
+  const finished: string[] = [];
+  const contents = new EventTarget();
+  const disk = new EventTarget();
+  let holdNext = true;
+  let alive = true;
+
+  const page = createPageSettle((seq) => {
+    if (!alive) {
+      return;
+    }
+
+    inMain.push(...typed.splice(0));
+
+    if (!countStuck) {
+      page.setDrafts(0);
+    }
+
+    page.answered(seq);
+  });
+
+  followPage(
+    {
+      on: (event, listener) => {
+        contents.addEventListener(event, listener);
+      },
+    },
+    page
+  );
+
+  const hold = createQuitHold({
+    ask: async (question) => {
+      questions.push(question);
+      await Promise.resolve();
+
+      return "cancel";
+    },
+    flush: async () => {
+      if (holdNext) {
+        holdNext = false;
+        disk.dispatchEvent(new Event("writing"));
+        await once(disk, "release");
+      }
+
+      onDisk.push(...inMain.splice(0));
+
+      return { ok: true };
+    },
+    pageDrafts: page.drafts,
+    prompt: () => {},
+    quitting: () => {},
+    saveDrawing: async () => {
+      await Promise.resolve();
+    },
+    settlePage: page.request,
+    setTimer: () => () => {},
+    state: () => ({
+      drawing: "none",
+      drawingError: null,
+      readOnly: false,
+      saveError: null,
+      unsaved: inMain.length,
+    }),
+  });
+
+  return {
+    /** The page crashes, reloads or goes away: it answers nothing more. */
+    end: (event: string): void => {
+      alive = false;
+      contents.dispatchEvent(new Event(event));
+    },
+    finished,
+    onDisk,
+    page,
+    questions,
+    /** Quits, and resolves once the first write is on its way. */
+    quit: async (): Promise<void> => {
+      const writing = once(disk, "writing");
+
+      hold.request(() => {
+        finished.push("quit");
+      });
+      await writing;
+    },
+    release: (): void => {
+      disk.dispatchEvent(new Event("release"));
+    },
+    /** The user types in the shelf page: an edit main doesn't have yet. */
+    type: (text: string): void => {
+      typed.push(text);
+      page.setDrafts(typed.length);
+    },
+  };
+};
 
 describe("the quit hold", () => {
   it("quits without asking when the disk holds every change", async () => {
@@ -449,6 +628,36 @@ describe("the quit hold", () => {
     expect(shelf.finished).toStrictEqual(["quit"]);
   });
 
+  it("locks the drawing from the first wait while the prompt, a Retry or main's dialog is up, and unlocks it on Cancel", async () => {
+    const shelf = setup();
+
+    shelf.disk.full = true;
+    shelf.drawing.dirty = true;
+    shelf.quit();
+    const waiting = [...shelf.quitting];
+
+    await settled();
+    const held = [...shelf.quitting];
+
+    shelf.hold.answer("retry");
+    await settled();
+    const retried = [...shelf.quitting];
+
+    shelf.hold.answer("cancel");
+
+    expect({
+      cancelled: shelf.quitting,
+      held,
+      retried,
+      waiting,
+    }).toStrictEqual({
+      cancelled: [true, false],
+      held: [true],
+      retried: [true],
+      waiting: [true],
+    });
+  });
+
   it("writes a change made during the wait before the quit goes on", async () => {
     const shelf = setup();
     const first = shelf.holdNextSave();
@@ -485,7 +694,7 @@ describe("the quit hold", () => {
 
     expect(shelf.shown()).toStrictEqual({
       count: 1,
-      message: "Saving didn't finish in time.",
+      message: "Saving didn’t finish in time.",
       state: "asking",
     });
 
@@ -662,7 +871,7 @@ describe("the quit hold", () => {
 
     expect(shelf.shown()).toStrictEqual({
       count: 1,
-      message: "Your drawing isn't on the shelf yet.",
+      message: "Your drawing isn’t on the shelf yet.",
       state: "asking",
     });
 
@@ -670,7 +879,7 @@ describe("the quit hold", () => {
     await settled();
 
     expect([shelf.drawing, shelf.finished]).toStrictEqual([
-      { dirty: true, saves: 0, saveWorks: true },
+      { dirty: true, error: null, saves: 0, saveWorks: true },
       [],
     ]);
 
@@ -718,44 +927,153 @@ describe("the quit hold", () => {
     }
   );
 
-  it("asks in main's dialog when the page reloads before it answers and its last count held an edit", async () => {
-    const page = createPageSettle(() => {});
-    const questions: NativeQuestion[] = [];
-    const finished: string[] = [];
+  it.each(["render-process-gone", "did-navigate", "did-start-loading"])(
+    "asks in main's dialog when the page ends (%s) before it answers, even once a new page has loaded, until that page reports its own count",
+    async (end) => {
+      const page = createPageSettle(() => {});
+      const contents = new EventTarget();
+      const questions: NativeQuestion[] = [];
+      const finished: string[] = [];
 
-    const hold = createQuitHold({
-      ask: async (question) => {
-        questions.push(question);
-        await Promise.resolve();
+      followPage(
+        {
+          on: (event, listener) => {
+            contents.addEventListener(event, listener);
+          },
+        },
+        page
+      );
 
-        return "cancel";
-      },
-      flush: async () => await Promise.resolve({ ok: true }),
-      pageDrafts: page.drafts,
-      prompt: () => {},
-      saveDrawing: async () => {
-        await Promise.resolve();
-      },
-      settlePage: page.request,
-      setTimer: () => () => {},
-      state: () => ({
-        drawing: false,
-        readOnly: false,
-        saveError: null,
-        unsaved: 0,
-      }),
-    });
+      const hold = createQuitHold({
+        ask: async (question) => {
+          questions.push(question);
+          await Promise.resolve();
 
-    page.setDrafts(1);
-    hold.request(() => {
-      finished.push("quit");
-    });
-    page.reset();
+          return "cancel";
+        },
+        flush: async () => await Promise.resolve({ ok: true }),
+        pageDrafts: page.drafts,
+        prompt: () => {},
+        quitting: () => {},
+        saveDrawing: async () => {
+          await Promise.resolve();
+        },
+        settlePage: page.request,
+        setTimer: () => () => {},
+        state: () => ({
+          drawing: "none",
+          drawingError: null,
+          readOnly: false,
+          saveError: null,
+          unsaved: 0,
+        }),
+      });
+
+      const quit = async (): Promise<void> => {
+        hold.request(() => {
+          finished.push("quit");
+        });
+        await settled();
+      };
+
+      page.setDrafts(1);
+      await quit();
+      contents.dispatchEvent(new Event(end));
+      // Electron loads the page again after a crash or reload.
+      contents.dispatchEvent(new Event("did-finish-load"));
+      await settled();
+      await quit();
+      contents.dispatchEvent(new Event("destroyed"));
+      await settled();
+
+      const before = { finished: [...finished], questions: [...questions] };
+
+      // The new page says it holds nothing.
+      page.setDrafts(0);
+      await quit();
+      page.answered(3);
+      await settled();
+
+      expect({ after: finished, before }).toStrictEqual({
+        after: ["quit"],
+        before: {
+          finished: [],
+          questions: [{ kind: "unconfirmed" }, { kind: "unconfirmed" }],
+        },
+      });
+    }
+  );
+
+  it.each([
+    "render-process-gone",
+    "did-navigate",
+    "did-start-loading",
+    "destroyed",
+  ])(
+    "asks in main's dialog when the page ends (%s) during the disk wait holding an edit it hadn't sent (red-team round 8)",
+    async (end) => {
+      const app = duringDiskWait();
+
+      await app.quit();
+      app.type("typed during the wait");
+      app.end(end);
+      app.release();
+      await settled();
+
+      expect({
+        drafts: app.page.drafts(),
+        finished: app.finished,
+        questions: app.questions,
+      }).toStrictEqual({
+        drafts: 1,
+        finished: [],
+        questions: [{ kind: "unconfirmed" }],
+      });
+    }
+  );
+
+  it("asks in main's dialog, after a few rounds, when the page answers but its count never falls to 0", async () => {
+    const app = duringDiskWait(true);
+
+    await app.quit();
+    app.type("typed during the wait");
+    app.release();
     await settled();
 
-    expect({ finished, questions }).toStrictEqual({
+    expect({
+      finished: app.finished,
+      questions: app.questions,
+    }).toStrictEqual({
       finished: [],
       questions: [{ kind: "unconfirmed" }],
+    });
+  });
+
+  it("asks the page again for an edit typed during the disk wait, and writes it before it quits", async () => {
+    const app = duringDiskWait();
+
+    await app.quit();
+    app.type("typed during the wait");
+    app.release();
+    await settled();
+
+    expect({
+      finished: app.finished,
+      onDisk: app.onDisk,
+      questions: app.questions,
+    }).toStrictEqual({
+      finished: ["quit"],
+      onDisk: ["typed during the wait"],
+      questions: [],
+    });
+  });
+
+  it("explains that the shelf window stopped responding when it asks", () => {
+    expect(nativeDialog({ kind: "unconfirmed" }, "Inset Shelf")).toStrictEqual({
+      buttons: ["Wait", "Quit anyway", "Cancel"],
+      detail:
+        "The shelf window stopped responding, so an edit you were typing there may not be saved. Wait gives it more time to answer.",
+      message: "Inset Shelf couldn’t confirm your changes were saved",
     });
   });
 
@@ -781,7 +1099,7 @@ describe("the quit hold", () => {
 
     expect(shelf.shown()).toStrictEqual({
       count: 2,
-      message: "disk full Your drawing isn't on the shelf yet.",
+      message: "disk full Your drawing isn’t on the shelf yet.",
       state: "asking",
     });
   });
@@ -839,7 +1157,7 @@ describe("the quit hold", () => {
     expect([shelf.shown(), shelf.finished]).toStrictEqual([
       {
         count: 1,
-        message: "Saving didn't finish in time.",
+        message: "Saving didn’t finish in time.",
         state: "stillFailing",
       },
       [],

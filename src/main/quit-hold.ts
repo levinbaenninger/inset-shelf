@@ -9,9 +9,9 @@ import type { WriteResult } from "./shelf-store";
 /** How long quitting waits for the shelf page to answer, and then for the disk, before it asks (Round 7). */
 export const QUIT_WAIT_MS = 3000;
 
-export const SAVE_TOO_SLOW = "Saving didn't finish in time.";
+export const SAVE_TOO_SLOW = "Saving didn’t finish in time.";
 
-export const DRAWING_UNSAVED = "Your drawing isn't on the shelf yet.";
+export const DRAWING_UNSAVED = "Your drawing isn’t on the shelf yet.";
 
 /**
  * A save the user waits on outside quitting (the banner's Retry, a copy's
@@ -43,6 +43,24 @@ export const withinWait = async (
 /** Flushes in a row while changes keep arriving during the wait; the time limit ends it anyway. */
 const SETTLE_ROUNDS = 5;
 
+/**
+ * New Drawing or Annotate: `none` holds nothing unsaved; `onShelf` its
+ * marks are a shelf item the disk doesn't hold yet, counted with the shelf;
+ * `unsaved` they aren't on the shelf, one more change.
+ */
+export type DrawingMarks = "none" | "onShelf" | "unsaved";
+
+export const drawingMarks = (
+  dirty: boolean,
+  onShelf: boolean
+): DrawingMarks => {
+  if (!dirty) {
+    return "none";
+  }
+
+  return onShelf ? "onShelf" : "unsaved";
+};
+
 /** Everything a quit could lose, once the wait is over. */
 export interface QuitState {
   /** Shelf items the disk doesn't hold as they are. */
@@ -50,8 +68,9 @@ export interface QuitState {
   /** Nothing is saved this session, so there is nothing to wait for or retry on the shelf. */
   readonly readOnly: boolean;
   readonly saveError: string | null;
-  /** New Drawing or Annotate holds marks that aren't on the shelf. */
-  readonly drawing: boolean;
+  readonly drawing: DrawingMarks;
+  /** Why the drawing's last save failed, in the shared words. */
+  readonly drawingError: string | null;
   readonly timedOut: boolean;
 }
 
@@ -59,31 +78,36 @@ export type QuitDecision =
   | { readonly kind: "quit" }
   | { readonly kind: "hold"; readonly count: number; readonly message: string };
 
-/** Why the shelf isn't saved, when it isn't. */
-const shelfCause = (state: QuitState, shelf: number): string | null => {
-  if (state.timedOut) {
-    return SAVE_TOO_SLOW;
-  }
-
-  return shelf > 0 ? (state.saveError ?? SAVE_FAILED) : null;
-};
-
 export const decideQuit = (state: QuitState): QuitDecision => {
   const shelf = state.readOnly ? 0 : state.unsaved;
-  const count = shelf + (state.drawing ? 1 : 0);
+
+  // A shelf that saves nothing this session can't take the drawing to the disk either.
+  const drawing =
+    state.readOnly && state.drawing === "onShelf" ? "unsaved" : state.drawing;
+
+  const count = shelf + (drawing === "unsaved" ? 1 : 0);
 
   if (count === 0) {
     return { kind: "quit" };
   }
 
-  const cause = shelfCause(state, shelf);
+  const causes = state.timedOut
+    ? [SAVE_TOO_SLOW]
+    : [
+        shelf > 0 ? (state.saveError ?? SAVE_FAILED) : null,
+        drawing === "none" ? null : state.drawingError,
+      ];
+
+  const parts = [
+    ...causes,
+    drawing === "unsaved" ? DRAWING_UNSAVED : null,
+  ].filter((part) => part !== null);
 
   return {
     count,
     kind: "hold",
-    message: [cause, state.drawing ? DRAWING_UNSAVED : null]
-      .filter((part) => part !== null)
-      .join(" "),
+    // The shelf and the drawing often fail for the same reason: it is said once.
+    message: [...new Set(parts)].join(" "),
   };
 };
 
@@ -110,8 +134,8 @@ export const nativeDialog = (
     ? {
         buttons: ["Wait", "Quit anyway", "Cancel"],
         detail:
-          "The shelf window didn't answer in time, so an edit you were typing may not be saved. Wait gives it longer.",
-        message: `${appName} couldn't confirm your changes were saved`,
+          "The shelf window stopped responding, so an edit you were typing there may not be saved. Wait gives it more time to answer.",
+        message: `${appName} couldn’t confirm your changes were saved`,
       }
     : {
         buttons: ["Retry", "Quit without saving", "Cancel"],
@@ -141,6 +165,8 @@ export interface QuitHoldDeps {
    */
   readonly saveDrawing: (stop: AbortSignal) => Promise<void>;
   readonly state: () => Omit<QuitState, "timedOut">;
+  /** A quit is under way, from the first wait until it is cancelled: the drawing's marks can't change meanwhile (Round 8). */
+  readonly quitting: (busy: boolean) => void;
   readonly setTimer: (run: () => void, ms: number) => () => void;
   /** Shows the prompt in the shelf, or takes it away. */
   readonly prompt: (prompt: QuitPrompt | null) => void;
@@ -182,6 +208,7 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
 
   const enter = (next: Phase): void => {
     phase = next;
+    deps.quitting(next.kind !== "idle");
     deps.prompt(
       next.kind === "waiting" || next.kind === "held" ? next.prompt : null
     );
@@ -275,7 +302,8 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
 
     const live = (): boolean => mine === attempt && phase.kind === "waiting";
 
-    void (async () => {
+    // The page first, then the disk; the drawing saves only on the first pass of a Retry.
+    const pass = async (round: number): Promise<void> => {
       const answered = await within(deps.settlePage().catch(() => false));
 
       if (!live()) {
@@ -292,7 +320,11 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
       }
 
       const saving = (async () => {
-        if (retried !== null && deps.state().drawing) {
+        if (
+          round === 0 &&
+          retried !== null &&
+          deps.state().drawing !== "none"
+        ) {
           drawingSave = new AbortController();
           await deps.saveDrawing(drawingSave.signal);
         }
@@ -303,6 +335,17 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
       const saved = await within(saving);
 
       if (!live()) {
+        return;
+      }
+
+      // The page's count gates the quit, whether or not the page is still there: an edit typed during the disk wait, or kept from a page that ended, sends it back to the page, a few times at most (Round 8).
+      if (deps.pageDrafts() > 0) {
+        if (round + 1 < SETTLE_ROUNDS) {
+          await pass(round + 1);
+        } else {
+          void ask({ kind: "unconfirmed" });
+        }
+
         return;
       }
 
@@ -329,7 +372,9 @@ export const createQuitHold = (deps: QuitHoldDeps): QuitHold => {
       } else {
         void ask({ kind: "held", prompt });
       }
-    })();
+    };
+
+    void pass(0);
   };
 
   return {

@@ -18,7 +18,7 @@ import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 import { Page } from "./page";
-import type { PageImage } from "./page";
+import type { DragMark, PageImage } from "./page";
 import { nudgePin, nudgeStep, movePin, pinsOf, removePin } from "./pins";
 import { exportAnnotated, exportPng, measureText } from "./render";
 import {
@@ -30,6 +30,7 @@ import {
   commit,
   EXPORT_SCALE,
   exportFrame,
+  isVisible,
   redo,
   undo,
 } from "./sketch";
@@ -183,8 +184,48 @@ const startingMarks = (image: DrawingImage | null): readonly Mark[] =>
           : { at, kind: "pin", label: pin.label };
       });
 
+/** Something to save: new marks, words still being typed, or pins added, moved or removed. */
+const hasChanges = (
+  marks: readonly Mark[],
+  draft: Mark | null,
+  initial: readonly Mark[]
+): boolean =>
+  marks.some((mark) => mark.kind !== "pin") ||
+  draft !== null ||
+  JSON.stringify(pinsOf(marks)) !== JSON.stringify(pinsOf(initial));
+
+/** A stroke still being drawn, once it shows: it counts and is saved before it is let go (red-team round 8). */
+const shownStroke = (drag: DragMark | null): DragMark | null =>
+  drag !== null && isVisible(drag) ? drag : null;
+
+/** Letting go of a stroke, or a lock ending it: one that shows becomes a mark. */
+const endStroke = (history: History, drag: DragMark): History =>
+  isVisible(drag) ? addMark(history, drag) : history;
+
+/** The pill over the page: why it is locked during a quit, otherwise the Pin tool's hint. */
+const pagePill = (
+  quitting: boolean,
+  selectedPin: number | null,
+  pinCount: number
+): string => {
+  if (quitting) {
+    return "Locked while Inset asks about quitting";
+  }
+
+  return selectedPin === null
+    ? `Click to place pin ${pinCount + 1}`
+    : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ⌫ removes it`;
+};
+
 /** One drawing, on a blank page or over an image; the app remounts it for every opening. */
-const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
+const Editor = ({
+  image,
+  quitting,
+}: {
+  readonly image: DrawingImage | null;
+  /** A quit is under way: the marks wait, untouched, until it is answered. */
+  readonly quitting: boolean;
+}) => {
   const initial = useMemo(() => startingMarks(image), [image]);
 
   const [history, setHistory] = useState<History>(() => ({
@@ -237,7 +278,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
       window.removeEventListener("blur", letGo);
       area?.removeEventListener("focusout", onFocusOut);
     };
-  }, []);
+  }, [pinsRef]);
   // Marks on a picture stand out in red; a blank page starts in ink.
   const [color, setColor] = useState<Color>(image === null ? "ink" : "red");
   const [stroke, setStroke] = useState<Stroke>("thin");
@@ -246,16 +287,26 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
   const [confirming, setConfirming] = useState(false);
   // Words in the open text field, not yet a mark in the history.
   const [draft, setDraft] = useState<Mark | null>(null);
+  // A pen, line or shape still being drawn, not yet a mark in the history.
+  const [drag, setDrag] = useState<DragMark | null>(null);
   // On an image the marks keep the colours they are saved in, whatever the theme.
   const dark = useDark() && image === null;
   const marks = history.present;
   const pins = pinsOf(marks);
-  const empty = marks.every((mark) => mark.kind === "pin");
   const pinsChanged = JSON.stringify(pins) !== JSON.stringify(pinsOf(initial));
-  // Something to save: new marks, words still being typed, or pins added, moved or removed.
-  const dirty = !empty || draft !== null || pinsChanged;
-  // What a save sends: the marks, and the words still being typed.
-  const toSave = draft === null ? marks : [...marks, draft];
+  const drawn = shownStroke(drag);
+  const stroking = drawn !== null;
+  const dirty = hasChanges(marks, draft, initial) || stroking;
+  // What a save sends: the marks, the words still being typed and a stroke still being drawn.
+  const toSave = [...marks, ...[draft, drawn].filter((mark) => mark !== null)];
+  // While its save, a quit or the Discard confirm is under way nothing changes the marks, so none is made that main would not get or that the prompt doesn't show (Round 8).
+  const locked = saving || quitting || confirming;
+
+  // A lock ends a stroke where it is, as letting go would: the marks then stay as they are until it lifts.
+  if (locked && drag !== null) {
+    setDrag(null);
+    setHistory(endStroke(history, drag));
+  }
 
   const bounds =
     image === null
@@ -310,23 +361,28 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
     return next;
   };
 
-  useLocalKeys({
-    // Esc lets go of a selected pin first; only an untouched page closes on it, so a stray key never throws work away.
-    onEscape: () => {
-      if (selectedPin !== null) {
-        setSelectedPin(null);
-      } else if (!dirty) {
-        api.cancel();
-      }
-    },
-    onSave: () => {
-      void save(false, toSave);
-    },
-  });
+  useLocalKeys(
+    locked
+      ? {}
+      : {
+          // Esc lets go of a selected pin first; only an untouched page closes on it, so a stray key never throws work away.
+          onEscape: () => {
+            if (selectedPin !== null) {
+              setSelectedPin(null);
+            } else if (!dirty) {
+              api.cancel();
+            }
+          },
+          onSave: () => {
+            void save(false, toSave);
+          },
+        }
+  );
 
+  // Every change, not only the first: main then knows the marks a held quit put on the shelf have changed since.
   useEffect(() => {
-    api.setDirty(dirty);
-  }, [dirty]);
+    api.setDirty(hasChanges(history.present, draft, initial) || stroking);
+  }, [history.present, draft, initial, stroking]);
 
   // Retry in a held quit saves the marks to the shelf, as Save does; a save already running finishes on its own.
   const saveForQuit = useEffectEvent(() => {
@@ -341,27 +397,40 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
     []
   );
 
-  // Closing the window with marks asks here, in the page's own dialog.
+  // Closing the window with marks asks here, in the page's own dialog; not while a quit or a save is under way.
+  const confirmClose = useEffectEvent(() => {
+    if (!locked) {
+      setConfirming(true);
+    }
+  });
+
   useEffect(
     () =>
       api.on("confirmClose", () => {
-        setConfirming(true);
+        confirmClose();
       }),
     []
   );
 
   // The menu bar's Undo and Redo arrive here instead of as keys.
+  const menuEdit = useEffectEvent((kind: "undo" | "redo") => {
+    if (!locked) {
+      setHistory((current) =>
+        kind === "undo" ? undo(current) : redo(current)
+      );
+    }
+  });
+
   useEffect(
     () =>
       api.on("edit", (kind) => {
-        setHistory((current) =>
-          kind === "undo" ? undo(current) : redo(current)
-        );
+        menuEdit(kind);
       }),
     []
   );
 
   useDrawingKeys({
+    enabled: !locked,
     dropPin: () => {
       const center =
         bounds === undefined
@@ -449,7 +518,9 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           <Page
             color={color}
             dark={dark}
+            drag={drag}
             image={pageImage(image)}
+            locked={locked}
             marks={marks}
             onAdd={(mark) => {
               add(mark);
@@ -458,6 +529,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
             onMovePin={(index, to) => {
               change(movePin(marks, index, to, bounds));
             }}
+            onDrag={setDrag}
             onSelectPin={selectPin}
             onSubmit={(mark) => {
               const next = mark === null ? history : add(mark);
@@ -470,11 +542,12 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
             tool={tool}
           />
         </section>
-        {tool === "pin" ? (
-          <p className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm">
-            {selectedPin === null
-              ? `Click to place pin ${pins.length + 1}`
-              : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ⌫ removes it`}
+        {quitting || tool === "pin" ? (
+          <p
+            className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm"
+            role={quitting ? "status" : undefined}
+          >
+            {pagePill(quitting, selectedPin, pins.length)}
           </p>
         ) : null}
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
@@ -485,6 +558,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
             canUndo={canUndo(history)}
             color={color}
             dark={dark}
+            locked={locked}
             onClear={() => {
               setHistory(clearMarks(history));
             }}
@@ -541,6 +615,14 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
 /** Every opening pushes a new view, which starts over with no history: a blank page or the image. */
 export const DrawingApp = () => {
   const view = usePushedView<DrawingView | null>(load, subscribe, null);
+  // The opening as it first arrived: a later push of it (a quit locking the page) brings a new copy of the same image, which must not count as a change.
+  const [opened, setOpened] = useState<DrawingView | null>(null);
 
-  return view === null ? null : <Editor image={view.image} key={view.seq} />;
+  if (view !== null && view.seq !== opened?.seq) {
+    setOpened(view);
+  }
+
+  return view === null || opened?.seq !== view.seq ? null : (
+    <Editor image={opened.image} key={opened.seq} quitting={view.quitting} />
+  );
 };

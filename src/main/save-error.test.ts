@@ -5,11 +5,11 @@ import { causeText, reportSaveError, saveErrorText } from "./save-error";
 describe(saveErrorText, () => {
   it.each([
     ["ENOSPC", "The disk is full."],
-    ["EACCES", "Inset can't write to its data folder."],
-    ["EPERM", "Inset can't write to its data folder."],
+    ["EACCES", "Inset can’t write to its data folder."],
+    ["EPERM", "Inset can’t write to its data folder."],
     ["EROFS", "The disk is read-only."],
-    ["EIO", "Couldn't save (EIO)."],
-    [null, "Couldn't save (unknown)."],
+    ["EIO", "Couldn’t save (EIO)."],
+    [null, "Couldn’t save (unknown)."],
   ])("says %s as a sentence", (code, sentence) => {
     expect(saveErrorText(code)).toBe(sentence);
   });

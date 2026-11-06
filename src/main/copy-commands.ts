@@ -68,7 +68,7 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     const file = deps.stageFile(item);
 
     if (file === null) {
-      return { problem: "The file can't be read." };
+      return { problem: "The file can’t be read." };
     }
 
     const url = pathToFileURL(file).href;
@@ -106,7 +106,7 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
     const exported = deps.exportImage(item);
 
     if (exported === null) {
-      return { problem: "The image can't be read." };
+      return { problem: "The image can’t be read." };
     }
 
     const image = new Blob([exported.png], { type: "image/png" });

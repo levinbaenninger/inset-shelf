@@ -4,9 +4,9 @@ import { z } from "zod";
 export const FsErrorSchema = z.object({ code: z.string() });
 
 const SENTENCES = new Map([
-  ["EACCES", "Inset can't write to its data folder."],
+  ["EACCES", "Inset can’t write to its data folder."],
   ["ENOSPC", "The disk is full."],
-  ["EPERM", "Inset can't write to its data folder."],
+  ["EPERM", "Inset can’t write to its data folder."],
   ["EROFS", "The disk is read-only."],
 ]);
 
@@ -16,7 +16,7 @@ const SENTENCES = new Map([
  * causes read as a sentence; anything else names its code.
  */
 export const saveErrorText = (code: string | null): string =>
-  SENTENCES.get(code ?? "") ?? `Couldn't save (${code ?? "unknown"}).`;
+  SENTENCES.get(code ?? "") ?? `Couldn’t save (${code ?? "unknown"}).`;
 
 /**
  * A save that throws, such as a picture the disk refused, ends as a failed

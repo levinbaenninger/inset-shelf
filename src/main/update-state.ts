@@ -139,7 +139,7 @@ export const updateNotice = (
     }
 
     case "error": {
-      return `Couldn't check for updates: ${next.message}`;
+      return `Couldn’t check for updates: ${next.message}`;
     }
 
     case "idle":

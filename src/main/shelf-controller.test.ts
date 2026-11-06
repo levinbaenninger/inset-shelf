@@ -40,6 +40,7 @@ const setup = (
       now: () => new Date("2026-10-22T10:00:00.000Z"),
     },
     initial: emptyShelf(SECTION),
+    restore: async () => await Promise.resolve(false),
     save: async (doc) => {
       saved.push(doc);
       await hold;
@@ -453,13 +454,26 @@ const textOf = (doc: ShelfDoc | undefined, id: string) => {
 
 const DISK_FULL: WriteResult = { message: "The disk is full.", ok: false };
 
-/** The real controller on a disk that fills up on request and can hold the next write back. */
+/**
+ * The real controller on a disk that fills up on request and can hold the
+ * next write back. Like the store, a write asks whether it is still current
+ * just before it replaces the file, and `restore` renames the file from
+ * before the last write back.
+ */
 const onDisk = (readOnly = false) => {
-  const disk = { full: readOnly };
+  const disk = { full: readOnly, renamesBack: true };
+  // What the shelf file held after each write that replaced it; the last is the file now.
   const writes: ShelfDoc[] = [];
   const deleted: string[] = [];
+
+  let restores = 0;
   // Set by hold(): the next write tells it has started, then waits for the test's outcome.
-  let held: EventTarget | null = null;
+
+  let held: {
+    readonly signal: EventTarget;
+    readonly replaced: boolean;
+  } | null = null;
+
   let outcome: WriteResult = { ok: true };
   let next = 10;
 
@@ -474,18 +488,47 @@ const onDisk = (readOnly = false) => {
       now: () => new Date("2026-11-06T10:00:00.000Z"),
     },
     initial: emptyShelf(SECTION),
-    save: async (doc) => {
+    restore: async () => {
+      await Promise.resolve();
+      restores += 1;
+
+      if (!disk.renamesBack) {
+        return false;
+      }
+
+      writes.pop();
+
+      return true;
+    },
+    save: async (doc, current) => {
       const hold = held;
       let result: WriteResult = disk.full ? DISK_FULL : { ok: true };
 
       held = null;
 
-      if (hold !== null) {
-        const finished = once(hold, "finish");
+      // A held write that already replaced the file: only a rename puts the old one back.
+      if (hold?.replaced === true) {
+        writes.push(doc);
+      }
 
-        hold.dispatchEvent(new Event("start"));
+      if (hold !== null) {
+        const finished = once(hold.signal, "finish");
+
+        hold.signal.dispatchEvent(new Event("start"));
         await finished;
         result = outcome;
+      }
+
+      if (hold?.replaced === true) {
+        if (!result.ok) {
+          writes.pop();
+        }
+
+        return result;
+      }
+
+      if (result.ok && !current()) {
+        return { dropped: true, ok: false };
       }
 
       if (result.ok) {
@@ -521,11 +564,14 @@ const onDisk = (readOnly = false) => {
     controller,
     deleted,
     disk,
-    /** The next write waits until `finish`; `started` resolves once it is on its way. */
-    hold: () => {
+    /**
+     * The next write waits until `finish`; `started` resolves once it is on
+     * its way. `replaced`: it has already taken the file's place by then.
+     */
+    hold: (options: { readonly replaced?: boolean } = {}) => {
       const signal = new EventTarget();
 
-      held = signal;
+      held = { replaced: options.replaced === true, signal };
 
       return {
         finish: (result: WriteResult): void => {
@@ -535,6 +581,7 @@ const onDisk = (readOnly = false) => {
         started: once(signal, "start"),
       };
     },
+    restores: () => restores,
     shown: (id: string) => textOf(controller.view().doc, id),
     stored: (id: string) => textOf(writes.at(-1), id),
     writes,
@@ -619,8 +666,10 @@ describe("Discard changes and each item's saved version", () => {
     }).toStrictEqual({ error: null, notSaved: [], unsaved: 0, writes: 0 });
   });
 
-  it("keeps the discarded words gone when a write holding them lands after the Discard", async () => {
-    const { add, controller, disk, hold, shown, stored } = onDisk();
+  it("drops a write of the discarded words that hasn't replaced the file yet, and writes nothing to undo it", async () => {
+    const { add, controller, disk, hold, restores, shown, stored, writes } =
+      onDisk();
+
     const a = add("A as saved");
 
     await controller.flush();
@@ -637,14 +686,95 @@ describe("Discard changes and each item's saved version", () => {
     controller.discard(a);
     write.finish({ ok: true });
     await retry;
+    await controller.flush();
 
-    // Nothing else asks for a save: the Discard's own write puts the saved words back on the disk.
-    await vi.waitFor(() => {
-      expect(stored(a)).toBe("A as saved");
-    });
-    expect({ shown: shown(a), unsaved: controller.unsaved() }).toStrictEqual({
+    expect({
+      restores: restores(),
+      shown: shown(a),
+      stored: stored(a),
+      unsaved: controller.unsaved(),
+      writes: writes.length,
+    }).toStrictEqual({
+      restores: 0,
       shown: "A as saved",
+      stored: "A as saved",
       unsaved: 0,
+      writes: 1,
+    });
+  });
+
+  it("renames the file from before back when the write of the discarded words already replaced it, even on a full disk", async () => {
+    const { add, controller, disk, hold, restores, shown, stored, writes } =
+      onDisk();
+
+    const a = add("A as saved");
+
+    await controller.flush();
+    disk.full = true;
+    controller.apply({ id: a, text: "Discard me", type: "editText" });
+    await controller.flush();
+
+    disk.full = false;
+    const write = hold({ replaced: true });
+    const retry = controller.flush();
+
+    await write.started;
+    controller.discard(a);
+    // The disk fills up again: a write could not put the saved words back now, a rename can.
+    disk.full = true;
+    write.finish({ ok: true });
+    await retry;
+    await controller.flush();
+
+    expect({
+      error: controller.view().status.saveError,
+      notSaved: controller.view().notSaved,
+      restores: restores(),
+      shown: shown(a),
+      stored: stored(a),
+      unsaved: controller.unsaved(),
+      writes: writes.length,
+    }).toStrictEqual({
+      error: null,
+      notSaved: [],
+      restores: 1,
+      shown: "A as saved",
+      stored: "A as saved",
+      unsaved: 0,
+      writes: 1,
+    });
+  });
+
+  it("writes the other items' changes once a Discard dropped the write holding them, and Retry answers for that write", async () => {
+    const { add, controller, disk, hold, stored } = onDisk();
+    const a = add("A as saved");
+    const b = add("B as saved");
+
+    await controller.flush();
+    disk.full = true;
+    controller.apply({ id: a, text: "A, typed", type: "editText" });
+    controller.apply({ id: b, text: "B, typed", type: "editText" });
+    await controller.flush();
+
+    disk.full = false;
+    const write = hold();
+    const retry = controller.flush();
+
+    await write.started;
+    controller.discard(a);
+    write.finish({ ok: true });
+
+    await expect(retry).resolves.toStrictEqual({ ok: true });
+    expect({
+      a: stored(a),
+      b: stored(b),
+      error: controller.view().status.saveError,
+      notSaved: controller.view().notSaved,
+    }).toStrictEqual({
+      a: "A as saved",
+      b: "B, typed",
+      error: null,
+      notSaved: [],
     });
   });
 
@@ -774,22 +904,25 @@ describe("Discard changes and each item's saved version", () => {
     await controller.flush();
     disk.full = false;
 
-    const write = hold();
+    const write = hold({ replaced: true });
     const retry = controller.flush();
 
     await write.started;
     controller.discard(id);
     write.finish({ ok: true });
     await retry;
+    const afterDiscard = [...deleted];
+
+    // The drawn picture goes with the next write that doesn't name it.
+    controller.apply({ text: "Anything", type: "compose" });
     await controller.flush();
 
-    expect({ deleted, shown: controller.item(id) }).toMatchObject({
-      deleted: [drawn.file],
-      shown: { image },
-    });
+    expect({ afterDiscard, deleted, shown: controller.item(id) }).toMatchObject(
+      { afterDiscard: [], deleted: [drawn.file], shown: { image } }
+    );
   });
 
-  it("puts back what the user kept when a write already on its way lands with the discarded words and the next write fails", async () => {
+  it("keeps what the user kept when the file can't be renamed back, and the write replacing the discarded words fails", async () => {
     const { add, controller, disk, hold, shown } = onDisk();
     const a = add("A as saved");
 
@@ -798,8 +931,9 @@ describe("Discard changes and each item's saved version", () => {
     controller.apply({ id: a, text: "Discard me", type: "editText" });
     await controller.flush();
 
-    // Retry's write holds the words when Discard changes is picked; it lands, and the write putting A back fails.
-    const write = hold();
+    // Retry's write has replaced the file when Discard changes is picked; the rename back fails, and so does the write after it.
+    disk.renamesBack = false;
+    const write = hold({ replaced: true });
     const retry = controller.flush();
 
     await write.started;

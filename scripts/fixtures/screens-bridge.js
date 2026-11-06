@@ -277,6 +277,7 @@ if (page === "drawing") {
       getImage: resolved(null),
       getView: resolved(data.view),
       on,
+      // `holdSave`: the save waits until the scene calls `__releaseSave()`, then fails as a full disk, so the page stays open.
       save: (drawing) => {
         globalThis.__calls.push({
           arg: {
@@ -287,7 +288,16 @@ if (page === "drawing") {
           call: "save",
         });
 
-        return ok();
+        if (data.holdSave !== true) {
+          return ok();
+        }
+
+        // oxlint-disable-next-line promise/avoid-new -- a save held until the scene lets it go.
+        return new Promise((resolve) => {
+          globalThis.__releaseSave = () => {
+            resolve({ message: "The disk is full.", ok: false });
+          };
+        });
       },
       // Kept apart from the calls, which the drawing scenes compare whole.
       setDirty: (dirty) => {

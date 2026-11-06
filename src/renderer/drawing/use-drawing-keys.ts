@@ -7,6 +7,8 @@ import { TOOLS } from "./sketch";
 import type { Tool } from "./sketch";
 
 export interface DrawingKeyActions {
+  /** False while a save or a quit is under way: no key changes the marks. */
+  readonly enabled: boolean;
   readonly undo: () => void;
   readonly redo: () => void;
   readonly pickTool: (tool: Tool) => void;
@@ -105,6 +107,7 @@ const pinKey = (event: KeyboardEvent, actions: DrawingKeyActions): boolean => {
 export const useDrawingKeys = (actions: DrawingKeyActions): void => {
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (
+      !actions.enabled ||
       event.defaultPrevented ||
       event.isComposing ||
       isTextField(event.target)

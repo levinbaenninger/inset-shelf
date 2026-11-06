@@ -1,7 +1,14 @@
 import { viewerImageRect } from "@shared/geometry";
 import { PIN_HEAD_RADIUS, PIN_HEAD_Y, PIN_HEIGHT } from "@shared/pin-shape";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from "react";
+import type {
+  Dispatch,
+  KeyboardEvent,
+  PointerEvent,
+  ReactNode,
+  RefObject,
+  SetStateAction,
+} from "react";
 
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
@@ -46,11 +53,16 @@ export interface PageProps {
   readonly stroke: Stroke;
   readonly dark: boolean;
   readonly image: PageImage | null;
+  /** Its save or a quit is under way: clicks, drags and typing change nothing (Round 8). */
+  readonly locked: boolean;
   readonly onAdd: (mark: Mark) => void;
   /** ⌘↩ in the text field: keep the text, if any, and save. */
   readonly onSubmit: (mark: Mark | null) => void;
   /** The words in the open text field as a mark, or null when there are none: they count as marks before they are committed. */
   readonly onDraft: (mark: TextMark | null) => void;
+  /** A pen, line or shape still being drawn. The editor holds it, so a save or a quit includes it and a lock ends it (Round 8). */
+  readonly drag: DragMark | null;
+  readonly onDrag: Dispatch<SetStateAction<DragMark | null>>;
   /** The selected pin (0-based), which ⌫ removes and the arrow keys nudge. */
   readonly selectedPin: number | null;
   readonly onSelectPin: (index: number | null) => void;
@@ -79,7 +91,7 @@ interface TextDraft {
   readonly size: number;
 }
 
-type DragMark = PenMark | SegmentMark;
+export type DragMark = PenMark | SegmentMark;
 
 const clamp = (value: number, low: number, high: number): number =>
   Math.min(Math.max(value, low), high);
@@ -179,6 +191,7 @@ const textMark = (draft: TextDraft): TextMark => ({
 const TextField = ({
   dark,
   draft,
+  locked,
   onCancel,
   onChange,
   onCommit,
@@ -187,6 +200,7 @@ const TextField = ({
 }: {
   readonly draft: TextDraft;
   readonly dark: boolean;
+  readonly locked: boolean;
   readonly view: PageView;
   readonly onChange: (value: string) => void;
   readonly onCommit: () => void;
@@ -195,6 +209,15 @@ const TextField = ({
 }) => {
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    // Locked, the words stay as they are, open, and are saved with the marks.
+    if (locked) {
+      if (event.key === "Escape" || event.key === "Enter") {
+        event.preventDefault();
+      }
+
       return;
     }
 
@@ -224,6 +247,7 @@ const TextField = ({
         onChange(event.target.value);
       }}
       onKeyDown={onKeyDown}
+      readOnly={locked}
       ref={(node) => {
         node?.focus();
       }}
@@ -243,12 +267,15 @@ const TextField = ({
 export const Page = ({
   color,
   dark,
+  drag,
   image,
+  locked,
   marks,
   onAdd,
   onDraft,
   onMovePin,
   onSelectPin,
+  onDrag: setDrag,
   onSubmit,
   pointerRef,
   selectedPin,
@@ -266,7 +293,6 @@ export const Page = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(canvasRef);
   const fontsLoaded = useFontsLoaded();
-  const [drag, setDrag] = useState<DragMark | null>(null);
   const [text, setText] = useState<TextDraft | null>(null);
   // Removing a focused field can also blur it; the text must only be added once.
   const textClosed = useRef(false);
@@ -373,7 +399,8 @@ export const Page = ({
 
   const finishDrag = (): void => {
     if (pinDrag !== null) {
-      if (pinDrag.moved) {
+      // Let go on a locked page, the pin stays where the marks have it.
+      if (pinDrag.moved && !locked) {
         onMovePin(pinDrag.index, pinDrag.at);
       }
 
@@ -516,8 +543,9 @@ export const Page = ({
         </div>
       )}
       <canvas
+        aria-disabled={locked}
         aria-label="Drawing"
-        className="absolute inset-0 size-full cursor-crosshair touch-none data-[tool=pin]:cursor-copy data-[tool=text]:cursor-text"
+        className="absolute inset-0 size-full cursor-crosshair touch-none aria-disabled:cursor-default data-[tool=pin]:cursor-copy data-[tool=text]:cursor-text"
         data-tool={tool}
         // Every drag captures the pointer, so this ends it once: on release, cancel, or capture lost.
         onLostPointerCapture={finishDrag}
@@ -525,11 +553,11 @@ export const Page = ({
         onMouseDown={(event) => {
           event.preventDefault();
         }}
-        onPointerDown={onPointerDown}
+        onPointerDown={locked ? undefined : onPointerDown}
         onPointerLeave={() => {
           pointerRef.current = null;
         }}
-        onPointerMove={onPointerMove}
+        onPointerMove={locked ? undefined : onPointerMove}
         ref={canvasRef}
       />
       {pinsOf(marks).map((pin, index) => {
@@ -551,6 +579,7 @@ export const Page = ({
         <TextField
           dark={dark}
           draft={text}
+          locked={locked}
           onCancel={() => {
             textClosed.current = true;
             showText(null);
