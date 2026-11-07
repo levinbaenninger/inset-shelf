@@ -114,20 +114,20 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: ["1–9"], label: "Select a pin" },
         {
           keys: [DRAWING_TOOL_KEYS.select],
-          label: `Select tool: click a mark, ${rangeClick} to add, or drag around marks`,
+          label: `Select: click, ${rangeClick} to add, drag a box`,
         },
         {
           keys: ["Double-click"],
-          label: "Edit text, or add text where you click",
+          label: "Edit text, or add text",
         },
         {
           keys: [k("Up"), k("Down"), k("Left"), k("Right")],
-          label: `Nudge the selection or pin 1 px (${k("Shift")} for 10 px)`,
+          label: `Nudge 1 px (${k("Shift")} for 10 px)`,
         },
         { keys: [k("CommandOrControl+D")], label: "Duplicate the selection" },
         {
           keys: [k("Backspace")],
-          label: "Remove the selection or the selected pin",
+          label: "Remove the selection or pin",
         },
         { keys: ["Esc"], label: "Deselect" },
         { keys: [DRAWING_TOOL_KEYS.pen], label: "Pen" },
