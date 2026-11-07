@@ -1,4 +1,9 @@
-import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
+import {
+  emptyShelf,
+  ItemIdSchema,
+  SectionIdSchema,
+  NO_META,
+} from "@shared/shelf";
 import type { ShelfDoc } from "@shared/shelf";
 import { describe, expect, it, vi } from "vitest";
 
@@ -25,6 +30,9 @@ const actions: AppMenuActions = {
   closeWindow: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),
   copyAsList: vi.fn<() => void>(),
+  field: vi.fn<(field: string) => void>(),
+  newWindowLink: vi.fn<() => void>(),
+  showShortcuts: vi.fn<() => void>(),
   selectAll: vi.fn<() => void>(),
   find: vi.fn<() => void>(),
   item: vi.fn<(action: string) => void>(),
@@ -131,6 +139,7 @@ describe(appMenuTemplate, () => {
         ...doc,
         items: [
           {
+            ...NO_META,
             color: null,
             context: null,
             createdAt: "2026-10-22T10:00:00.000Z",

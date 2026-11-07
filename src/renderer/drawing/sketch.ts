@@ -1,4 +1,5 @@
 /** The drawing as data: marks (pen strokes, lines, arrows, boxes, ellipses, text) in page coordinates, with undo history. */
+import { DRAWING_COLORS } from "@shared/drawing-scene";
 
 /** A point on the drawing page, in CSS pixels from its top-left corner. */
 export interface Point {
@@ -13,7 +14,8 @@ export interface Bounds {
   readonly height: number;
 }
 
-export const COLORS = ["ink", "red", "blue", "green", "orange"] as const;
+/** The inks, the same list a saved drawing's marks are checked against. */
+export const COLORS = DRAWING_COLORS;
 
 export type Color = (typeof COLORS)[number];
 
@@ -43,15 +45,29 @@ export interface TextMark {
   readonly size: number;
 }
 
-export type Mark = PenMark | SegmentMark | TextMark;
+/**
+ * A numbered map pin, kept with the marks so undo covers it, but never drawn
+ * into the saved picture: the shelf keeps pins beside the image and draws
+ * them over it. Its number is its place among the pins.
+ */
+export interface PinMark {
+  readonly kind: "pin";
+  readonly at: Point;
+  readonly label?: string;
+}
 
+export type Mark = PenMark | SegmentMark | TextMark | PinMark;
+
+/** In Excalidraw's order: Select, the shapes, the pen, text, then the shelf's own Pin. */
 export const TOOLS = [
-  "pen",
-  "line",
-  "arrow",
+  "select",
   "rect",
   "ellipse",
+  "arrow",
+  "line",
+  "pen",
   "text",
+  "pin",
 ] as const;
 
 export type Tool = (typeof TOOLS)[number];
@@ -69,14 +85,22 @@ export const TEXT_SIZE: Readonly<Record<Stroke, number>> = {
 /** Line height as a multiple of the font size, shared by the canvas and the text field. */
 export const TEXT_LEADING = 1.25;
 
-export const TEXT_FONT = '"Inter Variable", sans-serif';
+/**
+ * Excalidraw's hand-drawn face (fonts/excalifont), the same on the page and
+ * in every export; Inter only for letters it has no glyph for.
+ */
+export const TEXT_FONT = '"Excalifont", "Inter Variable", sans-serif';
 
-export const fontFor = (size: number): string => `500 ${size}px ${TEXT_FONT}`;
+export const fontFor = (size: number): string => `400 ${size}px ${TEXT_FONT}`;
 
 /** Drags shorter than this are clicks, which draw nothing with the drag tools. */
 const MIN_DRAG = 2;
 
 export const isVisible = (mark: Mark): boolean => {
+  if (mark.kind === "pin") {
+    return true;
+  }
+
   if (mark.kind === "pen") {
     return mark.points.length > 0;
   }
@@ -110,6 +134,13 @@ export const commit = (
 ): History => ({
   future: [],
   past: [...history.past, history.present].slice(-HISTORY_LIMIT),
+  present,
+});
+
+/** Changes the latest step in place, so a key held down undoes as one step. */
+export const amend = (history: History, present: readonly Mark[]): History => ({
+  ...history,
+  future: [],
   present,
 });
 
@@ -193,6 +224,9 @@ export const arrowhead = (
 /** Width of a line of text in CSS pixels at a font size; the page measures with the canvas. */
 export type MeasureText = (text: string, size: number) => number;
 
+/** The room a pin takes above and around its tip, in drawing units. */
+const PIN_REACH = 26;
+
 const boxAround = (points: readonly Point[], margin: number): Bounds | null => {
   if (points.length === 0) {
     return null;
@@ -222,6 +256,16 @@ const segmentPoints = (mark: SegmentMark): readonly Point[] => {
 
 /** The area a mark paints, including half its stroke. */
 export const markBounds = (mark: Mark, measure: MeasureText): Bounds | null => {
+  // A pin's head stands above its tip; a blank drawing keeps room for it.
+  if (mark.kind === "pin") {
+    return {
+      height: PIN_REACH,
+      width: PIN_REACH,
+      x: mark.at.x - PIN_REACH / 2,
+      y: mark.at.y - PIN_REACH,
+    };
+  }
+
   if (mark.kind === "text") {
     const lines = mark.text.split("\n");
     const widest = Math.max(...lines.map((line) => measure(line, mark.size)));

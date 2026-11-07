@@ -8,6 +8,7 @@ export type PageName =
   | "toast"
   | "drawing"
   | "settings"
+  | "picker"
   | "screenshot";
 
 export type InsetRequest =

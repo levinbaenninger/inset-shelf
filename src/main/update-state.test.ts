@@ -138,7 +138,7 @@ describe(updateNotice, () => {
     ).toBe("Downloading version 0.1.901…");
     expect(
       updateNotice(checking(true), { kind: "error", message: "offline" })
-    ).toBe("Couldn't check for updates: offline");
+    ).toBe("Couldn’t check for updates: offline");
   });
 
   it("stays quiet about background checks", () => {

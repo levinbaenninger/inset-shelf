@@ -1,5 +1,6 @@
 import "@/shared/zod-jitless";
 import "@/styles.css";
+import "./fonts/excalifont/excalifont.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 

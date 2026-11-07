@@ -1,5 +1,6 @@
 import type {
   DrawingContract,
+  PickerContract,
   ScreenshotContract,
   SettingsContract,
   ShelfContract,
@@ -15,6 +16,7 @@ declare global {
     readonly insetScreenshot?: Client<ScreenshotContract>;
     readonly insetDrawing?: Client<DrawingContract>;
     readonly insetSettings?: Client<SettingsContract>;
+    readonly insetPicker?: Client<PickerContract>;
     readonly insetFiles?: { readonly pathFor: (file: File) => string };
   }
 }
@@ -45,3 +47,6 @@ export const filePath = (file: File): string =>
 
 export const settingsBridge = (): Client<SettingsContract> =>
   require(window.insetSettings, "settings window");
+
+export const pickerBridge = (): Client<PickerContract> =>
+  require(window.insetPicker, "window-link picker");

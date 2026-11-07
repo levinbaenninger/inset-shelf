@@ -2,7 +2,9 @@ import {
   ArrowUpRight01Icon,
   CircleIcon,
   Copy01Icon,
+  Cursor01Icon,
   Delete02Icon,
+  Location01Icon,
   SlashIcon,
   PencilIcon,
   Redo02Icon,
@@ -12,7 +14,7 @@ import {
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -32,7 +34,9 @@ const TOOL_LABEL: Readonly<Record<Tool, string>> = {
   ellipse: "Ellipse",
   line: "Line",
   pen: "Pen",
+  pin: "Pin",
   rect: "Rectangle",
+  select: "Select",
   text: "Text",
 };
 
@@ -41,7 +45,9 @@ const TOOL_ICON: Readonly<Record<Tool, typeof PencilIcon>> = {
   ellipse: CircleIcon,
   line: SlashIcon,
   pen: PencilIcon,
+  pin: Location01Icon,
   rect: SquareIcon,
+  select: Cursor01Icon,
   text: TextIcon,
 };
 
@@ -55,14 +61,17 @@ const COLOR_LABEL: Readonly<Record<Color, string>> = {
 
 export interface ToolbarProps {
   readonly tool: Tool;
-  readonly color: Color;
-  readonly stroke: Stroke;
+  /** The ink and stroke shown: the selection's, or the next mark's; null when the selection mixes them. */
+  readonly color: Color | null;
+  readonly stroke: Stroke | null;
   readonly dark: boolean;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly canClear: boolean;
   /** There is something to save, and no save is under way. */
   readonly canSave: boolean;
+  /** Its save or a quit is under way: nothing can change the marks (Round 8). */
+  readonly locked: boolean;
   readonly onTool: (tool: Tool) => void;
   readonly onColor: (color: Color) => void;
   readonly onStroke: (stroke: Stroke) => void;
@@ -93,6 +102,11 @@ const Tip = ({
 
 const Divider = () => <div aria-hidden className="bg-border mx-1 h-5 w-px" />;
 
+/** Inks and the stroke restyle what is selected or being typed, so a click on them leaves focus, and with it the selection, where it is. */
+const keepFocus = (event: MouseEvent): void => {
+  event.preventDefault();
+};
+
 /** The floating pill under the page: tools, inks, stroke, history, and saving to the shelf. */
 export const Toolbar = ({
   canClear,
@@ -101,6 +115,7 @@ export const Toolbar = ({
   canUndo,
   color,
   dark,
+  locked,
   onClear,
   onColor,
   onCopyAndSave,
@@ -121,6 +136,7 @@ export const Toolbar = ({
       <Tip key={each} keys={TOOL_KEYS[each]} label={TOOL_LABEL[each]}>
         <Button
           aria-label={TOOL_LABEL[each]}
+          disabled={locked}
           aria-pressed={each === tool}
           onClick={() => {
             onTool(each);
@@ -137,10 +153,12 @@ export const Toolbar = ({
       <Tip key={each} label={COLOR_LABEL[each]}>
         <Button
           aria-label={COLOR_LABEL[each]}
+          disabled={locked}
           aria-pressed={each === color}
           onClick={() => {
             onColor(each);
           }}
+          onMouseDown={keepFocus}
           size="icon-sm"
           variant="ghost"
         >
@@ -154,10 +172,12 @@ export const Toolbar = ({
     <Tip label="Thick stroke">
       <Button
         aria-label="Thick stroke"
+        disabled={locked}
         aria-pressed={stroke === "thick"}
         onClick={() => {
           onStroke(stroke === "thick" ? "thin" : "thick");
         }}
+        onMouseDown={keepFocus}
         size="icon-sm"
         variant="ghost"
       >
@@ -168,7 +188,7 @@ export const Toolbar = ({
     <Tip keys={UNDO_KEYS} label="Undo">
       <Button
         aria-label="Undo"
-        disabled={!canUndo}
+        disabled={locked || !canUndo}
         onClick={onUndo}
         size="icon-sm"
         variant="ghost"
@@ -179,7 +199,7 @@ export const Toolbar = ({
     <Tip keys={REDO_KEYS} label="Redo">
       <Button
         aria-label="Redo"
-        disabled={!canRedo}
+        disabled={locked || !canRedo}
         onClick={onRedo}
         size="icon-sm"
         variant="ghost"
@@ -190,7 +210,7 @@ export const Toolbar = ({
     <Tip label="Clear">
       <Button
         aria-label="Clear"
-        disabled={!canClear}
+        disabled={locked || !canClear}
         onClick={onClear}
         size="icon-sm"
         variant="ghost"
@@ -202,7 +222,7 @@ export const Toolbar = ({
     <Tip label="Copy and Save">
       <Button
         aria-label="Copy and Save"
-        disabled={!canSave}
+        disabled={locked || !canSave}
         onClick={onCopyAndSave}
         size="icon-sm"
         variant="ghost"
@@ -213,7 +233,7 @@ export const Toolbar = ({
     <Tip keys={SAVE_KEYS} label="Save">
       <Button
         aria-label="Save"
-        disabled={!canSave}
+        disabled={locked || !canSave}
         onClick={onSave}
         size="icon-sm"
       >

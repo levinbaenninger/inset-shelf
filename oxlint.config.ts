@@ -14,6 +14,19 @@ export default defineConfig({
   options: { typeAware: true },
   overrides: [
     {
+      // Plain JavaScript the screens harness injects into a page: untyped by nature.
+      files: ["scripts/fixtures/**"],
+      rules: {
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/promise-function-async": "off",
+        "typescript/strict-boolean-expressions": "off",
+      },
+    },
+    {
       files: ["src/shared/**"],
       rules: {
         "no-restricted-imports": [

@@ -2,27 +2,34 @@ import { randomUUID } from "node:crypto";
 import { access, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
 
 import {
   drawingContract,
+  pickerContract,
   screenshotContract,
   settingsContract,
   shelfContract,
   toastContract,
 } from "@shared/contracts";
-import type { ActionResult, Permission, ShelfCommand } from "@shared/contracts";
+import type {
+  ActionResult,
+  NoticeTone,
+  Permission,
+  PickerView,
+  ShelfCommand,
+} from "@shared/contracts";
+import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { IconPlace, SettingsView } from "@shared/settings";
-import {
-  ItemIdSchema,
-  SectionIdSchema,
-  itemsAsList,
-  itemTextWithLink,
-  listHtmlWithImage,
+import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
+import type {
+  ItemContext,
+  ItemId,
+  MainOp,
+  ShelfItem,
+  WindowRef,
 } from "@shared/shelf";
-import type { ItemContext, ItemId, MainOp, ShelfItem } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import { desktopLink, isAppLink, openingApp } from "@shared/web-source";
 import {
@@ -39,13 +46,22 @@ import {
   screen,
   shell,
   systemPreferences,
+  webContents,
 } from "electron";
-import type { NativeImage } from "electron";
+import type {
+  MenuItemConstructorOptions,
+  NativeImage,
+  WebContents,
+} from "electron";
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { chatGptThreadLink } from "./codex-threads";
+import { createCopyCommands } from "./copy-commands";
+import { createCopyGate } from "./copy-gate";
+import type { ClipboardContents } from "./copy-gate";
 import { copySource } from "./copy-source";
+import { createDrawingSaves } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
@@ -53,8 +69,23 @@ import { createDragStaging, exportImage } from "./exports";
 import { frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
-import { openApp } from "./open-app";
+import {
+  answerMenuKeys,
+  createMenuOpenTracker,
+  holdMenuBarKeys,
+} from "./menu-open";
+import { openApp, openAppAt } from "./open-app";
+import { createPageSettle, followPage } from "./page-settle";
+import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
+import {
+  createQuitHold,
+  drawingMarks,
+  NATIVE_ANSWERS,
+  nativeDialog,
+  withinWait,
+} from "./quit-hold";
+import { causeText, FsErrorSchema } from "./save-error";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
@@ -62,6 +93,7 @@ import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
+import type { WriteResult } from "./shelf-store";
 import { createShelfWindow } from "./shelf-window";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
@@ -69,6 +101,7 @@ import type { ShelfTray } from "./tray";
 import type { TrayAction } from "./tray-menu";
 import { updateNotice } from "./update-state";
 import { createUpdater } from "./updater";
+import { canListWindows, createWindowLinker } from "./window-links";
 import {
   appOrigin,
   pageUrl,
@@ -78,17 +111,18 @@ import {
 } from "./window-security";
 
 const PRODUCT_NAME = "Inset Shelf";
+
+const ignore = (): void => undefined;
 const APP_ID = "ch.inset.prototype.shelf";
 
 /** Fixed constants: never built from renderer input. */
 const MAC_ACCESSIBILITY_SETTINGS =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
-const KEYS_POLL_MS = 3000;
+const MAC_SCREEN_SETTINGS =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
 
-/** The macOS pasteboard type for a file, which Electron reaches through its raw formats. */
-const MAC_FILE_URL =
-  'electron application/osclipboard;format="public.file-url"';
+const KEYS_POLL_MS = 3000;
 
 const TOAST_EXCERPT = 80;
 
@@ -115,8 +149,12 @@ const logRejected = (channel: string, reason: string): void => {
   console.warn(`Rejected IPC on ${channel}: ${reason}`);
 };
 
+/** A common disk problem reads as its sentence (Round 7); anything else in its own words. */
 const errorMessage = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : "Unknown error";
+  causeText(
+    FsErrorSchema.safeParse(cause).data?.code ?? null,
+    cause instanceof Error ? cause.message : "Unknown error"
+  );
 
 const trayIconPath = (): string => {
   const base = app.isPackaged
@@ -143,12 +181,7 @@ const excerpt = (text: string): string => {
     : line;
 };
 
-/** What one clipboard item holds, format by format. */
-type ClipboardData = ConstructorParameters<typeof ClipboardItem>[0];
-
-type ClipboardSnapshot = readonly ClipboardData[];
-
-const snapshotClipboard = async (): Promise<ClipboardSnapshot> => {
+const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
   const items = await clipboard.read();
 
   return await Promise.all(
@@ -178,16 +211,6 @@ const readClipboardHtml = async (): Promise<string> => {
   return await html.text();
 };
 
-const restoreClipboard = async (saved: ClipboardSnapshot): Promise<void> => {
-  if (saved.length === 0) {
-    clipboard.clear();
-
-    return;
-  }
-
-  await clipboard.write(saved.map((data) => new ClipboardItem(data)));
-};
-
 /** Opens the chat or page an item came from in its desktop app, else (macOS only) just brings the app forward. */
 const openInApp = async (
   name: string,
@@ -206,6 +229,42 @@ const openInApp = async (
     await shell.openExternal(link);
   } else if (isMac) {
     openApp(name);
+  }
+};
+
+/** The note a new window link starts as: the windows' titles, which the user can then edit. */
+const linkText = (windows: readonly WindowRef[]): string =>
+  windows.map((window) => window.title ?? window.app ?? "Window").join(" · ");
+
+/** Pages with a menu open, which then take every key themselves (src/renderer/lib/menu-keys.ts). */
+const menus = createMenuOpenTracker<WebContents>();
+
+/** The app menu, whose keys do nothing while the focused page has a menu open. */
+const heldMenuTemplate = (
+  ...args: Parameters<typeof appMenuTemplate>
+): MenuItemConstructorOptions[] =>
+  holdMenuBarKeys(appMenuTemplate(...args), () =>
+    menus.isOpen(webContents.getFocusedWebContents())
+  );
+
+/**
+ * Reopens a linked window: its page in the browser, its file in its app,
+ * else its app brought forward. Every target was read by main when the
+ * window was linked, never sent by a page.
+ */
+const reopenWindow = (window: WindowRef): void => {
+  if (window.url !== null && /^https?:\/\//u.test(window.url)) {
+    void shell.openExternal(window.url);
+  } else if (window.document !== null) {
+    void shell.openPath(window.document);
+  } else if (window.appPath !== null) {
+    if (isMac) {
+      openAppAt(window.appPath);
+    } else {
+      void shell.openPath(window.appPath);
+    }
+  } else if (window.app !== null && isMac) {
+    openApp(window.app);
   }
 };
 
@@ -271,6 +330,14 @@ const freePath = async (folder: string, name: string): Promise<string> => {
   return path.join(folder, `${stem} ${Date.now()}${ext}`);
 };
 
+const setTimer = (run: () => void, ms: number): (() => void) => {
+  const timer = setTimeout(run, ms);
+
+  return () => {
+    clearTimeout(timer);
+  };
+};
+
 const start = async (): Promise<void> => {
   await app.whenReady();
 
@@ -280,6 +347,26 @@ const start = async (): Promise<void> => {
     credits: "A prototype for the Inset capture experiments.",
   });
   secureSession();
+
+  // Item 8: Windows has no menu bar for the frameless shelf to take the menu's
+  // keys from, so every window reads them itself and runs the entry.
+  if (!isMac) {
+    app.on("browser-window-created", (_event, window) => {
+      const contents = window.webContents;
+
+      answerMenuKeys({
+        held: () => menus.isOpen(contents),
+        menu: () => Menu.getApplicationMenu()?.items ?? [],
+        onKey: (listener) => {
+          contents.on("before-input-event", listener);
+        },
+        run: (entry) => {
+          // Electron types click as Function. It is an arrow function taking (event, focusedWindow, focusedWebContents).
+          entry.click.call(undefined, undefined, window, contents);
+        },
+      });
+    });
+  }
 
   const dataDir = app.getPath("userData");
 
@@ -308,18 +395,15 @@ const start = async (): Promise<void> => {
       now: () => new Date(),
     },
     initial: store.initial,
+    restore: store.restorePrevious,
     save: store.save,
-    setTimer: (run, ms) => {
-      const timer = setTimeout(run, ms);
-
-      return () => {
-        clearTimeout(timer);
-      };
-    },
+    setTimer,
     status: {
       floatOnTop: true,
       keys: keyPermission(true, trusted()),
       problem: store.recovered,
+      quitPrompt: null,
+      readOnly: store.readOnly,
       saveError: null,
       selectionCapture,
     },
@@ -339,6 +423,8 @@ const start = async (): Promise<void> => {
     preload: preloadPath("shelf"),
     url: pageUrl("shelf"),
   });
+
+  menus.watch(shelf.webContents, shelf.dialogParent);
 
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
@@ -392,31 +478,14 @@ const start = async (): Promise<void> => {
     url: pageUrl("drawing"),
   });
 
-  // The image item open in the drawing window; null for a new drawing.
-  let drawingItem: ItemId | null = null;
+  // Set once the IPC servers exist; nothing can quit before then.
+  let askPageToSettle: (seq: number) => void = ignore;
+  let askDrawingToSave: () => void = ignore;
 
-  const newDrawing = (): void => {
-    drawingItem = null;
-    drawing.open(null);
-  };
-
-  const openImage = (id: ItemId): void => {
-    const item = controller.item(id);
-
-    if (item?.kind !== "image") {
-      return;
-    }
-
-    drawingItem = id;
-    e2eLog("drawingShown", { itemId: id });
-    drawing.open({
-      heightPx: item.image.heightPx,
-      pin: item.pin,
-      pixelsPerDip: item.image.pixelsPerDip,
-      url: insetUrl.attachment(item.image.file),
-      widthPx: item.image.widthPx,
-    });
-  };
+  // Quitting first asks the shelf page for an edit still being typed; it answers once it has sent it.
+  const pageSettle = createPageSettle((seq) => {
+    askPageToSettle(seq);
+  });
 
   const toast = createToastWindow({
     preload: preloadPath("toast"),
@@ -481,6 +550,19 @@ const start = async (): Promise<void> => {
     rendererRoot: rendererRoot(),
   });
 
+  // Every copy goes through this gate: a copy of items waits for the disk, and copies nothing when the save failed.
+  const gate = createCopyGate({
+    clipboard,
+    copyState: controller.copyState,
+    discards: controller.discards,
+    onWrite: screenshots.ignoreClipboard,
+    persisted: async (rev) =>
+      await withinWait(controller.persisted(rev), setTimer),
+    readOnly: store.readOnly,
+    snapshot: controller.snapshot,
+    toItem: (data) => new ClipboardItem(data),
+  });
+
   const keyMonitor = createKeyMonitor();
 
   let capturingSelection = false;
@@ -503,18 +585,12 @@ const start = async (): Promise<void> => {
 
     try {
       const capture = captureSelection({
-        clear: () => {
-          screenshots.ignoreClipboard();
-          clipboard.clear();
-        },
+        clear: gate.clearForSelection,
         copy: keyMonitor.copy,
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),
-        restore: async (saved) => {
-          screenshots.ignoreClipboard();
-          await restoreClipboard(saved);
-        },
+        restore: gate.restore,
         snapshot: snapshotClipboard,
         wait: delay,
       });
@@ -654,7 +730,7 @@ const start = async (): Promise<void> => {
             pixelsPerDip: 1,
             widthPx: width,
           },
-          pin: null,
+          pins: [],
           source: null,
           type: "addImage",
           via: "paste",
@@ -671,7 +747,7 @@ const start = async (): Promise<void> => {
         type: "addFile",
       };
     } catch {
-      return { problem: `${added.name} couldn't be read.` };
+      return { problem: `${added.name} couldn’t be read.` };
     }
   };
 
@@ -736,8 +812,11 @@ const start = async (): Promise<void> => {
   };
 
   // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
-  let notify: (message: string) => void = (message) => {
-    toast.show(message, "");
+  let notify: (message: string, tone?: NoticeTone) => void = (
+    message,
+    tone
+  ) => {
+    toast.show(message, "", tone);
   };
 
   const pickFiles = async (): Promise<void> => {
@@ -759,148 +838,217 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /**
-   * Items as one numbered list, with the first image (pin drawn in) in its
-   * HTML, so apps that paste formatting show the picture with the words and
-   * the rest keep the words. Without any words, the image alone.
-   */
-  const copyList = async (ids: readonly ItemId[]): Promise<ActionResult> => {
-    screenshots.ignoreClipboard();
+  const copies = createCopyCommands({
+    exportImage: (item) => {
+      const file = store.attachmentPath(item.image.file);
+      const exported = file === null ? null : exportImage(item, file);
 
-    const items = ids.flatMap((id) => {
-      const item = controller.item(id);
-
-      return item === undefined ? [] : [item];
-    });
-
-    const list = itemsAsList(items);
-    const firstImage = items.find((item) => item.kind === "image");
-
-    const imageFile =
-      firstImage?.kind === "image"
-        ? store.attachmentPath(firstImage.image.file)
-        : null;
-
-    const exported =
-      firstImage?.kind === "image" && imageFile !== null
-        ? exportImage(firstImage, imageFile)
-        : null;
-
-    if (list.count === 0 && exported === null) {
-      return { message: "There is nothing to copy.", ok: false };
-    }
-
-    try {
-      const data: ClipboardData = {};
-
-      if (list.count > 0) {
-        const html =
-          exported === null || firstImage?.kind !== "image"
-            ? list.html
-            : listHtmlWithImage(list.html, {
-                alt: firstImage.note.trim() === "" ? "Image" : firstImage.note,
-                base64: Buffer.from(exported.png).toString("base64"),
-                width:
-                  exported.image.getSize().width /
-                  firstImage.image.pixelsPerDip,
-              });
-
-        data["text/plain"] = new Blob([list.text], { type: "text/plain" });
-        data["text/html"] = new Blob([html], { type: "text/html" });
-      } else if (exported !== null) {
-        data["image/png"] = new Blob([exported.png], { type: "image/png" });
-      }
-
-      await clipboard.write([new ClipboardItem(data)]);
-
+      return exported === null
+        ? null
+        : { png: exported.png, widthPx: exported.image.getSize().width };
+    },
+    gate,
+    mac: isMac,
+    onCopied: (ids, kind) => {
+      // Checked off as the items are now: one checked off while the copy waited stays checked.
       if (settings.current().markDoneOnCopy) {
-        for (const item of items) {
-          if (!item.done) {
-            controller.apply({ id: item.id, type: "toggleDone" });
+        for (const id of ids) {
+          if (controller.item(id)?.done === false) {
+            controller.apply({ id, type: "toggleDone" });
           }
         }
       }
 
-      e2eLog("copied", { kind: "list" });
+      const [firstId] = ids;
 
-      return { ok: true };
+      const first =
+        kind === "list" || firstId === undefined
+          ? undefined
+          : controller.item(firstId);
+
+      e2eLog(
+        "copied",
+        first === undefined
+          ? { kind: "list" }
+          : { itemId: first.id, kind: first.kind }
+      );
+    },
+    stageFile: (item) => {
+      const stored = store.attachmentPath(item.file.stored);
+
+      return stored === null
+        ? null
+        : staging.copy(item.id, item.file.name, stored);
+    },
+  });
+
+  // The window-link picker: New Window Link… makes a note, Link Window… adds to an item.
+  const picker = createPickerWindow({
+    handOff: focusShelf,
+    preload: preloadPath("picker"),
+    url: pageUrl("picker"),
+  });
+
+  const linker = createWindowLinker({
+    now: () => new Date(),
+    ownSourceIds: () =>
+      new Set(
+        BrowserWindow.getAllWindows().map((window) => window.getMediaSourceId())
+      ),
+    writeAttachment: store.writeAttachment,
+  });
+
+  let pickerTarget: ItemId | null = null;
+
+  let pickerView: PickerView = {
+    linking: false,
+    seq: 0,
+    state: { kind: "loading" },
+    target: { kind: "new" },
+  };
+
+  // Set once the picker's IPC server exists.
+  let showPickerView: ((view: PickerView) => void) | null = null;
+
+  const setPickerView = (patch: Partial<PickerView>): void => {
+    pickerView = { ...pickerView, ...patch };
+    showPickerView?.(pickerView);
+  };
+
+  const listWindows = async (): Promise<void> => {
+    const { seq } = pickerView;
+
+    if (!canListWindows()) {
+      setPickerView({ state: { kind: "permission" } });
+
+      return;
+    }
+
+    setPickerView({ state: { kind: "loading" } });
+
+    try {
+      const candidates = await linker.list();
+
+      // A newer opening started over meanwhile.
+      if (pickerView.seq === seq) {
+        setPickerView({ state: { candidates, kind: "ready" } });
+      }
     } catch (error) {
-      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
+      setPickerView({
+        state: {
+          kind: "failed",
+          message: `The open windows couldn’t be listed: ${errorMessage(error)}`,
+        },
+      });
     }
   };
 
-  const copyItem = async (id: ItemId): Promise<ActionResult> => {
-    screenshots.ignoreClipboard();
+  const openPicker = (target: ItemId | null): void => {
+    const item = target === null ? undefined : controller.item(target);
 
-    const item = controller.item(id);
+    pickerTarget = item === undefined ? null : item.id;
+    setPickerView({
+      linking: false,
+      seq: pickerView.seq + 1,
+      state: { kind: "loading" },
+      target:
+        item === undefined
+          ? { kind: "new" }
+          : { kind: "item", label: excerpt(itemText(item)) },
+    });
+    picker.open();
+    void listWindows();
+  };
 
-    if (item === undefined) {
-      return { message: "This item no longer exists.", ok: false };
-    }
+  const chooseWindows = async (
+    ids: readonly string[]
+  ): Promise<ActionResult> => {
+    setPickerView({ linking: true });
 
     try {
-      if (item.kind === "text" && item.html !== null) {
-        // The copied HTML goes back next to the text, so links and formatting paste too.
-        await clipboard.write([
-          new ClipboardItem({
-            "text/html": new Blob([item.html], { type: "text/html" }),
-            "text/plain": new Blob([item.text], { type: "text/plain" }),
-          }),
-        ]);
-      } else if (item.kind === "text") {
-        await clipboard.writeText(item.text);
-      } else if (item.kind === "file") {
-        const stored = store.attachmentPath(item.file.stored);
+      const windows = await linker.capture(ids);
 
-        if (stored === null) {
-          return { message: "The file can't be read.", ok: false };
-        }
+      if (windows.length === 0) {
+        setPickerView({ linking: false });
 
-        // A named copy goes on the clipboard as a file, so it pastes into Finder, Explorer or Mail as itself.
-        const file = staging.copy(id, item.file.name, stored);
-        const url = pathToFileURL(file).href;
-
-        await clipboard.write([
-          new ClipboardItem({
-            // On Windows a URI list becomes a file drop list (CF_HDROP).
-            ...(isMac
-              ? { [MAC_FILE_URL]: new Blob([url]) }
-              : {
-                  "text/uri-list": new Blob([url], { type: "text/uri-list" }),
-                }),
-            "text/plain": new Blob([item.file.name], { type: "text/plain" }),
-          }),
-        ]);
-      } else {
-        const file = store.attachmentPath(item.image.file);
-        const exported = file === null ? null : exportImage(item, file);
-
-        if (exported === null) {
-          return { message: "The image can't be read.", ok: false };
-        }
-
-        // The note travels as text next to the image, so a chat box can take both.
-        const data: ClipboardData = {
-          "image/png": new Blob([exported.png], { type: "image/png" }),
+        return {
+          message: "Those windows are gone. Refresh the list and pick again.",
+          ok: false,
         };
+      }
 
-        if (item.note.trim() !== "") {
-          data["text/plain"] = new Blob([item.note], { type: "text/plain" });
+      const target =
+        pickerTarget === null ? undefined : controller.item(pickerTarget);
+
+      picker.close();
+
+      if (target === undefined) {
+        const id = controller.apply({
+          context: null,
+          html: null,
+          text: linkText(windows),
+          type: "addText",
+          via: "typed",
+          windows: [...windows],
+        });
+
+        await showShelf();
+
+        if (id !== null) {
+          e2eLog("itemAdded", { itemId: id, kind: "text", via: "windowLink" });
+          controller.focus(id, true);
         }
-
-        await clipboard.write([new ClipboardItem(data)]);
+      } else {
+        controller.apply({
+          id: target.id,
+          type: "attachWindows",
+          windows: [...windows],
+        });
+        notify(
+          windows.length === 1
+            ? "Linked 1 window"
+            : `Linked ${windows.length} windows`
+        );
       }
-
-      if (settings.current().markDoneOnCopy && !item.done) {
-        controller.apply({ id, type: "toggleDone" });
-      }
-
-      e2eLog("copied", { itemId: id, kind: item.kind });
 
       return { ok: true };
     } catch (error) {
-      return { message: `Couldn't copy: ${errorMessage(error)}`, ok: false };
+      setPickerView({ linking: false });
+
+      return {
+        message: `The windows couldn’t be linked: ${errorMessage(error)}`,
+        ok: false,
+      };
     }
+  };
+
+  const pickerServer = serveContract(
+    pickerContract,
+    {
+      cancel: () => {
+        picker.close();
+      },
+      choose: chooseWindows,
+      getView: () => pickerView,
+      openScreenSettings: () => {
+        if (isMac) {
+          void shell.openExternal(MAC_SCREEN_SETTINGS);
+        }
+      },
+      refresh: () => {
+        void listWindows();
+      },
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => picker.webContents,
+    }
+  );
+
+  showPickerView = (view) => {
+    pickerServer.emit("view", view);
   };
 
   // Set once the shelf's IPC server exists; menus built before then only reach it later.
@@ -910,6 +1058,244 @@ const start = async (): Promise<void> => {
   const setFloatOnTop = (on: boolean): void => {
     shelf.setFloatOnTop(on);
     controller.setStatus({ floatOnTop: on });
+  };
+
+  /**
+   * Shows the shelf with the saved image; when Copy and Save could not copy,
+   * it says why there. `saving`: a new drawing copied before it reached the
+   * disk, which says so if it never does.
+   */
+  const showSaved = async (
+    copied: ActionResult | null,
+    saving: Promise<WriteResult> | null = null
+  ): Promise<void> => {
+    await showShelf();
+
+    if (copied !== null && !copied.ok) {
+      notify(copied.message, "failed");
+
+      return;
+    }
+
+    const saved = await saving;
+
+    if (saved !== null && !saved.ok) {
+      notify(`Copied, but not saved to disk. ${saved.message}`, "failed");
+    }
+  };
+
+  const drawingSaves = createDrawingSaves({
+    added: (id, via) => {
+      e2eLog("itemAdded", { itemId: id, kind: "image", via });
+      controller.focus(id);
+    },
+    clearStaging: (id) => {
+      staging.clear(id);
+    },
+    close: () => {
+      drawing.close();
+    },
+    controller,
+    copies,
+    decode: (png) => {
+      const image = nativeImage.createFromBuffer(Buffer.from(png));
+
+      if (image.isEmpty()) {
+        return null;
+      }
+
+      const { height, width } = image.getSize();
+
+      return { heightPx: height, png: image.toPNG(), widthPx: width };
+    },
+    ended: () => {
+      drawing.saveEnded();
+    },
+    readFile: async (file) => {
+      try {
+        return new Uint8Array(await readFile(file));
+      } catch {
+        return null;
+      }
+    },
+    show: (copied, saving) => {
+      void showSaved(copied, saving);
+    },
+    store,
+  });
+
+  /**
+   * Quitting and the update restart wait here for the page, the drawing
+   * window and the disk. Changes they still don't hold keep the app open
+   * and the shelf asks what to do, or main does when the page can't.
+   */
+  const quitHold = createQuitHold({
+    ask: async (question) => {
+      const text = nativeDialog(question, PRODUCT_NAME);
+
+      if (isMac) {
+        app.focus({ steal: true });
+      }
+
+      const { response } = await dialog.showMessageBox({
+        buttons: [...text.buttons],
+        cancelId: 2,
+        defaultId: 0,
+        detail: text.detail,
+        message: text.message,
+        noLink: true,
+        type: "warning",
+      });
+
+      return NATIVE_ANSWERS[response] ?? "cancel";
+    },
+    flush: controller.flush,
+    pageDrafts: pageSettle.drafts,
+    prompt: (quitPrompt) => {
+      controller.setStatus({ quitPrompt });
+      // Above the drawing window, which floats over the shelf.
+      shelf.raiseForPrompt(quitPrompt !== null);
+
+      if (quitPrompt === null) {
+        return;
+      }
+
+      // From the notification area, the window in front is a part of the taskbar.
+      if (shelf.isVisible()) {
+        shelf.focus();
+      } else {
+        void showShelf({ dock: isMac });
+      }
+    },
+    quitting: (busy) => {
+      drawing.setQuitting(busy);
+    },
+    saveDrawing: async (stop) => {
+      const saved = drawing.whenSaved();
+
+      drawingSaves.forQuit(stop);
+      askDrawingToSave();
+      await saved;
+    },
+    settlePage: pageSettle.request,
+    setTimer,
+    state: () => {
+      const { status } = controller.view();
+      const marks = drawingSaves.state();
+
+      return {
+        drawing: drawingMarks(drawing.isDirty(), marks.onShelf),
+        drawingError: marks.error,
+        readOnly: status.readOnly,
+        saveError: status.saveError,
+        unsaved: controller.unsaved(),
+      };
+    },
+  });
+
+  // A crash, reload or navigation of the shelf page: its settle gets no answer, and a prompt it showed is asked in main's dialog.
+  followPage(shelf.webContents, () => {
+    pageSettle.reset();
+    quitHold.pageEnded();
+  });
+
+  const drawingServer = serveContract(
+    drawingContract,
+    {
+      cancel: () => {
+        drawing.close();
+      },
+      // The image the window opened on, whatever a save during a held quit has put on the shelf since.
+      getImage: async () => await drawingSaves.image(),
+      getView: () => drawing.view(),
+      setDirty: (dirty) => {
+        drawing.setDirty(dirty);
+        drawingSaves.changed();
+      },
+      save: drawingSaves.save,
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => drawing.webContents,
+    }
+  );
+
+  // Unsaved marks are never replaced by another drawing: their window comes forward instead, and says why.
+  const keepDrawing = (): void => {
+    drawing.bringForward();
+    drawingServer.emit("openRefused", null);
+  };
+
+  const newDrawing = (): void => {
+    if (drawing.isDirty()) {
+      keepDrawing();
+
+      return;
+    }
+
+    drawingSaves.open(null);
+    drawing.open({ image: null, marks: [], pinMode: false });
+  };
+
+  /** Annotate on the picture the window already shows only brings it forward; other unsaved marks keep the window. True when the window is taken. */
+  const drawingTaken = (id: ItemId): boolean => {
+    if (!drawing.isDirty()) {
+      return false;
+    }
+
+    if (drawingSaves.target() === id) {
+      drawing.bringForward();
+    } else {
+      keepDrawing();
+    }
+
+    return true;
+  };
+
+  /** Opens an image item to draw on, with the marks a save kept beside it to edit again. */
+  const openImage = async (id: ItemId, pinMode = false): Promise<void> => {
+    const before = controller.item(id);
+
+    if (before?.kind !== "image" || drawingTaken(id)) {
+      return;
+    }
+
+    const opening = await drawingSaves.opening(before);
+    const item = controller.item(id);
+
+    // Anything can happen while the marks are read: the window and the item are checked again, as they are now.
+    if (item?.kind !== "image" || drawingTaken(id)) {
+      return;
+    }
+
+    if (
+      item.image.file !== before.image.file ||
+      item.scene?.file !== before.scene?.file
+    ) {
+      await openImage(id, pinMode);
+
+      return;
+    }
+
+    const { picture } = opening;
+
+    drawingSaves.open({ id, opening });
+    e2eLog("drawingShown", { itemId: id });
+    drawing.open({
+      image:
+        picture === null
+          ? null
+          : {
+              heightPx: picture.heightPx,
+              pixelsPerDip: picture.pixelsPerDip,
+              url: insetUrl.attachment(picture.file),
+              widthPx: picture.widthPx,
+            },
+      marks: openedMarks(opening.marks, item.pins, item.image.pixelsPerDip),
+      pinMode,
+    });
   };
 
   const shelfServer = serveContract(
@@ -926,27 +1312,45 @@ const start = async (): Promise<void> => {
       attachFiles: () => {
         void pickFiles();
       },
-      copy: copyItem,
-      copyList,
-      copyWithLink: (id) => {
-        screenshots.ignoreClipboard();
+      copy: copies.copy,
+      copyDetails: copies.copyDetails,
+      copyList: copies.copyList,
+      copyWithLink: copies.copyWithLink,
+      linkWindows: (id) => {
+        openPicker(id);
+      },
+      newWindowLink: () => {
+        openPicker(null);
+      },
+      reopenWindow: ({ id, windowId }) => {
+        const windows = controller.item(id)?.windows ?? [];
 
-        const item = controller.item(id);
-
-        if (item !== undefined) {
-          void clipboard.writeText(itemTextWithLink(item));
+        for (const window of windows) {
+          if (windowId === undefined || window.id === windowId) {
+            reopenWindow(window);
+          }
         }
       },
       dismissProblem: () => {
         controller.setStatus({ problem: null });
       },
+      retrySave: async () => await withinWait(controller.flush(), setTimer),
+      answerQuit: quitHold.answer,
+      discardChanges: (id) => {
+        controller.discard(id);
+      },
+      drafts: pageSettle.setDrafts,
+      settled: pageSettle.answered,
       getView: () => controller.view(),
       hide: () => {
         shelf.hide();
       },
+      menuOpen: (open) => {
+        menus.set(shelf.webContents, open);
+      },
       nativeEdit: (action) => {
         if (action === "copy") {
-          shelf.webContents.copy();
+          gate.copySelection(shelf.webContents);
         } else if (action === "selectAll") {
           shelf.webContents.selectAll();
         } else if (action === "redo") {
@@ -957,7 +1361,12 @@ const start = async (): Promise<void> => {
       },
       newDrawing,
       openHelp,
-      openImage,
+      openImage: (id) => {
+        void openImage(id);
+      },
+      openPins: (id) => {
+        void openImage(id, true);
+      },
       openKeySettings,
       openLink: ({ id, url }) => {
         const item = controller.item(id);
@@ -1002,7 +1411,7 @@ const start = async (): Promise<void> => {
 
         const id = controller.apply({
           image: { file, heightPx: height, pixelsPerDip: 1, widthPx: width },
-          pin: null,
+          pins: [],
           source: null,
           type: "addImage",
           via: "paste",
@@ -1029,120 +1438,15 @@ const start = async (): Promise<void> => {
     }
   );
 
-  /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
-  const DRAWING_PIXELS_PER_DIP = 2;
-
-  /** Puts the annotated image in place of the old one, which is deleted once the shelf is saved. */
-  const saveAnnotation = async (
-    id: ItemId,
-    image: NativeImage,
-    copy: boolean
-  ): Promise<ActionResult> => {
-    const item = controller.item(id);
-
-    if (item?.kind !== "image") {
-      return { message: "This image is no longer on the shelf.", ok: false };
-    }
-
-    const { height, width } = image.getSize();
-
-    controller.apply({
-      id,
-      image: {
-        file: await store.writeAttachment(image.toPNG()),
-        heightPx: height,
-        pixelsPerDip: item.image.pixelsPerDip,
-        widthPx: width,
-      },
-      type: "replaceImage",
-    });
-    // Copies dragged out earlier show the old picture.
-    staging.clear(id);
-
-    if (copy) {
-      await copyItem(id);
-    }
-
-    drawing.close();
-    e2eLog("itemAdded", { itemId: id, kind: "image", via: "annotation" });
-    controller.focus(id);
-    void showShelf();
-
-    return { ok: true };
-  };
-
-  const drawingServer = serveContract(
-    drawingContract,
-    {
-      cancel: () => {
-        drawing.close();
-      },
-      getImage: async () => {
-        const item =
-          drawingItem === null ? undefined : controller.item(drawingItem);
-
-        const file =
-          item?.kind === "image" ? store.attachmentPath(item.image.file) : null;
-
-        return file === null ? null : new Uint8Array(await readFile(file));
-      },
-      getView: () => drawing.view(),
-      setDirty: drawing.setDirty,
-      save: async ({ copy, png }) => {
-        const image = nativeImage.createFromBuffer(Buffer.from(png));
-
-        if (image.isEmpty()) {
-          return { message: "The drawing could not be read.", ok: false };
-        }
-
-        if (drawingItem !== null) {
-          return await saveAnnotation(drawingItem, image, copy);
-        }
-
-        const { height, width } = image.getSize();
-
-        const id = controller.apply({
-          context: null,
-          image: {
-            file: await store.writeAttachment(image.toPNG()),
-            heightPx: height,
-            pixelsPerDip: DRAWING_PIXELS_PER_DIP,
-            widthPx: width,
-          },
-          pin: null,
-          source: null,
-          type: "addImage",
-          via: "drawing",
-        });
-
-        if (copy && id !== null) {
-          await copyItem(id);
-        }
-
-        drawing.close();
-
-        if (id !== null) {
-          e2eLog("itemAdded", { itemId: id, kind: "image", via: "drawing" });
-          controller.focus(id);
-          void showShelf();
-        }
-
-        return { ok: true };
-      },
-    },
-    {
-      appOrigin: appOrigin(),
-      ipc: ipcMain,
-      onRejected: logRejected,
-      target: () => drawing.webContents,
-    }
-  );
-
   drawing.onView((view) => {
     drawingServer.emit("view", view);
   });
+  askDrawingToSave = () => {
+    drawingServer.emit("saveForQuit", null);
+  };
+
   drawing.onCloseRequest(() => {
-    drawingServer.emit("confirmClose", null);
+    drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
   /** The card's screenshot, when it is still the newest; null for an older card's request. */
@@ -1174,7 +1478,7 @@ const start = async (): Promise<void> => {
         pixelsPerDip: scaleFactor,
         widthPx: width,
       },
-      pin: null,
+      pins: [],
       source: null,
       type: "addImage",
       via: "screenshot",
@@ -1226,7 +1530,7 @@ const start = async (): Promise<void> => {
           }
 
           controller.focus(id);
-          openImage(id);
+          await openImage(id);
         })();
       },
       copy: (seq) => {
@@ -1236,15 +1540,21 @@ const start = async (): Promise<void> => {
           return;
         }
 
-        shot = null;
-        screenshotCard.hide();
-        screenshots.ignoreClipboard();
         void (async () => {
-          await clipboard.write([
-            new ClipboardItem({
-              "image/png": new Blob([current.png], { type: "image/png" }),
-            }),
-          ]);
+          const copied = await copies.copyScreenshot(current.png);
+
+          if (!copied.ok) {
+            // The card stays, so the screenshot isn't lost.
+            notify(copied.message, "failed");
+
+            return;
+          }
+
+          if (shot === current) {
+            shot = null;
+            screenshotCard.hide();
+          }
+
           notify("Copied screenshot");
         })();
       },
@@ -1282,7 +1592,7 @@ const start = async (): Promise<void> => {
             notify("Saved to Downloads");
           } catch (error) {
             controller.setStatus({
-              problem: `The screenshot couldn't be saved: ${errorMessage(error)}`,
+              problem: `The screenshot couldn’t be saved: ${errorMessage(error)}`,
             });
           }
         })();
@@ -1331,11 +1641,15 @@ const start = async (): Promise<void> => {
     shelfServer.emit("command", command);
   };
 
-  notify = (message) => {
+  askPageToSettle = (seq) => {
+    shelfServer.emit("settle", seq);
+  };
+
+  notify = (message, tone = "done") => {
     if (shelf.isVisible()) {
-      shelfServer.emit("notice", { message });
+      shelfServer.emit("notice", { message, tone });
     } else {
-      toast.show(message, "");
+      toast.show(message, "", tone);
     }
   };
 
@@ -1349,6 +1663,12 @@ const start = async (): Promise<void> => {
   };
 
   const updater = createUpdater();
+
+  const restartToUpdate = (): void => {
+    if (updater.state().kind === "ready") {
+      quitHold.request(updater.restart);
+    }
+  };
 
   // What the menu shows; a note being typed changes the document but not this.
   let builtMenu = "";
@@ -1375,7 +1695,7 @@ const start = async (): Promise<void> => {
 
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
-        appMenuTemplate(
+        heldMenuTemplate(
           {
             doc,
             floatOnTop: status.floatOnTop,
@@ -1393,6 +1713,8 @@ const start = async (): Promise<void> => {
             closeWindow: () => {
               if (drawing.isFocused()) {
                 drawing.requestClose();
+              } else if (picker.isFocused()) {
+                picker.close();
               } else if (settingsWindow.isFocused()) {
                 settingsWindow.close();
               } else {
@@ -1421,6 +1743,22 @@ const start = async (): Promise<void> => {
             newNote: () => {
               void commandShelf({ kind: "newNote" });
             },
+            field: (field) => {
+              // The drawing window has no fields: its ⌘D duplicates the selection, as in Excalidraw.
+              if (drawing.isFocused()) {
+                if (field === "description") {
+                  drawingServer.emit("edit", "duplicate");
+                }
+              } else {
+                void commandShelf({ field, kind: "field" });
+              }
+            },
+            newWindowLink: () => {
+              openPicker(null);
+            },
+            showShortcuts: () => {
+              void commandShelf({ kind: "shortcuts" });
+            },
             newSection: () => {
               void commandShelf({ kind: "newSection" });
             },
@@ -1430,7 +1768,7 @@ const start = async (): Promise<void> => {
             },
             setFloatOnTop,
             openSettings: settingsWindow.open,
-            restartToUpdate: updater.restart,
+            restartToUpdate,
             redo: () => {
               if (drawing.isFocused()) {
                 drawingServer.emit("edit", "redo");
@@ -1531,13 +1869,18 @@ const start = async (): Promise<void> => {
         break;
       }
 
+      case "showShortcuts": {
+        void commandShelf({ kind: "shortcuts" });
+        break;
+      }
+
       case "checkForUpdates": {
         updater.check();
         break;
       }
 
       case "restartToUpdate": {
-        updater.restart();
+        restartToUpdate();
         break;
       }
 
@@ -1635,36 +1978,43 @@ const start = async (): Promise<void> => {
     screenshotCard.load(),
     drawing.load(),
     settingsWindow.load(),
+    picker.load(),
   ]);
 
-  let quitting = false;
-
   /**
-   * Writes a pending note, then exits. A second app.quit() after a held-back
-   * quit closes the windows but does not end the app on macOS when the quit
-   * came from the Quit menu item, so the app exits itself.
+   * A second app.quit() after a held-back quit closes the windows but does
+   * not end the app on macOS when the quit came from the Quit menu item, so
+   * the app exits itself.
    */
-  const finishQuit = async (): Promise<void> => {
-    try {
-      await controller.flush();
-    } finally {
-      globalShortcut.unregisterAll();
-      app.exit(0);
-    }
-  };
-
-  app.on("before-quit", (event) => {
-    event.preventDefault();
-
-    if (quitting) {
-      return;
-    }
-
-    quitting = true;
+  const exitNow = (): void => {
     keyMonitor.stop();
     screenshots.stop();
     staging.clear();
-    void finishQuit();
+    globalShortcut.unregisterAll();
+    app.exit(0);
+  };
+
+  // The Quit items, the OS quitting the app, and the installer's quit after the update restart.
+  app.on("before-quit", (event) => {
+    event.preventDefault();
+
+    if (quitHold.exiting()) {
+      exitNow();
+    } else {
+      quitHold.request(exitNow);
+    }
+  });
+
+  // Windows shutting down or signing out asks every window first.
+  shelf.dialogParent.on("query-session-end", (event) => {
+    if (
+      (controller.unsaved() > 0 && !controller.view().status.readOnly) ||
+      drawing.isDirty() ||
+      pageSettle.drafts() > 0
+    ) {
+      event.preventDefault();
+      quitHold.request(exitNow);
+    }
   });
 
   if (settings.current().screenshotCards) {
@@ -1682,7 +2032,7 @@ const startOrExit = async (): Promise<void> => {
     await start();
   } catch (error) {
     dialog.showErrorBox(
-      `${PRODUCT_NAME} couldn't start`,
+      `${PRODUCT_NAME} couldn’t start`,
       `${errorMessage(error)}\n\nOpen ${PRODUCT_NAME} again.`
     );
     app.exit(1);

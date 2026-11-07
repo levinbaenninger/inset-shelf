@@ -5,14 +5,14 @@ import type { ImageItem } from "@shared/shelf";
 import { nativeImage } from "electron";
 import type { NativeImage } from "electron";
 
-import { drawPinMark } from "./pin-mark";
+import { drawPinMarks } from "./pin-mark";
 
 export interface ExportedImage {
   readonly image: NativeImage;
   readonly png: Buffer;
 }
 
-/** The saved PNG, with the pin drawn on it when the item has one. */
+/** The saved PNG, with its numbered pins drawn on it. */
 export const exportImage = (
   item: ImageItem,
   file: string
@@ -23,7 +23,7 @@ export const exportImage = (
     return null;
   }
 
-  if (item.pin === null) {
+  if (item.pins.length === 0) {
     return { image: saved, png: saved.toPNG() };
   }
 
@@ -31,9 +31,9 @@ export const exportImage = (
 
   const marked = nativeImage.createFromBitmap(
     Buffer.from(
-      drawPinMark(
+      drawPinMarks(
         { data: saved.toBitmap(), height, width },
-        item.pin,
+        item.pins,
         item.image.pixelsPerDip
       )
     ),

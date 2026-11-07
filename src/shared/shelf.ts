@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isValidDay, matchesDue, parseSearch } from "./due";
 import {
   isAppLink,
   LINK_TEXT_MAX,
@@ -19,7 +20,11 @@ const ATTACHMENT_FILE =
 const IMAGE_FILE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/u;
 
-const SECTION_HEADING = /^#\s+(?<name>\S.*)$/u;
+const SCENE_FILE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u;
+
+/** The composer writes a typed "# " as "\\# " (it no longer turns it into a heading), so both read as a section. */
+const SECTION_HEADING = /^\\?#\s+(?<name>\S.*)$/u;
 
 export const TEXT_MAX = 20_000;
 export const SECTION_NAME_MAX = 60;
@@ -41,9 +46,29 @@ export const AttachmentFileSchema = z.string().regex(ATTACHMENT_FILE);
 const Pixel = z.number().int().min(0).max(100_000);
 const Extent = z.number().int().min(1).max(100_000);
 
-export const PinSchema = z.object({ x: Pixel, y: Pixel });
+/** The single pin of shelves before version 3, which now becomes the first of `pins`. */
+const LegacyPinSchema = z.object({ x: Pixel, y: Pixel });
+
+export const PIN_LABEL_MAX = 120;
+export const PINS_MAX = 99;
+
+/** A numbered map pin on an image, in image pixels; its place in the list is its number. */
+export const PinSchema = z.object({
+  label: z.string().max(PIN_LABEL_MAX).optional(),
+  x: Pixel,
+  y: Pixel,
+});
 
 export type Pin = z.output<typeof PinSchema>;
+
+export const PinsSchema = z.array(PinSchema).max(PINS_MAX);
+
+/** The pins with one pin's label changed; the store drops a label left empty. */
+export const withPinLabel = (
+  pins: readonly Pin[],
+  index: number,
+  label: string
+): Pin[] => pins.map((pin, at) => (at === index ? { ...pin, label } : pin));
 
 export const ImageFileSchema = z.string().regex(IMAGE_FILE);
 
@@ -56,6 +81,122 @@ export const ImageSchema = z.object({
 
 export type ShelfImage = z.output<typeof ImageSchema>;
 
+/**
+ * The marks a drawing was saved with, kept beside its picture so Annotate
+ * can open them again to edit; the picture stays what is shown and copied.
+ */
+export const DrawingSceneSchema = z.object({
+  /** The picture under the marks, without them; null when they were drawn on a blank page. */
+  base: ImageSchema.nullable(),
+  /** The marks, as JSON (drawing-scene.ts). */
+  file: z.string().regex(SCENE_FILE),
+});
+
+export type DrawingScene = z.output<typeof DrawingSceneSchema>;
+
+export const TITLE_MAX = 300;
+export const DESCRIPTION_MAX = 20_000;
+export const STEP_TEXT_MAX = 500;
+export const STEPS_MAX = 100;
+export const WINDOWS_MAX = 20;
+
+export const StepIdSchema = z.string().regex(LOWER_UUID);
+
+/** One of an item's next steps. */
+export const StepSchema = z.object({
+  done: z.boolean(),
+  id: StepIdSchema,
+  text: z.string().max(STEP_TEXT_MAX),
+});
+
+export type Step = z.output<typeof StepSchema>;
+
+export const StepsSchema = z.array(StepSchema).max(STEPS_MAX);
+
+/**
+ * A removed step back where it was, in the list as it is now: ticks and
+ * edits made since the removal stay.
+ */
+export const withStepBack = (
+  steps: readonly Step[],
+  removed: { readonly step: Step; readonly index: number }
+): readonly Step[] =>
+  steps.some((step) => step.id === removed.step.id)
+    ? steps
+    : steps.toSpliced(Math.min(removed.index, steps.length), 0, removed.step);
+
+/** A due day, `YYYY-MM-DD` in local time (due.ts). */
+export const DueSchema = z.string().refine(isValidDay, "Not a calendar day.");
+
+export const WindowIdSchema = z.string().regex(LOWER_UUID).brand<"WindowId">();
+
+export const WINDOW_TITLE_MAX = 500;
+export const APP_NAME_MAX = 200;
+export const PATH_MAX = 4096;
+export const PAGE_URL_MAX = 2000;
+
+/** Text the system reported, cut to what the saved shelf keeps, ending in "…" when cut. */
+export const fitText = (text: string, max: number): string => {
+  if (text.length <= max) {
+    return text;
+  }
+
+  const cut = text.slice(0, max - 1);
+  const last = cut.codePointAt(cut.length - 1) ?? 0;
+  // Never leave half of a character that takes two code units.
+  const whole = last >= 0xd8_00 && last <= 0xdb_ff ? cut.slice(0, -1) : cut;
+
+  return `${whole}…`;
+};
+
+export type WindowId = z.output<typeof WindowIdSchema>;
+
+/**
+ * A window linked to an item: what it showed, and how to reopen it. Only the
+ * main process makes these; the shelf window refers to them by id.
+ */
+export const WindowRefSchema = z.object({
+  app: z.string().max(APP_NAME_MAX).nullable(),
+  /** The app's bundle or executable, to bring it forward. */
+  appPath: z.string().max(PATH_MAX).nullable(),
+  capturedAt: z.iso.datetime(),
+  description: z.string().max(DESCRIPTION_MAX),
+  /** The file the window showed, read from the system, never from the page. */
+  document: z.string().max(PATH_MAX).nullable(),
+  id: WindowIdSchema,
+  thumb: ImageSchema.nullable(),
+  title: z.string().max(WINDOW_TITLE_MAX).nullable(),
+  url: z
+    .url({ protocol: /^https?$/u })
+    .max(PAGE_URL_MAX)
+    .nullable(),
+});
+
+export type WindowRef = z.output<typeof WindowRefSchema>;
+
+/** What every item can hold besides its content: all optional, all empty by default. */
+const MetaFields = {
+  description: z.string().max(DESCRIPTION_MAX),
+  due: DueSchema.nullable(),
+  steps: StepsSchema,
+  windows: z.array(WindowRefSchema).max(WINDOWS_MAX),
+};
+
+export interface ItemMeta {
+  readonly description: string;
+  readonly due: string | null;
+  // Mutable like the schema's output, so an item can be built from it.
+  readonly steps: Step[];
+  readonly windows: WindowRef[];
+}
+
+export const NO_META: Readonly<ItemMeta> = {
+  description: "",
+  due: null,
+  steps: [],
+  windows: [],
+};
+
 const ItemBaseV1 = {
   createdAt: z.iso.datetime(),
   done: z.boolean(),
@@ -65,16 +206,16 @@ const ItemBaseV1 = {
 
 /** Where an item came from: the app in front, its window title and, for a browser, the page. */
 export const ContextSchema = z.object({
-  app: z.string().max(200).nullable(),
+  app: z.string().max(APP_NAME_MAX).nullable(),
   /**
    * Opens the item where it was in its desktop app: a ChatGPT or T3 Code
    * thread, a Claude chat, a Notion page. Only known app schemes.
    */
   appLink: z.string().refine(isAppLink).nullable().default(null),
-  title: z.string().max(500).nullable(),
+  title: z.string().max(WINDOW_TITLE_MAX).nullable(),
   url: z
     .url({ protocol: /^https?$/u })
-    .max(2000)
+    .max(PAGE_URL_MAX)
     .nullable(),
 });
 
@@ -122,14 +263,30 @@ const TextFields = {
   via: z.enum(["typed", "selection"]),
 };
 
-const ImageFields = {
+/** An image as shelves before version 3 kept it: one pin at most. */
+const ImageFieldsV2 = {
   image: ImageSchema,
   kind: z.literal("image"),
   note: z.string().max(TEXT_MAX),
   /** Relative to the image; null when the area was dragged without a pin. */
-  pin: PinSchema.nullable(),
+  pin: LegacyPinSchema.nullable(),
   /** The display an area or pin was captured on. */
   source: z.string().max(200).nullable(),
+  via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
+};
+
+const ImageFields = {
+  image: ImageSchema,
+  kind: z.literal("image"),
+  note: z.string().max(TEXT_MAX),
+  /** Numbered pins, in image pixels; none by default. */
+  pins: PinsSchema,
+  /** Set by a save in Annotate or New Drawing; shelves from before it have none. */
+  scene: DrawingSceneSchema.optional(),
+  /** The display an area or pin was captured on. */
+  source: z.string().max(200).nullable(),
+  /** Shown in place of the note as the item's main line when set. */
+  title: z.string().max(TITLE_MAX).nullable(),
   via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
 };
 
@@ -142,15 +299,29 @@ export const StoredFileSchema = z.object({
 
 export type StoredFile = z.output<typeof StoredFileSchema>;
 
-export const TextItemSchema = z.object({ ...ItemBase, ...TextFields });
-
-export const ImageItemSchema = z.object({ ...ItemBase, ...ImageFields });
-
-export const FileItemSchema = z.object({
-  ...ItemBase,
+const FileFieldsV2 = {
   file: StoredFileSchema,
   kind: z.literal("file"),
   note: z.string().max(TEXT_MAX),
+};
+
+export const TextItemSchema = z.object({
+  ...ItemBase,
+  ...MetaFields,
+  ...TextFields,
+});
+
+export const ImageItemSchema = z.object({
+  ...ItemBase,
+  ...MetaFields,
+  ...ImageFields,
+});
+
+export const FileItemSchema = z.object({
+  ...ItemBase,
+  ...MetaFields,
+  ...FileFieldsV2,
+  title: z.string().max(TITLE_MAX).nullable(),
 });
 
 export const ItemSchema = z.discriminatedUnion("kind", [
@@ -193,13 +364,32 @@ export const ShelfDocSchema = z
   .object({
     activeSectionId: SectionIdSchema,
     items: z.array(ItemSchema),
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     sections: z.array(SectionSchema).min(1),
   })
   .refine(activeExists, "The active section must exist.")
   .refine(itemsBelong, "Every item must belong to a section.");
 
 export type ShelfDoc = z.output<typeof ShelfDocSchema>;
+
+/** The second format: one pin per image, no titles or other metadata. */
+const ShelfDocV2Schema = z
+  .object({
+    activeSectionId: SectionIdSchema,
+    items: z.array(
+      z.discriminatedUnion("kind", [
+        z.object({ ...ItemBase, ...TextFields }),
+        z.object({ ...ItemBase, ...ImageFieldsV2 }),
+        z.object({ ...ItemBase, ...FileFieldsV2 }),
+      ])
+    ),
+    schemaVersion: z.literal(2),
+    sections: z.array(SectionSchema).min(1),
+  })
+  .refine(activeExists)
+  .refine(itemsBelong);
+
+type ItemV2 = z.output<typeof ShelfDocV2Schema>["items"][number];
 
 /** The first shelf format: no source context, colours or files. */
 const ShelfDocV1Schema = z
@@ -210,7 +400,7 @@ const ShelfDocV1Schema = z
         z.object({ ...ItemBaseV1, ...TextFields }),
         z.object({
           ...ItemBaseV1,
-          ...ImageFields,
+          ...ImageFieldsV2,
           via: z.enum(["area", "pin", "paste"]),
         }),
       ])
@@ -234,6 +424,32 @@ const JsonTextSchema = z
     }
   });
 
+/** A version 2 item with empty metadata; an image's one pin becomes pin 1. */
+const upgradeItem = (item: ItemV2): ShelfItem => {
+  if (item.kind === "image") {
+    const { pin, ...rest } = item;
+
+    return {
+      ...rest,
+      ...NO_META,
+      pins: pin === null ? [] : [{ x: pin.x, y: pin.y }],
+      title: null,
+    };
+  }
+
+  if (item.kind === "file") {
+    return { ...item, ...NO_META, title: null };
+  }
+
+  return { ...item, ...NO_META };
+};
+
+const upgradeV2 = (doc: z.output<typeof ShelfDocV2Schema>): ShelfDoc => ({
+  ...doc,
+  items: doc.items.map(upgradeItem),
+  schemaVersion: 3,
+});
+
 /** Reads a stored shelf in any known format, upgrading older ones; null when it is neither. */
 export const parseShelfDocument = (raw: string): ShelfDoc | null => {
   const json = JsonTextSchema.safeParse(raw);
@@ -249,10 +465,16 @@ export const parseShelfDocument = (raw: string): ShelfDoc | null => {
     return current.data;
   }
 
+  const second = ShelfDocV2Schema.safeParse(data);
+
+  if (second.success) {
+    return upgradeV2(second.data);
+  }
+
   const first = ShelfDocV1Schema.safeParse(data);
 
   return first.success
-    ? {
+    ? upgradeV2({
         ...first.data,
         items: first.data.items.map((item) => ({
           ...item,
@@ -260,23 +482,44 @@ export const parseShelfDocument = (raw: string): ShelfDoc | null => {
           context: null,
         })),
         schemaVersion: 2,
-      }
+      })
     : null;
 };
 
-/** The stored file an item keeps next to the shelf, if any. */
-export const attachmentOf = (item: ShelfItem): string | null => {
-  if (item.kind === "image") {
-    return item.image.file;
-  }
+const OWN_FILES: Readonly<
+  Record<ShelfItem["kind"], (item: ShelfItem) => readonly string[]>
+> = {
+  file: (item) => (item.kind === "file" ? [item.file.stored] : []),
+  image: (item) => {
+    if (item.kind !== "image") {
+      return [];
+    }
 
-  return item.kind === "file" ? item.file.stored : null;
+    const { scene } = item;
+
+    if (scene === undefined) {
+      return [item.image.file];
+    }
+
+    return scene.base === null
+      ? [item.image.file, scene.file]
+      : [item.image.file, scene.file, scene.base.file];
+  },
+  text: () => [],
 };
+
+/** Every stored file an item keeps next to the shelf: its image or file, and its windows' pictures. */
+export const attachmentsOf = (item: ShelfItem): readonly string[] => [
+  ...OWN_FILES[item.kind](item),
+  ...item.windows.flatMap((window) =>
+    window.thumb === null ? [] : [window.thumb.file]
+  ),
+];
 
 export const emptyShelf = (sectionId: SectionId): ShelfDoc => ({
   activeSectionId: sectionId,
   items: [],
-  schemaVersion: 2,
+  schemaVersion: 3,
   sections: [{ id: sectionId, name: DEFAULT_SECTION_NAME }],
 });
 
@@ -346,6 +589,58 @@ export const ShelfOpSchema = z.discriminatedUnion("type", [
     sectionId: SectionIdSchema.optional(),
     type: z.literal("clearDone"),
   }),
+  /** An image's or file's title; empty clears it. Text items are their text. */
+  z.object({
+    id: ItemIdSchema,
+    title: z.string().max(TITLE_MAX),
+    type: z.literal("setTitle"),
+  }),
+  z.object({
+    description: z.string().max(DESCRIPTION_MAX),
+    id: ItemIdSchema,
+    type: z.literal("setDescription"),
+  }),
+  z.object({
+    id: ItemIdSchema,
+    steps: StepsSchema,
+    type: z.literal("setSteps"),
+  }),
+  z.object({
+    id: ItemIdSchema,
+    stepId: StepIdSchema,
+    type: z.literal("toggleStep"),
+  }),
+  z.object({
+    due: DueSchema.nullable(),
+    id: ItemIdSchema,
+    type: z.literal("setDue"),
+  }),
+  /** An image's pins, kept on the image; numbers follow the order. */
+  z.object({ id: ItemIdSchema, pins: PinsSchema, type: z.literal("setPins") }),
+  z.object({
+    description: z.string().max(DESCRIPTION_MAX),
+    id: ItemIdSchema,
+    type: z.literal("describeWindow"),
+    windowId: WindowIdSchema,
+  }),
+  /** Moves a linked window to another place in the item's list. */
+  z.object({
+    id: ItemIdSchema,
+    index: z.number().int().min(0).max(WINDOWS_MAX),
+    type: z.literal("moveWindow"),
+    windowId: WindowIdSchema,
+  }),
+  z.object({
+    id: ItemIdSchema,
+    type: z.literal("removeWindow"),
+    windowId: WindowIdSchema,
+  }),
+  /** Puts back a window removed from an item; main remembers it (shelf-controller.ts). */
+  z.object({
+    id: ItemIdSchema,
+    type: z.literal("restoreWindow"),
+    windowId: WindowIdSchema,
+  }),
 ]);
 
 export type ShelfOp = z.output<typeof ShelfOpSchema>;
@@ -358,11 +653,14 @@ export type MainOp =
       readonly html: string | null;
       readonly via: TextItem["via"];
       readonly context: ItemContext | null;
+      /** Windows linked from the start, for a new window link. */
+      readonly windows?: readonly WindowRef[];
     }
   | {
       readonly type: "addImage";
       readonly image: ShelfImage;
-      readonly pin: Pin | null;
+      readonly scene?: DrawingScene;
+      readonly pins: readonly Pin[];
       readonly source: string | null;
       readonly via: ImageItem["via"];
       readonly context: ItemContext | null;
@@ -372,11 +670,25 @@ export type MainOp =
       readonly file: StoredFile;
       readonly context: ItemContext | null;
     }
-  /** An annotated image takes the place of the old one; the old file goes once this is saved. */
+  /** An annotated image takes the place of the old one, with the marks drawn into it, if any; the old files go once this is saved. */
   | {
       readonly type: "replaceImage";
       readonly id: ItemId;
       readonly image: ShelfImage;
+      readonly scene?: DrawingScene;
+    }
+  /** Windows linked to an item afterwards, at the end of its list. */
+  | {
+      readonly type: "attachWindows";
+      readonly id: ItemId;
+      readonly windows: readonly WindowRef[];
+    }
+  /** A removed window back in its place (restoreWindow, in the controller). */
+  | {
+      readonly type: "insertWindow";
+      readonly id: ItemId;
+      readonly window: WindowRef;
+      readonly index: number;
     };
 
 export interface OpEnv {
@@ -509,6 +821,7 @@ const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
 
   if (entry.kind === "note") {
     return addItem(doc, {
+      ...NO_META,
       color: null,
       context: null,
       createdAt: env.now().toISOString(),
@@ -580,11 +893,12 @@ const moveItem = (
       });
 };
 
-/** The item keeps its place, note, pin and source; only its picture changes. */
+/** The item keeps its place, note, pin and source; only its picture and the marks kept with it change. */
 const replaceImage = (
   doc: ShelfDoc,
   id: ItemId,
-  image: ShelfImage
+  image: ShelfImage,
+  scene: DrawingScene | undefined
 ): OpResult => {
   const item = doc.items.find((candidate) => candidate.id === id);
 
@@ -592,9 +906,17 @@ const replaceImage = (
     return unchanged(doc);
   }
 
+  // An image with no marks kept has no scene at all, as on shelves from before them.
+  const { scene: _kept, ...rest } = item;
+
   return {
-    ...changed(mapItem(doc, id, () => ({ ...item, image }))),
-    discarded: [item],
+    ...changed(
+      mapItem(doc, id, () =>
+        scene === undefined ? { ...rest, image } : { ...rest, image, scene }
+      )
+    ),
+    // Only the old picture and marks go, unless the new ones still name them: the windows' pictures still belong to the item.
+    discarded: [{ ...item, windows: [] }],
   };
 };
 
@@ -609,6 +931,7 @@ const addText = (
   }
 
   return addItem(doc, {
+    ...NO_META,
     color: null,
     context: op.context,
     createdAt: env.now().toISOString(),
@@ -626,6 +949,7 @@ const addText = (
     sectionId: doc.activeSectionId,
     text: op.text.slice(0, TEXT_MAX),
     via: op.via,
+    windows: (op.windows ?? []).slice(0, WINDOWS_MAX),
   });
 };
 
@@ -719,6 +1043,193 @@ const applySectionOp = (doc: ShelfDoc, op: SectionOp, env: OpEnv): OpResult => {
   }
 };
 
+/** Pins kept on the image, at most PINS_MAX, labels trimmed and empty ones dropped. */
+export const clampPins = (pins: readonly Pin[], image: ShelfImage): Pin[] =>
+  pins.slice(0, PINS_MAX).map((pin) => {
+    const label = pin.label?.trim().slice(0, PIN_LABEL_MAX) ?? "";
+
+    const at = {
+      x: Math.min(Math.max(Math.round(pin.x), 0), image.widthPx - 1),
+      y: Math.min(Math.max(Math.round(pin.y), 0), image.heightPx - 1),
+    };
+
+    return label === "" ? at : { ...at, label };
+  });
+
+const mapWindows = (
+  doc: ShelfDoc,
+  id: ItemId,
+  update: (windows: readonly WindowRef[]) => readonly WindowRef[]
+): ShelfDoc =>
+  mapItem(doc, id, (item) => ({
+    ...item,
+    windows: [...update(item.windows)],
+  }));
+
+const moveWindow = (
+  windows: readonly WindowRef[],
+  windowId: WindowId,
+  index: number
+): readonly WindowRef[] => {
+  const moving = windows.find((window) => window.id === windowId);
+
+  if (moving === undefined) {
+    return windows;
+  }
+
+  const rest = windows.filter((window) => window.id !== windowId);
+
+  return rest.toSpliced(Math.min(index, rest.length), 0, moving);
+};
+
+type MetaOp = Extract<
+  ShelfOp | MainOp,
+  {
+    readonly type:
+      | "setTitle"
+      | "setDescription"
+      | "setSteps"
+      | "toggleStep"
+      | "setDue"
+      | "setPins"
+      | "describeWindow"
+      | "moveWindow"
+      | "removeWindow"
+      | "attachWindows"
+      | "insertWindow"
+      | "restoreWindow";
+  }
+>;
+
+const META_OPS: ReadonlySet<string> = new Set([
+  "setTitle",
+  "setDescription",
+  "setSteps",
+  "toggleStep",
+  "setDue",
+  "setPins",
+  "describeWindow",
+  "moveWindow",
+  "removeWindow",
+  "attachWindows",
+  "insertWindow",
+  "restoreWindow",
+]);
+
+const isMetaOp = (op: ShelfOp | MainOp): op is MetaOp => META_OPS.has(op.type);
+
+/** Title, description, steps, due, pins and linked windows: all optional, all edited after capture. */
+const applyMetaOp = (doc: ShelfDoc, op: MetaOp): OpResult => {
+  switch (op.type) {
+    case "restoreWindow": {
+      // The controller turns it into insertWindow, since only main remembers removed windows.
+      return unchanged(doc);
+    }
+
+    case "setTitle": {
+      const title = op.title.trim() === "" ? null : op.title.trim();
+
+      return changed(
+        mapItem(doc, op.id, (item) =>
+          item.kind === "text" ? null : { ...item, title }
+        )
+      );
+    }
+
+    case "setDescription": {
+      return changed(
+        mapItem(doc, op.id, (item) => ({
+          ...item,
+          description: op.description,
+        }))
+      );
+    }
+
+    case "setSteps": {
+      return changed(
+        mapItem(doc, op.id, (item) => ({ ...item, steps: [...op.steps] }))
+      );
+    }
+
+    case "toggleStep": {
+      return changed(
+        mapItem(doc, op.id, (item) => ({
+          ...item,
+          steps: item.steps.map((step) =>
+            step.id === op.stepId ? { ...step, done: !step.done } : step
+          ),
+        }))
+      );
+    }
+
+    case "setDue": {
+      return changed(mapItem(doc, op.id, (item) => ({ ...item, due: op.due })));
+    }
+
+    case "setPins": {
+      return changed(
+        mapItem(doc, op.id, (item) =>
+          item.kind === "image"
+            ? { ...item, pins: clampPins(op.pins, item.image) }
+            : null
+        )
+      );
+    }
+
+    case "describeWindow": {
+      return changed(
+        mapWindows(doc, op.id, (windows) =>
+          windows.map((window) =>
+            window.id === op.windowId
+              ? { ...window, description: op.description }
+              : window
+          )
+        )
+      );
+    }
+
+    case "moveWindow": {
+      return changed(
+        mapWindows(doc, op.id, (windows) =>
+          moveWindow(windows, op.windowId, op.index)
+        )
+      );
+    }
+
+    case "removeWindow": {
+      return changed(
+        mapWindows(doc, op.id, (windows) =>
+          windows.filter((window) => window.id !== op.windowId)
+        )
+      );
+    }
+
+    case "attachWindows": {
+      return changed(
+        mapWindows(doc, op.id, (windows) =>
+          [...windows, ...op.windows].slice(0, WINDOWS_MAX)
+        )
+      );
+    }
+
+    case "insertWindow": {
+      return changed(
+        mapWindows(doc, op.id, (windows) =>
+          windows.some((window) => window.id === op.window.id)
+            ? windows
+            : windows
+                .toSpliced(Math.min(op.index, windows.length), 0, op.window)
+                .slice(0, WINDOWS_MAX)
+        )
+      );
+    }
+
+    default: {
+      return unchanged(doc);
+    }
+  }
+};
+
 /**
  * Applies one operation. `pending` holds the deleted items that can still be
  * put back, oldest first; a delete past UNDO_MAX discards the oldest for good.
@@ -733,6 +1244,10 @@ export const applyOp = (
     return applySectionOp(doc, op, env);
   }
 
+  if (isMetaOp(op)) {
+    return applyMetaOp(doc, op);
+  }
+
   switch (op.type) {
     case "compose": {
       return compose(doc, op.text, env);
@@ -743,7 +1258,8 @@ export const applyOp = (
     }
 
     case "addImage": {
-      return addItem(doc, {
+      const item: ImageItem = {
+        ...NO_META,
         color: null,
         context: op.context,
         createdAt: env.now().toISOString(),
@@ -752,15 +1268,23 @@ export const applyOp = (
         image: op.image,
         kind: "image",
         note: "",
-        pin: op.pin,
+        pins: clampPins(op.pins, op.image),
         sectionId: doc.activeSectionId,
         source: op.source,
+        title: null,
         via: op.via,
-      });
+      };
+
+      // An image with no marks kept has no scene at all, as on shelves from before them.
+      return addItem(
+        doc,
+        op.scene === undefined ? item : { ...item, scene: op.scene }
+      );
     }
 
     case "addFile": {
       return addItem(doc, {
+        ...NO_META,
         color: null,
         context: op.context,
         createdAt: env.now().toISOString(),
@@ -770,6 +1294,7 @@ export const applyOp = (
         kind: "file",
         note: "",
         sectionId: doc.activeSectionId,
+        title: null,
       });
     }
 
@@ -790,7 +1315,7 @@ export const applyOp = (
     }
 
     case "replaceImage": {
-      return replaceImage(doc, op.id, op.image);
+      return replaceImage(doc, op.id, op.image, op.scene);
     }
 
     case "toggleDone": {
@@ -839,20 +1364,35 @@ export interface ItemGroup {
   readonly items: readonly ShelfItem[];
 }
 
-const SEARCH_TERM = /\s+/u;
-
 const KIND_TEXT: Record<ShelfItem["kind"], (item: ShelfItem) => string> = {
   file: (item) =>
-    item.kind === "file" ? `${item.file.name} ${item.note}` : "",
+    item.kind === "file"
+      ? `${item.title ?? ""} ${item.file.name} ${item.note}`
+      : "",
   image: (item) =>
-    item.kind === "image" ? `${item.note} ${item.source ?? ""}` : "",
+    item.kind === "image"
+      ? [
+          item.title ?? "",
+          item.note,
+          item.source ?? "",
+          ...item.pins.map((pin) => pin.label ?? ""),
+        ].join(" ")
+      : "",
   text: (item) => (item.kind === "text" ? item.text : ""),
 };
 
-/** Everything a search looks at: the item's words and where it came from. */
+/** Everything a search looks at: the item's words, its metadata, and where it and its windows came from. */
 const searchableText = (item: ShelfItem): string =>
   [
     KIND_TEXT[item.kind](item),
+    item.description,
+    ...item.steps.map((step) => step.text),
+    ...item.windows.flatMap((window) => [
+      window.title ?? "",
+      window.app ?? "",
+      window.url ?? "",
+      window.description,
+    ]),
     item.context?.app ?? "",
     item.context?.title ?? "",
     item.context?.url ?? "",
@@ -861,15 +1401,28 @@ const searchableText = (item: ShelfItem): string =>
 /**
  * The shelf as one list grouped by section, in section order. Without a query
  * every section shows, empty ones too. With a query only matching items show,
- * and sections without a match are left out.
+ * and sections without a match are left out. `due:today`, `due:overdue`,
+ * `due:week`, `due:any` and `due:none` filter by due day (due.ts).
  */
 export const groupItems = (
   doc: ShelfDoc,
-  query: string
+  query: string,
+  now: Date = new Date(),
+  /** An item shown whatever the search: the one being typed in, whose words may stop matching. */
+  keep: ItemId | null = null
 ): readonly ItemGroup[] => {
-  const terms = query.toLocaleLowerCase().split(SEARCH_TERM).filter(Boolean);
+  const { due, terms } = parseSearch(query);
+  const filtering = terms.length > 0 || due !== null;
 
   const matches = (item: ShelfItem): boolean => {
+    if (item.id === keep) {
+      return true;
+    }
+
+    if (due !== null && !matchesDue(item.due, due, now)) {
+      return false;
+    }
+
     const text = searchableText(item).toLocaleLowerCase();
 
     return terms.every((term) => text.includes(term));
@@ -882,7 +1435,7 @@ export const groupItems = (
       (item) => item.sectionId === section.id && matches(item)
     );
 
-    const shown = items.length > 0 || terms.length === 0;
+    const shown = items.length > 0 || !filtering;
 
     return shown ? [{ active, items, section }] : [];
   });
@@ -901,19 +1454,107 @@ export const itemText = (item: ShelfItem): string => {
   return item.note.trim() === "" ? "Image" : item.note;
 };
 
-/** An item's words followed by the page it came from, for pasting where the link matters. */
-export const itemTextWithLink = (item: ShelfItem): string =>
-  item.context?.url === null || item.context === null
-    ? itemText(item)
-    : `${itemText(item)}\n${item.context.url}`;
+/** An image's or file's own title; text items are their text. */
+const titleOf = (item: ShelfItem): string | null =>
+  item.kind === "text" ? null : item.title;
 
-/** The words an item adds to a list: images and files only when they have a note or a name. */
-const listText = (item: ShelfItem): string | null => {
-  if (item.kind === "image") {
-    return item.note.trim() === "" ? null : item.note.trim();
+/** Whether an item holds any metadata worth copying with it. */
+export const hasDetails = (item: ShelfItem): boolean =>
+  item.description.trim() !== "" ||
+  item.steps.some((step) => step.text.trim() !== "") ||
+  item.due !== null ||
+  item.windows.length > 0 ||
+  titleOf(item) !== null ||
+  (item.kind === "image" && item.pins.some((pin) => pin.label !== undefined));
+
+/** A linked window as one line: its title, then where it reopens. */
+const windowLine = (window: WindowRef): string => {
+  const title = window.title ?? window.app ?? "Window";
+  const where = window.url ?? window.document;
+
+  return where === null ? title : `${title} — ${where}`;
+};
+
+/**
+ * An item's metadata as plain-text lines, in the order details shows them:
+ * labelled pins, description, steps as a Markdown checklist, the due day and
+ * the linked windows. `full` (Copy with Details) adds each window's own
+ * description and where the item came from. Empty when there is none.
+ */
+export const detailLines = (
+  item: ShelfItem,
+  full = false
+): readonly string[] => {
+  const steps = item.steps.filter((step) => step.text.trim() !== "");
+  const pins = item.kind === "image" ? item.pins : [];
+  const source = item.context;
+
+  return [
+    ...pins.flatMap((pin, index) =>
+      pin.label === undefined ? [] : [`${index + 1} · ${pin.label}`]
+    ),
+    ...(item.description.trim() === "" ? [] : [item.description.trim()]),
+    ...steps.map((step) => `- [${step.done ? "x" : " "}] ${step.text.trim()}`),
+    ...(item.due === null ? [] : [`Due: ${item.due}`]),
+    ...(item.windows.length === 0 ? [] : ["Windows:"]),
+    ...item.windows.flatMap((window) => [
+      `- ${windowLine(window)}`,
+      ...(full && window.description.trim() !== ""
+        ? [`  ${window.description.trim()}`]
+        : []),
+    ]),
+    ...(full && source !== null && (source.app ?? source.title) !== null
+      ? [
+          `From: ${[source.app, source.title]
+            .filter((part) => part !== null && part !== "")
+            .join(" · ")}`,
+        ]
+      : []),
+  ];
+};
+
+/** The words an item stands for, under its title when it has one. */
+const titled = (item: ShelfItem): string => {
+  const title = titleOf(item);
+
+  if (title === null) {
+    return itemText(item);
   }
 
-  return itemText(item).trim();
+  const words = item.kind === "image" ? item.note.trim() : itemText(item);
+
+  return words === "" ? title : `${title}\n${words}`;
+};
+
+const withUrl = (text: string, item: ShelfItem): string =>
+  item.context?.url === null || item.context === null
+    ? text
+    : `${text}\n${item.context.url}`;
+
+const withDetails = (head: string, details: readonly string[]): string =>
+  details.length === 0 ? head : `${head}\n\n${details.join("\n")}`;
+
+/**
+ * An item's words, the page it came from and, when it has any, its title
+ * and metadata, for pasting where the link matters. An item without
+ * metadata copies exactly as before.
+ */
+export const itemTextWithLink = (item: ShelfItem): string =>
+  hasDetails(item)
+    ? withDetails(withUrl(titled(item), item), detailLines(item))
+    : withUrl(itemText(item), item);
+
+/** Copy with Details: the title, the words, the page, and every piece of metadata. */
+export const itemDetailsText = (item: ShelfItem): string =>
+  withDetails(withUrl(titled(item), item), detailLines(item, true));
+
+/** The words an item adds to a list: images only with a title, note or details, files with their name. */
+const listText = (item: ShelfItem): string | null => {
+  const words = titled(item).trim();
+
+  return item.kind === "image" && !hasDetails(item) && item.note.trim() === ""
+    ? null
+    : words;
 };
 
 const HTML_ESCAPES = {
@@ -943,7 +1584,7 @@ export interface ItemList {
 
 /**
  * Items as a numbered list, in the order given, each with its page link.
- * Images without a note add no line; they travel as the image itself.
+ * Images without a title, note or details add no line; they travel as the image itself.
  */
 export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
   const entries = items.flatMap((item) => {
@@ -951,10 +1592,10 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
 
     return text === null || text === ""
       ? []
-      : [{ text, url: item.context?.url ?? null }];
+      : [{ details: detailLines(item), text, url: item.context?.url ?? null }];
   });
 
-  const lines = entries.map(({ text, url }, index) => {
+  const lines = entries.map(({ details, text, url }, index) => {
     const marker = `${index + 1}. `;
     const [first = "", ...rest] = text.split("\n");
     const indent = " ".repeat(marker.length);
@@ -963,11 +1604,14 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
     return [
       `${marker}${first}${link}`,
       ...rest.map((line) => `${indent}${line}`),
+      ...details.flatMap((detail) =>
+        detail.split("\n").map((line) => `${indent}${line}`)
+      ),
     ].join("\n");
   });
 
   const html = entries
-    .map(({ text, url }) => {
+    .map(({ details, text, url }) => {
       const body = escapeHtml(text).replaceAll("\n", "<br>");
 
       const link =
@@ -975,7 +1619,11 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
           ? ""
           : ` (<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>)`;
 
-      return `<li>${body}${link}</li>`;
+      const more = details
+        .map((detail) => `<br>${escapeHtml(detail).replaceAll("\n", "<br>")}`)
+        .join("");
+
+      return `<li>${body}${link}${more}</li>`;
     })
     .join("");
 

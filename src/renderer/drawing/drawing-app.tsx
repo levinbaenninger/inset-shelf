@@ -1,5 +1,11 @@
-import type { DrawingImage, DrawingView } from "@shared/contracts";
-import { useEffect, useState } from "react";
+import type {
+  DrawingImage,
+  DrawingOnShelf,
+  DrawingOpened,
+  DrawingView,
+} from "@shared/contracts";
+import type { Pin } from "@shared/shelf";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import {
   AlertDialog,
@@ -13,23 +19,50 @@ import {
 } from "@/components/ui/alert-dialog";
 import { drawingBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
-import { PinMarker } from "@/shared/pin-marker";
+import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 import { Page } from "./page";
 import type { PageImage } from "./page";
-import { exportAnnotated, exportPng } from "./render";
+import { nudgeStep, pinIndexOf, pinMarkIndex, pinsOf } from "./pins";
+import { exportAnnotated, exportPng, measureText } from "./render";
 import {
-  addMark,
+  draftEdit,
+  duplicateMarks,
+  gestureMarks,
+  gestureSelection,
+  moveMarks,
+  NOTHING,
+  onlySelected,
+  releaseGesture,
+  removeMarks,
+  restyle,
+  shownStyle,
+  withDraft,
+  withText,
+} from "./selection";
+import type { Gesture, Selection, Style, TextDraft } from "./selection";
+import {
+  amend,
   canRedo,
   canUndo,
   clearMarks,
-  emptyHistory,
+  commit,
+  EXPORT_SCALE,
   redo,
+  TEXT_SIZE,
   undo,
 } from "./sketch";
-import type { Color, History, Mark, Stroke, Tool } from "./sketch";
+import type {
+  Color,
+  History,
+  Mark,
+  PinMark,
+  Point,
+  Stroke,
+  Tool,
+} from "./sketch";
 import { Toolbar } from "./toolbar";
 import { useDark, useDrawingKeys } from "./use-drawing-keys";
 
@@ -40,14 +73,78 @@ const load = async (): Promise<DrawingView> => await api.getView();
 const subscribe = (listener: (view: DrawingView | null) => void) =>
   api.on("view", listener);
 
-/** The marks drawn into the open image, or onto a fresh page; null when there is nothing to save. */
+/** The pins, in the saved image's pixels, labels kept. */
+const pinsInPixels = (
+  marks: readonly Mark[],
+  toPixels: (point: Point) => Point
+): Pin[] =>
+  pinsOf(marks).map((pin) => {
+    const at = toPixels(pin.at);
+
+    const point = {
+      x: Math.max(0, Math.round(at.x)),
+      y: Math.max(0, Math.round(at.y)),
+    };
+
+    return pin.label === undefined ? point : { ...point, label: pin.label };
+  });
+
+type DrawnMark = Exclude<Mark, PinMark>;
+
+const isDrawn = (mark: Mark): mark is DrawnMark => mark.kind !== "pin";
+
+interface Saved {
+  readonly png: Uint8Array<ArrayBuffer> | null;
+  /** The marks drawn into `png`, in its DIP, kept beside it to edit again. */
+  readonly marks: readonly DrawnMark[];
+  readonly pins: Pin[];
+}
+
+/**
+ * What a save sends: on an image, the marks drawn into it (none when only
+ * the pins changed) and the pins in its pixels; on a blank page, the
+ * drawing trimmed to everything on it and the pins in that picture.
+ */
 const exportMarks = async (
   marks: readonly Mark[],
   image: DrawingImage | null,
   dark: boolean
-): Promise<Uint8Array<ArrayBuffer> | null> => {
+): Promise<Saved | null> => {
   if (image === null) {
-    return await exportPng(marks, dark);
+    // The frame comes with the picture, measured once the font has loaded, so the pins land where the text pushed the edges.
+    const exported = await exportPng(marks, dark);
+
+    if (exported === null) {
+      return null;
+    }
+
+    // The picture's corner becomes the drawing's, so the marks kept and the pins open again where the picture has them.
+    const { origin } = exported.frame;
+
+    const placed = moveMarks(marks, new Set(marks.keys()), {
+      x: -origin.x,
+      y: -origin.y,
+    });
+
+    return {
+      marks: placed.filter(isDrawn),
+      pins: pinsInPixels(placed, (point) => ({
+        x: point.x * EXPORT_SCALE,
+        y: point.y * EXPORT_SCALE,
+      })),
+      png: exported.png,
+    };
+  }
+
+  const strokes = marks.filter(isDrawn);
+
+  const pins = pinsInPixels(marks, (point) => ({
+    x: Math.min(point.x * image.pixelsPerDip, image.widthPx - 1),
+    y: Math.min(point.y * image.pixelsPerDip, image.heightPx - 1),
+  }));
+
+  if (strokes.length === 0) {
+    return { marks: [], pins, png: null };
   }
 
   const png = await api.getImage();
@@ -56,29 +153,41 @@ const exportMarks = async (
     throw new Error("The image is no longer on the shelf.");
   }
 
-  return await exportAnnotated(marks, {
-    heightPx: image.heightPx,
-    pixelsPerDip: image.pixelsPerDip,
-    png: new Uint8Array(png),
-    widthPx: image.widthPx,
-  });
+  return {
+    marks: strokes,
+    pins,
+    png: await exportAnnotated(strokes, {
+      heightPx: image.heightPx,
+      pixelsPerDip: image.pixelsPerDip,
+      png: new Uint8Array(png),
+      widthPx: image.widthPx,
+    }),
+  };
 };
 
 /** Resolves to a problem to show, or null once main has the drawing. */
 const saveDrawing = async (
   copy: boolean,
+  forQuit: boolean,
   marks: readonly Mark[],
   image: DrawingImage | null,
   dark: boolean
 ): Promise<string | null> => {
   try {
-    const png = await exportMarks(marks, image, dark);
+    const saved = await exportMarks(marks, image, dark);
 
-    if (png === null) {
-      return null;
+    // Only a drawing opened again can be left with nothing on it: the shelf keeps it as it was.
+    if (saved === null) {
+      return "There is nothing to save.";
     }
 
-    const result = await api.save({ copy, png });
+    const result = await api.save({
+      copy,
+      forQuit,
+      marks: saved.marks,
+      pins: saved.pins,
+      png: saved.png,
+    });
 
     return result.ok ? null : result.message;
   } catch {
@@ -86,13 +195,7 @@ const saveDrawing = async (
   }
 };
 
-const percent = (value: number, total: number): string =>
-  `${(value / total) * 100}%`;
-
-/** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
-const PIN_DIAMETER_DIP = 28;
-
-/** The image under the marks, with its pin as the shelf shows it. */
+/** The image under the marks; its pins are drawn by the page, where they can be moved. */
 const ImageUnderlay = ({ image }: { readonly image: DrawingImage }) => (
   <div className="relative size-full">
     <img
@@ -101,13 +204,6 @@ const ImageUnderlay = ({ image }: { readonly image: DrawingImage }) => (
       draggable={false}
       src={image.url}
     />
-    {image.pin === null ? null : (
-      <PinMarker
-        left={percent(image.pin.x, image.widthPx)}
-        top={percent(image.pin.y, image.heightPx)}
-        width={percent(PIN_DIAMETER_DIP * image.pixelsPerDip, image.widthPx)}
-      />
-    )}
     <div className="ring-foreground/15 pointer-events-none absolute inset-0 ring-1" />
   </div>
 );
@@ -121,98 +217,537 @@ const pageImage = (image: DrawingImage | null): PageImage | null =>
         width: image.widthPx / image.pixelsPerDip,
       };
 
+/** Something to save: the marks (words still being typed among them) differ from those the page opened with. */
+const hasChanges = (
+  marks: readonly Mark[],
+  initial: readonly Mark[]
+): boolean =>
+  marks !== initial && JSON.stringify(marks) !== JSON.stringify(initial);
+
+/** Pins from details start with the Pin tool, marks kept from a save with Select, so they read as editable; else the pen. */
+const firstTool = (opened: DrawingOpened): Tool => {
+  if (opened.pinMode) {
+    return "pin";
+  }
+
+  return opened.marks.some(isDrawn) ? "select" : "pen";
+};
+
+/** What the header calls the page: a new drawing, one saved before, or an image. */
+const pageTitle = (opened: DrawingOpened): string => {
+  if (opened.image !== null) {
+    return "Annotate";
+  }
+
+  return opened.marks.length === 0 ? "New Drawing" : "Drawing";
+};
+
+/** How long the page says why New Drawing or Annotate brought it forward instead. */
+const REFUSED_MS = 4000;
+
+/** What the page announces over everything else: why it is locked during a quit, or why another drawing didn't open. */
+const pageNotice = (quitting: boolean, refused: boolean): string | null => {
+  if (quitting) {
+    return "Locked while Inset asks about quitting";
+  }
+
+  return refused ? "Save or discard this drawing to open another" : null;
+};
+
+const pinHint = (selectedPin: number | null, pinCount: number): string =>
+  selectedPin === null
+    ? `Click to place pin ${pinCount + 1}`
+    : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ⌫ removes it`;
+
+/** The pill over the page: the page's notice, otherwise the Pin tool's hint. */
+const PagePill = ({
+  hint,
+  notice,
+}: {
+  readonly hint: string | null;
+  readonly notice: string | null;
+}) => {
+  const text = notice ?? hint;
+
+  return text === null ? null : (
+    <p
+      className="bg-foreground/85 text-background pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1 text-xs whitespace-nowrap shadow-sm"
+      role={notice === null ? undefined : "status"}
+    >
+      {text}
+    </p>
+  );
+};
+
+/** What closing a new drawing keeps, from what the shelf holds of it. */
+const BLANK_CLOSING: Readonly<Record<DrawingOnShelf, string>> = {
+  asIs: "It is already on the shelf.",
+  earlier: "The shelf keeps it without your latest changes.",
+  none: "It is not on the shelf yet.",
+};
+
+/** What the close confirm says closing keeps or loses. */
+const closingText = (
+  image: DrawingImage | null,
+  onShelf: DrawingOnShelf
+): string => {
+  if (image === null) {
+    return BLANK_CLOSING[onShelf];
+  }
+
+  return onShelf === "asIs"
+    ? "The image on the shelf already has these marks."
+    : "The image on the shelf stays as it was.";
+};
+
 /** One drawing, on a blank page or over an image; the app remounts it for every opening. */
-const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
-  const [history, setHistory] = useState<History>(emptyHistory);
-  const [tool, setTool] = useState<Tool>("pen");
+const Editor = ({
+  opened,
+  quitting,
+}: {
+  readonly opened: DrawingOpened;
+  /** A quit is under way: the marks wait, untouched, until it is answered. */
+  readonly quitting: boolean;
+}) => {
+  const { image } = opened;
+  const initial: readonly Mark[] = opened.marks;
+
+  const [history, setHistory] = useState<History>(() => ({
+    future: [],
+    past: [],
+    present: initial,
+  }));
+
+  const [tool, setTool] = useState<Tool>(() => firstTool(opened));
+
+  const [lastTool, setLastTool] = useState<Tool>("pen");
+  // What Select or the pin keys picked, pins included, by place among the marks.
+  const [selection, setSelection] = useState<Selection>(NOTHING);
+  const pointerRef = useRef<Point | null>(null);
+  // The page, image and pins: a selection brings focus here, so its keys reach it.
+  const pageRef = useRef<HTMLElement>(null);
+  // The page and its toolbar: focus may move between them and keep the selection, so the toolbar restyles it from the keyboard too.
+  const areaRef = useRef<HTMLDivElement>(null);
+  // The step a held arrow key last made, so its repeats move the selection within that step.
+  const nudged = useRef<History | null>(null);
+  // Removing a focused field can also blur it; its words must only be added once.
+  const textOpen = useRef(false);
+
+  /** Picks marks; a selection takes focus to the page, so its keys reach it. */
+  const select = (next: Selection): void => {
+    setSelection(next);
+
+    if (next.size > 0) {
+      pageRef.current?.focus({ preventScroll: true });
+    }
+  };
+
+  // Focus leaving the page and its toolbar, or the window, lets go of the selection, so digits and ⌫ typed elsewhere never touch it.
+  useEffect(() => {
+    const area = areaRef.current;
+
+    const letGo = (): void => {
+      setSelection(NOTHING);
+    };
+
+    const onFocusOut = (event: FocusEvent): void => {
+      const to = event.relatedTarget;
+
+      if (!(to instanceof Node && area?.contains(to) === true)) {
+        letGo();
+      }
+    };
+
+    window.addEventListener("blur", letGo);
+    area?.addEventListener("focusout", onFocusOut);
+
+    return () => {
+      window.removeEventListener("blur", letGo);
+      area?.removeEventListener("focusout", onFocusOut);
+    };
+  }, [areaRef]);
   // Marks on a picture stand out in red; a blank page starts in ink.
   const [color, setColor] = useState<Color>(image === null ? "ink" : "red");
   const [stroke, setStroke] = useState<Stroke>("thin");
+  // Screen pixels per drawing unit, as the page shows it: restyled marks get the size new ones would.
+  const [scale, setScale] = useState(1);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [closing, setClosing] = useState<DrawingOnShelf>("none");
+  // Each time New Drawing or Annotate brought this drawing forward instead: the pill says why for a while.
+  const [refused, setRefused] = useExpiringState<number>(REFUSED_MS);
+  // Words in the open text field, not yet a mark in the history.
+  const [text, setText] = useState<TextDraft | null>(null);
+  // A stroke being drawn or a selection being moved, resized or picked, not yet a step in the history.
+  const [gesture, setGesture] = useState<Gesture | null>(null);
   // On an image the marks keep the colours they are saved in, whatever the theme.
   const dark = useDark() && image === null;
   const marks = history.present;
-  const empty = marks.length === 0;
+  const pins = pinsOf(marks);
+
+  const bounds =
+    image === null
+      ? undefined
+      : {
+          height: image.heightPx / image.pixelsPerDip,
+          width: image.widthPx / image.pixelsPerDip,
+        };
+
+  // The marks and the selection as the gesture shows them; a gesture that shows counts and is saved before it is let go (red-team round 8).
+  const shown = gestureMarks(marks, selection, gesture, bounds);
+
+  const shownSelection = gestureSelection(
+    marks,
+    selection,
+    gesture,
+    measureText
+  );
+
+  const moving = shown !== marks;
+  // Kept between renders, so the page reports a change of the words, not every render while they are open.
+  const typed = useMemo(() => withDraft(marks, text), [marks, text]);
+  const changed = useMemo(() => hasChanges(typed, initial), [typed, initial]);
+  const dirty = changed || moving;
+  // What a save sends: the marks, the words still being typed and a gesture still under way.
+  const toSave = withDraft(shown, text);
+  // While its save, a quit or the Discard confirm is under way nothing changes the marks, so none is made that main would not get or that the prompt doesn't show (Round 8).
+  const locked = saving || quitting || confirming;
+
+  /** One step of the history, when the marks changed. */
+  const change = (next: readonly Mark[]): void => {
+    if (next !== marks) {
+      setHistory(commit(history, next));
+    }
+  };
+
+  // A lock ends a gesture where it is, as letting go would: the marks then stay as they are until it lifts.
+  if (locked && gesture !== null) {
+    setGesture(null);
+    change(shown);
+  }
+
+  /** P toggles the Pin tool; any other key picks its tool. Only Select and Pin keep what is selected. */
+  const pickTool = (next: Tool): void => {
+    const picked = next === "pin" && tool === "pin" ? lastTool : next;
+
+    if (picked === "pin") {
+      setLastTool(tool);
+    }
+
+    setTool(picked);
+
+    if (picked !== "select" && picked !== "pin") {
+      setSelection(NOTHING);
+    }
+  };
 
   // Takes the marks to save, so ⌘↩ in the text field can include the text it just added.
   const save = async (
     copy: boolean,
-    toSave: readonly Mark[]
+    list: readonly Mark[],
+    forQuit = false
   ): Promise<void> => {
-    if (saving || toSave.length === 0) {
+    if (saving || !hasChanges(list, initial)) {
       return;
     }
 
     setSaving(true);
     setProblem(null);
-    setProblem(await saveDrawing(copy, toSave, image, dark));
+    setProblem(await saveDrawing(copy, forQuit, list, image, dark));
     setSaving(false);
   };
 
-  const add = (mark: Mark): History => {
-    const next = addMark(history, mark);
-
-    setHistory(next);
-
-    return next;
+  const addPin = (at: Point): void => {
+    change([...marks, { at, kind: "pin" }]);
+    select(new Set([marks.length]));
   };
 
-  useLocalKeys({
-    // Only an empty page closes on Esc, so a stray key never throws a drawing away.
-    onEscape: () => {
-      if (empty) {
-        api.cancel();
-      }
-    },
-    onSave: () => {
-      void save(false, marks);
-    },
+  /**
+   * Letting go of `last`, the gesture as the page last had it: it becomes
+   * one step, and a shape just drawn is selected with Select picked, as in
+   * Excalidraw. A gesture a lock already ended is over.
+   */
+  const release = (last: Gesture): void => {
+    if (gesture === null || locked) {
+      return;
+    }
+
+    const result = releaseGesture(marks, selection, last, measureText, bounds);
+
+    setGesture(null);
+    change(result.marks);
+    select(result.selection);
+
+    if (
+      last.kind === "draw" &&
+      last.mark.kind !== "pen" &&
+      result.marks !== marks
+    ) {
+      setTool("select");
+    }
+  };
+
+  const openText = (draft: TextDraft): void => {
+    textOpen.current = true;
+    setSelection(NOTHING);
+    setText(draft);
+  };
+
+  /**
+   * Closes the text field: kept, the words become one step and are
+   * selected, with Select picked; dropped, an edited text stays as it was.
+   * The page takes focus back, unless focus left for something else.
+   */
+  const closeText = (keep: boolean, blurred = false): History => {
+    if (text === null || !textOpen.current) {
+      return history;
+    }
+
+    textOpen.current = false;
+    setText(null);
+
+    if (tool === "text") {
+      setTool("select");
+    }
+
+    const edit = draftEdit(text);
+    const next = keep ? withText(marks, edit) : marks;
+    const after = next === marks ? history : commit(history, next);
+    let { index } = edit;
+
+    if (keep && edit.mark === null) {
+      index = null;
+    } else if (keep && edit.index === null) {
+      index = next.length - 1;
+    }
+
+    setHistory(after);
+
+    if (blurred) {
+      return after;
+    }
+
+    if (index === null) {
+      pageRef.current?.focus({ preventScroll: true });
+    } else {
+      select(new Set([index]));
+    }
+
+    return after;
+  };
+
+  /** An ink or a stroke picked: the words being typed or the selection take it, and so does the next mark. */
+  const applyStyle = (style: Style): void => {
+    if (text === null) {
+      change(restyle(marks, selection, style, scale));
+    } else {
+      setText({
+        ...text,
+        color: style.color ?? text.color,
+        size:
+          style.stroke === undefined
+            ? text.size
+            : TEXT_SIZE[style.stroke] / scale,
+      });
+    }
+  };
+
+  const style = shownStyle(shown, shownSelection, text, scale, {
+    color,
+    stroke,
   });
 
-  useEffect(() => {
-    api.setDirty(!empty);
-  }, [empty]);
+  const duplicate = (): void => {
+    if (selection.size === 0) {
+      return;
+    }
 
-  // Closing the window with marks asks here, in the page's own dialog.
+    const copies = duplicateMarks(marks, selection, bounds);
+
+    change(copies.marks);
+    select(copies.selection);
+  };
+
+  /**
+   * Undo and Redo, from a key, the toolbar or the menu bar. With the text
+   * field open they are the field's, as in any text field, so the drawing's
+   * steps never move under the words being typed (review 4501523118).
+   */
+  const historyStep = (kind: "undo" | "redo"): void => {
+    if (text !== null) {
+      // oxlint-disable-next-line typescript/no-deprecated -- the field's own undo, as the menu's role would run it; there is no other API for it.
+      document.execCommand(kind);
+
+      return;
+    }
+
+    setHistory(kind === "undo" ? undo(history) : redo(history));
+    setSelection(NOTHING);
+  };
+
+  useLocalKeys(
+    locked
+      ? {}
+      : {
+          // Esc lets go of the selection first; only an untouched page closes on it, so a stray key never throws work away.
+          onEscape: () => {
+            if (selection.size > 0) {
+              setSelection(NOTHING);
+            } else if (!dirty) {
+              api.cancel();
+            }
+          },
+          onSave: () => {
+            void save(false, toSave);
+          },
+        }
+  );
+
+  // Every change, not only the first: main then knows the marks a held quit put on the shelf have changed since.
+  useEffect(() => {
+    api.setDirty(hasChanges(typed, initial) || moving);
+  }, [typed, initial, moving]);
+
+  // Retry in a held quit saves the marks to the shelf, as Save does; a save already running finishes on its own.
+  const saveForQuit = useEffectEvent(() => {
+    void save(false, toSave, true);
+  });
+
   useEffect(
     () =>
-      api.on("confirmClose", () => {
-        setConfirming(true);
+      api.on("saveForQuit", () => {
+        saveForQuit();
       }),
     []
   );
 
-  // The menu bar's Undo and Redo arrive here instead of as keys.
+  // Closing the window with marks asks here, in the page's own dialog; not while a quit or a save is under way.
+  const confirmClose = useEffectEvent((onShelf: DrawingOnShelf) => {
+    if (!locked) {
+      setClosing(onShelf);
+      setConfirming(true);
+    }
+  });
+
+  useEffect(
+    () =>
+      api.on("confirmClose", (onShelf) => {
+        confirmClose(onShelf);
+      }),
+    []
+  );
+
+  useEffect(
+    () =>
+      api.on("openRefused", () => {
+        setRefused((count) => (count ?? 0) + 1);
+      }),
+    [setRefused]
+  );
+
+  // The menu bar's Undo, Redo and Duplicate (⌘D, which the menu takes for Description) arrive here instead of as keys.
+  const menuEdit = useEffectEvent((kind: "undo" | "redo" | "duplicate") => {
+    if (locked) {
+      return;
+    }
+
+    if (kind === "duplicate") {
+      duplicate();
+    } else {
+      historyStep(kind);
+    }
+  });
+
   useEffect(
     () =>
       api.on("edit", (kind) => {
-        setHistory((current) =>
-          kind === "undo" ? undo(current) : redo(current)
-        );
+        menuEdit(kind);
       }),
     []
   );
 
   useDrawingKeys({
-    pickTool: setTool,
+    dropPin: () => {
+      const center =
+        bounds === undefined
+          ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+          : { x: bounds.width / 2, y: bounds.height / 2 };
+
+      addPin(pointerRef.current ?? center);
+    },
+    duplicate,
+    enabled: !locked,
+    nudge: (dx, dy, held) => {
+      if (selection.size === 0) {
+        return false;
+      }
+
+      // Pins move in pixels of the saved image, whatever the screen's scale; marks in the drawing's own units.
+      const onlyPins = [...selection].every(
+        (index) => marks[index]?.kind === "pin"
+      );
+
+      const step = onlyPins
+        ? nudgeStep(1, image?.pixelsPerDip ?? EXPORT_SCALE)
+        : 1;
+
+      const moved = moveMarks(
+        marks,
+        selection,
+        { x: dx * step, y: dy * step },
+        bounds
+      );
+
+      if (moved === marks) {
+        return true;
+      }
+
+      // One Undo puts the selection back where the held key started it.
+      const next =
+        held && nudged.current === history
+          ? amend(history, moved)
+          : commit(history, moved);
+
+      nudged.current = next;
+      setHistory(next);
+
+      return true;
+    },
+    pickTool,
     redo: () => {
-      setHistory(redo(history));
+      historyStep("redo");
+    },
+    remove: () => {
+      if (selection.size === 0) {
+        return false;
+      }
+
+      change(removeMarks(marks, selection));
+      setSelection(NOTHING);
+
+      return true;
+    },
+    selectPin: (index) => {
+      const at = pinMarkIndex(marks, index);
+
+      if (at !== null) {
+        select(new Set([at]));
+      }
     },
     undo: () => {
-      setHistory(undo(history));
+      historyStep("undo");
     },
   });
+
+  const selectedPin = pinIndexOf(marks, onlySelected(selection));
 
   return (
     <main className="bg-background flex h-svh flex-col overflow-hidden select-none">
       {/* A problem saving takes the title's place; saving itself is in the toolbar. */}
       <WindowHeader>
         {problem === null ? (
-          <WindowTitle>
-            {image === null ? "New Drawing" : "Annotate"}
-          </WindowTitle>
+          <WindowTitle>{pageTitle(opened)}</WindowTitle>
         ) : (
           <p
             className="text-destructive mr-auto min-w-0 truncate text-xs"
@@ -222,50 +757,83 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
           </p>
         )}
       </WindowHeader>
-      <div className="relative min-h-0 flex-1">
-        <Page
-          color={color}
-          dark={dark}
-          image={pageImage(image)}
-          marks={marks}
-          onAdd={(mark) => {
-            add(mark);
-          }}
-          onSubmit={(mark) => {
-            const next = mark === null ? history : add(mark);
-
-            void save(false, next.present);
-          }}
-          stroke={stroke}
-          tool={tool}
+      <div className="relative min-h-0 flex-1" ref={areaRef}>
+        <section
+          aria-label="Pins"
+          className="absolute inset-0 outline-none"
+          ref={pageRef}
+          tabIndex={-1}
+        >
+          <Page
+            color={color}
+            dark={dark}
+            gesture={gesture}
+            image={pageImage(image)}
+            locked={locked}
+            marks={shown}
+            onAddPin={addPin}
+            onCloseText={(keep, blurred) => {
+              closeText(keep, blurred);
+            }}
+            onGesture={setGesture}
+            onOpenText={openText}
+            onRelease={release}
+            onScale={setScale}
+            onSelect={select}
+            onSubmitText={() => {
+              void save(false, closeText(true).present);
+            }}
+            onTypeText={(value) => {
+              if (text !== null) {
+                setText({ ...text, value });
+              }
+            }}
+            pointerRef={pointerRef}
+            selection={shownSelection}
+            stroke={stroke}
+            text={text}
+            tool={tool}
+          />
+        </section>
+        <PagePill
+          hint={tool === "pin" ? pinHint(selectedPin, pins.length) : null}
+          notice={pageNotice(quitting, refused !== null)}
         />
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
           <Toolbar
-            canClear={!empty}
+            canClear={marks.length > 0}
             canRedo={canRedo(history)}
-            canSave={!empty && !saving}
+            canSave={dirty && !saving}
             canUndo={canUndo(history)}
-            color={color}
+            color={style.color}
             dark={dark}
+            locked={locked}
             onClear={() => {
               setHistory(clearMarks(history));
+              setSelection(NOTHING);
             }}
-            onColor={setColor}
+            onColor={(next) => {
+              setColor(next);
+              applyStyle({ color: next });
+            }}
             onCopyAndSave={() => {
-              void save(true, marks);
+              void save(true, toSave);
             }}
             onRedo={() => {
-              setHistory(redo(history));
+              historyStep("redo");
             }}
             onSave={() => {
-              void save(false, marks);
+              void save(false, toSave);
             }}
-            onStroke={setStroke}
-            onTool={setTool}
+            onStroke={(next) => {
+              setStroke(next);
+              applyStyle({ stroke: next });
+            }}
+            onTool={pickTool}
             onUndo={() => {
-              setHistory(undo(history));
+              historyStep("undo");
             }}
-            stroke={stroke}
+            stroke={style.stroke}
             tool={tool}
           />
         </div>
@@ -279,9 +847,7 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
                 : "Discard what you drew on this image?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {image === null
-                ? "It is not on the shelf yet."
-                : "The image on the shelf stays as it was."}
+              {closingText(image, closing)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -303,6 +869,14 @@ const Editor = ({ image }: { readonly image: DrawingImage | null }) => {
 /** Every opening pushes a new view, which starts over with no history: a blank page or the image. */
 export const DrawingApp = () => {
   const view = usePushedView<DrawingView | null>(load, subscribe, null);
+  // The opening as it first arrived: a later push of it (a quit locking the page) brings a new copy of the same image, which must not count as a change.
+  const [opened, setOpened] = useState<DrawingView | null>(null);
 
-  return view === null ? null : <Editor image={view.image} key={view.seq} />;
+  if (view !== null && view.seq !== opened?.seq) {
+    setOpened(view);
+  }
+
+  return view === null || opened?.seq !== view.seq ? null : (
+    <Editor key={opened.seq} opened={opened} quitting={view.quitting} />
+  );
 };

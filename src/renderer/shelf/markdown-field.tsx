@@ -1,3 +1,4 @@
+import { Strike } from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -20,6 +21,12 @@ export const editorWithFocus = (): Editor | null => focusedEditor;
 const toMarkdown = (editor: Editor): string =>
   editor.getMarkdown().replaceAll("  \n", "\n");
 
+/**
+ * ~~text~~ still strikes through, but ⇧⌘S is Next steps in every Inset app,
+ * so the editor leaves that chord to the menu.
+ */
+const StrikeWithoutKey = Strike.extend({ addKeyboardShortcuts: () => ({}) });
+
 /** What a note field does with the keys a plain field would not. */
 export interface MarkdownFieldKeys {
   /** Return, or ⌘↩: the note is done. */
@@ -35,6 +42,22 @@ export interface MarkdownFieldHandle {
   /** The editable element, to tell whether it has focus. */
   readonly element: () => HTMLElement | null;
 }
+
+/**
+ * Every Markdown shortcut but "# ", for the note field: there "# Name" makes
+ * a section, so it must not turn into a bold heading as it is typed.
+ */
+const RULES_WITHOUT_HEADINGS = [
+  "blockquote",
+  "bold",
+  "bulletList",
+  "code",
+  "codeBlock",
+  "horizontalRule",
+  "italic",
+  "orderedList",
+  "strike",
+];
 
 const isInside = (editor: Editor, node: string): boolean =>
   editor.isActive(node);
@@ -67,6 +90,8 @@ export const MarkdownField = ({
   autoFocus = false,
   className,
   controlSlot = false,
+  followValue = true,
+  headingRules = true,
   keys,
   onBlur,
   onChange,
@@ -84,6 +109,10 @@ export const MarkdownField = ({
   readonly className?: string;
   /** In an input group, the field is its control, which draws the group's focus ring. */
   readonly controlSlot?: boolean;
+  /** Whether "# " turns a line into a heading as it is typed. */
+  readonly headingRules?: boolean;
+  /** False: `value` only starts the field, and a later one (main's echo of the edit) leaves what is typed alone. */
+  readonly followValue?: boolean;
   readonly onBlur?: (markdown: string) => void;
   readonly ref?: Ref<MarkdownFieldHandle>;
 }) => {
@@ -100,6 +129,7 @@ export const MarkdownField = ({
     autofocus: autoFocus ? "end" : false,
     content: value,
     contentType: "markdown",
+    enableInputRules: headingRules ? true : RULES_WITHOUT_HEADINGS,
     editorProps: {
       attributes: fieldAttributes(ariaLabel, className, controlSlot),
       handleKeyDown: (_view, event) => {
@@ -162,9 +192,11 @@ export const MarkdownField = ({
         heading: { levels: [1, 2, 3] },
         // Links open from the list, through the app, never inside the field.
         link: { autolink: true, openOnClick: false },
+        strike: false,
         trailingNode: false,
         underline: false,
       }),
+      StrikeWithoutKey,
       Markdown.configure({ markedOptions: { breaks: true, gfm: true } }),
       Placeholder.configure({ placeholder: placeholder ?? "" }),
     ],
@@ -192,11 +224,11 @@ export const MarkdownField = ({
 
   // The value set from outside (cleared after adding a note) replaces what is typed.
   useEffect(() => {
-    if (editor !== null && value !== emitted.current) {
+    if (followValue && editor !== null && value !== emitted.current) {
       emitted.current = value;
       editor.commands.setContent(value, { contentType: "markdown" });
     }
-  }, [editor, value]);
+  }, [editor, followValue, value]);
 
   useImperativeHandle(
     ref,

@@ -1,4 +1,5 @@
 import {
+  AppWindowIcon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowUpRight01Icon,
@@ -12,6 +13,8 @@ import {
   FolderExportIcon,
   HelpCircleIcon,
   InboxDownloadIcon,
+  KeyboardIcon,
+  SidebarRightIcon,
   Link01Icon,
   PaintBrush01Icon,
   PencilEdit02Icon,
@@ -24,16 +27,21 @@ import { COLOR_HEX } from "@shared/colors";
 import {
   COLOR_NAMES,
   itemMenu,
+  menuChoiceForKey,
   pickedMenu,
   sectionMenu,
   shelfMenu,
 } from "@shared/menus";
-import type { MenuChoice, MenuEntry, MenuIcon } from "@shared/menus";
+import type {
+  ItemMenuPlace,
+  MenuChoice,
+  MenuEntry,
+  MenuIcon,
+} from "@shared/menus";
 import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
-import { keyText } from "@shared/shortcut";
 import { useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
 import {
   DropdownMenu,
@@ -42,7 +50,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuSwatchItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -60,23 +67,21 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
   clear: CleanIcon,
   copy: Copy01Icon,
   delete: Delete02Icon,
+  details: SidebarRightIcon,
   edit: PencilEdit02Icon,
   float: PinIcon,
   help: HelpCircleIcon,
+  keyboard: KeyboardIcon,
   link: Link01Icon,
   move: FolderExportIcon,
   newSection: FolderAddIcon,
   open: ArrowUpRight01Icon,
   settings: Settings02Icon,
+  windowLink: AppWindowIcon,
 };
 
 const EntryIcon = ({ icon }: { readonly icon?: MenuIcon }) =>
   icon === undefined ? null : <HugeiconsIcon icon={ICONS[icon]} />;
-
-const Shortcut = ({ accelerator }: { readonly accelerator?: string }) =>
-  accelerator === undefined ? null : (
-    <DropdownMenuShortcut>{keyText(accelerator, isMac)}</DropdownMenuShortcut>
-  );
 
 /** The colours as one row of swatches, without a heading; the item's own is ringed. */
 const ColorRow = ({
@@ -151,6 +156,8 @@ const Entries = ({
       case "group": {
         return (
           <DropdownMenuItem
+            // → opens it, as it would a submenu (MenuContent).
+            data-menu-group={entry.label}
             key={entry.label}
             onSelect={(event) => {
               // The menu stays open and shows the group's entries instead.
@@ -177,11 +184,11 @@ const Entries = ({
             onSelect={() => {
               onChoose(entry.choice);
             }}
+            shortcut={entry.accelerator}
             variant={entry.destructive === true ? "destructive" : "default"}
           >
             <EntryIcon icon={entry.icon} />
             <span className="truncate">{entry.label}</span>
-            <Shortcut accelerator={entry.accelerator} />
             {entry.checked === true ? (
               <HugeiconsIcon className="ml-auto" icon={Tick02Icon} />
             ) : null}
@@ -200,22 +207,75 @@ const keepFocus = (event: Event): void => {
   event.preventDefault();
 };
 
-/** A menu's content, showing one group's entries in place when it is opened. */
+/**
+ * A menu's content, showing one group's entries in place when it is opened.
+ * With `onKey`, the keys its entries show run them for the menu's item from
+ * any page of the menu, "Move to" included, whichever entry is highlighted.
+ * Return and Space choose the highlighted entry, on either page.
+ */
 const MenuContent = ({
   entries,
   onChoose,
+  onKey,
   ...props
 }: {
   readonly entries: readonly MenuEntry[];
   readonly onChoose: (choice: MenuChoice) => void;
+  readonly onKey?: (choice: MenuChoice) => void;
 } & Omit<ComponentProps<typeof DropdownMenuContent>, "children">) => {
   const [group, setGroup] = useState<GroupEntry | null>(null);
+
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "ArrowLeft" && group !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      setGroup(null);
+
+      return;
+    }
+
+    // → belongs to "Move to" while it is highlighted or open: it opens the list.
+    const highlighted =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-menu-group]")?.dataset
+            .menuGroup
+        : undefined;
+
+    if (
+      event.key === "ArrowRight" &&
+      (group !== null || highlighted !== undefined)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      setGroup(
+        (current) =>
+          current ??
+          entries.find(
+            (entry): entry is GroupEntry =>
+              entry.kind === "group" && entry.label === highlighted
+          ) ??
+          null
+      );
+
+      return;
+    }
+
+    const choice =
+      onKey === undefined ? null : menuChoiceForKey(entries, event, isMac);
+
+    if (choice !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      onKey?.(choice);
+    }
+  };
 
   return (
     <DropdownMenuContent
       // Each page places itself again, so a taller page never ends up clipped.
       key={group?.label ?? ""}
       onCloseAutoFocus={keepFocus}
+      onKeyDownCapture={onKeyDownCapture}
       {...props}
     >
       {group === null ? (
@@ -255,7 +315,11 @@ export interface MenuAnchor {
 
 /** What a right-click was on. */
 export type MenuTarget =
-  | { readonly kind: "item"; readonly id: ItemId }
+  | {
+      readonly kind: "item";
+      readonly id: ItemId;
+      readonly place: ItemMenuPlace;
+    }
   | { readonly kind: "items"; readonly ids: readonly ItemId[] }
   | { readonly kind: "section"; readonly id: SectionId }
   | { readonly kind: "shelf" };
@@ -293,13 +357,15 @@ const entriesFor = (
 
   const item = doc.items.find((candidate) => candidate.id === target.id);
 
-  return item === undefined ? null : itemMenu(item, doc, isMac);
+  return item === undefined ? null : itemMenu(item, doc, isMac, target.place);
 };
 
 /**
  * One menu for every right-click and every item's ⋯, opened at an anchor the
  * shelf reports. Not modal, so a dialog it opens (deleting a section) never
- * leaves the page unclickable.
+ * leaves the page unclickable. An item's menu belongs to its item: the keys
+ * it shows act on that item while it is open, never on another one, and the
+ * shelf puts focus back (`onClosed`) once it has gone.
  */
 export const PointerMenu = ({
   doc,
@@ -307,15 +373,23 @@ export const PointerMenu = ({
   menu,
   onChoose,
   onClose,
+  onClosed,
 }: {
   readonly menu: OpenMenu | null;
   readonly doc: ShelfDoc;
   readonly floatOnTop: boolean;
   readonly onChoose: (choice: MenuChoice) => void;
   readonly onClose: () => void;
+  /** The menu has left the page, by Escape, a click elsewhere or a choice. */
+  readonly onClosed: () => void;
 }) => {
   const entries =
     menu === null ? null : entriesFor(menu.target, doc, floatOnTop);
+
+  const onKey = (choice: MenuChoice): void => {
+    onChoose(choice);
+    onClose();
+  };
 
   return (
     <DropdownMenu
@@ -350,6 +424,17 @@ export const PointerMenu = ({
               : `${menu.target.kind}-${"id" in menu.target ? menu.target.id : ""}-${menu.x}-${menu.y}`
           }
           onChoose={onChoose}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onClosed();
+          }}
+          onKey={onKey}
+          // A quick right-click lets go over the menu while it slides in under the pointer; that never chooses an entry.
+          onPointerUpCapture={(event) => {
+            if (event.button === 2) {
+              event.stopPropagation();
+            }
+          }}
           sideOffset={menu?.height === 0 ? 2 : 4}
         />
       )}
@@ -384,6 +469,7 @@ export const ShelfMenu = ({
 export interface AddActions {
   readonly attachFiles: () => void;
   readonly newDrawing: () => void;
+  readonly newWindowLink: () => void;
 }
 
 /** The "+" in the note field opens upward, above the field, so it never covers it; closing it goes back to the field. */
@@ -418,10 +504,19 @@ export const AddMenu = ({
         onSelect={() => {
           actions.newDrawing();
         }}
+        shortcut="Alt+CommandOrControl+N"
       >
         <HugeiconsIcon icon={Edit02Icon} />
         New Drawing
-        <Shortcut accelerator="Alt+CommandOrControl+N" />
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={() => {
+          actions.newWindowLink();
+        }}
+        shortcut="Shift+CommandOrControl+L"
+      >
+        <HugeiconsIcon icon={AppWindowIcon} />
+        New Window Link…
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>

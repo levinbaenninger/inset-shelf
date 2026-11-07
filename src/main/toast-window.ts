@@ -1,4 +1,4 @@
-import type { ToastView } from "@shared/contracts";
+import type { NoticeTone, ToastView } from "@shared/contracts";
 import { BrowserWindow, nativeTheme, screen } from "electron";
 import type { WebContents } from "electron";
 
@@ -13,7 +13,7 @@ export interface ToastWindow {
   readonly webContents: WebContents;
   readonly load: () => Promise<void>;
   /** Shows a short confirmation without taking focus or mouse input. */
-  readonly show: (title: string, detail: string) => void;
+  readonly show: (title: string, detail: string, tone?: NoticeTone) => void;
   readonly hide: () => void;
   readonly view: () => ToastView | null;
   readonly onView: (listener: (view: ToastView) => void) => void;
@@ -79,13 +79,13 @@ export const createToastWindow = (options: {
     onView: (next) => {
       listener = next;
     },
-    show: (title, detail) => {
+    show: (title, detail, tone = "done") => {
       const { workArea } = screen.getDisplayNearestPoint(
         screen.getCursorScreenPoint()
       );
 
       seq += 1;
-      current = { detail, seq, title };
+      current = { detail, seq, title, tone };
       listener(current);
       window.setBounds({
         height: HEIGHT,

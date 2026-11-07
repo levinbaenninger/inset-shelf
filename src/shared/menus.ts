@@ -1,3 +1,4 @@
+import { hasDetails } from "./shelf";
 import type {
   ItemColor,
   ItemId,
@@ -23,11 +24,16 @@ export type MenuChoice =
   | { readonly kind: "renameSection"; readonly id: SectionId }
   | { readonly kind: "removeSection"; readonly id: SectionId }
   | { readonly kind: "newSection" }
+  | { readonly kind: "newWindowLink" }
+  | { readonly kind: "shortcuts" }
   | { readonly kind: "openSettings" }
   | { readonly kind: "setFloatOnTop"; readonly on: boolean }
   | { readonly kind: "openHelp" }
   | { readonly kind: "copy"; readonly id: ItemId }
   | { readonly kind: "copyWithLink"; readonly id: ItemId }
+  | { readonly kind: "copyDetails"; readonly id: ItemId }
+  /** The details view: every field, for editing. */
+  | { readonly kind: "details"; readonly id: ItemId }
   /** Opens an image large, ready to draw on. */
   | { readonly kind: "open"; readonly id: ItemId }
   /** Opens the page or desktop app an item came from. */
@@ -54,6 +60,9 @@ export type MenuIcon =
   | "addHere"
   | "clear"
   | "newSection"
+  | "windowLink"
+  | "keyboard"
+  | "details"
   | "settings"
   | "float"
   | "help"
@@ -114,6 +123,14 @@ export const shelfMenu = (
     kind: "choice",
     label: "New Section",
   },
+  {
+    accelerator: "Shift+CommandOrControl+L",
+    choice: { kind: "newWindowLink" },
+    enabled: true,
+    icon: "windowLink",
+    kind: "choice",
+    label: "New Window Link…",
+  },
   SEPARATOR,
   ...(windowMenu === null
     ? []
@@ -135,6 +152,14 @@ export const shelfMenu = (
     icon: "settings",
     kind: "choice",
     label: "Settings",
+  },
+  {
+    accelerator: "CommandOrControl+/",
+    choice: { kind: "shortcuts" },
+    enabled: true,
+    icon: "keyboard",
+    kind: "choice",
+    label: "Keyboard Shortcuts",
   },
   ...(windowMenu === null
     ? []
@@ -229,7 +254,6 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
     ? []
     : [
         {
-          accelerator: "Alt+CommandOrControl+C",
           choice: { id: item.id, kind: "copyWithLink" },
           enabled: true,
           icon: "link",
@@ -237,6 +261,21 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
           label: "Copy with Link",
         },
       ];
+
+/** ⌥⌘C in every Inset app; shown only where it copies more than Copy does. */
+const copyDetails = (item: ShelfItem): readonly MenuEntry[] =>
+  hasDetails(item) || (item.context?.url ?? null) !== null
+    ? [
+        {
+          accelerator: "Alt+CommandOrControl+C",
+          choice: { id: item.id, kind: "copyDetails" },
+          enabled: true,
+          icon: "copy",
+          kind: "choice",
+          label: "Copy with Details",
+        },
+      ]
+    : [];
 
 /** ⌘O: an image opens to draw on; anything else opens where it came from, if the shelf knows. */
 const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
@@ -271,11 +310,19 @@ const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
   ];
 };
 
-/** What a right-click on an item offers, with the keys that do the same in the list. */
+/** Where an item's menu opens: on its row in the list, or from ⋯ in its details, which have no Details entry. */
+export type ItemMenuPlace = "row" | "details";
+
+/**
+ * What a right-click on an item offers, with the keys that act on the item
+ * while its menu is open. Return and Space choose the highlighted entry
+ * there, as in any menu, so no entry shows them.
+ */
 export const itemMenu = (
   item: ShelfItem,
   doc: ShelfDoc,
-  mac = true
+  mac = true,
+  place: ItemMenuPlace = "row"
 ): readonly MenuEntry[] => [
   {
     accelerator: "CommandOrControl+C",
@@ -285,19 +332,30 @@ export const itemMenu = (
     kind: "choice",
     label: "Copy",
   },
+  ...copyDetails(item),
   ...copyWithLink(item),
   SEPARATOR,
+  ...(place === "details"
+    ? []
+    : [
+        {
+          accelerator: "Right",
+          choice: { id: item.id, kind: "details" },
+          enabled: true,
+          icon: "details",
+          kind: "choice",
+          label: "Details",
+        } satisfies MenuEntry,
+      ]),
   ...open(item, mac),
   {
-    accelerator: "Enter",
     choice: { id: item.id, kind: "edit" },
     enabled: true,
     icon: "edit",
     kind: "choice",
-    label: item.kind === "text" ? "Edit" : "Edit Note",
+    label: item.kind === "text" ? "Edit" : "Edit Caption",
   },
   {
-    accelerator: "Space",
     choice: { id: item.id, kind: "toggleDone" },
     enabled: true,
     icon: "check",
@@ -342,7 +400,6 @@ export const pickedMenu = (
     },
     SEPARATOR,
     {
-      accelerator: "Space",
       choice: { ids, kind: "toggleMany" },
       enabled: true,
       icon: "check",
@@ -376,3 +433,84 @@ export const pickedMenu = (
     },
   ];
 };
+
+/** The parts of a KeyboardEvent a menu reads. */
+export interface MenuKeyPress {
+  readonly key: string;
+  /** The physical key, which macOS keeps when ⌥ turns C into ç. */
+  readonly code: string;
+  readonly metaKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly shiftKey: boolean;
+  readonly repeat: boolean;
+}
+
+/** The keys an accelerator's last part stands for; ⌫ and Delete both delete, as in the list. */
+const NAMED_KEYS = new Map<string, readonly string[]>([
+  ["Backspace", ["Backspace", "Delete"]],
+  ["Right", ["ArrowRight"]],
+]);
+
+const pressesKey = (press: MenuKeyPress, key: string, mac: boolean): boolean =>
+  NAMED_KEYS.get(key)?.includes(press.key) ??
+  (key.length === 1 &&
+    (press.key.toLowerCase() === key.toLowerCase() ||
+      (mac && press.code === `Key${key.toUpperCase()}`)));
+
+/** Whether a key press is an accelerator, such as "Alt+CommandOrControl+C", on this system. */
+export const pressesAccelerator = (
+  press: MenuKeyPress,
+  accelerator: string,
+  mac: boolean
+): boolean => {
+  const parts = accelerator.split("+");
+  const key = parts.at(-1) ?? "";
+  const command = mac ? press.metaKey : press.ctrlKey;
+  const other = mac ? press.ctrlKey : press.metaKey;
+
+  return (
+    !other &&
+    command === parts.includes("CommandOrControl") &&
+    press.altKey === parts.includes("Alt") &&
+    press.shiftKey === parts.includes("Shift") &&
+    pressesKey(press, key, mac)
+  );
+};
+
+/**
+ * The choice a key press runs while an item's menu is open: the entry that
+ * shows that key, for the item the menu belongs to, whichever entry is
+ * highlighted. A held key acts once.
+ */
+export const menuChoiceForKey = (
+  entries: readonly MenuEntry[],
+  press: MenuKeyPress,
+  mac: boolean
+): MenuChoice | null => {
+  if (press.repeat) {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (
+      entry.kind === "choice" &&
+      entry.enabled &&
+      entry.accelerator !== undefined &&
+      pressesAccelerator(press, entry.accelerator, mac)
+    ) {
+      return entry.choice;
+    }
+  }
+
+  return null;
+};
+
+const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift", "AltGraph"]);
+
+/**
+ * An app shortcut, which an open menu keeps from the page under it unless
+ * the menu shows it: any key held with ⌘ on a Mac, or Ctrl elsewhere.
+ */
+export const isAppChord = (press: MenuKeyPress, mac: boolean): boolean =>
+  (mac ? press.metaKey : press.ctrlKey) && !MODIFIER_KEYS.has(press.key);

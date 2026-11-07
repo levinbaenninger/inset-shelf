@@ -19,18 +19,23 @@ export const stepSelection = (
   return ids[Math.max(index + offset, 0)] ?? null;
 };
 
-/** After a delete, select the next item, else the one before. */
+/** After a delete, select the next item still shown, else the one before. */
 export const selectionAfterRemoval = (
   ids: readonly ItemId[],
-  removed: ItemId
+  removed: readonly ItemId[]
 ): ItemId | null => {
-  const index = ids.indexOf(removed);
+  const gone = new Set(removed);
+  const last = ids.findLastIndex((id) => gone.has(id));
 
-  if (index === -1) {
+  if (last === -1) {
     return null;
   }
 
-  return ids[index + 1] ?? ids[index - 1] ?? null;
+  const kept = (id: ItemId): boolean => !gone.has(id);
+
+  return (
+    ids.slice(last + 1).find(kept) ?? ids.slice(0, last).findLast(kept) ?? null
+  );
 };
 
 /** Keeps ids in the order they are shown. */

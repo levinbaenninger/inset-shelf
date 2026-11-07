@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOp,
+  attachmentsOf,
   groupItems,
   itemsAsList,
   listHtmlWithImage,
+  itemText,
   itemTextWithLink,
   parseShelfDocument,
   emptyShelf,
@@ -13,8 +15,18 @@ import {
   SectionIdSchema,
   ShelfDocSchema,
   UNDO_MAX,
+  fitText,
+  withPinLabel,
+  withStepBack,
 } from "./shelf";
-import type { OpEnv, ShelfDoc, ShelfOp, MainOp, Removed } from "./shelf";
+import type {
+  ImageItem,
+  OpEnv,
+  ShelfDoc,
+  ShelfOp,
+  MainOp,
+  Removed,
+} from "./shelf";
 
 const uuid = (n: number) =>
   `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(n).padStart(2, "0")}`;
@@ -218,7 +230,7 @@ describe(applyOp, () => {
     const { doc } = apply(start, [
       {
         image,
-        pin: { x: 480, y: 300 },
+        pins: [{ x: 480, y: 300 }],
         source: "Built-in Retina Display",
         context: null,
         type: "addImage",
@@ -231,7 +243,7 @@ describe(applyOp, () => {
     expect(item).toMatchObject({
       kind: "image",
       note: "",
-      pin: { x: 480, y: 300 },
+      pins: [{ x: 480, y: 300 }],
       via: "pin",
     });
 
@@ -300,7 +312,7 @@ describe(applyOp, () => {
       {
         context: null,
         image,
-        pin: { x: 480, y: 300 },
+        pins: [{ x: 480, y: 300 }],
         source: null,
         type: "addImage",
         via: "pin",
@@ -334,12 +346,65 @@ describe(applyOp, () => {
     );
     expect(result.doc.items[0]).toMatchObject({
       image: annotated,
-      pin: { x: 480, y: 300 },
+      pins: [{ x: 480, y: 300 }],
     });
     expect(result.discarded).toStrictEqual([first]);
     expect(
       applyOp(doc, { id: first.id, image, type: "replaceImage" }, env(), []).doc
     ).toBe(doc);
+  });
+
+  it("keeps the marks drawn into a replaced image, and drops them when the image goes back to the bare picture", () => {
+    const image = {
+      file: `${uuid(50)}.png`,
+      heightPx: 600,
+      pixelsPerDip: 2,
+      widthPx: 960,
+    };
+
+    const { doc } = apply(start, [
+      {
+        context: null,
+        image,
+        pins: [],
+        source: null,
+        type: "addImage",
+        via: "area",
+      },
+    ]);
+
+    const [first] = doc.items;
+
+    if (first === undefined) {
+      throw new Error("missing item");
+    }
+
+    const annotated = { ...image, file: `${uuid(51)}.png` };
+    const scene = { base: image, file: `${uuid(52)}.json` };
+
+    const marked = applyOp(
+      doc,
+      { id: first.id, image: annotated, scene, type: "replaceImage" },
+      env(),
+      []
+    );
+
+    const bare = applyOp(
+      marked.doc,
+      { id: first.id, image, type: "replaceImage" },
+      env(),
+      []
+    );
+
+    expect({
+      bare: bare.doc.items[0],
+      discarded: bare.discarded.flatMap(attachmentsOf),
+      marked: marked.doc.items[0],
+    }).toStrictEqual({
+      bare: first,
+      discarded: [`${uuid(51)}.png`, `${uuid(52)}.json`, `${uuid(50)}.png`],
+      marked: { ...first, image: annotated, scene },
+    });
   });
 });
 
@@ -387,6 +452,21 @@ describe(groupItems, () => {
         group.items.length,
       ])
     ).toStrictEqual([["Later", 1]]);
+  });
+
+  it("keeps the item being typed in when its words stop matching", () => {
+    const typing = filled.items.find(
+      (item) => item.kind === "text" && item.text.startsWith("Check")
+    );
+
+    expect(
+      groupItems(filled, "discount", new Date(), typing?.id ?? null).map(
+        (group) => [group.section.name, group.items.map(itemText)]
+      )
+    ).toStrictEqual([
+      ["Inbox", ["Total ignores the discount"]],
+      ["Later", ["Check the plan picker copy"]],
+    ]);
   });
 });
 
@@ -618,20 +698,25 @@ describe(parseShelfDocument, () => {
   it("upgrades the first format and keeps every item as it was", () => {
     const doc = parseShelfDocument(JSON.stringify(firstFormat));
 
-    expect(doc?.schemaVersion).toBe(2);
+    expect(doc?.schemaVersion).toBe(3);
     expect(doc?.items).toMatchObject([
       {
         color: null,
         context: null,
+        description: "",
+        due: null,
         id: uuid(20),
+        steps: [],
         text: "Building this little habit app\n",
+        windows: [],
       },
       {
         color: null,
         context: null,
         done: true,
         id: uuid(21),
-        pin: { x: 480, y: 300 },
+        pins: [{ x: 480, y: 300 }],
+        title: null,
       },
     ]);
     expect(ShelfDocSchema.safeParse(doc).success).toBeTruthy();
@@ -642,9 +727,97 @@ describe(parseShelfDocument, () => {
 
     expect(parseShelfDocument(JSON.stringify(current))).toStrictEqual(current);
     expect(
-      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 3 }))
+      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 4 }))
     ).toBeNull();
     expect(parseShelfDocument("{ not a shelf")).toBeNull();
+  });
+
+  describe("an image's kept marks (feedback round 13)", () => {
+    const base = {
+      file: `${uuid(50)}.png`,
+      heightPx: 600,
+      pixelsPerDip: 2,
+      widthPx: 960,
+    };
+
+    const shelfWith = (
+      fields: Partial<Pick<ImageItem, "image" | "scene">>
+    ) => ({
+      activeSectionId: uuid(1),
+      items: [
+        {
+          color: null,
+          context: null,
+          createdAt: "2026-10-22T17:40:00.000Z",
+          description: "",
+          done: false,
+          due: null,
+          id: uuid(21),
+          image: base,
+          kind: "image",
+          note: "",
+          pins: [{ x: 480, y: 300 }],
+          sectionId: uuid(1),
+          source: null,
+          steps: [],
+          title: null,
+          via: "area",
+          windows: [],
+          ...fields,
+        },
+      ],
+      schemaVersion: 3,
+      sections: [{ id: uuid(1), name: "Inbox" }],
+    });
+
+    it("reads an image saved before marks were kept exactly as it was, with no scene", () => {
+      const old = shelfWith({});
+
+      expect(parseShelfDocument(JSON.stringify(old))).toStrictEqual(old);
+    });
+
+    it("keeps the marks' file and the picture under them through a save and a read, and names all three files", () => {
+      const kept = shelfWith({
+        image: { ...base, file: `${uuid(51)}.png` },
+        scene: { base, file: `${uuid(52)}.json` },
+      });
+
+      const read = parseShelfDocument(JSON.stringify(kept));
+      const [item] = read?.items ?? [];
+
+      expect({
+        files: item === undefined ? [] : attachmentsOf(item),
+        read,
+      }).toStrictEqual({
+        files: [`${uuid(51)}.png`, `${uuid(52)}.json`, `${uuid(50)}.png`],
+        read: kept,
+      });
+    });
+
+    it("names the marks' file of a drawing made on a blank page, which has no picture under them", () => {
+      const read = parseShelfDocument(
+        JSON.stringify(
+          shelfWith({ scene: { base: null, file: `${uuid(52)}.json` } })
+        )
+      );
+
+      const [item] = read?.items ?? [];
+
+      expect(item === undefined ? [] : attachmentsOf(item)).toStrictEqual([
+        `${uuid(50)}.png`,
+        `${uuid(52)}.json`,
+      ]);
+    });
+
+    it("rejects a scene whose marks are not a JSON file the app named", () => {
+      expect(
+        parseShelfDocument(
+          JSON.stringify(
+            shelfWith({ scene: { base: null, file: "../shelf.json" } })
+          )
+        )
+      ).toBeNull();
+    });
   });
 });
 
@@ -736,5 +909,66 @@ describe("setColor", () => {
       apply(tagged, [{ color: null, id: item.id, type: "setColor" }], e).doc
         .items[0]?.color
     ).toBeNull();
+  });
+});
+
+const step = (n: number, done = false) => ({
+  done,
+  id: `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1d${String(n).padStart(2, "0")}`,
+  text: `Step ${n}`,
+});
+
+describe(withStepBack, () => {
+  it("puts a removed step back where it was, keeping ticks made since", () => {
+    const now = [step(1, true), step(3)];
+
+    expect(withStepBack(now, { index: 1, step: step(2) })).toStrictEqual([
+      step(1, true),
+      step(2),
+      step(3),
+    ]);
+  });
+
+  it("puts it at the end when the list has since got shorter", () => {
+    expect(withStepBack([step(1)], { index: 4, step: step(5) })).toStrictEqual([
+      step(1),
+      step(5),
+    ]);
+  });
+
+  it("does nothing when the step is already back", () => {
+    expect(
+      withStepBack([step(1), step(2)], { index: 0, step: step(2) })
+    ).toStrictEqual([step(1), step(2)]);
+  });
+});
+
+describe(withPinLabel, () => {
+  it("changes only that pin's label, keeping where every pin is", () => {
+    const pins = [
+      { label: "Title", x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ];
+
+    expect(withPinLabel(pins, 1, "Error text")).toStrictEqual([
+      { label: "Title", x: 10, y: 20 },
+      { label: "Error text", x: 30, y: 40 },
+    ]);
+  });
+
+  it("leaves the pins alone when that pin is gone", () => {
+    expect(withPinLabel([{ x: 1, y: 2 }], 3, "Gone")).toStrictEqual([
+      { x: 1, y: 2 },
+    ]);
+  });
+});
+
+describe(fitText, () => {
+  it("keeps text that fits", () => {
+    expect(fitText("Quote", 5)).toBe("Quote");
+  });
+
+  it("cuts longer text to the limit, ending in an ellipsis", () => {
+    expect(fitText("Quotes", 5)).toBe("Quot…");
   });
 });
