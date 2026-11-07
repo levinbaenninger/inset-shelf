@@ -188,6 +188,24 @@ describe(itemMenu, () => {
     });
   });
 
+  it("offers Details on the row, not in the details the item is open in", () => {
+    const [item] = doc.items;
+
+    if (item === undefined) {
+      throw new Error("missing item");
+    }
+
+    expect(labels(itemMenu(item, doc, true, "row")).slice(0, 4)).toStrictEqual([
+      "Copy",
+      "---",
+      "Details",
+      "Edit",
+    ]);
+    expect(
+      labels(itemMenu(item, doc, true, "details")).slice(0, 4)
+    ).toStrictEqual(["Copy", "---", "Edit", "Uncheck"]);
+  });
+
   it("offers Copy with Details only for an item that has some", () => {
     const [item] = doc.items;
 

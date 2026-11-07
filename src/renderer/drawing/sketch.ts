@@ -56,12 +56,14 @@ export interface PinMark {
 
 export type Mark = PenMark | SegmentMark | TextMark | PinMark;
 
+/** In Excalidraw's order: Select, the shapes, the pen, text, then the shelf's own Pin. */
 export const TOOLS = [
-  "pen",
-  "line",
-  "arrow",
+  "select",
   "rect",
   "ellipse",
+  "arrow",
+  "line",
+  "pen",
   "text",
   "pin",
 ] as const;
@@ -81,9 +83,13 @@ export const TEXT_SIZE: Readonly<Record<Stroke, number>> = {
 /** Line height as a multiple of the font size, shared by the canvas and the text field. */
 export const TEXT_LEADING = 1.25;
 
-export const TEXT_FONT = '"Inter Variable", sans-serif';
+/**
+ * Excalidraw's hand-drawn face (fonts/excalifont), the same on the page and
+ * in every export; Inter only for letters it has no glyph for.
+ */
+export const TEXT_FONT = '"Excalifont", "Inter Variable", sans-serif';
 
-export const fontFor = (size: number): string => `500 ${size}px ${TEXT_FONT}`;
+export const fontFor = (size: number): string => `400 ${size}px ${TEXT_FONT}`;
 
 /** Drags shorter than this are clicks, which draw nothing with the drag tools. */
 const MIN_DRAG = 2;

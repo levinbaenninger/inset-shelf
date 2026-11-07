@@ -2,6 +2,7 @@ import {
   ArrowUpRight01Icon,
   CircleIcon,
   Copy01Icon,
+  Cursor01Icon,
   Delete02Icon,
   Location01Icon,
   SlashIcon,
@@ -13,7 +14,7 @@ import {
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -35,6 +36,7 @@ const TOOL_LABEL: Readonly<Record<Tool, string>> = {
   pen: "Pen",
   pin: "Pin",
   rect: "Rectangle",
+  select: "Select",
   text: "Text",
 };
 
@@ -45,6 +47,7 @@ const TOOL_ICON: Readonly<Record<Tool, typeof PencilIcon>> = {
   pen: PencilIcon,
   pin: Location01Icon,
   rect: SquareIcon,
+  select: Cursor01Icon,
   text: TextIcon,
 };
 
@@ -58,8 +61,9 @@ const COLOR_LABEL: Readonly<Record<Color, string>> = {
 
 export interface ToolbarProps {
   readonly tool: Tool;
-  readonly color: Color;
-  readonly stroke: Stroke;
+  /** The ink and stroke shown: the selection's, or the next mark's; null when the selection mixes them. */
+  readonly color: Color | null;
+  readonly stroke: Stroke | null;
   readonly dark: boolean;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -97,6 +101,11 @@ const Tip = ({
 );
 
 const Divider = () => <div aria-hidden className="bg-border mx-1 h-5 w-px" />;
+
+/** Inks and the stroke restyle what is selected or being typed, so a click on them leaves focus, and with it the selection, where it is. */
+const keepFocus = (event: MouseEvent): void => {
+  event.preventDefault();
+};
 
 /** The floating pill under the page: tools, inks, stroke, history, and saving to the shelf. */
 export const Toolbar = ({
@@ -149,6 +158,7 @@ export const Toolbar = ({
           onClick={() => {
             onColor(each);
           }}
+          onMouseDown={keepFocus}
           size="icon-sm"
           variant="ghost"
         >
@@ -167,6 +177,7 @@ export const Toolbar = ({
         onClick={() => {
           onStroke(stroke === "thick" ? "thin" : "thick");
         }}
+        onMouseDown={keepFocus}
         size="icon-sm"
         variant="ghost"
       >

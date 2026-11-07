@@ -16,13 +16,15 @@ export interface DrawingKeyActions {
   readonly dropPin: () => void;
   /** 1–9: selects that pin. */
   readonly selectPin: (index: number) => void;
-  /** ⌫ with a pin selected; false when none is, so the key does nothing. */
-  readonly removePin: () => boolean;
-  /** The arrow keys, 10 with Shift; held is true for a held key's repeats. False when no pin is selected. */
-  readonly nudgePin: (dx: number, dy: number, held: boolean) => boolean;
+  /** ⌫ or Delete: removes what is selected; false when nothing is, so the key does nothing. */
+  readonly remove: () => boolean;
+  /** The arrow keys, 10 with Shift; held is true for a held key's repeats. False when nothing is selected. */
+  readonly nudge: (dx: number, dy: number, held: boolean) => boolean;
+  /** ⌘D: copies of what is selected. */
+  readonly duplicate: () => void;
 }
 
-/** P is the Pin tool (P toggles it); the pen moved to B. */
+/** Excalidraw's letters; P is the Pin tool (P toggles it), so the pen is X. */
 export const TOOL_KEYS: Readonly<Record<Tool, string>> = DRAWING_TOOL_KEYS;
 
 const NUDGE = new Map<string, readonly [number, number]>([
@@ -45,13 +47,19 @@ export const SAVE_KEYS = isMac ? "⌘↩" : "Ctrl+Enter";
 const isTextField = (target: EventTarget | null): boolean =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
-/** ⌘Z and ⇧⌘Z, or Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z elsewhere; true when the key was one of them. */
-const historyKey = (
+/** ⌘Z and ⇧⌘Z, or Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z elsewhere, and ⌘D; true when the key was one of them. */
+const commandKey = (
   event: KeyboardEvent,
   actions: DrawingKeyActions
 ): boolean => {
   const command = (isMac ? event.metaKey : event.ctrlKey) && !event.altKey;
   const letter = event.key.toLowerCase();
+
+  if (command && letter === "d" && !event.shiftKey) {
+    actions.duplicate();
+
+    return true;
+  }
 
   if (command && letter === "z") {
     if (event.shiftKey) {
@@ -72,8 +80,11 @@ const historyKey = (
   return false;
 };
 
-/** ⇧P drops a pin, 1–9 select one, the arrows nudge it (10 px with Shift), ⌫ removes it; true when the key was used. */
-const pinKey = (event: KeyboardEvent, actions: DrawingKeyActions): boolean => {
+/** ⇧P drops a pin, 1–9 select one, the arrows nudge the selection (10 px with Shift), ⌫ removes it; true when the key was used. */
+const selectionKey = (
+  event: KeyboardEvent,
+  actions: DrawingKeyActions
+): boolean => {
   if (event.shiftKey && event.key.toLowerCase() === "p") {
     actions.dropPin();
 
@@ -91,18 +102,18 @@ const pinKey = (event: KeyboardEvent, actions: DrawingKeyActions): boolean => {
   if (nudge !== undefined) {
     const step = event.shiftKey ? 10 : 1;
 
-    return actions.nudgePin(nudge[0] * step, nudge[1] * step, event.repeat);
+    return actions.nudge(nudge[0] * step, nudge[1] * step, event.repeat);
   }
 
   return (
-    (event.key === "Backspace" || event.key === "Delete") && actions.removePin()
+    (event.key === "Backspace" || event.key === "Delete") && actions.remove()
   );
 };
 
 /**
- * The history keys, the pin keys, and a plain letter for each tool (P
- * toggles the Pin tool). A text field keeps its own keys. The letter is read
- * from the layout, so Z is found on QWERTZ keyboards too.
+ * The history keys and ⌘D, the selection and pin keys, and a plain letter
+ * for each tool (P toggles the Pin tool). A text field keeps its own keys.
+ * The letter is read from the layout, so Z is found on QWERTZ keyboards too.
  */
 export const useDrawingKeys = (actions: DrawingKeyActions): void => {
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
@@ -115,7 +126,7 @@ export const useDrawingKeys = (actions: DrawingKeyActions): void => {
       return;
     }
 
-    if (historyKey(event, actions)) {
+    if (commandKey(event, actions)) {
       event.preventDefault();
 
       return;
@@ -125,7 +136,7 @@ export const useDrawingKeys = (actions: DrawingKeyActions): void => {
       return;
     }
 
-    if (pinKey(event, actions)) {
+    if (selectionKey(event, actions)) {
       event.preventDefault();
 
       return;

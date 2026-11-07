@@ -23,20 +23,34 @@ import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
 
 import { Page } from "./page";
-import type { DragMark, PageImage } from "./page";
-import { nudgePin, nudgeStep, movePin, pinsOf, removePin } from "./pins";
+import type { PageImage } from "./page";
+import { nudgeStep, pinIndexOf, pinMarkIndex, pinsOf } from "./pins";
 import { exportAnnotated, exportPng, measureText } from "./render";
 import {
-  addMark,
+  draftEdit,
+  duplicateMarks,
+  gestureMarks,
+  gestureSelection,
+  moveMarks,
+  NOTHING,
+  onlySelected,
+  releaseGesture,
+  removeMarks,
+  restyle,
+  shownStyle,
+  withDraft,
+  withText,
+} from "./selection";
+import type { Gesture, Selection, Style, TextDraft } from "./selection";
+import {
   amend,
   canRedo,
   canUndo,
   clearMarks,
   commit,
   EXPORT_SCALE,
-  exportFrame,
-  isVisible,
   redo,
+  TEXT_SIZE,
   undo,
 } from "./sketch";
 import type { Color, History, Mark, Point, Stroke, Tool } from "./sketch";
@@ -84,17 +98,17 @@ const exportMarks = async (
   const strokes = marks.filter((mark) => mark.kind !== "pin");
 
   if (image === null) {
-    const frame = exportFrame(marks, measureText);
-    const png = await exportPng(marks, dark);
+    // The frame comes with the picture, measured once the font has loaded, so the pins land where the text pushed the edges.
+    const exported = await exportPng(marks, dark);
 
-    return png === null || frame === null
+    return exported === null
       ? null
       : {
           pins: pinsInPixels(marks, (point) => ({
-            x: (point.x - frame.origin.x) * EXPORT_SCALE,
-            y: (point.y - frame.origin.y) * EXPORT_SCALE,
+            x: (point.x - exported.frame.origin.x) * EXPORT_SCALE,
+            y: (point.y - exported.frame.origin.y) * EXPORT_SCALE,
           })),
-          png,
+          png: exported.png,
         };
   }
 
@@ -189,23 +203,13 @@ const startingMarks = (image: DrawingImage | null): readonly Mark[] =>
           : { at, kind: "pin", label: pin.label };
       });
 
-/** Something to save: new marks, words still being typed, or pins added, moved or removed. */
+/** Something to save: marks (words still being typed among them), or pins added, moved or removed. */
 const hasChanges = (
   marks: readonly Mark[],
-  draft: Mark | null,
   initial: readonly Mark[]
 ): boolean =>
   marks.some((mark) => mark.kind !== "pin") ||
-  draft !== null ||
   JSON.stringify(pinsOf(marks)) !== JSON.stringify(pinsOf(initial));
-
-/** A stroke still being drawn, once it shows: it counts and is saved before it is let go (red-team round 8). */
-const shownStroke = (drag: DragMark | null): DragMark | null =>
-  drag !== null && isVisible(drag) ? drag : null;
-
-/** Letting go of a stroke, or a lock ending it: one that shows becomes a mark. */
-const endStroke = (history: History, drag: DragMark): History =>
-  isVisible(drag) ? addMark(history, drag) : history;
 
 /** How long the page says why New Drawing or Annotate brought it forward instead. */
 const REFUSED_MS = 4000;
@@ -288,27 +292,31 @@ const Editor = ({
   );
 
   const [lastTool, setLastTool] = useState<Tool>("pen");
-  const [selectedPin, setSelectedPin] = useState<number | null>(null);
+  // What Select or the pin keys picked, pins included, by place among the marks.
+  const [selection, setSelection] = useState<Selection>(NOTHING);
   const pointerRef = useRef<Point | null>(null);
-  // The image and its pins: a selected pin brings focus here, and focus leaving lets go of it.
-  const pinsRef = useRef<HTMLElement>(null);
-  // The step a held arrow key last made, so its repeats move the pin within that step.
+  // The page, image and pins: a selection brings focus here, and focus leaving lets go of it.
+  const pageRef = useRef<HTMLElement>(null);
+  // The step a held arrow key last made, so its repeats move the selection within that step.
   const nudged = useRef<History | null>(null);
+  // Removing a focused field can also blur it; its words must only be added once.
+  const textOpen = useRef(false);
 
-  const selectPin = (index: number | null): void => {
-    setSelectedPin(index);
+  /** Picks marks; a selection takes focus to the page, so its keys reach it. */
+  const select = (next: Selection): void => {
+    setSelection(next);
 
-    if (index !== null) {
-      pinsRef.current?.focus({ preventScroll: true });
+    if (next.size > 0) {
+      pageRef.current?.focus({ preventScroll: true });
     }
   };
 
-  // Focus leaving the image, or the window, lets go of the pin, so digits and ⌫ typed elsewhere never touch it.
+  // Focus leaving the page, or the window, lets go of the selection, so digits and ⌫ typed elsewhere never touch it.
   useEffect(() => {
-    const area = pinsRef.current;
+    const area = pageRef.current;
 
     const letGo = (): void => {
-      setSelectedPin(null);
+      setSelection(NOTHING);
     };
 
     const onFocusOut = (event: FocusEvent): void => {
@@ -326,10 +334,12 @@ const Editor = ({
       window.removeEventListener("blur", letGo);
       area?.removeEventListener("focusout", onFocusOut);
     };
-  }, [pinsRef]);
+  }, [pageRef]);
   // Marks on a picture stand out in red; a blank page starts in ink.
   const [color, setColor] = useState<Color>(image === null ? "ink" : "red");
   const [stroke, setStroke] = useState<Stroke>("thin");
+  // Screen pixels per drawing unit, as the page shows it: restyled marks get the size new ones would.
+  const [scale, setScale] = useState(1);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -337,27 +347,14 @@ const Editor = ({
   // Each time New Drawing or Annotate brought this drawing forward instead: the pill says why for a while.
   const [refused, setRefused] = useExpiringState<number>(REFUSED_MS);
   // Words in the open text field, not yet a mark in the history.
-  const [draft, setDraft] = useState<Mark | null>(null);
-  // A pen, line or shape still being drawn, not yet a mark in the history.
-  const [drag, setDrag] = useState<DragMark | null>(null);
+  const [text, setText] = useState<TextDraft | null>(null);
+  // A stroke being drawn or a selection being moved, resized or picked, not yet a step in the history.
+  const [gesture, setGesture] = useState<Gesture | null>(null);
   // On an image the marks keep the colours they are saved in, whatever the theme.
   const dark = useDark() && image === null;
   const marks = history.present;
   const pins = pinsOf(marks);
   const pinsChanged = JSON.stringify(pins) !== JSON.stringify(pinsOf(initial));
-  const drawn = shownStroke(drag);
-  const stroking = drawn !== null;
-  const dirty = hasChanges(marks, draft, initial) || stroking;
-  // What a save sends: the marks, the words still being typed and a stroke still being drawn.
-  const toSave = [...marks, ...[draft, drawn].filter((mark) => mark !== null)];
-  // While its save, a quit or the Discard confirm is under way nothing changes the marks, so none is made that main would not get or that the prompt doesn't show (Round 8).
-  const locked = saving || quitting || confirming;
-
-  // A lock ends a stroke where it is, as letting go would: the marks then stay as they are until it lifts.
-  if (locked && drag !== null) {
-    setDrag(null);
-    setHistory(endStroke(history, drag));
-  }
 
   const bounds =
     image === null
@@ -367,24 +364,50 @@ const Editor = ({
           width: image.widthPx / image.pixelsPerDip,
         };
 
+  // The marks and the selection as the gesture shows them; a gesture that shows counts and is saved before it is let go (red-team round 8).
+  const shown = gestureMarks(marks, selection, gesture, bounds);
+
+  const shownSelection = gestureSelection(
+    marks,
+    selection,
+    gesture,
+    measureText
+  );
+
+  const moving = shown !== marks;
+  // Kept between renders, so the page reports a change of the words, not every render while they are open.
+  const typed = useMemo(() => withDraft(marks, text), [marks, text]);
+  const dirty = hasChanges(typed, initial) || moving;
+  // What a save sends: the marks, the words still being typed and a gesture still under way.
+  const toSave = withDraft(shown, text);
+  // While its save, a quit or the Discard confirm is under way nothing changes the marks, so none is made that main would not get or that the prompt doesn't show (Round 8).
+  const locked = saving || quitting || confirming;
+
+  /** One step of the history, when the marks changed. */
   const change = (next: readonly Mark[]): void => {
-    setHistory(commit(history, next));
+    if (next !== marks) {
+      setHistory(commit(history, next));
+    }
   };
 
-  /** P toggles the Pin tool; any other key picks its tool. */
-  const pickTool = (next: Tool): void => {
-    if (next === "pin" && tool === "pin") {
-      setTool(lastTool);
-    } else {
-      if (next === "pin") {
-        setLastTool(tool);
-      }
+  // A lock ends a gesture where it is, as letting go would: the marks then stay as they are until it lifts.
+  if (locked && gesture !== null) {
+    setGesture(null);
+    change(shown);
+  }
 
-      setTool(next);
+  /** P toggles the Pin tool; any other key picks its tool. Only Select and Pin keep what is selected. */
+  const pickTool = (next: Tool): void => {
+    const picked = next === "pin" && tool === "pin" ? lastTool : next;
+
+    if (picked === "pin") {
+      setLastTool(tool);
     }
 
-    if (next !== "pin") {
-      setSelectedPin(null);
+    setTool(picked);
+
+    if (picked !== "select" && picked !== "pin") {
+      setSelection(NOTHING);
     }
   };
 
@@ -404,22 +427,135 @@ const Editor = ({
     setSaving(false);
   };
 
-  const add = (mark: Mark): History => {
-    const next = addMark(history, mark);
+  const addPin = (at: Point): void => {
+    change([...marks, { at, kind: "pin" }]);
+    select(new Set([marks.length]));
+  };
 
-    setHistory(next);
+  /**
+   * Letting go of `last`, the gesture as the page last had it: it becomes
+   * one step, and a shape just drawn is selected with Select picked, as in
+   * Excalidraw. A gesture a lock already ended is over.
+   */
+  const release = (last: Gesture): void => {
+    if (gesture === null || locked) {
+      return;
+    }
 
-    return next;
+    const result = releaseGesture(marks, selection, last, measureText, bounds);
+
+    setGesture(null);
+    change(result.marks);
+    select(result.selection);
+
+    if (
+      last.kind === "draw" &&
+      last.mark.kind !== "pen" &&
+      result.marks !== marks
+    ) {
+      setTool("select");
+    }
+  };
+
+  const openText = (draft: TextDraft): void => {
+    textOpen.current = true;
+    setSelection(NOTHING);
+    setText(draft);
+  };
+
+  /**
+   * Closes the text field: kept, the words become one step and are
+   * selected, with Select picked; dropped, an edited text stays as it was.
+   * The page takes focus back, unless focus left for something else.
+   */
+  const closeText = (keep: boolean, blurred = false): History => {
+    if (text === null || !textOpen.current) {
+      return history;
+    }
+
+    textOpen.current = false;
+    setText(null);
+
+    if (tool === "text") {
+      setTool("select");
+    }
+
+    const edit = draftEdit(text);
+    const next = keep ? withText(marks, edit) : marks;
+    const after = next === marks ? history : commit(history, next);
+    let { index } = edit;
+
+    if (keep && edit.mark === null) {
+      index = null;
+    } else if (keep && edit.index === null) {
+      index = next.length - 1;
+    }
+
+    setHistory(after);
+
+    if (blurred) {
+      return after;
+    }
+
+    if (index === null) {
+      pageRef.current?.focus({ preventScroll: true });
+    } else {
+      select(new Set([index]));
+    }
+
+    return after;
+  };
+
+  /** An ink or a stroke picked: the words being typed or the selection take it, and so does the next mark. */
+  const applyStyle = (style: Style): void => {
+    if (text === null) {
+      change(restyle(marks, selection, style, scale));
+    } else {
+      setText({
+        ...text,
+        color: style.color ?? text.color,
+        size:
+          style.stroke === undefined
+            ? text.size
+            : TEXT_SIZE[style.stroke] / scale,
+      });
+    }
+  };
+
+  const style = shownStyle(shown, shownSelection, text, scale, {
+    color,
+    stroke,
+  });
+
+  const duplicate = (): void => {
+    if (selection.size === 0) {
+      return;
+    }
+
+    const copies = duplicateMarks(marks, selection, bounds);
+
+    change(copies.marks);
+    select(copies.selection);
+  };
+
+  const undoStep = (): void => {
+    setHistory(undo(history));
+    setSelection(NOTHING);
+  };
+
+  const redoStep = (): void => {
+    setHistory(redo(history));
+    setSelection(NOTHING);
   };
 
   useLocalKeys(
     locked
       ? {}
       : {
-          // Esc lets go of a selected pin first; only an untouched page closes on it, so a stray key never throws work away.
+          // Esc lets go of the selection first; only an untouched page closes on it, so a stray key never throws work away.
           onEscape: () => {
-            if (selectedPin !== null) {
-              setSelectedPin(null);
+            if (selection.size > 0) {
+              setSelection(NOTHING);
             } else if (!dirty) {
               api.cancel();
             }
@@ -432,8 +568,8 @@ const Editor = ({
 
   // Every change, not only the first: main then knows the marks a held quit put on the shelf have changed since.
   useEffect(() => {
-    api.setDirty(hasChanges(history.present, draft, initial) || stroking);
-  }, [history.present, draft, initial, stroking]);
+    api.setDirty(hasChanges(typed, initial) || moving);
+  }, [typed, initial, moving]);
 
   // Retry in a held quit saves the marks to the shelf, as Save does; a save already running finishes on its own.
   const saveForQuit = useEffectEvent(() => {
@@ -472,12 +608,19 @@ const Editor = ({
     [setRefused]
   );
 
-  // The menu bar's Undo and Redo arrive here instead of as keys.
-  const menuEdit = useEffectEvent((kind: "undo" | "redo") => {
-    if (!locked) {
+  // The menu bar's Undo, Redo and Duplicate (⌘D, which the menu takes for Description) arrive here instead of as keys.
+  const menuEdit = useEffectEvent((kind: "undo" | "redo" | "duplicate") => {
+    if (locked) {
+      return;
+    }
+
+    if (kind === "duplicate") {
+      duplicate();
+    } else {
       setHistory((current) =>
         kind === "undo" ? undo(current) : redo(current)
       );
+      setSelection(NOTHING);
     }
   });
 
@@ -490,32 +633,42 @@ const Editor = ({
   );
 
   useDrawingKeys({
-    enabled: !locked,
     dropPin: () => {
       const center =
         bounds === undefined
           ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
           : { x: bounds.width / 2, y: bounds.height / 2 };
 
-      change([...marks, { at: pointerRef.current ?? center, kind: "pin" }]);
-      selectPin(pins.length);
+      addPin(pointerRef.current ?? center);
     },
-    nudgePin: (dx, dy, held) => {
-      if (selectedPin === null) {
+    duplicate,
+    enabled: !locked,
+    nudge: (dx, dy, held) => {
+      if (selection.size === 0) {
         return false;
       }
 
-      // dx and dy are pixels of the saved image, whatever the screen's scale.
-      const scale = image?.pixelsPerDip ?? EXPORT_SCALE;
+      // Pins move in pixels of the saved image, whatever the screen's scale; marks in the drawing's own units.
+      const onlyPins = [...selection].every(
+        (index) => marks[index]?.kind === "pin"
+      );
 
-      const moved = nudgePin(
+      const step = onlyPins
+        ? nudgeStep(1, image?.pixelsPerDip ?? EXPORT_SCALE)
+        : 1;
+
+      const moved = moveMarks(
         marks,
-        selectedPin,
-        { x: nudgeStep(dx, scale), y: nudgeStep(dy, scale) },
+        selection,
+        { x: dx * step, y: dy * step },
         bounds
       );
 
-      // One Undo puts the pin back where the held key started it.
+      if (moved === marks) {
+        return true;
+      }
+
+      // One Undo puts the selection back where the held key started it.
       const next =
         held && nudged.current === history
           ? amend(history, moved)
@@ -527,29 +680,28 @@ const Editor = ({
       return true;
     },
     pickTool,
-    redo: () => {
-      setHistory(redo(history));
-    },
-    removePin: () => {
-      if (selectedPin === null) {
+    redo: redoStep,
+    remove: () => {
+      if (selection.size === 0) {
         return false;
       }
 
-      change(removePin(marks, selectedPin));
-      setSelectedPin(null);
+      change(removeMarks(marks, selection));
+      setSelection(NOTHING);
 
       return true;
     },
     selectPin: (index) => {
-      if (index < pins.length) {
-        selectPin(index);
+      const at = pinMarkIndex(marks, index);
+
+      if (at !== null) {
+        select(new Set([at]));
       }
     },
-    undo: () => {
-      setHistory(undo(history));
-      setSelectedPin(null);
-    },
+    undo: undoStep,
   });
+
+  const selectedPin = pinIndexOf(marks, onlySelected(selection));
 
   return (
     <main className="bg-background flex h-svh flex-col overflow-hidden select-none">
@@ -572,33 +724,37 @@ const Editor = ({
         <section
           aria-label="Pins"
           className="absolute inset-0 outline-none"
-          ref={pinsRef}
+          ref={pageRef}
           tabIndex={-1}
         >
           <Page
             color={color}
             dark={dark}
-            drag={drag}
+            gesture={gesture}
             image={pageImage(image)}
             locked={locked}
-            marks={marks}
-            onAdd={(mark) => {
-              add(mark);
+            marks={shown}
+            onAddPin={addPin}
+            onCloseText={(keep, blurred) => {
+              closeText(keep, blurred);
             }}
-            onDraft={setDraft}
-            onMovePin={(index, to) => {
-              change(movePin(marks, index, to, bounds));
+            onGesture={setGesture}
+            onOpenText={openText}
+            onRelease={release}
+            onScale={setScale}
+            onSelect={select}
+            onSubmitText={() => {
+              void save(false, closeText(true).present);
             }}
-            onDrag={setDrag}
-            onSelectPin={selectPin}
-            onSubmit={(mark) => {
-              const next = mark === null ? history : add(mark);
-
-              void save(false, next.present);
+            onTypeText={(value) => {
+              if (text !== null) {
+                setText({ ...text, value });
+              }
             }}
             pointerRef={pointerRef}
-            selectedPin={selectedPin}
+            selection={shownSelection}
             stroke={stroke}
+            text={text}
             tool={tool}
           />
         </section>
@@ -612,28 +768,31 @@ const Editor = ({
             canRedo={canRedo(history)}
             canSave={dirty && !saving}
             canUndo={canUndo(history)}
-            color={color}
+            color={style.color}
             dark={dark}
             locked={locked}
             onClear={() => {
               setHistory(clearMarks(history));
+              setSelection(NOTHING);
             }}
-            onColor={setColor}
+            onColor={(next) => {
+              setColor(next);
+              applyStyle({ color: next });
+            }}
             onCopyAndSave={() => {
               void save(true, toSave);
             }}
-            onRedo={() => {
-              setHistory(redo(history));
-            }}
+            onRedo={redoStep}
             onSave={() => {
               void save(false, toSave);
             }}
-            onStroke={setStroke}
-            onTool={pickTool}
-            onUndo={() => {
-              setHistory(undo(history));
+            onStroke={(next) => {
+              setStroke(next);
+              applyStyle({ stroke: next });
             }}
-            stroke={stroke}
+            onTool={pickTool}
+            onUndo={undoStep}
+            stroke={style.stroke}
             tool={tool}
           />
         </div>

@@ -303,8 +303,8 @@ export const drawingContract = defineContract({
   events: {
     /** The window is closing with marks on the page: the page asks before throwing them away. */
     confirmClose: event<DrawingOnShelf>(),
-    /** Undo and Redo from the menu bar, which takes ⌘Z before the page sees it. */
-    edit: event<"undo" | "redo">(),
+    /** Undo, Redo and Duplicate from the menu bar, which takes ⌘Z, and ⌘D for Add Description, before the page sees them. */
+    edit: event<"undo" | "redo" | "duplicate">(),
     /** New Drawing or Annotate asked for another drawing: this one, with its unsaved marks, came forward instead. */
     openRefused: event<null>(),
     /** Retry in a held quit: the page saves its marks to the shelf, as Save does. */

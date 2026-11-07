@@ -91,6 +91,31 @@ export const dueFor = (choice: DueChoice, now: Date): string => {
   }
 };
 
+type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+const WEEKDAYS: readonly Weekday[] = [0, 1, 2, 3, 4, 5, 6];
+
+/** What Intl.Locale tells of a week; older engines name it a property, newer a method. */
+interface WeekInfoLocale {
+  readonly getWeekInfo?: () => { readonly firstDay: number };
+  readonly weekInfo?: { readonly firstDay: number };
+}
+
+/**
+ * The day a locale's weeks start on, as Date#getDay counts (Sunday is 0), so
+ * a calendar's columns match the system: Monday in most of Europe, Sunday in
+ * the US. Monday when the engine can't say.
+ */
+export const weekStartDay = (locale?: string): Weekday => {
+  const info: Intl.Locale & WeekInfoLocale = new Intl.Locale(
+    locale ?? new Intl.DateTimeFormat().resolvedOptions().locale
+  );
+
+  const first = info.getWeekInfo?.().firstDay ?? info.weekInfo?.firstDay ?? 1;
+
+  return WEEKDAYS[first % WEEK] ?? MONDAY;
+};
+
 /** How a due day stands against today. "week" is the next six days after today. */
 export type DueBucket = "overdue" | "today" | "week" | "later";
 

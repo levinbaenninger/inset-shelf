@@ -4,9 +4,11 @@ import {
   exportFrame,
   fontFor,
   TEXT_LEADING,
+  TEXT_SIZE,
 } from "./sketch";
 import type {
   Color,
+  ExportFrame,
   MeasureText,
   PenMark,
   Point,
@@ -243,25 +245,51 @@ export const measureText: MeasureText = (text, size) => {
   return measuring.measureText(text).width;
 };
 
-/** Text drawn before its font has loaded would fall back to another face. */
-const loadFonts = async (marks: readonly Mark[]): Promise<void> => {
-  const sizes = new Set(
-    marks.flatMap((mark) => (mark.kind === "text" ? [mark.size] : []))
+const SKETCH_FAMILY = "Excalifont";
+
+/**
+ * Text drawn before its face has loaded would fall back to another one, so
+ * an export first loads the faces its words need (each script is its own
+ * file) and fails, rather than falling back, when the hand-drawn face isn't
+ * there.
+ */
+export const loadFonts = async (marks: readonly Mark[]): Promise<void> => {
+  const texts = marks.flatMap((mark) => (mark.kind === "text" ? [mark] : []));
+
+  if (texts.length === 0) {
+    return;
+  }
+
+  const [latin] = await Promise.all([
+    document.fonts.load(fontFor(TEXT_SIZE.thin), "Aa"),
+    ...texts.map(
+      async (mark) => await document.fonts.load(fontFor(mark.size), mark.text)
+    ),
+  ]);
+
+  const loaded = latin.some(
+    (face) =>
+      face.status === "loaded" &&
+      face.family.replaceAll('"', "") === SKETCH_FAMILY
   );
 
-  await Promise.all(
-    [...sizes].map(async (size) => await document.fonts.load(fontFor(size)))
-  );
+  if (!loaded) {
+    throw new Error("The drawing's font could not be loaded.");
+  }
 };
 
 /**
  * A PNG of everything drawn, trimmed with padding, at twice the page's size
- * on the page as it looked: dark in the dark theme. Null when nothing is drawn.
+ * on the page as it looked: dark in the dark theme, with the frame it was
+ * cut to, measured in the loaded font. Null when nothing is drawn.
  */
 export const exportPng = async (
   marks: readonly Mark[],
   dark: boolean
-): Promise<Uint8Array<ArrayBuffer> | null> => {
+): Promise<{
+  readonly png: Uint8Array<ArrayBuffer>;
+  readonly frame: ExportFrame;
+} | null> => {
   await loadFonts(marks);
 
   const frame = exportFrame(marks, measureText);
@@ -285,7 +313,7 @@ export const exportPng = async (
 
   const blob = await canvas.convertToBlob({ type: "image/png" });
 
-  return new Uint8Array(await blob.arrayBuffer());
+  return { frame, png: new Uint8Array(await blob.arrayBuffer()) };
 };
 
 export interface AnnotatedImage {

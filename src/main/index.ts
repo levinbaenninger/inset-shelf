@@ -1714,7 +1714,14 @@ const start = async (): Promise<void> => {
               void commandShelf({ kind: "newNote" });
             },
             field: (field) => {
-              void commandShelf({ field, kind: "field" });
+              // The drawing window has no fields: its ⌘D duplicates the selection, as in Excalidraw.
+              if (drawing.isFocused()) {
+                if (field === "description") {
+                  drawingServer.emit("edit", "duplicate");
+                }
+              } else {
+                void commandShelf({ field, kind: "field" });
+              }
             },
             newWindowLink: () => {
               openPicker(null);

@@ -11,6 +11,7 @@ import {
   isValidDay,
   matchesDue,
   parseSearch,
+  weekStartDay,
 } from "./due";
 
 /** Local dates, as the shelf reads them: 2026-11-05 is a Thursday. */
@@ -111,6 +112,15 @@ describe(dateText, () => {
     expect(dateText(at("2025-11-07"), now, { locale: "en-GB" })).toBe(
       "7 Nov 2025"
     );
+  });
+});
+
+describe(weekStartDay, () => {
+  it("starts the week on the locale's own first day", () => {
+    expect(weekStartDay("en-US")).toBe(0);
+    expect(weekStartDay("de-CH")).toBe(1);
+    expect(weekStartDay("en-GB")).toBe(1);
+    expect(weekStartDay("ar-EG")).toBe(6);
   });
 });
 

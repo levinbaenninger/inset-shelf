@@ -132,6 +132,17 @@ const applyOp = (doc, op) => {
       return updateItem(doc, op.id, (item) => ({ ...item, note: op.note }));
     }
 
+    case "describeWindow": {
+      return updateItem(doc, op.id, (item) => ({
+        ...item,
+        windows: item.windows.map((window) =>
+          window.id === op.windowId
+            ? { ...window, description: op.description }
+            : window
+        ),
+      }));
+    }
+
     case "setDescription": {
       return updateItem(doc, op.id, (item) => ({
         ...item,

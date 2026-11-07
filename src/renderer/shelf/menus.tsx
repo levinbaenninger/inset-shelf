@@ -32,7 +32,12 @@ import {
   sectionMenu,
   shelfMenu,
 } from "@shared/menus";
-import type { MenuChoice, MenuEntry, MenuIcon } from "@shared/menus";
+import type {
+  ItemMenuPlace,
+  MenuChoice,
+  MenuEntry,
+  MenuIcon,
+} from "@shared/menus";
 import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
 import { useState } from "react";
@@ -310,7 +315,11 @@ export interface MenuAnchor {
 
 /** What a right-click was on. */
 export type MenuTarget =
-  | { readonly kind: "item"; readonly id: ItemId }
+  | {
+      readonly kind: "item";
+      readonly id: ItemId;
+      readonly place: ItemMenuPlace;
+    }
   | { readonly kind: "items"; readonly ids: readonly ItemId[] }
   | { readonly kind: "section"; readonly id: SectionId }
   | { readonly kind: "shelf" };
@@ -348,7 +357,7 @@ const entriesFor = (
 
   const item = doc.items.find((candidate) => candidate.id === target.id);
 
-  return item === undefined ? null : itemMenu(item, doc, isMac);
+  return item === undefined ? null : itemMenu(item, doc, isMac, target.place);
 };
 
 /**

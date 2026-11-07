@@ -488,6 +488,10 @@ interface MenuReturn {
   readonly owner: ItemId | null;
 }
 
+/** What a press can land on that takes focus or acts, as opposed to empty space. */
+const CONTROLS =
+  'button, input, textarea, select, a[href], [contenteditable="true"], [role="button"], [role="checkbox"], [tabindex]:not([tabindex="-1"])';
+
 /**
  * Puts focus back after a menu has gone, unless a choice or a click already
  * put it somewhere (an editor, details, the search field). The selected item
@@ -1042,23 +1046,53 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   useShelfKeys({ ...listKeys, back: closeDetails }, inDetails);
 
-  // A click on empty space in the list lets go of the selection and any note being edited.
-  const onListPointerDown = (event: PointerEvent<HTMLElement>): void => {
+  /**
+   * A press anywhere in the list view outside the items (search, the note
+   * field, empty space, a section, the header's buttons) lets go of the open
+   * item, the picks and any item being edited, so nothing there looks active.
+   * A press on empty space while a menu is open only closes the menu, which
+   * gives focus back to its item (Round 4).
+   */
+  const onPanelPointerDown = (event: PointerEvent<HTMLElement>): void => {
+    const { target } = event;
+
     if (
-      event.target instanceof Element &&
-      event.target.closest("li, button, input, textarea") !== null
+      inDetails ||
+      !(target instanceof Element) ||
+      // Menus and dialogs sit in portals, outside the panel.
+      !event.currentTarget.contains(target) ||
+      target.closest("[data-item-id], [data-sonner-toaster]") !== null
     ) {
       return;
+    }
+
+    const onControl = target.closest(CONTROLS) !== null;
+
+    if (!onControl && openMenu !== null) {
+      return;
+    }
+
+    const active = document.activeElement;
+
+    // A field being typed in finishes first, so its words are saved.
+    if (
+      active instanceof HTMLElement &&
+      isTextField(active) &&
+      active !== composerRef.current?.element() &&
+      !active.contains(target)
+    ) {
+      active.blur();
     }
 
     setSelectedId(null);
     setEditingId(null);
     unpick();
 
+    // Empty space takes no focus, so the item that had it lets go.
     if (
+      !onControl &&
       document.activeElement instanceof HTMLElement &&
-      isTextField(document.activeElement) &&
-      document.activeElement !== composerRef.current?.element()
+      document.activeElement.closest("[data-item-id]") !== null
     ) {
       document.activeElement.blur();
     }
@@ -1478,6 +1512,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         "shelf-panel text-foreground flex h-svh flex-col rounded-xl",
         dropping && "ring-pin ring-2 ring-inset"
       )}
+      onPointerDownCapture={onPanelPointerDown}
     >
       <h1 className="sr-only">Inset Shelf</h1>
       {detailsItem === undefined ? null : (
@@ -1509,7 +1544,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           }}
           onMenu={(anchor) => {
             showMenu(
-              { ...anchor, target: { id: detailsItem.id, kind: "item" } },
+              {
+                ...anchor,
+                target: { id: detailsItem.id, kind: "item", place: "details" },
+              },
               detailsItem.id
             );
           }}
@@ -1594,7 +1632,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
               });
             }
           }}
-          onPointerDown={onListPointerDown}
         >
           <DueSuggestions
             onChoose={(filter) => {
@@ -1684,7 +1721,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                               ...anchor,
                               target: several
                                 ? { ids: picked, kind: "items" }
-                                : { id: item.id, kind: "item" },
+                                : { id: item.id, kind: "item", place: "row" },
                             },
                             item.id
                           );

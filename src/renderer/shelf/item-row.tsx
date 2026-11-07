@@ -1108,13 +1108,14 @@ export const ItemRow = (props: ItemRowProps) => {
           />
         )}
         {selected ? (
-          <div className="flex min-h-6 items-center gap-2">
+          // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
+          <div className="-mr-9 flex min-h-6 items-center gap-2">
             <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
               {metaText(item)}
             </p>
             <Button
               aria-label="Show details"
-              className="-mr-1 shrink-0"
+              className="-mr-2.75 shrink-0"
               data-details-button
               onClick={props.onShowDetails}
               size="xs"

@@ -39,7 +39,7 @@ import { keyText } from "@shared/shortcut";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -81,7 +81,7 @@ export type DetailsUndo =
       readonly label: string;
     };
 
-/** A field to open, from the Add… menu or a field shortcut; seq makes each request new. */
+/** A field to open, from the Add menu or a field shortcut; seq makes each request new. */
 export interface FieldRequest {
   readonly field: DetailField;
   readonly seq: number;
@@ -424,28 +424,32 @@ const StepsEditor = ({
     }
   };
 
+  // The circle, the words and the × each sit in a box one line tall (h-7), so they share a centre line, typed in or not.
   return (
-    <ul className={cn(SURFACE, "flex flex-col px-2 py-1")} ref={listRef}>
+    <ul className={cn(SURFACE, "flex flex-col px-2 py-1.5")} ref={listRef}>
       {steps.map((step, index) => (
-        <li className="group/step flex min-h-8 items-start gap-2" key={step.id}>
-          <Checkbox
-            aria-label={
-              step.done ? "Mark step as not done" : "Mark step as done"
-            }
-            className="mt-1.5"
-            checked={step.done}
-            onCheckedChange={() => {
-              onChange(
-                steps.map((other) =>
-                  other.id === step.id ? { ...other, done: !other.done } : other
-                )
-              );
-            }}
-          />
+        <li className="group/step flex items-start gap-2" key={step.id}>
+          <span className="flex h-7 shrink-0 items-center">
+            <Checkbox
+              aria-label={
+                step.done ? "Mark step as not done" : "Mark step as done"
+              }
+              checked={step.done}
+              onCheckedChange={() => {
+                onChange(
+                  steps.map((other) =>
+                    other.id === step.id
+                      ? { ...other, done: !other.done }
+                      : other
+                  )
+                );
+              }}
+            />
+          </span>
           <textarea
             aria-label={`Step ${index + 1}`}
             className={cn(
-              "placeholder:text-muted-foreground focus-visible:ring-ring/50 focus-visible:bg-foreground/[0.04] field-sizing-content min-h-7 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1.5 py-1 text-sm leading-snug outline-none focus-visible:ring-3",
+              "placeholder:text-muted-foreground focus-visible:ring-ring/50 focus-visible:bg-foreground/[0.04] field-sizing-content min-h-7 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1.5 py-1 text-sm leading-5 outline-none focus-visible:ring-3",
               step.done && "text-muted-foreground line-through"
             )}
             maxLength={STEP_TEXT_MAX}
@@ -472,7 +476,7 @@ const StepsEditor = ({
             }}
             value={step.text}
           />
-          <span className="mt-0.5 opacity-0 transition-opacity group-focus-within/step:opacity-100 group-hover/step:opacity-100">
+          <span className="flex h-7 shrink-0 items-center opacity-0 transition-opacity group-focus-within/step:opacity-100 group-hover/step:opacity-100">
             <Button
               aria-label={`Remove step ${index + 1}`}
               onClick={() => {
@@ -514,7 +518,116 @@ const windowPlace = (window: WindowRef): string =>
     .filter((part, at, all) => part !== "" && all.indexOf(part) === at)
     .join(" · ");
 
-/** One linked window: its picture, name and place, reopen, and a menu to describe, move or remove it. */
+/**
+ * A window's description as words, or a quiet + Description when it has
+ * none; a click edits it in a field of the same height. Return or leaving
+ * the field keeps what was typed (it saves as it is typed), Esc puts back
+ * what it held before.
+ */
+const WindowDescription = ({
+  name,
+  onSave,
+  value,
+}: {
+  readonly name: string;
+  readonly value: string;
+  readonly onSave: (description: string) => void;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const before = useRef(value);
+  // Return and Esc hand focus back to the words; a click elsewhere keeps it where it went.
+  const refocus = useRef(false);
+  const shown = useRef<HTMLButtonElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      field.current?.focus();
+    } else if (refocus.current) {
+      refocus.current = false;
+      shown.current?.focus();
+    }
+  }, [editing]);
+
+  const line = "-mx-1.5 min-h-6 rounded-md px-1.5 text-sm";
+
+  if (editing) {
+    return (
+      <input
+        aria-label={`Description of ${name}`}
+        className={cn(
+          line,
+          "placeholder:text-muted-foreground focus-visible:ring-ring/50 bg-foreground/[0.04] h-6 min-w-0 outline-none focus-visible:ring-3"
+        )}
+        defaultValue={value}
+        maxLength={DESCRIPTION_MAX}
+        onBlur={() => {
+          setEditing(false);
+        }}
+        onChange={(event) => {
+          onSave(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) {
+            return;
+          }
+
+          if (event.key === "Escape" || event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            refocus.current = true;
+
+            if (
+              event.key === "Escape" &&
+              event.currentTarget.value !== before.current
+            ) {
+              onSave(before.current);
+            }
+
+            setEditing(false);
+          }
+        }}
+        placeholder="What this window shows"
+        ref={field}
+      />
+    );
+  }
+
+  const edit = (): void => {
+    before.current = value;
+    setEditing(true);
+  };
+
+  return value === "" ? (
+    <Button
+      aria-label={`Add a description of ${name}`}
+      className="-ml-1.5 self-start"
+      onClick={edit}
+      ref={shown}
+      size="xs"
+      variant="quiet"
+    >
+      <HugeiconsIcon data-icon="inline-start" icon={PlusSignIcon} />
+      Description
+    </Button>
+  ) : (
+    <button
+      aria-label={`${value}. Edit the description of ${name}`}
+      className={cn(
+        line,
+        // Focus tints the words as hover does; a ring would read as the field again.
+        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 self-start text-left break-words outline-none"
+      )}
+      onClick={edit}
+      ref={shown}
+      type="button"
+    >
+      {value}
+    </button>
+  );
+};
+
+/** One linked window: its picture, name and place, its description, reopen, and a menu to move or remove it. */
 const WindowRow = ({
   index,
   item,
@@ -530,8 +643,6 @@ const WindowRow = ({
   readonly onReopen: () => void;
   readonly onRemoved: () => void;
 }) => {
-  const [describing, setDescribing] = useState(false);
-  const describe = describing || window.description !== "";
   const name = windowName(window);
   const reopen = reopenLabel(window);
 
@@ -586,15 +697,6 @@ const WindowRow = ({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem
-              onSelect={() => {
-                setDescribing(true);
-              }}
-            >
-              {window.description === ""
-                ? "Add Description"
-                : "Edit Description"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
               disabled={index === 0}
               onSelect={() => {
                 move(index - 1);
@@ -627,26 +729,20 @@ const WindowRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {describe ? (
-        <div className="pl-16.5">
-          <AutoText
-            autoFocus={describing}
-            label={`Description of ${name}`}
-            max={DESCRIPTION_MAX}
-            multiline={false}
-            onSave={(description) => {
-              onApply({
-                description,
-                id: item.id,
-                type: "describeWindow",
-                windowId: window.id,
-              });
-            }}
-            placeholder="What this window shows"
-            value={window.description}
-          />
-        </div>
-      ) : null}
+      <div className="flex min-w-0 flex-col pl-16.5">
+        <WindowDescription
+          name={name}
+          onSave={(description) => {
+            onApply({
+              description,
+              id: item.id,
+              type: "describeWindow",
+              windowId: window.id,
+            });
+          }}
+          value={window.description}
+        />
+      </div>
     </li>
   );
 };
@@ -860,7 +956,7 @@ const FIELD_ICON: Readonly<Record<DetailField, typeof File01Icon>> = {
 
 const FIELDS: readonly DetailField[] = ["description", "steps", "due"];
 
-/** Back, the title, the one Add… menu, ⋯ and Hide. */
+/** Back, the title, the one Add menu, ⋯ and Hide. */
 const DetailsHeader = ({
   addable,
   item,
@@ -879,7 +975,7 @@ const DetailsHeader = ({
   readonly onAdd: (field: DetailField) => void;
   readonly titleRef: RefObject<HTMLHeadingElement | null>;
 }) => {
-  // The field picked in Add…, opened once the menu has closed, so focus goes to it and not back to Add….
+  // The field picked in Add, opened once the menu has closed, so focus goes to it and not back to Add.
   const chosen = useRef<DetailField | null>(null);
 
   return (
@@ -910,7 +1006,7 @@ const DetailsHeader = ({
         <DropdownMenuTrigger asChild>
           <Button aria-label="Add a field" size="sm" variant="ghost">
             <HugeiconsIcon data-icon="inline-start" icon={PlusSignIcon} />
-            Add…
+            Add
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -991,7 +1087,11 @@ const DetailsHeader = ({
   );
 };
 
-/** Due: the chip that opens the quick picker, and a date field for Pick a date…. */
+/**
+ * Due: Set Due, or the chip once there is a day, both opening the Due
+ * picker. One button plays both parts, so focus stays on it when a pick
+ * turns Set Due into the chip.
+ */
 const DueField = ({
   item,
   now,
@@ -1004,121 +1104,67 @@ const DueField = ({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onApply: (op: ShelfOp) => void;
-}) => {
-  const [pickingDate, setPickingDate] = useState(false);
-  const dateRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (pickingDate) {
-      dateRef.current?.focus();
-
-      try {
-        dateRef.current?.showPicker();
-      } catch {
-        // Some systems show no picker until the field is clicked.
-      }
-    }
-  }, [pickingDate]);
-
-  const menu = (trigger: ReactNode) => (
-    <DueMenu
-      due={item.due}
-      now={now}
-      onOpenChange={onOpenChange}
-      onPickDate={() => {
-        setPickingDate(true);
-      }}
-      onSet={(due) => {
-        setPickingDate(false);
-        onApply({ due, id: item.id, type: "setDue" });
-      }}
-      open={open}
-    >
-      {trigger}
-    </DueMenu>
-  );
-
-  return (
-    <Field icon={Calendar03Icon} label="Due">
-      <div className="flex min-h-7 flex-wrap items-center gap-2">
-        {item.due === null ? (
-          menu(
-            <Button size="xs" variant="outline">
-              <HugeiconsIcon data-icon="inline-start" icon={Calendar03Icon} />
-              Set Due
-            </Button>
-          )
-        ) : (
-          // The × sits inside the chip's tint, as in the other Inset apps.
-          <span
-            className={cn(
-              "inline-flex h-6 shrink-0 items-center rounded-md text-xs font-medium whitespace-nowrap tabular-nums",
-              dueTone(item.due, now)
-            )}
-          >
-            {menu(
-              <button
-                aria-label={`${dueLabel(item.due, now)}. Change Due`}
-                className="focus-visible:ring-ring/50 flex h-full items-center gap-1 rounded-md pr-0.5 pl-1.5 outline-none focus-visible:ring-3"
-                title={dueLabel(item.due, now)}
-                type="button"
-              >
-                <HugeiconsIcon
-                  className="shrink-0"
-                  icon={Calendar03Icon}
-                  size={11}
-                  strokeWidth={2}
-                />
-                {dueChipText(item.due, now)}
-              </button>
-            )}
+}) => (
+  <Field icon={Calendar03Icon} label="Due">
+    <div className="flex min-h-7 items-center">
+      {/* The × sits inside the chip's tint, as in the other Inset apps. */}
+      <span
+        className={cn(
+          "inline-flex h-6 shrink-0 items-center rounded-md text-xs font-medium whitespace-nowrap tabular-nums",
+          item.due !== null && dueTone(item.due, now)
+        )}
+      >
+        <DueMenu
+          due={item.due}
+          now={now}
+          onOpenChange={onOpenChange}
+          onSet={(due) => {
+            onApply({ due, id: item.id, type: "setDue" });
+          }}
+          open={open}
+        >
+          {item.due === null ? (
             <button
-              aria-label="Clear Due"
-              className="focus-visible:ring-ring/50 grid h-full w-6 place-items-center rounded-md opacity-70 outline-none hover:opacity-100 focus-visible:ring-3"
-              onClick={() => {
-                setPickingDate(false);
-                onApply({ due: null, id: item.id, type: "setDue" });
-              }}
-              title="Clear Due"
+              className={buttonVariants({ size: "xs", variant: "outline" })}
               type="button"
             >
-              <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+              <HugeiconsIcon data-icon="inline-start" icon={Calendar03Icon} />
+              Set Due
             </button>
-          </span>
+          ) : (
+            <button
+              aria-label={`${dueLabel(item.due, now)}. Change Due`}
+              className="focus-visible:ring-ring/50 flex h-full items-center gap-1 rounded-md pr-0.5 pl-1.5 outline-none focus-visible:ring-3"
+              title={dueLabel(item.due, now)}
+              type="button"
+            >
+              <HugeiconsIcon
+                className="shrink-0"
+                icon={Calendar03Icon}
+                size={11}
+                strokeWidth={2}
+              />
+              {dueChipText(item.due, now)}
+            </button>
+          )}
+        </DueMenu>
+        {item.due === null ? null : (
+          <button
+            aria-label="Clear Due"
+            className="focus-visible:ring-ring/50 grid h-full w-6 place-items-center rounded-md opacity-70 outline-none hover:opacity-100 focus-visible:ring-3"
+            onClick={() => {
+              onApply({ due: null, id: item.id, type: "setDue" });
+            }}
+            title="Clear Due"
+            type="button"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+          </button>
         )}
-        {pickingDate ? (
-          <div className="w-40">
-            <Input
-              aria-label="Due"
-              defaultValue={item.due ?? ""}
-              onBlur={() => {
-                setPickingDate(false);
-              }}
-              onChange={(event) => {
-                if (event.target.value !== "") {
-                  onApply({
-                    due: event.target.value,
-                    id: item.id,
-                    type: "setDue",
-                  });
-                }
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" || event.key === "Enter") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setPickingDate(false);
-                }
-              }}
-              ref={dateRef}
-              type="date"
-            />
-          </div>
-        ) : null}
-      </div>
-    </Field>
-  );
-};
+      </span>
+    </div>
+  </Field>
+);
 
 const addedText = (item: ShelfItem): string => {
   const created = new Date(item.createdAt);
@@ -1131,7 +1177,7 @@ const addedText = (item: ShelfItem): string => {
   return `Added ${dateText(created, new Date())}, ${TIME.format(created)}${from}`;
 };
 
-/** Where the item came from, the links copied with it, and when it was added; only the time when there is no source. */
+/** Where the item came from and the links copied with it; nothing when there are neither. */
 const SourceField = ({
   item,
   onOpenLink,
@@ -1139,9 +1185,8 @@ const SourceField = ({
   readonly item: ShelfItem;
   readonly onOpenLink: (url?: string) => void;
 }) =>
-  item.context === null && (item.kind !== "text" || item.links.length === 0) ? (
-    <p className="text-muted-foreground text-xs">{addedText(item)}</p>
-  ) : (
+  item.context === null &&
+  (item.kind !== "text" || item.links.length === 0) ? null : (
     <Field icon={ArrowUpRight01Icon} label="Source">
       <div className="flex flex-col gap-1">
         {item.context === null ? null : (
@@ -1157,7 +1202,6 @@ const SourceField = ({
         {item.kind === "text" && item.links.length > 0 ? (
           <LinkList links={item.links} onOpenLink={onOpenLink} />
         ) : null}
-        <p className="text-muted-foreground text-xs">{addedText(item)}</p>
       </div>
     </Field>
   );
@@ -1211,7 +1255,7 @@ const WindowsField = ({
 
 /**
  * Level 2: everything about one item, for deliberate editing, as a view
- * pushed over the list. Empty fields take no room; Add… (or ⌘D, ⇧⌘S,
+ * pushed over the list. Empty fields take no room; Add (or ⌘D, ⇧⌘S,
  * ⇧⌘D) brings them in. Every edit saves as it is made.
  */
 export const DetailsView = (props: DetailsProps) => {
@@ -1423,6 +1467,10 @@ export const DetailsView = (props: DetailsProps) => {
           />
         )}
         <SourceField item={item} onOpenLink={props.onOpenLink} />
+        {/* When it was added: a quiet footer at the foot of details, not a field. */}
+        <footer className="text-muted-foreground/80 mt-auto pt-2 text-xs">
+          {addedText(item)}
+        </footer>
       </div>
     </div>
   );

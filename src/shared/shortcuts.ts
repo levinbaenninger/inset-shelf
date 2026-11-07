@@ -12,14 +12,15 @@ export interface ShortcutGroup {
   readonly rows: readonly ShortcutRow[];
 }
 
-/** The pen moved off P, which now picks the Pin tool. */
+/** Excalidraw's letters; P stays the Pin tool, so the pen takes X, Excalidraw's other pen key. */
 export const DRAWING_TOOL_KEYS = {
   arrow: "A",
   ellipse: "O",
   line: "L",
-  pen: "B",
+  pen: "X",
   pin: "P",
   rect: "R",
+  select: "V",
   text: "T",
 } as const;
 
@@ -112,10 +113,23 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k("Shift+P")], label: "Drop a pin at the pointer" },
         { keys: ["1–9"], label: "Select a pin" },
         {
-          keys: [k("Up"), k("Down"), k("Left"), k("Right")],
-          label: `Nudge the pin 1 px (${k("Shift")} for 10 px)`,
+          keys: [DRAWING_TOOL_KEYS.select],
+          label: `Select tool: click a mark, ${rangeClick} to add, or drag around marks`,
         },
-        { keys: [k("Backspace")], label: "Remove the selected pin" },
+        {
+          keys: ["Double-click"],
+          label: "Edit text, or add text where you click",
+        },
+        {
+          keys: [k("Up"), k("Down"), k("Left"), k("Right")],
+          label: `Nudge the selection or pin 1 px (${k("Shift")} for 10 px)`,
+        },
+        { keys: [k("CommandOrControl+D")], label: "Duplicate the selection" },
+        {
+          keys: [k("Backspace")],
+          label: "Remove the selection or the selected pin",
+        },
+        { keys: ["Esc"], label: "Deselect" },
         { keys: [DRAWING_TOOL_KEYS.pen], label: "Pen" },
         {
           keys: [DRAWING_TOOL_KEYS.line, DRAWING_TOOL_KEYS.arrow],

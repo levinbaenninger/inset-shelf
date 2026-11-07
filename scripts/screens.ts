@@ -19,7 +19,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { chromium } from "playwright";
-import type { Browser, Page } from "playwright";
+import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -444,6 +444,8 @@ interface Scene {
   /** Fails the scene when anything in the list or details overflows or wraps badly. */
   readonly layoutCheck?: boolean;
   readonly act?: (page: Page) => Promise<void>;
+  /** Leaves the mouse where the act left it, a button still held, for a marquee being drawn. */
+  readonly keepPointer?: boolean;
   /** Runs after the screenshot: what went wrong, or null. */
   readonly check?: (page: Page) => Promise<string | null>;
 }
@@ -537,6 +539,133 @@ const drawStroke = async (page: Page, y: number): Promise<void> => {
   await page.mouse.up();
 };
 
+/** A point of the drawing canvas, in its CSS pixels, where the mouse goes for it. */
+const onCanvas = async (
+  page: Page,
+  x: number,
+  y: number
+): Promise<{ readonly x: number; readonly y: number }> => {
+  const box = await page.locator("canvas").first().boundingBox();
+
+  return { x: (box?.x ?? 0) + x, y: (box?.y ?? 0) + y };
+};
+
+const clickCanvas = async (page: Page, x: number, y: number): Promise<void> => {
+  const at = await onCanvas(page, x, y);
+
+  await page.mouse.click(at.x, at.y);
+};
+
+/** A drag across the canvas; `release: false` keeps the button down, as a marquee being drawn. */
+const dragCanvas = async (
+  page: Page,
+  from: readonly [number, number],
+  to: readonly [number, number],
+  release = true
+): Promise<void> => {
+  const start = await onCanvas(page, ...from);
+  const end = await onCanvas(page, ...to);
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+
+  if (release) {
+    await page.mouse.up();
+  }
+};
+
+/** What the canvas shows, to compare before and after. */
+const canvasPicture = async (page: Page): Promise<string> =>
+  String(await page.evaluate("document.querySelector('canvas').toDataURL()"));
+
+const PixelsSchema = z.array(z.number());
+
+/**
+ * One column of the canvas, from `top` to `bottom`: [r, g, b, a] of its
+ * first inked pixel, and how many CSS pixels are inked (a 7 px stroke is
+ * about 6 solid ones).
+ */
+const inkDown = async (
+  page: Page,
+  x: number,
+  top: number,
+  bottom: number
+): Promise<{ readonly color: readonly number[]; readonly run: number }> => {
+  const pixels = PixelsSchema.parse(
+    await page.evaluate(
+      `(() => {
+        const canvas = document.querySelector("canvas");
+        const ratio = canvas.width / canvas.clientWidth;
+        const top = Math.round(${top} * ratio);
+        const data = canvas.getContext("2d").getImageData(Math.round(${x} * ratio), top, 1, Math.round(${bottom} * ratio) - top).data;
+        return [...data];
+      })()`
+    )
+  );
+
+  const inked = Array.from({ length: pixels.length / 4 }, (_, index) =>
+    pixels.slice(index * 4, index * 4 + 4)
+  ).filter((pixel) => (pixel[3] ?? 0) > 200);
+
+  const ratio = Number(
+    await page.evaluate(
+      "(() => { const canvas = document.querySelector('canvas'); return canvas.width / canvas.clientWidth; })()"
+    )
+  );
+
+  return { color: inked[0] ?? [], run: inked.length / ratio };
+};
+
+const near = (color: readonly number[], hex: string): boolean =>
+  [1, 3, 5].every(
+    (start, index) =>
+      Math.abs(
+        (color[index] ?? -99) - Number.parseInt(hex.slice(start, start + 2), 16)
+      ) <= 6
+  );
+
+const attributes = async (page: Page, selector: string, name: string) =>
+  await page
+    .locator(selector)
+    .evaluateAll(
+      (nodes, attribute) => nodes.map((node) => node.getAttribute(attribute)),
+      name
+    );
+
+const isDark = async (page: Page): Promise<boolean> =>
+  (await page.evaluate(
+    "matchMedia('(prefers-color-scheme: dark)').matches"
+  )) === true;
+
+/** Keeps the PNG each save sends, so a scene can look at what the export drew. */
+const keepSavedPng = async (page: Page): Promise<void> => {
+  await page.evaluate(`(() => {
+    const save = globalThis.insetDrawing.save;
+    globalThis.insetDrawing.save = (drawing) => {
+      globalThis.__png = drawing.png === null ? null : [...drawing.png];
+      return save(drawing);
+    };
+  })()`);
+};
+
+const PngSchema = z.array(z.number()).nullable();
+
+const WidthsSchema = z.object({ plain: z.number(), sketch: z.number() });
+
+/** Words on the page, typed with Text, closed with Return. */
+const typeText = async (
+  page: Page,
+  x: number,
+  y: number,
+  words: string
+): Promise<void> => {
+  await page.keyboard.press("t");
+  await clickCanvas(page, x, y);
+  await page.keyboard.type(words);
+  await page.keyboard.press("Enter");
+};
+
 /** Retry's save has reached the fake main process, or 3 s went by; then time for a second one that shouldn't come. */
 const retrySent = async (page: Page): Promise<void> => {
   await page
@@ -569,7 +698,7 @@ const lockedPageCheck = async (page: Page): Promise<string | null> => {
 
   await drawStroke(page, 300);
   await page.keyboard.press("p");
-  await page.keyboard.press("b");
+  await page.keyboard.press("x");
   await page.keyboard.press(`${mod}+z`);
   await page.evaluate('globalThis.__emit("edit", "undo")');
 
@@ -2007,6 +2136,383 @@ const copyRefusedCheck = async (page: Page): Promise<string | null> => {
   return null;
 };
 
+const BoxSchema = z.object({
+  bottom: z.number(),
+  left: z.number(),
+  right: z.number(),
+  top: z.number(),
+});
+
+/** Where an element sits on the page. */
+const boxOf = async (locator: Locator) =>
+  BoxSchema.parse(
+    await locator.evaluate((element) => {
+      const { bottom, left, right, top } = element.getBoundingClientRect();
+
+      return { bottom, left, right, top };
+    })
+  );
+
+const middle = (box: z.infer<typeof BoxSchema>): number =>
+  (box.top + box.bottom) / 2;
+
+const tall = (box: z.infer<typeof BoxSchema>): number => box.bottom - box.top;
+
+const SetDueSchema = z.object({ due: z.string().nullable() });
+
+const DescribeWindowSchema = z.object({ description: z.string() });
+
+/** The last operation of a kind the page sent to main, or null. */
+const lastSent = async <T>(
+  page: Page,
+  type: string,
+  schema: z.ZodType<T>
+): Promise<T | null> => {
+  const ops = await applied(page);
+  const matching = ops.filter((op) => op.type === type);
+  const last = matching.at(-1);
+
+  return last === undefined ? null : schema.parse(last);
+};
+
+/** Round 13: the circle, the words and the × of a step share one centre line, and the row keeps its height when typing stops. */
+const stepRowCheck = async (page: Page): Promise<string | null> => {
+  const words = page.getByRole("textbox", { name: "Step 1" });
+  const row = words.locator("xpath=ancestor::li[1]");
+  const editing = await boxOf(row);
+
+  const centres = await Promise.all(
+    [
+      row.getByRole("checkbox"),
+      words,
+      row.getByRole("button", { name: /^Remove step/u }),
+    ].map(async (part) => middle(await boxOf(part)))
+  );
+
+  const [checkbox = 0, field = 0, remove = 0] = centres;
+
+  if (Math.abs(checkbox - field) > 0.5 || Math.abs(remove - field) > 0.5) {
+    return `the step's parts are off centre: circle ${checkbox}, words ${field}, × ${remove}`;
+  }
+
+  await page.getByRole("heading", { name: "Details" }).focus();
+
+  const viewing = await boxOf(row);
+
+  return Math.abs(tall(editing) - tall(viewing)) > 0.5
+    ? `the step row is ${tall(editing)} px tall while typed in and ${tall(viewing)} px after`
+    : null;
+};
+
+/** The ISO day of the calendar day that has focus, or "" when focus is elsewhere. */
+const focusedDay = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(
+      "document.activeElement?.closest('td[data-day]')?.getAttribute('data-day') ?? ''"
+    )
+  );
+
+const calendar = (page: Page) => page.locator("[data-slot=calendar]");
+
+const lastDue = async (page: Page): Promise<string | null> => {
+  const op = await lastSent(page, "setDue", SetDueSchema);
+
+  return op?.due ?? null;
+};
+
+/** Opens Pick a date… from the Due chip or Set Due. */
+const openCalendar = async (page: Page, trigger: RegExp): Promise<void> => {
+  await page.getByRole("button", { name: trigger }).click();
+  await page.getByRole("menuitem", { name: "Pick a date…" }).click();
+  await calendar(page).waitFor();
+  await page.waitForTimeout(150);
+};
+
+const inDetails = async (page: Page): Promise<boolean> =>
+  await page.getByRole("button", { name: "Back to the list" }).isVisible();
+
+/**
+ * The calendar takes the keys: the arrows move the day (← too, which goes
+ * back elsewhere in details), Return picks it and hands focus to the Due
+ * chip, the first Esc only closes the calendar and the next goes back.
+ */
+const calendarKeysCheck = async (page: Page): Promise<string | null> => {
+  const start = await focusedDay(page);
+
+  await page.keyboard.press("ArrowRight");
+
+  const right = await focusedDay(page);
+
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+
+  const left = await focusedDay(page);
+
+  if (start !== isoDay(1) || right !== isoDay(2) || left !== isoDay(0)) {
+    return `the calendar focused ${start}, then ${right} on →, then ${left} on ← ←`;
+  }
+
+  if (!(await inDetails(page))) {
+    return "← in the calendar went back to the list";
+  }
+
+  await page.keyboard.press("Enter");
+  await calendar(page).waitFor({ state: "detached" });
+  await page.waitForTimeout(150);
+
+  const picked = await lastDue(page);
+
+  const chip = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? ''"
+  );
+
+  if (picked !== isoDay(0) || !String(chip).startsWith("Due Today")) {
+    return `Return picked ${String(picked)} and left focus on “${String(chip)}”`;
+  }
+
+  await openCalendar(page, /^Due Today/u);
+  await page.keyboard.press("Escape");
+  await calendar(page).waitFor({ state: "detached" });
+  await page.waitForTimeout(150);
+
+  const back = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? ''"
+  );
+
+  if (!(await inDetails(page)) || !String(back).startsWith("Due Today")) {
+    return `the first Esc left details or put focus on “${String(back)}”, not the Due chip`;
+  }
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  return (await inDetails(page))
+    ? "the second Esc did not go back to the list"
+    : null;
+};
+
+/** Set Due turns into the chip once a day is picked, and focus stays on it. */
+const setDueCheck = async (page: Page): Promise<string | null> => {
+  const day = await focusedDay(page);
+
+  await page.keyboard.press("Enter");
+  await calendar(page).waitFor({ state: "detached" });
+  await page.waitForTimeout(150);
+
+  const picked = await lastDue(page);
+
+  const focus = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? ''"
+  );
+
+  return day === isoDay(0) &&
+    picked === isoDay(0) &&
+    String(focus).startsWith("Due Today")
+    ? null
+    : `the calendar opened on ${day}, Return set ${String(picked)} and focus is on “${String(focus)}”`;
+};
+
+const QUOTE_WINDOW = "Quote 2026-114 from Rieder Möbel";
+
+const windowDescriptionField = (page: Page) =>
+  page.getByRole("textbox", { name: `Description of ${QUOTE_WINDOW}` });
+
+/** A window's description goes back to words on Return and on blur, a click edits it again, and Esc puts back what it held. */
+const windowDescriptionCheck = async (page: Page): Promise<string | null> => {
+  const words = page.getByRole("button", {
+    name: new RegExp(
+      `^Signed copy, page 2\\. Edit the description of ${QUOTE_WINDOW}`,
+      "u"
+    ),
+  });
+
+  if ((await windowDescriptionField(page).count()) > 0) {
+    return "the description stayed a field after Return";
+  }
+
+  const focus = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? ''"
+  );
+
+  if (!String(focus).startsWith("Signed copy, page 2.")) {
+    return `after Return focus is on “${String(focus)}”, not the description`;
+  }
+
+  await words.click();
+  await page.keyboard.type(" and 3");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+
+  const kept = await lastSent(page, "describeWindow", DescribeWindowSchema);
+
+  if (
+    (await windowDescriptionField(page).count()) > 0 ||
+    !(await words.isVisible()) ||
+    !(await inDetails(page))
+  ) {
+    return "Esc didn't put the description back as words, or left details";
+  }
+
+  if (kept?.description !== "Signed copy, page 2") {
+    return `Esc left the description as “${String(kept?.description)}”`;
+  }
+
+  await words.click();
+  await page.getByRole("heading", { name: "Details" }).click();
+  await page.waitForTimeout(150);
+
+  return (await windowDescriptionField(page).count()) === 0
+    ? null
+    : "the description stayed a field after a click elsewhere";
+};
+
+/** When it was added sits at the foot of details, and the field menu reads Add. */
+const detailsFooterCheck = async (page: Page): Promise<string | null> => {
+  const add = await page
+    .getByRole("button", { name: "Add a field" })
+    .textContent();
+
+  if (add?.trim() !== "Add") {
+    return `the field menu reads “${String(add)}”, not “Add”`;
+  }
+
+  const footer = page.locator("[data-details] > footer");
+  const text = (await footer.textContent()) ?? "";
+  const foot = await boxOf(footer);
+  const panel = await boxOf(page.locator("[data-details]"));
+
+  if (!text.startsWith("Added ")) {
+    return `the footer reads “${text}”`;
+  }
+
+  return panel.bottom - foot.bottom > 24
+    ? `the footer ends ${panel.bottom - foot.bottom} px above the foot of details`
+    : null;
+};
+
+const menuEntries = async (page: Page): Promise<readonly string[]> => {
+  const entries = await page.getByRole("menuitem").allTextContents();
+
+  return entries.map((entry) => entry.trim());
+};
+
+/** Details' ⋯ has no Details entry; the row's menu still does. */
+const detailsMenuCheck = async (page: Page): Promise<string | null> => {
+  const inMenu = await menuEntries(page);
+
+  if (inMenu.some((entry) => entry.startsWith("Details"))) {
+    return `details' ⋯ offers ${JSON.stringify(inMenu)}`;
+  }
+
+  await page.keyboard.press("Escape");
+  await menuClosed(page);
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await page.waitForTimeout(150);
+  await openMenuOn(page, 10);
+
+  const onRow = await menuEntries(page);
+
+  return onRow.some((entry) => entry.startsWith("Details"))
+    ? null
+    : `the row's menu lost Details: ${JSON.stringify(onRow)}`;
+};
+
+/** The › of Details in the open row ends where the Due chip above it ends. */
+const detailsButtonCheck = async (page: Page): Promise<string | null> => {
+  const row = item(page, 10);
+  const chevron = await boxOf(row.locator("[data-details-button] svg path"));
+  const chip = await boxOf(row.locator("[data-badges] > *").first());
+
+  return Math.abs(chevron.right - chip.right) > 1
+    ? `Details’ › ends at ${chevron.right}, the Due chip at ${chip.right}`
+    : null;
+};
+
+/** Entries A and B alone, so the list keeps empty space below them, even with B open. */
+const SHORT_DOC = {
+  ...DOC,
+  items: [ENTRY_A, ROW_B].flatMap((n) =>
+    ITEMS.filter((entry) => entry.id === uuid(n))
+  ),
+};
+
+const nothingOpen = async (page: Page): Promise<boolean> => {
+  const focus = await focused(page);
+
+  return (await selectedRow(page)) === null && focus.row === null;
+};
+
+/** Clicks the list below its last section, where there is nothing. */
+const clickEmptySpace = async (page: Page): Promise<void> => {
+  const list = await boxOf(page.locator(".shelf-list").first());
+  const last = await boxOf(page.locator(".shelf-list > section").last());
+
+  await page.mouse.click(
+    list.left + 60,
+    Math.min(last.bottom + 24, list.bottom - 8)
+  );
+};
+
+/**
+ * Round 13: a click on search, the note field or empty space lets go of the
+ * open item, and ↑ from the note field still walks into the list. A click
+ * on empty space while an item's menu is open only closes the menu, and
+ * focus goes back to the item (Round 4).
+ */
+const clickElsewhereCheck = async (page: Page): Promise<string | null> => {
+  if (!(await nothingOpen(page))) {
+    return "a click on empty space left the item open or focused";
+  }
+
+  const targets = [
+    ["search", page.getByRole("textbox", { name: "Search the shelf" })],
+    ["the note field", page.getByRole("textbox", { name: /^New note in/u })],
+  ] as const;
+
+  for (const [name, target] of targets) {
+    // oxlint-disable-next-line no-await-in-loop -- one target after another, on purpose.
+    await select(page, ENTRY_A);
+    // oxlint-disable-next-line no-await-in-loop -- one target after another, on purpose.
+    await target.click();
+
+    // oxlint-disable-next-line no-await-in-loop -- read after each click.
+    if (!(await nothingOpen(page))) {
+      return `a click on ${name} left the item open or focused`;
+    }
+  }
+
+  await page.keyboard.press("ArrowUp");
+
+  if ((await selectedRow(page)) !== uuid(ROW_B)) {
+    return `↑ from the note field selected ${String(await selectedRow(page))}, not the last item`;
+  }
+
+  await openMenuOn(page, ROW_B);
+  await clickEmptySpace(page);
+  await menuClosed(page);
+
+  const afterMenu = await focused(page);
+
+  if (
+    afterMenu.row !== uuid(ROW_B) ||
+    (await selectedRow(page)) !== uuid(ROW_B)
+  ) {
+    return `a click on empty space with B's menu open left focus on ${afterMenu.row ?? "no item"}`;
+  }
+
+  await openMenuOn(page, ROW_B);
+  await page.getByRole("textbox", { name: "Search the shelf" }).click();
+  await menuClosed(page);
+
+  const searching = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? ''"
+  );
+
+  return searching === "Search the shelf" && (await nothingOpen(page))
+    ? null
+    : `a click on search with B's menu open left focus on “${String(searching)}”`;
+};
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -2048,6 +2554,7 @@ const SCENES: readonly Scene[] = [
     act: async (page) => {
       await select(page, 10);
     },
+    check: detailsButtonCheck,
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-full-item",
@@ -2267,6 +2774,98 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-details-adding-steps",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+    },
+    check: stepRowCheck,
+    data: { view: shelfView() },
+    name: "shelf-details-step-editing",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 12);
+    },
+    check: detailsFooterCheck,
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-details-footer",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await page
+        .locator("[data-details-view]")
+        .getByRole("button", { exact: true, name: "More" })
+        .click();
+      await page.getByRole("menu").waitFor();
+    },
+    check: detailsMenuCheck,
+    data: { view: shelfView() },
+    name: "shelf-details-more-menu",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 12);
+      await openCalendar(page, /^Due Tomorrow/u);
+    },
+    check: calendarKeysCheck,
+    data: { view: shelfView() },
+    name: "shelf-due-calendar",
+    page: "shelf",
+    // The shelf at its narrowest, so the calendar must fit there.
+    width: 300,
+  },
+  {
+    act: async (page) => {
+      await details(page, 13);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Due/u }).click();
+      await page.getByRole("menuitem", { name: "Pick a date…" }).click();
+      await calendar(page).waitFor();
+    },
+    check: setDueCheck,
+    data: { view: shelfView() },
+    name: "shelf-due-calendar-set-due",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await page
+        .getByRole("button", { name: `Add a description of ${QUOTE_WINDOW}` })
+        .click();
+      await windowDescriptionField(page).waitFor();
+      await page.keyboard.type("Signed copy, page 2");
+      await page.keyboard.press("Enter");
+      await page.locator("[data-details]").evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+    },
+    check: windowDescriptionCheck,
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-details-window-description",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await select(page, ENTRY_A);
+      await clickEmptySpace(page);
+    },
+    check: clickElsewhereCheck,
+    data: { view: shelfView(SHORT_DOC) },
+    name: "shelf-click-elsewhere",
     page: "shelf",
   },
   {
@@ -2811,6 +3410,38 @@ const SCENES: readonly Scene[] = [
     platforms: ["macos", "windows"],
   },
   {
+    // Round 13: the drawing rows in the sheet's Pins section fit the shelf's width, keys and all.
+    act: async (page) => {
+      await page.evaluate(
+        "globalThis.__emit('command', { kind: 'shortcuts' })"
+      );
+      await page.getByRole("dialog").waitFor();
+      await page
+        .getByRole("dialog")
+        .getByText("Pins", { exact: true })
+        .evaluate((heading) => {
+          heading.scrollIntoView({ block: "start" });
+        });
+    },
+    check: async (page) => {
+      const outside = await page.getByRole("dialog").evaluate((dialog) => {
+        const edge = dialog.getBoundingClientRect().right;
+
+        return [...dialog.querySelectorAll("*")]
+          .filter((node) => node.getBoundingClientRect().right > edge + 0.5)
+          .map((node) => node.textContent?.trim().slice(0, 30) ?? "");
+      });
+
+      return outside.length === 0
+        ? null
+        : `sticks out of the sheet: ${JSON.stringify(outside)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-shortcuts-drawing",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
     act: async (page) => {
       const modifier = "Meta";
 
@@ -3285,6 +3916,316 @@ const SCENES: readonly Scene[] = [
     name: "drawing-confirm-image-on-shelf",
     page: "drawing",
   },
+  {
+    // Feedback round 13: a box drawn picks Select and shows its eight handles; a corner resizes it, ⌘Z takes it back, an arrow has its two ends.
+    act: async (page) => {
+      await page.keyboard.press("r");
+      await dragCanvas(page, [300, 250], [560, 400]);
+      await page.keyboard.press("a");
+      await dragCanvas(page, [760, 160], [600, 270]);
+      await clickCanvas(page, 430, 251);
+    },
+    check: async (page) => {
+      const mod = await commandKey(page);
+
+      const selectTool = await page
+        .getByRole("button", { exact: true, name: "Select" })
+        .getAttribute("aria-pressed");
+
+      const handles = await page.locator("[data-handle]").count();
+      const corner = page.locator('[data-handle="1,1"]');
+      const before = await corner.boundingBox();
+
+      if (selectTool !== "true" || handles !== 8 || before === null) {
+        return `after drawing a box Select was pressed ${String(selectTool)} and the box had ${handles} handles, not 8`;
+      }
+
+      const grab = {
+        x: before.x + before.width / 2,
+        y: before.y + before.height / 2,
+      };
+
+      await page.mouse.move(grab.x, grab.y);
+      await page.mouse.down();
+      await page.mouse.move(grab.x + 60, grab.y + 40, { steps: 6 });
+      await page.mouse.up();
+
+      const resized = await corner.boundingBox();
+
+      await page.keyboard.press(`${mod}+z`);
+      await clickCanvas(page, 430, 251);
+
+      const undone = await corner.boundingBox();
+
+      await clickCanvas(page, 680, 215);
+
+      const ends = await attributes(page, "[data-handle]", "data-handle");
+
+      const moved = (box: typeof before | null, dx: number, dy: number) =>
+        box !== null &&
+        Math.abs(box.x - before.x - dx) < 2 &&
+        Math.abs(box.y - before.y - dy) < 2;
+
+      if (!moved(resized, 60, 40) || !moved(undone, 0, 0)) {
+        return `the corner went from ${JSON.stringify(before)} to ${JSON.stringify(resized)}, and after ⌘Z to ${JSON.stringify(undone)}`;
+      }
+
+      return isDeepStrictEqual(ends, ["from", "to"])
+        ? null
+        : `the arrow showed handles ${JSON.stringify(ends)}, not its two ends`;
+    },
+    data: { view: drawingView(IMAGE.pins, false) },
+    name: "drawing-select-handles",
+    page: "drawing",
+  },
+  {
+    // Feedback round 13: a marquee picks the marks it holds whole; ⌘D copies them, ⌫ deletes, and ⌘Z brings each step back.
+    act: async (page) => {
+      await page.keyboard.press("r");
+      await dragCanvas(page, [120, 120], [280, 230]);
+      await page.keyboard.press("o");
+      await dragCanvas(page, [330, 140], [480, 250]);
+      await typeText(page, 600, 190, "Left out");
+      await page.keyboard.press("x");
+      await dragCanvas(page, [150, 400], [420, 440]);
+      await page.keyboard.press("v");
+      await dragCanvas(page, [90, 90], [520, 300], false);
+    },
+    check: async (page) => {
+      const mod = await commandKey(page);
+      const marquee = await page.locator("[data-marquee]").count();
+
+      const held = await attributes(
+        page,
+        "[data-selected-mark]",
+        "data-selected-mark"
+      );
+
+      await page.mouse.up();
+
+      const group = await page.locator("[data-selection-group]").count();
+      const before = await canvasPicture(page);
+
+      await page.keyboard.press(`${mod}+d`);
+
+      const copies = await attributes(
+        page,
+        "[data-selected-mark]",
+        "data-selected-mark"
+      );
+
+      const duplicated = await canvasPicture(page);
+
+      await page.keyboard.press("Backspace");
+
+      const left = await page.locator("[data-selected-mark]").count();
+      const deleted = await canvasPicture(page);
+
+      await page.keyboard.press(`${mod}+z`);
+
+      const back = await canvasPicture(page);
+
+      await page.keyboard.press(`${mod}+z`);
+
+      const first = await canvasPicture(page);
+
+      const problems = [
+        marquee === 1 && isDeepStrictEqual(held, ["0", "1"])
+          ? null
+          : `the marquee showed ${marquee} times and held ${JSON.stringify(held)}, not the box and the ellipse`,
+        group === 1 ? null : `${group} group outlines after letting go`,
+        isDeepStrictEqual(copies, ["4", "5"]) && duplicated !== before
+          ? null
+          : `⌘D selected ${JSON.stringify(copies)}, not the two copies`,
+        left === 0 && deleted === before
+          ? null
+          : `⌫ left ${left} selected and ${deleted === before ? "the drawing as before" : "another drawing"}`,
+        back === duplicated && first === before
+          ? null
+          : "⌘Z did not bring back the copies, then the drawing before them",
+      ].filter((problem) => problem !== null);
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: BLANK_DRAWING },
+    keepPointer: true,
+    name: "drawing-marquee",
+    page: "drawing",
+  },
+  {
+    // Feedback round 13: text is in Excalifont while it is typed, on the canvas, and in the saved picture; a double-click edits it in place.
+    act: async (page) => {
+      await typeText(page, 200, 200, "Fix this");
+      const at = await onCanvas(page, 240, 200);
+      await page.mouse.dblclick(at.x, at.y);
+      await page.keyboard.press("End");
+      await page.keyboard.type(" first");
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", { exact: true, name: "Text" });
+      const value = await field.inputValue();
+
+      const family = await field.evaluate(
+        (node) => getComputedStyle(node).fontFamily
+      );
+
+      const loaded = await page.evaluate(
+        "[...document.fonts].some((face) => face.family.replaceAll('\"', '') === 'Excalifont' && face.status === 'loaded')"
+      );
+
+      if (
+        value !== "Fix this first" ||
+        !family.replaceAll('"', "").startsWith("Excalifont") ||
+        loaded !== true
+      ) {
+        return `the field held ${JSON.stringify(value)} in ${family}, Excalifont loaded ${String(loaded)}`;
+      }
+
+      await page.keyboard.press("Enter");
+      await keepSavedPng(page);
+      await page.getByRole("button", { exact: true, name: "Save" }).click();
+      await page.waitForFunction("globalThis.__png !== undefined");
+
+      const saved = PngSchema.parse(await page.evaluate("globalThis.__png"));
+
+      if (saved === null) {
+        return "the save sent no picture";
+      }
+
+      const bytes = Buffer.from(saved);
+
+      await writeFile(
+        path.join(
+          OUT,
+          `drawing-text-edit-export-${(await isDark(page)) ? "dark" : "light"}.png`
+        ),
+        bytes
+      );
+
+      const widths = WidthsSchema.parse(
+        await page.evaluate(`(async () => {
+          const text = "Fix this first";
+          await document.fonts.load('20px "Inter Variable"', text);
+          const context = new OffscreenCanvas(1, 1).getContext("2d");
+          context.font = '400 20px "Excalifont"';
+          const sketch = context.measureText(text).width;
+          context.font = '400 20px "Inter Variable"';
+          const plain = context.measureText(text).width;
+          return { plain, sketch };
+        })()`)
+      );
+
+      // The export trims to the text plus 24 px each side, at twice the size: its width tells which face it measured.
+      const width = bytes.readUInt32BE(16) / 2 - 48;
+
+      const sketched =
+        width >= widths.sketch - 0.5 && width <= widths.sketch + 2;
+
+      return sketched && Math.abs(width - widths.plain) > 4
+        ? null
+        : `the saved picture is ${width} px of text wide; Excalifont makes ${widths.sketch}, Inter ${widths.plain}`;
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-text-edit",
+    page: "drawing",
+  },
+  {
+    // Feedback round 13: picking an ink and the thick stroke with a box selected restyles it, one ⌘Z step each.
+    act: async (page) => {
+      await page.keyboard.press("r");
+      await dragCanvas(page, [200, 200], [440, 340]);
+      await page.getByRole("button", { exact: true, name: "Red" }).click();
+      await page
+        .getByRole("button", { exact: true, name: "Thick stroke" })
+        .click();
+    },
+    check: async (page) => {
+      const mod = await commandKey(page);
+      const red = (await isDark(page)) ? "#f87171" : "#dc2626";
+      const ink = (await isDark(page)) ? "#f5f5f5" : "#171717";
+
+      const pressed = await attributes(
+        page,
+        "[aria-pressed=true]",
+        "aria-label"
+      );
+
+      const thick = await inkDown(page, 320, 190, 210);
+
+      await page.keyboard.press(`${mod}+z`);
+
+      const thin = await inkDown(page, 320, 190, 210);
+
+      await page.keyboard.press(`${mod}+z`);
+
+      const before = await inkDown(page, 320, 190, 210);
+
+      const problems = [
+        isDeepStrictEqual(pressed, ["Select", "Red", "Thick stroke"])
+          ? null
+          : `the toolbar pressed ${JSON.stringify(pressed)}`,
+        near(thick.color, red) && thick.run >= 6
+          ? null
+          : `the restyled box drew ${JSON.stringify(thick)}, not a thick ${red} edge`,
+        near(thin.color, red) && thin.run <= 3
+          ? null
+          : `one ⌘Z left ${JSON.stringify(thin)}, not a thin red edge`,
+        near(before.color, ink)
+          ? null
+          : `two ⌘Z left ${JSON.stringify(before)}, not the ink it was drawn in`,
+      ].filter((problem) => problem !== null);
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-restyle",
+    page: "drawing",
+  },
+  {
+    // Round 13: a lock that ends a stroke still held, then lifts, leaves it ended: moving on and letting go add nothing, and one ⌘Z clears it.
+    act: async (page) => {
+      await page.evaluate(
+        "globalThis.__blank = document.querySelector('canvas').toDataURL()"
+      );
+      await dragCanvas(page, [200, 200], [320, 260], false);
+
+      for (const quitting of [true, false]) {
+        // oxlint-disable-next-line no-await-in-loop -- lock, then unlock.
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify({ ...BLANK_DRAWING, quitting })})`
+        );
+        // oxlint-disable-next-line no-await-in-loop -- each push renders before the next.
+        await page.waitForTimeout(100);
+      }
+    },
+    check: async (page) => {
+      const mod = await commandKey(page);
+      const ended = await canvasPicture(page);
+      const further = await onCanvas(page, 440, 330);
+
+      await page.mouse.move(further.x, further.y, { steps: 6 });
+      await page.mouse.up();
+
+      const after = await canvasPicture(page);
+
+      await page.keyboard.press(`${mod}+z`);
+
+      const undone = await canvasPicture(page);
+      const blank = String(await page.evaluate("globalThis.__blank"));
+
+      if (after !== ended) {
+        return "moving on and letting go after the lock lifted changed the drawing";
+      }
+
+      return undone === blank
+        ? null
+        : "one ⌘Z after the lock did not leave the page blank";
+    },
+    data: { view: BLANK_DRAWING },
+    keepPointer: true,
+    name: "drawing-lock-lifts-mid-stroke",
+    page: "drawing",
+  },
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
@@ -3484,8 +4425,10 @@ const shoot = async (
   }
 
   // No hover left over from the scene's clicks.
-  await page.mouse.move(1, 1);
-  await page.waitForTimeout(100);
+  if (scene.keepPointer !== true) {
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(100);
+  }
 
   const file = path.join(OUT, `${scene.name}-${platform}-${theme}.png`);
 

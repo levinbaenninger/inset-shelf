@@ -310,6 +310,9 @@ const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
   ];
 };
 
+/** Where an item's menu opens: on its row in the list, or from ⋯ in its details, which have no Details entry. */
+export type ItemMenuPlace = "row" | "details";
+
 /**
  * What a right-click on an item offers, with the keys that act on the item
  * while its menu is open. Return and Space choose the highlighted entry
@@ -318,7 +321,8 @@ const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
 export const itemMenu = (
   item: ShelfItem,
   doc: ShelfDoc,
-  mac = true
+  mac = true,
+  place: ItemMenuPlace = "row"
 ): readonly MenuEntry[] => [
   {
     accelerator: "CommandOrControl+C",
@@ -331,14 +335,18 @@ export const itemMenu = (
   ...copyDetails(item),
   ...copyWithLink(item),
   SEPARATOR,
-  {
-    accelerator: "Right",
-    choice: { id: item.id, kind: "details" },
-    enabled: true,
-    icon: "details",
-    kind: "choice",
-    label: "Details",
-  },
+  ...(place === "details"
+    ? []
+    : [
+        {
+          accelerator: "Right",
+          choice: { id: item.id, kind: "details" },
+          enabled: true,
+          icon: "details",
+          kind: "choice",
+          label: "Details",
+        } satisfies MenuEntry,
+      ]),
   ...open(item, mac),
   {
     choice: { id: item.id, kind: "edit" },

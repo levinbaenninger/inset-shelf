@@ -14,14 +14,18 @@ import {
   dueChipText,
   dueFor,
   dueText,
+  isoDay,
   parseDay,
+  weekStartDay,
 } from "@shared/due";
 import type { DueBucket } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import type { Pin, ShelfItem, Step, WindowRef } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -33,6 +37,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -312,16 +321,28 @@ const dayHint = (iso: string, now: Date): string => {
   return day === null ? iso : dateText(day, now, { weekday: true });
 };
 
+const CAPTION = new Intl.DateTimeFormat(undefined, {
+  month: "long",
+  year: "numeric",
+});
+
+const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
+
+const FULL_DATE = new Intl.DateTimeFormat(undefined, { dateStyle: "full" });
+
+const WEEK_START = weekStartDay();
+
 /**
- * The Due picker: the quick days, a date of one's own, or none. `children`
- * is the trigger; the menu can also be opened from outside (⌘⇧D).
+ * The Due picker: the quick days, a date of one's own, or none. Pick a
+ * date… opens a calendar under the same trigger, where the arrows move, Return
+ * picks and Esc closes back to the trigger. `children` is the trigger; the
+ * menu can also be opened from outside (⌘⇧D).
  */
 export const DueMenu = ({
   children,
   due,
   now,
   onOpenChange,
-  onPickDate,
   onSet,
   open,
 }: {
@@ -331,47 +352,120 @@ export const DueMenu = ({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onSet: (due: string | null) => void;
-  /** Pick a date…: the shelf shows a date field. */
-  readonly onPickDate: () => void;
-}) => (
-  <DropdownMenu modal={false} onOpenChange={onOpenChange} open={open}>
-    <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-    <DropdownMenuContent align="start" className="min-w-52">
-      <DropdownMenuLabel className="flex items-center justify-between">
-        Due
-        <Kbd>{keyText("Shift+CommandOrControl+D", isMac)}</Kbd>
-      </DropdownMenuLabel>
-      {DUE_CHOICES.map((choice) => {
-        const day = dueFor(choice, now);
+}) => {
+  const [calendar, setCalendar] = useState(false);
+  // Pick a date… opens the calendar once the menu has closed, so the menu doesn't take focus back to the trigger.
+  const pickDate = useRef(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const day = due === null ? undefined : (parseDay(due) ?? undefined);
 
-        return (
+  return (
+    <Popover onOpenChange={setCalendar} open={calendar}>
+      <DropdownMenu modal={false} onOpenChange={onOpenChange} open={open}>
+        <PopoverAnchor asChild>
+          <DropdownMenuTrigger asChild ref={trigger}>
+            {children}
+          </DropdownMenuTrigger>
+        </PopoverAnchor>
+        <DropdownMenuContent
+          align="start"
+          className="min-w-52"
+          onCloseAutoFocus={(event) => {
+            if (pickDate.current) {
+              event.preventDefault();
+              pickDate.current = false;
+              setCalendar(true);
+            }
+          }}
+        >
+          <DropdownMenuLabel className="flex items-center justify-between">
+            Due
+            <Kbd>{keyText("Shift+CommandOrControl+D", isMac)}</Kbd>
+          </DropdownMenuLabel>
+          {DUE_CHOICES.map((choice) => {
+            const choiceDay = dueFor(choice, now);
+
+            return (
+              <DropdownMenuItem
+                key={choice}
+                onSelect={() => {
+                  onSet(choiceDay);
+                }}
+              >
+                {DUE_CHOICE_LABEL[choice]}
+                <DropdownMenuShortcut>
+                  {dayHint(choiceDay, now)}
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+            );
+          })}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
-            key={choice}
             onSelect={() => {
-              onSet(day);
+              pickDate.current = true;
             }}
           >
-            {DUE_CHOICE_LABEL[choice]}
-            <DropdownMenuShortcut>{dayHint(day, now)}</DropdownMenuShortcut>
+            <HugeiconsIcon icon={Calendar03Icon} />
+            Pick a date…
           </DropdownMenuItem>
-        );
-      })}
-      <DropdownMenuSeparator />
-      <DropdownMenuItem onSelect={onPickDate}>
-        <HugeiconsIcon icon={Calendar03Icon} />
-        Pick a date…
-      </DropdownMenuItem>
-      {due === null ? null : (
-        <DropdownMenuItem
-          onSelect={() => {
-            onSet(null);
+          {due === null ? null : (
+            <DropdownMenuItem
+              onSelect={() => {
+                onSet(null);
+              }}
+              variant="destructive"
+            >
+              <HugeiconsIcon icon={CalendarRemove01Icon} />
+              Clear
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <PopoverContent
+        align="start"
+        aria-label="Pick a Due date"
+        // The calendar focuses its own day: the Due date, else today.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+        }}
+        size="fit"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          // The trigger may be a new one by now: Set Due becomes the chip once a day is picked.
+          trigger.current?.focus();
+        }}
+      >
+        <Calendar
+          autoFocus
+          defaultMonth={day ?? now}
+          formatters={{
+            formatCaption: (month) => CAPTION.format(month),
+            formatWeekdayName: (weekday) => WEEKDAY.format(weekday),
           }}
-          variant="destructive"
-        >
-          <HugeiconsIcon icon={CalendarRemove01Icon} />
-          Clear
-        </DropdownMenuItem>
-      )}
-    </DropdownMenuContent>
-  </DropdownMenu>
-);
+          labels={{
+            labelDayButton: (date, modifiers) =>
+              [
+                FULL_DATE.format(date),
+                modifiers.today === true ? "today" : "",
+                modifiers.selected === true ? "selected" : "",
+              ]
+                .filter((part) => part !== "")
+                .join(", "),
+            labelGrid: (month) => CAPTION.format(month),
+          }}
+          mode="single"
+          onSelect={(picked) => {
+            if (picked !== undefined) {
+              onSet(isoDay(picked));
+            }
+
+            setCalendar(false);
+          }}
+          selected={day}
+          today={now}
+          weekStartsOn={WEEK_START}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+};
