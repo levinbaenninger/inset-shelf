@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOp,
+  attachmentsOf,
   groupItems,
   itemsAsList,
   listHtmlWithImage,
@@ -18,7 +19,14 @@ import {
   withPinLabel,
   withStepBack,
 } from "./shelf";
-import type { OpEnv, ShelfDoc, ShelfOp, MainOp, Removed } from "./shelf";
+import type {
+  ImageItem,
+  OpEnv,
+  ShelfDoc,
+  ShelfOp,
+  MainOp,
+  Removed,
+} from "./shelf";
 
 const uuid = (n: number) =>
   `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(n).padStart(2, "0")}`;
@@ -345,6 +353,59 @@ describe(applyOp, () => {
       applyOp(doc, { id: first.id, image, type: "replaceImage" }, env(), []).doc
     ).toBe(doc);
   });
+
+  it("keeps the marks drawn into a replaced image, and drops them when the image goes back to the bare picture", () => {
+    const image = {
+      file: `${uuid(50)}.png`,
+      heightPx: 600,
+      pixelsPerDip: 2,
+      widthPx: 960,
+    };
+
+    const { doc } = apply(start, [
+      {
+        context: null,
+        image,
+        pins: [],
+        source: null,
+        type: "addImage",
+        via: "area",
+      },
+    ]);
+
+    const [first] = doc.items;
+
+    if (first === undefined) {
+      throw new Error("missing item");
+    }
+
+    const annotated = { ...image, file: `${uuid(51)}.png` };
+    const scene = { base: image, file: `${uuid(52)}.json` };
+
+    const marked = applyOp(
+      doc,
+      { id: first.id, image: annotated, scene, type: "replaceImage" },
+      env(),
+      []
+    );
+
+    const bare = applyOp(
+      marked.doc,
+      { id: first.id, image, type: "replaceImage" },
+      env(),
+      []
+    );
+
+    expect({
+      bare: bare.doc.items[0],
+      discarded: bare.discarded.flatMap(attachmentsOf),
+      marked: marked.doc.items[0],
+    }).toStrictEqual({
+      bare: first,
+      discarded: [`${uuid(51)}.png`, `${uuid(52)}.json`, `${uuid(50)}.png`],
+      marked: { ...first, image: annotated, scene },
+    });
+  });
 });
 
 describe(groupItems, () => {
@@ -669,6 +730,94 @@ describe(parseShelfDocument, () => {
       parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 4 }))
     ).toBeNull();
     expect(parseShelfDocument("{ not a shelf")).toBeNull();
+  });
+
+  describe("an image's kept marks (feedback round 13)", () => {
+    const base = {
+      file: `${uuid(50)}.png`,
+      heightPx: 600,
+      pixelsPerDip: 2,
+      widthPx: 960,
+    };
+
+    const shelfWith = (
+      fields: Partial<Pick<ImageItem, "image" | "scene">>
+    ) => ({
+      activeSectionId: uuid(1),
+      items: [
+        {
+          color: null,
+          context: null,
+          createdAt: "2026-10-22T17:40:00.000Z",
+          description: "",
+          done: false,
+          due: null,
+          id: uuid(21),
+          image: base,
+          kind: "image",
+          note: "",
+          pins: [{ x: 480, y: 300 }],
+          sectionId: uuid(1),
+          source: null,
+          steps: [],
+          title: null,
+          via: "area",
+          windows: [],
+          ...fields,
+        },
+      ],
+      schemaVersion: 3,
+      sections: [{ id: uuid(1), name: "Inbox" }],
+    });
+
+    it("reads an image saved before marks were kept exactly as it was, with no scene", () => {
+      const old = shelfWith({});
+
+      expect(parseShelfDocument(JSON.stringify(old))).toStrictEqual(old);
+    });
+
+    it("keeps the marks' file and the picture under them through a save and a read, and names all three files", () => {
+      const kept = shelfWith({
+        image: { ...base, file: `${uuid(51)}.png` },
+        scene: { base, file: `${uuid(52)}.json` },
+      });
+
+      const read = parseShelfDocument(JSON.stringify(kept));
+      const [item] = read?.items ?? [];
+
+      expect({
+        files: item === undefined ? [] : attachmentsOf(item),
+        read,
+      }).toStrictEqual({
+        files: [`${uuid(51)}.png`, `${uuid(52)}.json`, `${uuid(50)}.png`],
+        read: kept,
+      });
+    });
+
+    it("names the marks' file of a drawing made on a blank page, which has no picture under them", () => {
+      const read = parseShelfDocument(
+        JSON.stringify(
+          shelfWith({ scene: { base: null, file: `${uuid(52)}.json` } })
+        )
+      );
+
+      const [item] = read?.items ?? [];
+
+      expect(item === undefined ? [] : attachmentsOf(item)).toStrictEqual([
+        `${uuid(50)}.png`,
+        `${uuid(52)}.json`,
+      ]);
+    });
+
+    it("rejects a scene whose marks are not a JSON file the app named", () => {
+      expect(
+        parseShelfDocument(
+          JSON.stringify(
+            shelfWith({ scene: { base: null, file: "../shelf.json" } })
+          )
+        )
+      ).toBeNull();
+    });
   });
 });
 

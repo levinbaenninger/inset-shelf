@@ -1,6 +1,6 @@
 import { once } from "node:events";
 
-import type { DrawingImage, DrawingView } from "@shared/contracts";
+import type { DrawingOpened, DrawingView } from "@shared/contracts";
 import { rect, size, VIEWER_MIN, viewerWindowSize } from "@shared/geometry";
 import { app, BrowserWindow, nativeTheme, screen } from "electron";
 import type { WebContents } from "electron";
@@ -22,7 +22,7 @@ export interface DrawingWindow {
    * Opens a blank canvas, or an image item to look at large and draw on, in
    * the middle of the display under the pointer.
    */
-  readonly open: (image: DrawingImage | null) => void;
+  readonly open: (opened: DrawingOpened) => void;
   readonly close: () => void;
   /** Brings the open window to the front, marks and all. */
   readonly bringForward: () => void;
@@ -48,6 +48,15 @@ export interface DrawingWindow {
 
 const ignore = (): void => undefined;
 
+/** A blank page with marks on it opens a drawing saved before. */
+const windowTitle = (opened: DrawingOpened): string => {
+  if (opened.image !== null) {
+    return "Image";
+  }
+
+  return opened.marks.length === 0 ? "New Drawing" : "Drawing";
+};
+
 /** A regular window for one drawing or image; closing it throws the marks away. */
 export const createDrawingWindow = (options: {
   readonly preload: string;
@@ -58,7 +67,15 @@ export const createDrawingWindow = (options: {
   let closable = false;
   let dirty = false;
   const settled = new EventTarget();
-  let current: DrawingView = { image: null, quitting: false, seq: 0 };
+
+  let current: DrawingView = {
+    image: null,
+    marks: [],
+    pinMode: false,
+    quitting: false,
+    seq: 0,
+  };
+
   let onView: (view: DrawingView) => void = ignore;
   let onCloseRequest: () => void = ignore;
 
@@ -166,7 +183,9 @@ export const createDrawingWindow = (options: {
     onView: (listener) => {
       onView = listener;
     },
-    open: (image) => {
+    open: (opened) => {
+      const { image } = opened;
+
       const { workArea } = screen.getDisplayNearestPoint(
         screen.getCursorScreenPoint()
       );
@@ -183,9 +202,9 @@ export const createDrawingWindow = (options: {
             );
 
       markClean();
-      current = { ...current, image, seq: current.seq + 1 };
+      current = { ...current, ...opened, seq: current.seq + 1 };
       onView(current);
-      window.setTitle(image === null ? "New Drawing" : "Image");
+      window.setTitle(windowTitle(opened));
       window.setContentBounds({
         height: content.height,
         width: content.width,

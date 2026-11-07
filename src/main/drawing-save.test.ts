@@ -1,10 +1,12 @@
 import { once } from "node:events";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setImmediate } from "node:timers/promises";
 
 import type { QuitPrompt } from "@shared/contracts";
+import { parseSceneFile } from "@shared/drawing-scene";
+import type { StrokeMark } from "@shared/drawing-scene";
 import { ItemIdSchema, SectionIdSchema } from "@shared/shelf";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -152,7 +154,13 @@ const setup = async (dir: string, blocked = false) => {
 
       saves.forQuit(stop);
       pageSaves.push(
-        saves.save({ copy: false, forQuit: true, pins: [], png: PNG })
+        saves.save({
+          copy: false,
+          forQuit: true,
+          marks: [],
+          pins: [],
+          png: PNG,
+        })
       );
       await ended;
     },
@@ -212,6 +220,78 @@ const setup = async (dir: string, blocked = false) => {
   };
 };
 
+/** Saves that read the pictures and marks from the disk, as main's do. */
+const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
+  createDrawingSaves({
+    added: () => {},
+    clearStaging: () => {},
+    close: () => {},
+    controller: app.controller,
+    copies: {
+      copy: async () => await Promise.resolve({ ok: true }),
+      copyDrawing: async () => await Promise.resolve({ ok: true }),
+    },
+    decode: (png) => ({ heightPx: 3, png, widthPx: 4 }),
+    ended: () => {},
+    readFile: async (at) => {
+      try {
+        return new Uint8Array(await readFile(at));
+      } catch {
+        return null;
+      }
+    },
+    show: () => {},
+    store: app.store,
+  });
+
+const HELLO: readonly StrokeMark[] = [
+  {
+    at: { x: 1, y: 1 },
+    color: "red",
+    kind: "text",
+    size: 10,
+    text: "Hello",
+  },
+  {
+    color: "red",
+    from: { x: 0, y: 0 },
+    kind: "rect",
+    to: { x: 3, y: 2 },
+    width: 1,
+  },
+];
+
+const REDRAWN = new Uint8Array([137, 80, 78, 71, 2]);
+
+/** The marks a scene file on the disk holds. */
+const keptMarks = async (
+  app: Awaited<ReturnType<typeof setup>>,
+  file: string
+) =>
+  parseSceneFile(
+    new Uint8Array(await readFile(app.store.attachmentPath(file) ?? ""))
+  );
+
+/** The item after a relaunch, the files left beside it, and what Annotate opens it on. */
+const relaunched = async (app: Awaited<ReturnType<typeof setup>>) => {
+  const { files, items } = await app.reopened();
+  const [item] = items;
+
+  if (item?.kind !== "image") {
+    throw new Error("no image");
+  }
+
+  return {
+    files: [...files].toSorted(),
+    item,
+    kept:
+      item.scene === undefined ? null : await keptMarks(app, item.scene.file),
+    opening: await savesReading(app).opening(item),
+  };
+};
+
+const sorted = (...files: readonly string[]): string[] => files.toSorted();
+
 /** An image on the shelf, open in Annotate, its picture read from the disk as main reads it. */
 const annotating = async (app: Awaited<ReturnType<typeof setup>>) => {
   const original = new Uint8Array([1, 2, 3]);
@@ -232,23 +312,24 @@ const annotating = async (app: Awaited<ReturnType<typeof setup>>) => {
 
   await app.controller.flush();
 
-  const saves = createDrawingSaves({
-    added: () => {},
-    clearStaging: () => {},
-    close: () => {},
-    controller: app.controller,
-    copies: {
-      copy: async () => await Promise.resolve({ ok: true }),
-      copyDrawing: async () => await Promise.resolve({ ok: true }),
-    },
-    decode: (png) => ({ heightPx: 3, png, widthPx: 4 }),
-    ended: () => {},
-    readFile: async (at) => new Uint8Array(await readFile(at)),
-    show: () => {},
-    store: app.store,
-  });
+  const saves = savesReading(app);
 
-  saves.open(id);
+  /** Annotate on the item as the shelf has it now; what it opened on. */
+  const reopen = async () => {
+    const item = app.controller.item(id);
+
+    if (item?.kind !== "image") {
+      throw new Error("no image");
+    }
+
+    const opening = await saves.opening(item);
+
+    saves.open({ id, opening });
+
+    return opening;
+  };
+
+  await reopen();
 
   /** The image as the next launch opens it: its picture's bytes and its pins. */
   const reopened = async () => {
@@ -268,7 +349,13 @@ const annotating = async (app: Awaited<ReturnType<typeof setup>>) => {
     };
   };
 
-  return { original: [...original], reopened, saves };
+  return {
+    image: { file, heightPx: 3, pixelsPerDip: 1, widthPx: 4 },
+    original: [...original],
+    reopen,
+    reopened,
+    saves,
+  };
 };
 
 describe(createDrawingSaves, () => {
@@ -523,6 +610,7 @@ describe(createDrawingSaves, () => {
     const stroked = await image.saves.save({
       copy: false,
       forQuit: true,
+      marks: [],
       pins: [],
       png: PNG,
     });
@@ -535,6 +623,7 @@ describe(createDrawingSaves, () => {
     const pinned = await image.saves.save({
       copy: false,
       forQuit: true,
+      marks: [],
       pins: [{ x: 1, y: 2 }],
       png: null,
     });
@@ -557,6 +646,7 @@ describe(createDrawingSaves, () => {
     const pinned = await image.saves.save({
       copy: false,
       forQuit: true,
+      marks: [],
       pins: [{ x: 1, y: 2 }],
       png: null,
     });
@@ -619,13 +709,244 @@ describe(createDrawingSaves, () => {
       },
     });
 
-    saves.open(id);
+    const item = app.controller.item(id);
+
+    if (item?.kind !== "image") {
+      throw new Error("no image");
+    }
+
+    saves.open({ id, opening: await saves.opening(item) });
     saves.forQuit(new AbortController().signal);
     app.disk.full = true;
-    await saves.save({ copy: false, forQuit: true, pins: [], png: PNG });
+    await saves.save({
+      copy: false,
+      forQuit: true,
+      marks: [],
+      pins: [],
+      png: PNG,
+    });
     const image = await saves.image();
     await setImmediate();
 
     expect({ image, reads }).toStrictEqual({ image: original, reads: [file] });
+  });
+
+  describe("the marks kept beside the picture (feedback round 13)", () => {
+    it("opens an image saved before marks were kept as it shows, with nothing to edit", async () => {
+      const app = await setup(dir);
+      const image = await annotating(app);
+
+      await expect(image.reopen()).resolves.toStrictEqual({
+        bytes: new Uint8Array(image.original),
+        marks: [],
+        picture: image.image,
+      });
+    });
+
+    it("keeps the marks beside the picture they were drawn into, and after a relaunch opens them again on the bare picture", async () => {
+      const app = await setup(dir);
+      const image = await annotating(app);
+
+      const saved = await image.saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO,
+        pins: [{ x: 1, y: 2 }],
+        png: PNG,
+      });
+
+      await app.controller.flush();
+
+      const after = await relaunched(app);
+      const scene = after.item.scene?.file ?? "";
+
+      expect({
+        drawnInto: after.item.image.file === image.image.file,
+        files: after.files,
+        kept: after.kept,
+        opening: after.opening,
+        pins: after.item.pins,
+        saved,
+        scene: after.item.scene,
+      }).toStrictEqual({
+        drawnInto: false,
+        files: sorted(image.image.file, after.item.image.file, scene),
+        kept: HELLO,
+        opening: {
+          bytes: new Uint8Array(image.original),
+          marks: HELLO,
+          picture: image.image,
+        },
+        pins: [{ x: 1, y: 2 }],
+        saved: { ok: true },
+        scene: { base: image.image, file: scene },
+      });
+      expect(scene).toMatch(/\.json$/u);
+    });
+
+    it("edits a saved text opened again: drawn into the bare picture once, and the old picture and marks go", async () => {
+      const app = await setup(dir);
+      const image = await annotating(app);
+
+      await image.saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO,
+        pins: [],
+        png: PNG,
+      });
+      await app.controller.flush();
+
+      const first = await relaunched(app);
+      const opening = await image.reopen();
+      const under = await image.saves.image();
+      const [text, box] = opening.marks;
+
+      if (text?.kind !== "text" || box === undefined) {
+        throw new Error("the text did not open again");
+      }
+
+      const edited = [{ ...text, text: "Hello world" }, box];
+
+      await image.saves.save({
+        copy: false,
+        forQuit: false,
+        marks: edited,
+        pins: [],
+        png: REDRAWN,
+      });
+      await app.controller.flush();
+
+      const second = await relaunched(app);
+
+      const picture = await readFile(
+        app.store.attachmentPath(second.item.image.file) ?? ""
+      );
+
+      expect({
+        files: second.files,
+        kept: second.kept,
+        picture: [...picture],
+        scene: second.item.scene?.base,
+        under,
+      }).toStrictEqual({
+        files: sorted(
+          image.image.file,
+          second.item.image.file,
+          second.item.scene?.file ?? ""
+        ),
+        kept: edited,
+        picture: [...REDRAWN],
+        scene: image.image,
+        under: new Uint8Array(image.original),
+      });
+      expect(second.files).not.toContain(first.item.image.file);
+      expect(second.files).not.toContain(first.item.scene?.file);
+    });
+
+    it("takes every mark out of a saved image: the item goes back to its bare picture, and its old picture and marks go", async () => {
+      const app = await setup(dir);
+      const image = await annotating(app);
+
+      await image.saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO,
+        pins: [],
+        png: PNG,
+      });
+      await app.controller.flush();
+      await image.reopen();
+      await image.saves.save({
+        copy: false,
+        forQuit: false,
+        marks: [],
+        pins: [{ x: 1, y: 1 }],
+        png: null,
+      });
+      await app.controller.flush();
+
+      const after = await relaunched(app);
+
+      expect({
+        files: after.files,
+        image: after.item.image,
+        pins: after.item.pins,
+        scene: after.item.scene,
+      }).toStrictEqual({
+        files: [image.image.file],
+        image: image.image,
+        pins: [{ x: 1, y: 1 }],
+        scene: undefined,
+      });
+    });
+
+    it("opens the item as it shows when its marks can't be read", async () => {
+      const app = await setup(dir);
+      const image = await annotating(app);
+
+      await image.saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO,
+        pins: [],
+        png: PNG,
+      });
+      await app.controller.flush();
+
+      const { item } = await relaunched(app);
+
+      await writeFile(
+        app.store.attachmentPath(item.scene?.file ?? "") ?? "",
+        "{ not marks"
+      );
+
+      await expect(savesReading(app).opening(item)).resolves.toStrictEqual({
+        bytes: PNG,
+        marks: [],
+        picture: item.image,
+      });
+    });
+
+    it("keeps a new drawing's marks with no picture under them, opens it blank again, and saves it onto the same item", async () => {
+      const app = await setup(dir);
+      const saves = savesReading(app);
+
+      saves.open(null);
+      await saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO,
+        pins: [],
+        png: PNG,
+      });
+      await app.controller.flush();
+
+      const first = await relaunched(app);
+
+      saves.open({ id: first.item.id, opening: first.opening });
+      await saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO.slice(0, 1),
+        pins: [],
+        png: REDRAWN,
+      });
+      await app.controller.flush();
+
+      const { items } = await app.reopened();
+
+      expect({
+        items: items.map((each) => each.id),
+        opening: first.opening,
+        scene: first.item.scene?.base,
+        second: await relaunched(app).then(({ kept }) => kept),
+      }).toStrictEqual({
+        items: [first.item.id],
+        opening: { bytes: null, marks: HELLO, picture: null },
+        scene: null,
+        second: HELLO.slice(0, 1),
+      });
+    });
   });
 });

@@ -20,6 +20,9 @@ const ATTACHMENT_FILE =
 const IMAGE_FILE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/u;
 
+const SCENE_FILE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u;
+
 /** The composer writes a typed "# " as "\\# " (it no longer turns it into a heading), so both read as a section. */
 const SECTION_HEADING = /^\\?#\s+(?<name>\S.*)$/u;
 
@@ -77,6 +80,19 @@ export const ImageSchema = z.object({
 });
 
 export type ShelfImage = z.output<typeof ImageSchema>;
+
+/**
+ * The marks a drawing was saved with, kept beside its picture so Annotate
+ * can open them again to edit; the picture stays what is shown and copied.
+ */
+export const DrawingSceneSchema = z.object({
+  /** The picture under the marks, without them; null when they were drawn on a blank page. */
+  base: ImageSchema.nullable(),
+  /** The marks, as JSON (drawing-scene.ts). */
+  file: z.string().regex(SCENE_FILE),
+});
+
+export type DrawingScene = z.output<typeof DrawingSceneSchema>;
 
 export const TITLE_MAX = 300;
 export const DESCRIPTION_MAX = 20_000;
@@ -265,6 +281,8 @@ const ImageFields = {
   note: z.string().max(TEXT_MAX),
   /** Numbered pins, in image pixels; none by default. */
   pins: PinsSchema,
+  /** Set by a save in Annotate or New Drawing; shelves from before it have none. */
+  scene: DrawingSceneSchema.optional(),
   /** The display an area or pin was captured on. */
   source: z.string().max(200).nullable(),
   /** Shown in place of the note as the item's main line when set. */
@@ -472,7 +490,21 @@ const OWN_FILES: Readonly<
   Record<ShelfItem["kind"], (item: ShelfItem) => readonly string[]>
 > = {
   file: (item) => (item.kind === "file" ? [item.file.stored] : []),
-  image: (item) => (item.kind === "image" ? [item.image.file] : []),
+  image: (item) => {
+    if (item.kind !== "image") {
+      return [];
+    }
+
+    const { scene } = item;
+
+    if (scene === undefined) {
+      return [item.image.file];
+    }
+
+    return scene.base === null
+      ? [item.image.file, scene.file]
+      : [item.image.file, scene.file, scene.base.file];
+  },
   text: () => [],
 };
 
@@ -627,6 +659,7 @@ export type MainOp =
   | {
       readonly type: "addImage";
       readonly image: ShelfImage;
+      readonly scene?: DrawingScene;
       readonly pins: readonly Pin[];
       readonly source: string | null;
       readonly via: ImageItem["via"];
@@ -637,11 +670,12 @@ export type MainOp =
       readonly file: StoredFile;
       readonly context: ItemContext | null;
     }
-  /** An annotated image takes the place of the old one; the old file goes once this is saved. */
+  /** An annotated image takes the place of the old one, with the marks drawn into it, if any; the old files go once this is saved. */
   | {
       readonly type: "replaceImage";
       readonly id: ItemId;
       readonly image: ShelfImage;
+      readonly scene?: DrawingScene;
     }
   /** Windows linked to an item afterwards, at the end of its list. */
   | {
@@ -859,11 +893,12 @@ const moveItem = (
       });
 };
 
-/** The item keeps its place, note, pin and source; only its picture changes. */
+/** The item keeps its place, note, pin and source; only its picture and the marks kept with it change. */
 const replaceImage = (
   doc: ShelfDoc,
   id: ItemId,
-  image: ShelfImage
+  image: ShelfImage,
+  scene: DrawingScene | undefined
 ): OpResult => {
   const item = doc.items.find((candidate) => candidate.id === id);
 
@@ -871,9 +906,16 @@ const replaceImage = (
     return unchanged(doc);
   }
 
+  // An image with no marks kept has no scene at all, as on shelves from before them.
+  const { scene: _kept, ...rest } = item;
+
   return {
-    ...changed(mapItem(doc, id, () => ({ ...item, image }))),
-    // Only the old picture goes: the windows' pictures still belong to the item.
+    ...changed(
+      mapItem(doc, id, () =>
+        scene === undefined ? { ...rest, image } : { ...rest, image, scene }
+      )
+    ),
+    // Only the old picture and marks go, unless the new ones still name them: the windows' pictures still belong to the item.
     discarded: [{ ...item, windows: [] }],
   };
 };
@@ -1216,7 +1258,7 @@ export const applyOp = (
     }
 
     case "addImage": {
-      return addItem(doc, {
+      const item: ImageItem = {
         ...NO_META,
         color: null,
         context: op.context,
@@ -1231,7 +1273,13 @@ export const applyOp = (
         source: op.source,
         title: null,
         via: op.via,
-      });
+      };
+
+      // An image with no marks kept has no scene at all, as on shelves from before them.
+      return addItem(
+        doc,
+        op.scene === undefined ? item : { ...item, scene: op.scene }
+      );
     }
 
     case "addFile": {
@@ -1267,7 +1315,7 @@ export const applyOp = (
     }
 
     case "replaceImage": {
-      return replaceImage(doc, op.id, op.image);
+      return replaceImage(doc, op.id, op.image, op.scene);
     }
 
     case "toggleDone": {

@@ -1,4 +1,5 @@
 /** The drawing as data: marks (pen strokes, lines, arrows, boxes, ellipses, text) in page coordinates, with undo history. */
+import { DRAWING_COLORS } from "@shared/drawing-scene";
 
 /** A point on the drawing page, in CSS pixels from its top-left corner. */
 export interface Point {
@@ -13,7 +14,8 @@ export interface Bounds {
   readonly height: number;
 }
 
-export const COLORS = ["ink", "red", "blue", "green", "orange"] as const;
+/** The inks, the same list a saved drawing's marks are checked against. */
+export const COLORS = DRAWING_COLORS;
 
 export type Color = (typeof COLORS)[number];
 

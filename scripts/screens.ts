@@ -417,15 +417,27 @@ interface FixturePin {
   readonly label?: string;
 }
 
-const drawingView = (pins: readonly FixturePin[], pinMode: boolean) => ({
+/** Annotate on the sign-in screenshot: its pins, in its pixels, open as marks in its DIP, after the marks a save kept. */
+const drawingView = (
+  pins: readonly FixturePin[],
+  pinMode: boolean,
+  kept: readonly object[] = []
+) => ({
   image: {
     heightPx: LOGIN.heightPx,
-    pinMode,
-    pins,
     pixelsPerDip: LOGIN.pixelsPerDip,
     url: `/.fixtures/${LOGIN.file}`,
     widthPx: LOGIN.widthPx,
   },
+  marks: [
+    ...kept,
+    ...pins.map(({ x, y, ...label }) => ({
+      ...label,
+      at: { x: x / LOGIN.pixelsPerDip, y: y / LOGIN.pixelsPerDip },
+      kind: "pin",
+    })),
+  ],
+  pinMode,
   quitting: false,
   seq: 1,
 });
@@ -529,7 +541,13 @@ const commandKey = async (page: Page): Promise<"Meta" | "Control"> => {
 };
 
 /** A new drawing on a blank page. */
-const BLANK_DRAWING = { image: null, quitting: false, seq: 1 } as const;
+const BLANK_DRAWING = {
+  image: null,
+  marks: [],
+  pinMode: false,
+  quitting: false,
+  seq: 1,
+} as const;
 
 /** A pen stroke across the blank page. */
 const drawStroke = async (page: Page, y: number): Promise<void> => {
@@ -650,6 +668,55 @@ const keepSavedPng = async (page: Page): Promise<void> => {
 };
 
 const PngSchema = z.array(z.number()).nullable();
+
+/** Keeps the marks each save sends and its picture's width, so a scene can check what Annotate keeps. */
+const keepSavedMarks = async (page: Page): Promise<void> => {
+  await page.evaluate(`(() => {
+    const save = globalThis.insetDrawing.save;
+    globalThis.insetDrawing.save = (drawing) => {
+      globalThis.__kept = {
+        marks: drawing.marks,
+        width: drawing.png === null ? null : new DataView(drawing.png.buffer, drawing.png.byteOffset).getUint32(16),
+      };
+      return save(drawing);
+    };
+  })()`);
+};
+
+const KeptSchema = z.object({
+  marks: z.array(z.unknown()),
+  width: z.number().nullable(),
+});
+
+/** Where a point of the sign-in screenshot under the marks, in its DIP, is on the screen. */
+const onImage = async (
+  page: Page,
+  x: number,
+  y: number
+): Promise<{ readonly x: number; readonly y: number }> => {
+  const box = await page.locator("img").first().boundingBox();
+  const scale = (box?.width ?? 0) / (LOGIN.widthPx / LOGIN.pixelsPerDip);
+
+  return { x: (box?.x ?? 0) + x * scale, y: (box?.y ?? 0) + y * scale };
+};
+
+/** A box and a text a save kept beside the sign-in screenshot, in its DIP. */
+const KEPT = [
+  {
+    color: "red",
+    from: { x: 300, y: 160 },
+    kind: "rect",
+    to: { x: 660, y: 260 },
+    width: 3,
+  },
+  {
+    at: { x: 320, y: 300 },
+    color: "red",
+    kind: "text",
+    size: 24,
+    text: "Fix this",
+  },
+] as const;
 
 const WidthsSchema = z.object({ plain: z.number(), sketch: z.number() });
 
@@ -4208,6 +4275,68 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: BLANK_DRAWING },
     name: "drawing-text-native-undo",
+    page: "drawing",
+  },
+  {
+    // Sol review, round 13: a saved image opens on its bare picture with the marks it was saved with, each selectable and editable again, and saves them drawn in once.
+    act: async (page) => {
+      await keepSavedMarks(page);
+      const edge = await onImage(page, 480, 160);
+      await page.mouse.click(edge.x, edge.y);
+    },
+    check: async (page) => {
+      const selectTool = await page
+        .getByRole("button", { exact: true, name: "Select" })
+        .getAttribute("aria-pressed");
+
+      const picked = await attributes(
+        page,
+        "[data-selected-mark]",
+        "data-selected-mark"
+      );
+
+      const handles = await page.locator("[data-handle]").count();
+      const under = await page.locator("img").first().getAttribute("src");
+      const words = await onImage(page, 340, 315);
+
+      await page.mouse.dblclick(words.x, words.y);
+
+      const field = page.getByRole("textbox", { exact: true, name: "Text" });
+      const reopened = await field.inputValue();
+
+      await page.keyboard.press("End");
+      await page.keyboard.type(" first");
+      await page.keyboard.press("Enter");
+      await page.getByRole("button", { exact: true, name: "Save" }).click();
+      await page.waitForFunction("globalThis.__kept !== undefined");
+
+      const kept = KeptSchema.parse(await page.evaluate("globalThis.__kept"));
+      const [box, text] = KEPT;
+
+      const problems = [
+        selectTool === "true" &&
+        isDeepStrictEqual(picked, ["0"]) &&
+        handles === 8
+          ? null
+          : `opening with kept marks pressed Select ${String(selectTool)}; a click on the box picked ${JSON.stringify(picked)} with ${handles} handles`,
+        under === `/.fixtures/${LOGIN.file}`
+          ? null
+          : `the picture under the marks was ${String(under)}, not the bare screenshot`,
+        reopened === "Fix this"
+          ? null
+          : `a double-click on the kept text opened ${JSON.stringify(reopened)}`,
+        isDeepStrictEqual(kept, {
+          marks: [box, { ...text, text: "Fix this first" }],
+          width: LOGIN.widthPx,
+        })
+          ? null
+          : `Save kept ${JSON.stringify(kept)}, not the box and the edited text drawn into the ${LOGIN.widthPx} px screenshot`,
+      ].filter((problem) => problem !== null);
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { pictureBytes: true, view: drawingView([], false, KEPT) },
+    name: "drawing-reopen-editable",
     page: "drawing",
   },
   {

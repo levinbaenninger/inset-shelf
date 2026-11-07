@@ -166,7 +166,11 @@ export interface ShelfStore {
    * disk can't stop it; false when it couldn't (Round 8).
    */
   readonly restorePrevious: () => Promise<boolean>;
-  readonly writeAttachment: (png: Uint8Array) => Promise<string>;
+  /** Writes a picture (PNG) or a drawing's marks (JSON); returns its stored name. */
+  readonly writeAttachment: (
+    data: Uint8Array,
+    extension?: "png" | "json"
+  ) => Promise<string>;
   /** Copies a file the user added; returns its stored name with the given extension. */
   readonly copyAttachment: (from: string, extension: string) => Promise<string>;
   readonly deleteAttachment: (file: string) => Promise<void>;
@@ -442,10 +446,10 @@ export const openShelfStore = async (
 
       return file;
     },
-    writeAttachment: async (png) => {
-      const file = `${randomUUID()}.png`;
+    writeAttachment: async (data, extension = "png") => {
+      const file = `${randomUUID()}.${extension}`;
 
-      await fs.writeAtomic(path.join(attachments, file), png);
+      await fs.writeAtomic(path.join(attachments, file), data);
 
       return file;
     },

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { StrokeMarksSchema } from "./drawing-scene";
+import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
@@ -9,7 +11,7 @@ import {
   ShelfOpSchema,
   WindowIdSchema,
 } from "./shelf";
-import type { ItemId, Pin, ShelfDoc } from "./shelf";
+import type { ItemId, ShelfDoc } from "./shelf";
 
 export type Permission = "granted" | "missing" | "notNeeded";
 
@@ -269,24 +271,32 @@ export const screenshotContract = defineContract({
 
 const DRAWING_MAX_BYTES = 30 * 1024 * 1024;
 
-/** An image item opened in the drawing window, to look at large or draw on. */
+/** The picture under the marks in the drawing window: an image item's, without the marks a save kept beside it. */
 export interface DrawingImage {
   /** For showing it; the pixels for the saved copy come from getImage. */
   readonly url: string;
   readonly widthPx: number;
   readonly heightPx: number;
   readonly pixelsPerDip: number;
-  /** Numbered pins, in image pixels, edited with the Pin tool; drawn into copies, never into the saved image. */
-  readonly pins: readonly Pin[];
+}
+
+/** What the drawing window opens: the picture, the marks to edit on it, and the tool to start with. */
+export interface DrawingOpened {
+  /** Null for a blank page: a new drawing, or one saved before, opened again. */
+  readonly image: DrawingImage | null;
+  /**
+   * The marks a save kept and the item's numbered pins, in the picture's
+   * DIP, all editable again; pins are drawn into copies, never into the
+   * saved picture.
+   */
+  readonly marks: readonly DrawingMark[];
   /** Opened from details to place or move pins: the Pin tool is picked at once. */
   readonly pinMode: boolean;
 }
 
-export interface DrawingView {
+export interface DrawingView extends DrawingOpened {
   /** Changes with every opening, so the page starts over. */
   readonly seq: number;
-  /** Null for a new drawing on a blank page. */
-  readonly image: DrawingImage | null;
   /** A quit is under way: the marks can't change until it is answered (Round 8). Keeps `seq`, so the page keeps its marks. */
   readonly quitting: boolean;
 }
@@ -325,7 +335,9 @@ export const drawingContract = defineContract({
         copy: z.boolean(),
         /** Retry in a held quit asked for it: Cancel or Quit without saving stops it. */
         forQuit: z.boolean(),
-        /** Null when only the pins changed: the image stays as it is. */
+        /** The marks drawn into `png`, kept beside it to edit again. */
+        marks: StrokeMarksSchema,
+        /** Null when only the pins changed, or no mark is left: the picture the window opened on stays. */
         png: z
           .instanceof(Uint8Array)
           .refine((bytes) => bytes.byteLength <= DRAWING_MAX_BYTES)

@@ -1,6 +1,7 @@
 import type {
   DrawingImage,
   DrawingOnShelf,
+  DrawingOpened,
   DrawingView,
 } from "@shared/contracts";
 import type { Pin } from "@shared/shelf";
@@ -53,7 +54,15 @@ import {
   TEXT_SIZE,
   undo,
 } from "./sketch";
-import type { Color, History, Mark, Point, Stroke, Tool } from "./sketch";
+import type {
+  Color,
+  History,
+  Mark,
+  PinMark,
+  Point,
+  Stroke,
+  Tool,
+} from "./sketch";
 import { Toolbar } from "./toolbar";
 import { useDark, useDrawingKeys } from "./use-drawing-keys";
 
@@ -80,8 +89,14 @@ const pinsInPixels = (
     return pin.label === undefined ? point : { ...point, label: pin.label };
   });
 
+type DrawnMark = Exclude<Mark, PinMark>;
+
+const isDrawn = (mark: Mark): mark is DrawnMark => mark.kind !== "pin";
+
 interface Saved {
   readonly png: Uint8Array<ArrayBuffer> | null;
+  /** The marks drawn into `png`, in its DIP, kept beside it to edit again. */
+  readonly marks: readonly DrawnMark[];
   readonly pins: Pin[];
 }
 
@@ -95,22 +110,33 @@ const exportMarks = async (
   image: DrawingImage | null,
   dark: boolean
 ): Promise<Saved | null> => {
-  const strokes = marks.filter((mark) => mark.kind !== "pin");
-
   if (image === null) {
     // The frame comes with the picture, measured once the font has loaded, so the pins land where the text pushed the edges.
     const exported = await exportPng(marks, dark);
 
-    return exported === null
-      ? null
-      : {
-          pins: pinsInPixels(marks, (point) => ({
-            x: (point.x - exported.frame.origin.x) * EXPORT_SCALE,
-            y: (point.y - exported.frame.origin.y) * EXPORT_SCALE,
-          })),
-          png: exported.png,
-        };
+    if (exported === null) {
+      return null;
+    }
+
+    // The picture's corner becomes the drawing's, so the marks kept and the pins open again where the picture has them.
+    const { origin } = exported.frame;
+
+    const placed = moveMarks(marks, new Set(marks.keys()), {
+      x: -origin.x,
+      y: -origin.y,
+    });
+
+    return {
+      marks: placed.filter(isDrawn),
+      pins: pinsInPixels(placed, (point) => ({
+        x: point.x * EXPORT_SCALE,
+        y: point.y * EXPORT_SCALE,
+      })),
+      png: exported.png,
+    };
   }
+
+  const strokes = marks.filter(isDrawn);
 
   const pins = pinsInPixels(marks, (point) => ({
     x: Math.min(point.x * image.pixelsPerDip, image.widthPx - 1),
@@ -118,7 +144,7 @@ const exportMarks = async (
   }));
 
   if (strokes.length === 0) {
-    return { pins, png: null };
+    return { marks: [], pins, png: null };
   }
 
   const png = await api.getImage();
@@ -128,6 +154,7 @@ const exportMarks = async (
   }
 
   return {
+    marks: strokes,
     pins,
     png: await exportAnnotated(strokes, {
       heightPx: image.heightPx,
@@ -149,13 +176,15 @@ const saveDrawing = async (
   try {
     const saved = await exportMarks(marks, image, dark);
 
+    // Only a drawing opened again can be left with nothing on it: the shelf keeps it as it was.
     if (saved === null) {
-      return null;
+      return "There is nothing to save.";
     }
 
     const result = await api.save({
       copy,
       forQuit,
+      marks: saved.marks,
       pins: saved.pins,
       png: saved.png,
     });
@@ -188,28 +217,30 @@ const pageImage = (image: DrawingImage | null): PageImage | null =>
         width: image.widthPx / image.pixelsPerDip,
       };
 
-/** The image's pins as marks, in its DIP, so the page can show and move them. */
-const startingMarks = (image: DrawingImage | null): readonly Mark[] =>
-  image === null
-    ? []
-    : image.pins.map((pin): Mark => {
-        const at = {
-          x: pin.x / image.pixelsPerDip,
-          y: pin.y / image.pixelsPerDip,
-        };
-
-        return pin.label === undefined
-          ? { at, kind: "pin" }
-          : { at, kind: "pin", label: pin.label };
-      });
-
-/** Something to save: marks (words still being typed among them), or pins added, moved or removed. */
+/** Something to save: the marks (words still being typed among them) differ from those the page opened with. */
 const hasChanges = (
   marks: readonly Mark[],
   initial: readonly Mark[]
 ): boolean =>
-  marks.some((mark) => mark.kind !== "pin") ||
-  JSON.stringify(pinsOf(marks)) !== JSON.stringify(pinsOf(initial));
+  marks !== initial && JSON.stringify(marks) !== JSON.stringify(initial);
+
+/** Pins from details start with the Pin tool, marks kept from a save with Select, so they read as editable; else the pen. */
+const firstTool = (opened: DrawingOpened): Tool => {
+  if (opened.pinMode) {
+    return "pin";
+  }
+
+  return opened.marks.some(isDrawn) ? "select" : "pen";
+};
+
+/** What the header calls the page: a new drawing, one saved before, or an image. */
+const pageTitle = (opened: DrawingOpened): string => {
+  if (opened.image !== null) {
+    return "Annotate";
+  }
+
+  return opened.marks.length === 0 ? "New Drawing" : "Drawing";
+};
 
 /** How long the page says why New Drawing or Annotate brought it forward instead. */
 const REFUSED_MS = 4000;
@@ -271,14 +302,15 @@ const closingText = (
 
 /** One drawing, on a blank page or over an image; the app remounts it for every opening. */
 const Editor = ({
-  image,
+  opened,
   quitting,
 }: {
-  readonly image: DrawingImage | null;
+  readonly opened: DrawingOpened;
   /** A quit is under way: the marks wait, untouched, until it is answered. */
   readonly quitting: boolean;
 }) => {
-  const initial = useMemo(() => startingMarks(image), [image]);
+  const { image } = opened;
+  const initial: readonly Mark[] = opened.marks;
 
   const [history, setHistory] = useState<History>(() => ({
     future: [],
@@ -286,10 +318,7 @@ const Editor = ({
     present: initial,
   }));
 
-  // Add Pins… and Move pins in details open with the Pin tool; anything else starts with the pen.
-  const [tool, setTool] = useState<Tool>(
-    image?.pinMode === true ? "pin" : "pen"
-  );
+  const [tool, setTool] = useState<Tool>(() => firstTool(opened));
 
   const [lastTool, setLastTool] = useState<Tool>("pen");
   // What Select or the pin keys picked, pins included, by place among the marks.
@@ -354,7 +383,6 @@ const Editor = ({
   const dark = useDark() && image === null;
   const marks = history.present;
   const pins = pinsOf(marks);
-  const pinsChanged = JSON.stringify(pins) !== JSON.stringify(pinsOf(initial));
 
   const bounds =
     image === null
@@ -377,7 +405,8 @@ const Editor = ({
   const moving = shown !== marks;
   // Kept between renders, so the page reports a change of the words, not every render while they are open.
   const typed = useMemo(() => withDraft(marks, text), [marks, text]);
-  const dirty = hasChanges(typed, initial) || moving;
+  const changed = useMemo(() => hasChanges(typed, initial), [typed, initial]);
+  const dirty = changed || moving;
   // What a save sends: the marks, the words still being typed and a gesture still under way.
   const toSave = withDraft(shown, text);
   // While its save, a quit or the Discard confirm is under way nothing changes the marks, so none is made that main would not get or that the prompt doesn't show (Round 8).
@@ -417,7 +446,7 @@ const Editor = ({
     list: readonly Mark[],
     forQuit = false
   ): Promise<void> => {
-    if (saving || (list.length === 0 && !pinsChanged)) {
+    if (saving || !hasChanges(list, initial)) {
       return;
     }
 
@@ -716,9 +745,7 @@ const Editor = ({
       {/* A problem saving takes the title's place; saving itself is in the toolbar. */}
       <WindowHeader>
         {problem === null ? (
-          <WindowTitle>
-            {image === null ? "New Drawing" : "Annotate"}
-          </WindowTitle>
+          <WindowTitle>{pageTitle(opened)}</WindowTitle>
         ) : (
           <p
             className="text-destructive mr-auto min-w-0 truncate text-xs"
@@ -848,6 +875,6 @@ export const DrawingApp = () => {
   }
 
   return view === null || opened?.seq !== view.seq ? null : (
-    <Editor image={opened.image} key={opened.seq} quitting={view.quitting} />
+    <Editor key={opened.seq} opened={opened} quitting={view.quitting} />
   );
 };

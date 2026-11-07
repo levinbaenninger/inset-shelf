@@ -285,7 +285,15 @@ if (page === "drawing") {
   globalThis.__dirty = [];
   globalThis.insetDrawing = withFallback(
     {
-      getImage: resolved(null),
+      // `pictureBytes`: the picture's PNG, so a save can draw the marks into it as main's would.
+      getImage:
+        data.pictureBytes === true
+          ? async () => {
+              const picture = await fetch(data.view.image.url);
+
+              return new Uint8Array(await picture.arrayBuffer());
+            }
+          : resolved(null),
       getView: resolved(data.view),
       on,
       // `holdSave`: the save waits until the scene calls `__releaseSave()`, then fails as a full disk, so the page stays open.

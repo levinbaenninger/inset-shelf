@@ -18,6 +18,7 @@ import type {
   PickerView,
   ShelfCommand,
 } from "@shared/contracts";
+import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { IconPlace, SettingsView } from "@shared/settings";
@@ -1235,36 +1236,65 @@ const start = async (): Promise<void> => {
     }
 
     drawingSaves.open(null);
-    drawing.open(null);
+    drawing.open({ image: null, marks: [], pinMode: false });
   };
 
-  const openImage = (id: ItemId, pinMode = false): void => {
+  /** Annotate on the picture the window already shows only brings it forward; other unsaved marks keep the window. True when the window is taken. */
+  const drawingTaken = (id: ItemId): boolean => {
+    if (!drawing.isDirty()) {
+      return false;
+    }
+
+    if (drawingSaves.target() === id) {
+      drawing.bringForward();
+    } else {
+      keepDrawing();
+    }
+
+    return true;
+  };
+
+  /** Opens an image item to draw on, with the marks a save kept beside it to edit again. */
+  const openImage = async (id: ItemId, pinMode = false): Promise<void> => {
+    const before = controller.item(id);
+
+    if (before?.kind !== "image" || drawingTaken(id)) {
+      return;
+    }
+
+    const opening = await drawingSaves.opening(before);
     const item = controller.item(id);
 
-    if (item?.kind !== "image") {
+    // Anything can happen while the marks are read: the window and the item are checked again, as they are now.
+    if (item?.kind !== "image" || drawingTaken(id)) {
       return;
     }
 
-    // Annotate on the picture the window already shows only brings it forward.
-    if (drawing.isDirty()) {
-      if (drawingSaves.target() === id) {
-        drawing.bringForward();
-      } else {
-        keepDrawing();
-      }
+    if (
+      item.image.file !== before.image.file ||
+      item.scene?.file !== before.scene?.file
+    ) {
+      await openImage(id, pinMode);
 
       return;
     }
 
-    drawingSaves.open(id);
+    const { picture } = opening;
+
+    drawingSaves.open({ id, opening });
     e2eLog("drawingShown", { itemId: id });
     drawing.open({
-      heightPx: item.image.heightPx,
+      image:
+        picture === null
+          ? null
+          : {
+              heightPx: picture.heightPx,
+              pixelsPerDip: picture.pixelsPerDip,
+              url: insetUrl.attachment(picture.file),
+              widthPx: picture.widthPx,
+            },
+      marks: openedMarks(opening.marks, item.pins, item.image.pixelsPerDip),
       pinMode,
-      pins: item.pins,
-      pixelsPerDip: item.image.pixelsPerDip,
-      url: insetUrl.attachment(item.image.file),
-      widthPx: item.image.widthPx,
     });
   };
 
@@ -1332,10 +1362,10 @@ const start = async (): Promise<void> => {
       newDrawing,
       openHelp,
       openImage: (id) => {
-        openImage(id);
+        void openImage(id);
       },
       openPins: (id) => {
-        openImage(id, true);
+        void openImage(id, true);
       },
       openKeySettings,
       openLink: ({ id, url }) => {
@@ -1500,7 +1530,7 @@ const start = async (): Promise<void> => {
           }
 
           controller.focus(id);
-          openImage(id);
+          await openImage(id);
         })();
       },
       copy: (seq) => {
