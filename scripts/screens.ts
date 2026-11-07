@@ -3427,9 +3427,11 @@ const SCENES: readonly Scene[] = [
       const outside = await page.getByRole("dialog").evaluate((dialog) => {
         const edge = dialog.getBoundingClientRect().right;
 
-        return [...dialog.querySelectorAll("*")]
-          .filter((node) => node.getBoundingClientRect().right > edge + 0.5)
-          .map((node) => node.textContent?.trim().slice(0, 30) ?? "");
+        return [...dialog.querySelectorAll("*")].flatMap((node) =>
+          node.getBoundingClientRect().right > edge + 0.5
+            ? [node.textContent?.trim().slice(0, 30) ?? ""]
+            : []
+        );
       });
 
       return outside.length === 0
