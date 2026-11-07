@@ -34,9 +34,17 @@ describe(stepSelection, () => {
 
 describe(selectionAfterRemoval, () => {
   it("selects the next item, else the one before", () => {
-    expect(selectionAfterRemoval(ids, id(2))).toBe(id(3));
-    expect(selectionAfterRemoval(ids, id(3))).toBe(id(2));
-    expect(selectionAfterRemoval([id(1)], id(1))).toBeNull();
+    expect(selectionAfterRemoval(ids, [id(2)])).toBe(id(3));
+    expect(selectionAfterRemoval(ids, [id(3)])).toBe(id(2));
+    expect(selectionAfterRemoval([id(1)], [id(1)])).toBeNull();
+  });
+
+  it("skips every item deleted with it", () => {
+    const four = [...ids, id(4)];
+
+    expect(selectionAfterRemoval(four, [id(1), id(3)])).toBe(id(4));
+    expect(selectionAfterRemoval(four, [id(3), id(4)])).toBe(id(2));
+    expect(selectionAfterRemoval(ids, ids)).toBeNull();
   });
 });
 

@@ -30,6 +30,7 @@ describe(trayMenu, () => {
       "Show Inset Shelf",
       "---",
       "Settings…",
+      "Keyboard Shortcuts",
       "---",
       "(Version 0.1.900)",
       "Check for Updates…",

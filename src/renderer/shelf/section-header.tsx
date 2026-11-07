@@ -5,7 +5,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SECTION_NAME_MAX } from "@shared/shelf";
 import type { Section, SectionId } from "@shared/shelf";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+import { liveEdits } from "./drafts";
+import type { LiveEdit } from "./live-edits";
 import type { MenuAnchor } from "./menus";
 
 const COLLAPSED_KEY = "inset-shelf.collapsed-sections";
@@ -65,21 +67,54 @@ export const useCollapsedSections = () => {
   return { collapsed, setOpen };
 };
 
-/** A one-line field for a section's name: Return saves, Escape keeps the old name. */
+/**
+ * A one-line field for a section's name: Return saves, Escape keeps the old
+ * name. With `onLive`, renaming sends the name as it is typed, after a short
+ * pause, so a quit mid-rename waits for it like any other edit (Round 7).
+ */
 export const SectionNameField = ({
   initial,
   label,
   onCancel,
+  onLive,
   onSave,
 }: {
   readonly initial: string;
   readonly label: string;
   readonly onSave: (name: string) => void;
   readonly onCancel: () => void;
+  readonly onLive?: (name: string) => void;
 }) => {
   const [name, setName] = useState(initial);
+  // The name the field opened with: Escape goes back to it, even after renames were sent.
+  const opened = useRef(initial);
+  const live = useRef<LiveEdit | null>(null);
+
+  const liveEdit = (send: (text: string) => void): LiveEdit => {
+    const current =
+      live.current ?? liveEdits.open({ original: opened.current, send });
+
+    live.current = current;
+
+    return current;
+  };
+
+  // A field that goes away mid-rename still sends what was typed.
+  useEffect(
+    () => () => {
+      live.current?.flush();
+    },
+    []
+  );
 
   const finish = (): void => {
+    if (onLive !== undefined) {
+      liveEdit(onLive).finish(name);
+      onCancel();
+
+      return;
+    }
+
     if (name.trim() === "" || name.trim() === initial) {
       onCancel();
     } else {
@@ -98,6 +133,7 @@ export const SectionNameField = ({
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
+      live.current?.cancel();
       onCancel();
     }
   };
@@ -111,6 +147,10 @@ export const SectionNameField = ({
       onBlur={finish}
       onChange={(event) => {
         setName(event.target.value);
+
+        if (onLive !== undefined) {
+          liveEdit(onLive).change(event.target.value);
+        }
       }}
       onFocus={(event) => {
         event.currentTarget.select();
@@ -224,8 +264,9 @@ export const SectionHeader = ({
     {renaming ? (
       <SectionNameField
         initial={section.name}
-        label={`Rename ${section.name}`}
+        label="Rename section"
         onCancel={onStopRenaming}
+        onLive={onRename}
         onSave={(name) => {
           onRename(name);
           onStopRenaming();

@@ -2,13 +2,17 @@ import { useEffect, useEffectEvent } from "react";
 
 /** Plain keys for the item list; Copy, Undo and the rest come from the app's menu bar. */
 export interface ShelfKeyActions {
-  readonly move: (offset: 1 | -1) => void;
+  readonly move: ((offset: 1 | -1) => void) | null;
+  /** Escape, layered: the shelf decides what it closes first. */
   readonly hide: () => void;
+  /** → opens details, ← goes back to the list. */
+  readonly forward: (() => void) | null;
+  readonly back: (() => void) | null;
   readonly toggleDone: (() => void) | null;
   readonly edit: (() => void) | null;
   readonly remove: (() => void) | null;
-  /** Typing a character while the list has focus starts a note. */
-  readonly startNote: () => void;
+  /** Typing a character while the list has focus starts a note; null where nothing should start one. */
+  readonly startNote: (() => void) | null;
 }
 
 export const isTextField = (target: EventTarget | null): boolean =>
@@ -25,6 +29,25 @@ const isPrintable = (event: KeyboardEvent): boolean =>
   !commandKey(event) &&
   (!event.altKey || event.getModifierState("AltGraph"));
 
+/**
+ * A button, checkbox or link inside a row: a step's checkbox, a window to
+ * reopen, Details, ⋯. Return and Space press it, as anywhere else, and ⌫
+ * never deletes the item from it. Only the buttons that stand for the row
+ * itself (data-row-keys) keep Return to edit, Space to check off and ⌫ to
+ * delete.
+ */
+const isInlineControl = (target: EventTarget | null): boolean => {
+  const control =
+    target instanceof Element
+      ? target.closest<HTMLElement>("button, a, [role=checkbox], [role=button]")
+      : null;
+
+  return control !== null && control.dataset.rowKeys === undefined;
+};
+
+/** The keys that act on the row, which an inline control keeps from it. */
+const ROW_KEYS = new Set(["Enter", " ", "Backspace", "Delete"]);
+
 /** An open menu handles its own keys, typing included. */
 const inMenu = (target: EventTarget | null): boolean =>
   target instanceof Element && target.closest("[role=menu]") !== null;
@@ -37,25 +60,37 @@ const actionFor = (
     return null;
   }
 
+  const { move } = actions;
+
   const plain = new Map<string, (() => void) | null>([
     [
       "ArrowDown",
-      () => {
-        actions.move(1);
-      },
+      move === null
+        ? null
+        : () => {
+            move(1);
+          },
     ],
     [
       "ArrowUp",
-      () => {
-        actions.move(-1);
-      },
+      move === null
+        ? null
+        : () => {
+            move(-1);
+          },
     ],
+    ["ArrowRight", actions.forward],
+    ["ArrowLeft", actions.back],
     ["Escape", actions.hide],
     [" ", actions.toggleDone],
     ["Enter", actions.edit],
     ["Backspace", actions.remove],
     ["Delete", actions.remove],
   ]);
+
+  if (ROW_KEYS.has(event.key) && isInlineControl(event.target)) {
+    return null;
+  }
 
   if (plain.has(event.key)) {
     return plain.get(event.key) ?? null;
@@ -64,20 +99,38 @@ const actionFor = (
   return isPrintable(event) ? actions.startNote : null;
 };
 
-export const useShelfKeys = (actions: ShelfKeyActions): void => {
+/** In details only Escape, ← and Return act; the list's own keys wait until it is back. */
+const detailsKeys = (actions: ShelfKeyActions): ShelfKeyActions => ({
+  back: actions.back,
+  edit: actions.edit,
+  forward: null,
+  hide: actions.hide,
+  move: null,
+  remove: null,
+  startNote: null,
+  toggleDone: null,
+});
+
+export const useShelfKeys = (
+  actions: ShelfKeyActions,
+  inDetails: boolean
+): void => {
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.isComposing) {
       return;
     }
 
-    const action = actionFor(event, actions);
+    const action = actionFor(
+      event,
+      inDetails ? detailsKeys(actions) : { ...actions, back: null }
+    );
 
     if (action === null) {
       return;
     }
 
     // A printable key goes on into the note field, which takes focus first.
-    if (action !== actions.startNote) {
+    if (inDetails || action !== actions.startNote) {
       event.preventDefault();
     }
 

@@ -1,4 +1,5 @@
 import {
+  ArrowRight01Icon,
   ChatGptIcon,
   ClaudeIcon,
   FigmaIcon,
@@ -15,19 +16,23 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
+import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
-import { TEXT_MAX } from "@shared/shelf";
+import { itemText, TEXT_MAX } from "@shared/shelf";
 import type {
   FileItem,
   ImageItem,
   ItemContext,
   ShelfItem,
+  Step,
   TextItem,
+  WindowRef,
 } from "@shared/shelf";
+import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -41,12 +46,37 @@ import { cn } from "@/lib/utils";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
+import { NotSavedLine } from "./banners";
+import { liveEdits } from "./drafts";
 import { whenText } from "./format";
+import {
+  filledSteps,
+  PinLegend,
+  metaBadges,
+  StepChecklist,
+  WindowStrip,
+} from "./item-meta";
+import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
+
+/**
+ * Focus on an item's row itself, where Return edits, Space checks off and ⌫
+ * deletes. False when the row is gone or hidden.
+ */
+export const focusRow = (row: Element | null): boolean => {
+  const target =
+    row?.querySelector<HTMLElement>("[data-row-keys]") ??
+    row?.querySelector<HTMLElement>("[data-details-button]") ??
+    null;
+
+  target?.focus({ preventScroll: true });
+
+  return target !== null && document.activeElement === target;
+};
 
 /** A right-click on any part of an item opens its menu at the pointer. */
 const contextMenuAt =
@@ -76,17 +106,38 @@ const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
 };
 
 /**
+ * "site · page": the page's part leaves the line whole, its " · " with it,
+ * when too little of it would fit to read, so no line ends on a bare "· …".
+ */
+const SourceText = ({ label }: { readonly label: string }) => {
+  const at = label.indexOf(" · ");
+
+  if (at === -1) {
+    return <span className="truncate">{label}</span>;
+  }
+
+  return (
+    <span className="flex h-4 min-w-0 flex-wrap overflow-hidden">
+      <span className="truncate">{label.slice(0, at)}</span>
+      <span className="min-w-[7ch] flex-[1_1_0] truncate ps-1">
+        · {label.slice(at + 3)}
+      </span>
+    </span>
+  );
+};
+
+/**
  * Where an item came from, in one quiet line: the site and what on it for
  * pages the shelf knows, else the app and window. A page address opens in the
  * browser.
  */
-const SourceLine = ({
+export const SourceLine = ({
   context,
   onOpenLink,
 }: {
   readonly context: ItemContext;
   readonly onOpenLink: () => void;
-}) => {
+}): ReactNode => {
   const { label, service } = sourceLabel(context);
   const icon = service === null ? Link01Icon : SERVICE_ICON[service];
   // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
@@ -98,7 +149,7 @@ const SourceLine = ({
         {service === null ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
         )}
-        <span className="truncate">{label}</span>
+        <SourceText label={label} />
       </p>
     );
   }
@@ -111,7 +162,7 @@ const SourceLine = ({
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
-      <span className="truncate">{label === "" ? context.url : label}</span>
+      <SourceText label={label === "" ? (context.url ?? "") : label} />
     </button>
   );
 };
@@ -120,7 +171,7 @@ const hostOf = (url: string): string =>
   new URL(url).hostname.replace(/^www\./u, "");
 
 /** The links in a copied selection, listed while the item is open; each opens in the browser. */
-const LinkList = ({
+export const LinkList = ({
   links,
   onOpenLink,
 }: {
@@ -166,6 +217,7 @@ const FileName = ({
   <button
     className="focus-visible:ring-ring/50 flex min-w-0 cursor-grab items-center gap-2 rounded-sm text-left text-sm outline-none focus-visible:ring-3 active:cursor-grabbing"
     draggable
+    data-row-keys
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDragStart={(event) => {
@@ -193,6 +245,76 @@ const FileName = ({
   </button>
 );
 
+/** Badges wrapped below the line are out of sight, so screen readers skip them too. */
+const hideWrapped = (line: HTMLElement): void => {
+  const { bottom } = line.getBoundingClientRect();
+
+  for (const badge of line.children) {
+    if (badge.getBoundingClientRect().top >= bottom) {
+      badge.setAttribute("aria-hidden", "true");
+    } else {
+      badge.removeAttribute("aria-hidden");
+    }
+  }
+};
+
+/**
+ * A line with its words on the left and the metadata badges right-aligned.
+ * The words keep at least 14 characters; badges that don't fit wrap out of
+ * sight, lowest priority first, so the line never grows. `reach` lets the
+ * badges run on under the More button's column, below its button.
+ */
+const BadgeLine = ({
+  badges,
+  children,
+  reach,
+}: {
+  readonly badges: readonly ReactNode[];
+  readonly children: ReactNode;
+  readonly reach: boolean;
+}) => {
+  const words = children !== null && children !== undefined;
+  const ref = useRef<HTMLDivElement>(null);
+
+  // A new observer reports once on every render, when the badges may have changed, and again on each resize.
+  useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry?.target instanceof HTMLElement) {
+        hideWrapped(entry.target);
+      }
+    });
+
+    if (ref.current !== null) {
+      observer.observe(ref.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  });
+
+  if (badges.length === 0) {
+    return words ? <div className="flex min-w-0">{children}</div> : null;
+  }
+
+  return (
+    <div className={cn("flex min-w-0 items-center gap-2", reach && "-mr-9")}>
+      {words ? <div className="flex min-w-0 flex-1">{children}</div> : null}
+      <div
+        className={cn(
+          // Never narrower than its widest badge, the Due chip: the words give way first.
+          "ml-auto flex h-5 min-w-min shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
+          words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
+        )}
+        data-badges
+        ref={ref}
+      >
+        {badges}
+      </div>
+    </div>
+  );
+};
+
 export interface RowHandlers {
   /** Opens the page an item was captured from, or a link in it. */
   readonly onOpenLink: (url?: string) => void;
@@ -210,6 +332,15 @@ export interface RowHandlers {
   readonly onDragImage: () => void;
   /** Escape in a note, which saves as it is typed, hides the shelf. */
   readonly onHide: () => void;
+  /** Ticks a next step in the open row. */
+  readonly onToggleStep: (step: Step) => void;
+  readonly onReopenWindow: (window: WindowRef) => void;
+  /** The details view (→). */
+  readonly onShowDetails: () => void;
+  /** Not saved: saves the shelf again. */
+  readonly onRetrySave: () => void;
+  /** Not saved: Discard changes, or Delete for an item the disk has never held. */
+  readonly onDiscardChanges: () => void;
 }
 
 export interface ItemRowProps extends RowHandlers {
@@ -225,10 +356,15 @@ export interface ItemRowProps extends RowHandlers {
   readonly picked: boolean;
   /** ⌘-click (Ctrl elsewhere) toggles the card in the picks; ⇧-click picks a range. */
   readonly onPick: (mode: "toggle" | "range") => void;
+  /** Today, for the Due chip. */
+  readonly now: Date;
+  /** A failed save left this item's changes unwritten. */
+  readonly notSaved: NotSavedItem | undefined;
 }
 
-/** The outer diameter of the ring drawn into exports (src/main/pin-mark.ts). */
-const PIN_DIAMETER_DIP = 28;
+/** What an item is called on its row's buttons: its words, or its title when it has one. */
+const rowName = (item: ShelfItem): string =>
+  item.kind === "text" ? item.text : (item.title ?? itemText(item));
 
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
@@ -249,6 +385,10 @@ const FILE_SIZE = new Intl.NumberFormat(undefined, {
   unitDisplay: "narrow",
 });
 
+/** An image's main line: its title, else its note, else what kind of image it is. */
+const imageCaption = (item: ImageItem): string =>
+  item.title ?? (item.note === "" ? KIND_LABEL[item.via] : item.note);
+
 const metaText = (item: ShelfItem): string => {
   const when = whenText(item.createdAt);
 
@@ -268,8 +408,10 @@ const metaText = (item: ShelfItem): string => {
 /**
  * Edits a text item in place, with its Markdown formatted as it is typed;
  * ⌘↩ or Return saves, ⇧↩ adds a line or list item, Escape keeps the old text.
+ * The words reach main as they are typed, after a short pause, so main
+ * holds them as it holds every other edit (Round 7).
  */
-const TextEditor = ({
+export const TextEditor = ({
   item,
   onDone,
   onSave,
@@ -281,6 +423,26 @@ const TextEditor = ({
   const [text, setText] = useState(item.text);
   // Escape throws the edit away; the blur that follows must not save it.
   const cancelled = useRef(false);
+  const live = useRef<LiveEdit | null>(null);
+
+  // Opened at the first key, while the item still holds the words the field opened with.
+  const edit = (): LiveEdit => {
+    const current =
+      live.current ??
+      liveEdits.open({ original: item.text, owner: item.id, send: onSave });
+
+    live.current = current;
+
+    return current;
+  };
+
+  // A row that goes away mid-edit still sends what was typed.
+  useEffect(
+    () => () => {
+      live.current?.flush();
+    },
+    []
+  );
 
   const finish = (markdown: string): void => {
     if (cancelled.current) {
@@ -288,13 +450,7 @@ const TextEditor = ({
     }
 
     cancelled.current = true;
-
-    const next = markdown.trim().slice(0, TEXT_MAX);
-
-    if (next !== "" && next !== item.text) {
-      onSave(next);
-    }
-
+    edit().finish(markdown);
     onDone();
   };
 
@@ -306,6 +462,7 @@ const TextEditor = ({
         keys={{
           onEscape: () => {
             cancelled.current = true;
+            live.current?.cancel();
             onDone();
           },
           onSubmit: finish,
@@ -314,7 +471,11 @@ const TextEditor = ({
           // An untouched note keeps its own Markdown, not the field's rewrite of it.
           finish(markdown === text ? markdown : text);
         }}
-        onChange={setText}
+        followValue={false}
+        onChange={(markdown) => {
+          setText(markdown);
+          edit().change(markdown);
+        }}
         value={item.text}
       />
     </div>
@@ -384,7 +545,7 @@ const NoteField = ({
 
 /**
  * The note under an image or file as text: two lines until the item is
- * selected. A double-click, Return or Edit Note opens it for typing.
+ * selected. A double-click, Return or Edit Caption opens it for typing.
  */
 const NoteText = ({
   item,
@@ -400,8 +561,11 @@ const NoteText = ({
     <button
       className={cn(
         "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
+        // Under a title the caption is the second line, quiet as it is in details.
+        item.title !== null && "text-muted-foreground",
         item.done && "text-muted-foreground line-through"
       )}
+      data-row-keys
       onClick={onSelect}
       onContextMenu={contextMenuAt(onContextMenu)}
       onDoubleClick={onEdit}
@@ -430,12 +594,13 @@ const Picture = ({
   "onContextMenu" | "onDragImage" | "onOpen" | "onSelect"
 >) => (
   <button
-    aria-label={item.note === "" ? "Select this image" : `Select: ${item.note}`}
+    aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
       compact ? "w-24" : "w-full"
     )}
     draggable
+    data-row-keys
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDoubleClick={onOpen}
@@ -449,23 +614,24 @@ const Picture = ({
     type="button"
   >
     <img
-      alt={item.note === "" ? KIND_LABEL[item.via] : item.note}
+      alt={imageCaption(item)}
       className="block h-auto w-full"
       draggable={false}
       height={item.image.heightPx}
       src={insetUrl.attachment(item.image.file)}
       width={item.image.widthPx}
     />
-    {item.pin === null ? null : (
+    {item.pins.map((pin, index) => (
       <PinMarker
-        left={percent(item.pin.x, item.image.widthPx)}
-        top={percent(item.pin.y, item.image.heightPx)}
-        width={percent(
-          PIN_DIAMETER_DIP * item.image.pixelsPerDip,
-          item.image.widthPx
-        )}
+        height={compact ? 13 : 20}
+        // Pins have no identity but their place, which is their number.
+        // oxlint-disable-next-line react/no-array-index-key
+        key={index}
+        left={percent(pin.x, item.image.widthPx)}
+        number={index + 1}
+        top={percent(pin.y, item.image.heightPx)}
       />
-    )}
+    ))}
   </button>
 );
 
@@ -514,14 +680,26 @@ const ImageBody = ({
             item.note === "" && "text-muted-foreground",
             item.done && "text-muted-foreground line-through"
           )}
+          data-row-keys
           onClick={onSelect}
           onContextMenu={contextMenuAt(onContextMenu)}
           type="button"
         >
           {/* A clamp has no effect on a button itself, only on a box inside it. */}
-          <span className="line-clamp-2 min-w-0">
-            {item.note === "" ? KIND_LABEL[item.via] : item.note}
-          </span>
+          {item.title === null ? (
+            <span className="line-clamp-2 min-w-0">
+              {item.note === "" ? KIND_LABEL[item.via] : item.note}
+            </span>
+          ) : (
+            <span className="flex min-w-0 flex-col">
+              <span className="line-clamp-2 font-medium">{item.title}</span>
+              {item.note === "" ? null : (
+                <span className="text-muted-foreground line-clamp-1">
+                  {item.note}
+                </span>
+              )}
+            </span>
+          )}
         </button>
       </div>
     );
@@ -537,6 +715,16 @@ const ImageBody = ({
         onOpen={onOpen}
         onSelect={onSelect}
       />
+      {item.title === null ? null : (
+        <p
+          className={cn(
+            "text-sm leading-snug font-medium break-words",
+            item.done && "text-muted-foreground line-through"
+          )}
+        >
+          {item.title}
+        </p>
+      )}
       {editing ? (
         <NoteField
           autoFocus
@@ -561,6 +749,7 @@ const ImageBody = ({
 
 /** An attached file's name with its note: a field while the file is selected, else the note as text. */
 const FileBody = ({
+  badges,
   editing,
   item,
   onContextMenu,
@@ -575,6 +764,8 @@ const FileBody = ({
   readonly item: FileItem;
   readonly selected: boolean;
   readonly editing: boolean;
+  /** Without a source line, the badges sit on the file's own line. */
+  readonly badges: readonly ReactNode[];
 } & Pick<
   RowHandlers,
   | "onContextMenu"
@@ -586,12 +777,30 @@ const FileBody = ({
   | "onStopEditing"
 >) => (
   <div className="flex min-w-0 flex-col gap-2">
-    <FileName
-      item={item}
-      onContextMenu={onContextMenu}
-      onDragImage={onDragImage}
-      onSelect={onSelect}
-    />
+    {item.title === null ? null : (
+      <button
+        className={cn(
+          "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
+          item.done && "text-muted-foreground line-through"
+        )}
+        data-row-keys
+        onClick={onSelect}
+        onContextMenu={contextMenuAt(onContextMenu)}
+        type="button"
+      >
+        <span className={cn("block", !selected && "line-clamp-2")}>
+          {item.title}
+        </span>
+      </button>
+    )}
+    <BadgeLine badges={badges} reach={item.title !== null}>
+      <FileName
+        item={item}
+        onContextMenu={onContextMenu}
+        onDragImage={onDragImage}
+        onSelect={onSelect}
+      />
+    </BadgeLine>
     {editing ? (
       <NoteField
         autoFocus
@@ -652,18 +861,22 @@ const TextBody = ({
     <>
       {/* Open, its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        <Markdown
-          className={words}
-          interactive
-          onOpenLink={onOpenLink}
-          text={item.text}
-        />
+        // Where focus comes back to from details: the row, whose keys are Return and Space.
+        <div className="rounded-sm outline-none" data-row-keys tabIndex={-1}>
+          <Markdown
+            className={words}
+            interactive
+            onOpenLink={onOpenLink}
+            text={item.text}
+          />
+        </div>
       ) : (
         <button
           className={cn(
             "focus-visible:ring-ring/50 rounded-sm text-left outline-none focus-visible:ring-3",
             words
           )}
+          data-row-keys
           onClick={onSelect}
           onContextMenu={contextMenuAt(onContextMenu)}
           onDoubleClick={onEdit}
@@ -684,6 +897,72 @@ const TextBody = ({
   );
 };
 
+/**
+ * The line under an item: where it came from on the left, its metadata
+ * badges on the right. Without a source the badges keep the line to
+ * themselves, still on one line.
+ */
+const SourceRow = ({
+  badges,
+  context,
+  onOpenLink,
+}: {
+  readonly badges: readonly ReactNode[];
+  readonly context: ItemContext | null;
+  readonly onOpenLink: () => void;
+}) => (
+  <BadgeLine badges={badges} reach>
+    {context === null ? null : (
+      <SourceLine context={context} onOpenLink={onOpenLink} />
+    )}
+  </BadgeLine>
+);
+
+/** What an open row shows besides its words: the description, checkable steps and the linked windows. */
+const Expansion = ({
+  item,
+  onReopenWindow,
+  onToggleStep,
+}: {
+  readonly item: ShelfItem;
+  readonly onToggleStep: (step: Step) => void;
+  readonly onReopenWindow: (window: WindowRef) => void;
+}) => {
+  const description = item.description.trim();
+  const steps = filledSteps(item.steps);
+
+  const labelled =
+    item.kind === "image" && item.pins.some((pin) => pin.label !== undefined);
+
+  if (
+    description === "" &&
+    steps.length === 0 &&
+    item.windows.length === 0 &&
+    !labelled
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-2 pt-0.5">
+      {labelled && item.kind === "image" ? (
+        <PinLegend pins={item.pins} />
+      ) : null}
+      {description === "" ? null : (
+        <p className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-wrap">
+          {description}
+        </p>
+      )}
+      {steps.length === 0 ? null : (
+        <StepChecklist onToggle={onToggleStep} steps={item.steps} />
+      )}
+      {item.windows.length === 0 ? null : (
+        <WindowStrip onReopen={onReopenWindow} windows={item.windows} />
+      )}
+    </div>
+  );
+};
+
 /** A colour tag shows as a coloured bar along the card's left edge. */
 const TagStripe = ({ item }: { readonly item: ShelfItem }) =>
   item.color === null ? null : (
@@ -694,8 +973,21 @@ const TagStripe = ({ item }: { readonly item: ShelfItem }) =>
     />
   );
 
+/** A file without a source line carries its badges on the file's own line, not on a line of their own. */
+const placedBadges = (
+  item: ShelfItem,
+  badges: readonly ReactNode[]
+): {
+  readonly fileLine: readonly ReactNode[];
+  readonly sourceLine: readonly ReactNode[];
+} =>
+  item.kind === "file" && item.context === null
+    ? { fileLine: badges, sourceLine: [] }
+    : { fileLine: [], sourceLine: badges };
+
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
+  const badges = placedBadges(item, metaBadges(item, props.now, selected));
 
   return (
     <li
@@ -780,6 +1072,7 @@ export const ItemRow = (props: ItemRowProps) => {
         ) : null}
         {item.kind === "file" ? (
           <FileBody
+            badges={badges.fileLine}
             editing={editing}
             item={item}
             onContextMenu={props.onContextMenu}
@@ -792,16 +1085,47 @@ export const ItemRow = (props: ItemRowProps) => {
             selected={selected}
           />
         ) : null}
-        {item.context === null ? null : (
-          <SourceLine
-            context={item.context}
-            onOpenLink={() => {
-              props.onOpenLink();
-            }}
+        {selected ? (
+          <Expansion
+            item={item}
+            onReopenWindow={props.onReopenWindow}
+            onToggleStep={props.onToggleStep}
+          />
+        ) : null}
+        <SourceRow
+          badges={badges.sourceLine}
+          context={item.context}
+          onOpenLink={() => {
+            props.onOpenLink();
+          }}
+        />
+        {props.notSaved === undefined ? null : (
+          <NotSavedLine
+            name={rowName(item)}
+            undo={props.notSaved.undo}
+            onDiscard={props.onDiscardChanges}
+            onRetry={props.onRetrySave}
           />
         )}
         {selected ? (
-          <p className="text-muted-foreground text-xs">{metaText(item)}</p>
+          // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
+          <div className="-mr-9 flex min-h-6 items-center gap-2">
+            <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
+              {metaText(item)}
+            </p>
+            <Button
+              aria-label="Show details"
+              className="-mr-2.75 shrink-0"
+              data-details-button
+              onClick={props.onShowDetails}
+              size="xs"
+              title={`Details (${keyText("Right", isMac)})`}
+              variant="quiet"
+            >
+              Details
+              <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
+            </Button>
+          </div>
         ) : null}
       </div>
       <span

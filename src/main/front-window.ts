@@ -2,7 +2,12 @@ import path from "node:path";
 
 import { rect } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
-import { ContextSchema } from "@shared/shelf";
+import {
+  APP_NAME_MAX,
+  ContextSchema,
+  fitText,
+  WINDOW_TITLE_MAX,
+} from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
 import { desktopLink, t3Thread } from "@shared/web-source";
 import { withoutAppName } from "@shared/window-title";
@@ -52,6 +57,14 @@ const pageUrl = (url: string | undefined): string | null => {
   return parsed.success ? parsed.data : null;
 };
 
+/** The names cut to what the saved shelf keeps; a longer one would make it unreadable. */
+const fitted = (context: ItemContext): ItemContext => ({
+  ...context,
+  app: context.app === null ? null : fitText(context.app, APP_NAME_MAX),
+  title:
+    context.title === null ? null : fitText(context.title, WINDOW_TITLE_MAX),
+});
+
 /**
  * Where an item comes from, filled in from the pages the window shows, when
  * they are asked for: the page address get-windows couldn't read, a better
@@ -92,7 +105,7 @@ const sourceContext = async (
       ? appLink
       : null;
 
-  return { app: window.app, appLink: openable, title, url };
+  return fitted({ app: window.app, appLink: openable, title, url });
 };
 
 /** The pages a window shows: its web areas, read with `pid`, and the page the copied text came from. */
