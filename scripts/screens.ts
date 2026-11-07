@@ -4132,6 +4132,85 @@ const SCENES: readonly Scene[] = [
     page: "drawing",
   },
   {
+    // Review 4501523118: the menu bar's Undo and Redo with a text reopened act in its field; they never move the drawing's history under it.
+    act: async (page) => {
+      await typeText(page, 200, 200, "Hello");
+      await page.evaluate(
+        "globalThis.__hello = document.querySelector('canvas').toDataURL()"
+      );
+      const at = await onCanvas(page, 215, 200);
+      await page.mouse.dblclick(at.x, at.y);
+
+      for (const kind of ["undo", "redo"]) {
+        // oxlint-disable-next-line no-await-in-loop -- each renders before the next, or React would merge them into no change.
+        await page.evaluate(`globalThis.__emit("edit", "${kind}")`);
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        await page.waitForTimeout(100);
+      }
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", { exact: true, name: "Text" });
+
+      const words = async (): Promise<string | null> =>
+        (await field.count()) > 0 ? await field.inputValue() : null;
+
+      const reopened = await words();
+
+      await page.keyboard.press("End");
+      await page.keyboard.type(" world");
+      await page.evaluate('globalThis.__emit("edit", "undo")');
+
+      const undone = await words();
+
+      await page.evaluate('globalThis.__emit("edit", "redo")');
+
+      const redone = await words();
+
+      await page.keyboard.press("Enter");
+
+      const helloWorld = await canvasPicture(page);
+      const hello = String(await page.evaluate("globalThis.__hello"));
+      const at = await onCanvas(page, 215, 200);
+
+      // The toolbar's Undo takes focus from the field, which keeps its words as one step; Undo then takes that step back.
+      await page.mouse.dblclick(at.x, at.y);
+      await page.keyboard.press("End");
+      await page.keyboard.type("!");
+      await page.getByRole("button", { exact: true, name: "Undo" }).click();
+
+      const toolbarUndo = await canvasPicture(page);
+      const openAfterToolbar = await field.count();
+
+      await page.evaluate('globalThis.__emit("edit", "undo")');
+      await page.waitForTimeout(100);
+
+      const menuUndo = await canvasPicture(page);
+
+      const problems = [
+        reopened === "Hello"
+          ? null
+          : `menu Undo and Redo on the reopened text left the field ${JSON.stringify(reopened)}`,
+        undone === "Hello" && redone === "Hello world"
+          ? null
+          : `menu Undo then Redo after typing left ${JSON.stringify(undone)}, then ${JSON.stringify(redone)}`,
+        helloWorld === hello
+          ? "Return after the field's Undo and Redo did not keep “Hello world”"
+          : null,
+        toolbarUndo === helloWorld && openAfterToolbar === 0
+          ? null
+          : `the toolbar's Undo with the field open left it open ${openAfterToolbar} times and ${toolbarUndo === helloWorld ? "“Hello world”" : "another drawing"}`,
+        menuUndo === hello
+          ? null
+          : "menu Undo with the field closed did not take the drawing back to “Hello”",
+      ].filter((problem) => problem !== null);
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-text-native-undo",
+    page: "drawing",
+  },
+  {
     // Feedback round 13: picking an ink and the thick stroke with a box selected restyles it, one ⌘Z step each.
     act: async (page) => {
       await page.keyboard.press("r");

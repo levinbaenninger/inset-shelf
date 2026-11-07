@@ -538,13 +538,20 @@ const Editor = ({
     select(copies.selection);
   };
 
-  const undoStep = (): void => {
-    setHistory(undo(history));
-    setSelection(NOTHING);
-  };
+  /**
+   * Undo and Redo, from a key, the toolbar or the menu bar. With the text
+   * field open they are the field's, as in any text field, so the drawing's
+   * steps never move under the words being typed (review 4501523118).
+   */
+  const historyStep = (kind: "undo" | "redo"): void => {
+    if (text !== null) {
+      // oxlint-disable-next-line typescript/no-deprecated -- the field's own undo, as the menu's role would run it; there is no other API for it.
+      document.execCommand(kind);
 
-  const redoStep = (): void => {
-    setHistory(redo(history));
+      return;
+    }
+
+    setHistory(kind === "undo" ? undo(history) : redo(history));
     setSelection(NOTHING);
   };
 
@@ -617,10 +624,7 @@ const Editor = ({
     if (kind === "duplicate") {
       duplicate();
     } else {
-      setHistory((current) =>
-        kind === "undo" ? undo(current) : redo(current)
-      );
-      setSelection(NOTHING);
+      historyStep(kind);
     }
   });
 
@@ -680,7 +684,9 @@ const Editor = ({
       return true;
     },
     pickTool,
-    redo: redoStep,
+    redo: () => {
+      historyStep("redo");
+    },
     remove: () => {
       if (selection.size === 0) {
         return false;
@@ -698,7 +704,9 @@ const Editor = ({
         select(new Set([at]));
       }
     },
-    undo: undoStep,
+    undo: () => {
+      historyStep("undo");
+    },
   });
 
   const selectedPin = pinIndexOf(marks, onlySelected(selection));
@@ -782,7 +790,9 @@ const Editor = ({
             onCopyAndSave={() => {
               void save(true, toSave);
             }}
-            onRedo={redoStep}
+            onRedo={() => {
+              historyStep("redo");
+            }}
             onSave={() => {
               void save(false, toSave);
             }}
@@ -791,7 +801,9 @@ const Editor = ({
               applyStyle({ stroke: next });
             }}
             onTool={pickTool}
-            onUndo={undoStep}
+            onUndo={() => {
+              historyStep("undo");
+            }}
             stroke={style.stroke}
             tool={tool}
           />
