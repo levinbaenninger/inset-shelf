@@ -4038,9 +4038,10 @@ const SCENES: readonly Scene[] = [
         return `after drawing a box Select was pressed ${String(selectTool)} and the box had ${handles} handles, not 8`;
       }
 
+      // 10 px off the handle's middle on both axes: inside its 24 px target, outside the 8 px reach it had.
       const grab = {
-        x: before.x + before.width / 2,
-        y: before.y + before.height / 2,
+        x: before.x + before.width / 2 + 10,
+        y: before.y + before.height / 2 + 10,
       };
 
       await page.mouse.move(grab.x, grab.y);

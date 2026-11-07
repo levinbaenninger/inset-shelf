@@ -161,6 +161,13 @@ describe(resize, () => {
     });
   });
 
+  it("grabs a handle anywhere in the square its reach spans, corners included, and not past it", () => {
+    expect([
+      handleAt(box, { x: 214, y: 174 }, 12, 4),
+      handleAt(box, { x: 217, y: 164 }, 12, 4),
+    ]).toStrictEqual([{ kind: "side", x: 1, y: 1 }, null]);
+  });
+
   it("drags a box's top side only up and down", () => {
     expect(
       resize(box, { kind: "side", x: 0, y: -1 }, { x: 40, y: -30 })

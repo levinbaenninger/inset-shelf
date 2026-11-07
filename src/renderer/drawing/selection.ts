@@ -328,15 +328,16 @@ export const handlesOf = (
   }));
 };
 
-/** The handle within `radius` of a point, corners winning over the sides beside them. */
+/** The handle whose square, `reach` from its middle each way, holds a point; corners win over the sides beside them. */
 export const handleAt = (
   mark: Mark,
   point: Point,
-  radius: number,
+  reach: number,
   padding: number
 ): Handle | null =>
   handlesOf(mark, padding).find(
-    ({ at }) => Math.hypot(point.x - at.x, point.y - at.y) <= radius
+    ({ at }) =>
+      Math.abs(point.x - at.x) <= reach && Math.abs(point.y - at.y) <= reach
   )?.handle ?? null;
 
 /** A shape with one handle dragged `by`: a line's end moves, or a box's sides follow. */

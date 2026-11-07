@@ -110,8 +110,8 @@ const OUTLINE_GAP = 6;
 
 const HANDLE_SIZE = 9;
 
-/** How near a handle the pointer grabs it, in screen pixels. */
-const HANDLE_REACH = 8;
+/** How far from a handle's middle, each way, the pointer grabs it, in screen pixels: a 24 px square, however small it looks. */
+const HANDLE_REACH = 12;
 
 interface CanvasSize {
   readonly width: number;
