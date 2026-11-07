@@ -700,6 +700,25 @@ const onImage = async (
   return { x: (box?.x ?? 0) + x * scale, y: (box?.y ?? 0) + y * scale };
 };
 
+/** Tabs on until the control with this name has focus. */
+const tabTo = async (page: Page, name: string): Promise<void> => {
+  for (let tab = 0; tab < 20; tab += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one Tab at a time, as a person presses it.
+    await page.keyboard.press("Tab");
+
+    // oxlint-disable-next-line no-await-in-loop -- as above.
+    const label = await page.evaluate(
+      "document.activeElement?.getAttribute('aria-label') ?? null"
+    );
+
+    if (label === name) {
+      return;
+    }
+  }
+
+  throw new Error(`Tab never reached ${name}`);
+};
+
 /** A box and a text a save kept beside the sign-in screenshot, in its DIP. */
 const KEPT = [
   {
@@ -3620,6 +3639,12 @@ const SCENES: readonly Scene[] = [
       await page.getByRole("button", { name: "Pen" }).focus();
     },
     check: async (page) => {
+      // The toolbar restyles what is selected, so focus there keeps the pin (feedback round 13).
+      const keptOnToolbar = await selectedPin(page).count();
+
+      // The window losing focus lets go of it, so ⌫ typed on coming back never removes it.
+      await page.evaluate("window.dispatchEvent(new FocusEvent('blur'))");
+
       const selectedAfterLeaving = await selectedPin(page).count();
 
       await page.keyboard.press("Backspace");
@@ -3632,8 +3657,12 @@ const SCENES: readonly Scene[] = [
 
       const pinsAfterRemoving = await drawingPins(page).count();
 
-      if (selectedAfterLeaving > 0 || pinsAfterLeaving !== 3) {
-        return `with focus on the toolbar: ${selectedAfterLeaving} pins selected, ${pinsAfterLeaving} of 3 left after ⌫`;
+      if (
+        keptOnToolbar !== 1 ||
+        selectedAfterLeaving > 0 ||
+        pinsAfterLeaving !== 3
+      ) {
+        return `focus on the toolbar kept ${keptOnToolbar} pins selected; after the window blurred ${selectedAfterLeaving} were, and ⌫ left ${pinsAfterLeaving} of 3`;
       }
 
       if (pinsAfterRemoving !== 2) {
@@ -4337,6 +4366,46 @@ const SCENES: readonly Scene[] = [
     },
     data: { pictureBytes: true, view: drawingView([], false, KEPT) },
     name: "drawing-reopen-editable",
+    page: "drawing",
+  },
+  {
+    // Round 13: Tab from a selected box to an ink and the stroke keeps it selected, so Return and Space restyle it.
+    act: async (page) => {
+      await page.keyboard.press("r");
+      await dragCanvas(page, [200, 200], [440, 340]);
+      await tabTo(page, "Red");
+      await page.keyboard.press("Enter");
+      await tabTo(page, "Thick stroke");
+      await page.keyboard.press("Space");
+    },
+    check: async (page) => {
+      const red = (await isDark(page)) ? "#f87171" : "#dc2626";
+      const selected = await page.locator("[data-selected-mark]").count();
+
+      const pressed = await attributes(
+        page,
+        "[aria-pressed=true]",
+        "aria-label"
+      );
+
+      const edge = await inkDown(page, 320, 190, 210);
+
+      const problems = [
+        selected === 1
+          ? null
+          : `${selected} marks stayed selected with focus in the toolbar`,
+        isDeepStrictEqual(pressed, ["Select", "Red", "Thick stroke"])
+          ? null
+          : `the toolbar pressed ${JSON.stringify(pressed)}`,
+        near(edge.color, red) && edge.run >= 6
+          ? null
+          : `Return on Red and Space on the stroke drew ${JSON.stringify(edge)}, not a thick ${red} edge`,
+      ].filter((problem) => problem !== null);
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-keyboard-restyle",
     page: "drawing",
   },
   {

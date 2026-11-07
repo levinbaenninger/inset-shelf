@@ -324,8 +324,10 @@ const Editor = ({
   // What Select or the pin keys picked, pins included, by place among the marks.
   const [selection, setSelection] = useState<Selection>(NOTHING);
   const pointerRef = useRef<Point | null>(null);
-  // The page, image and pins: a selection brings focus here, and focus leaving lets go of it.
+  // The page, image and pins: a selection brings focus here, so its keys reach it.
   const pageRef = useRef<HTMLElement>(null);
+  // The page and its toolbar: focus may move between them and keep the selection, so the toolbar restyles it from the keyboard too.
+  const areaRef = useRef<HTMLDivElement>(null);
   // The step a held arrow key last made, so its repeats move the selection within that step.
   const nudged = useRef<History | null>(null);
   // Removing a focused field can also blur it; its words must only be added once.
@@ -340,9 +342,9 @@ const Editor = ({
     }
   };
 
-  // Focus leaving the page, or the window, lets go of the selection, so digits and ⌫ typed elsewhere never touch it.
+  // Focus leaving the page and its toolbar, or the window, lets go of the selection, so digits and ⌫ typed elsewhere never touch it.
   useEffect(() => {
-    const area = pageRef.current;
+    const area = areaRef.current;
 
     const letGo = (): void => {
       setSelection(NOTHING);
@@ -363,7 +365,7 @@ const Editor = ({
       window.removeEventListener("blur", letGo);
       area?.removeEventListener("focusout", onFocusOut);
     };
-  }, [pageRef]);
+  }, [areaRef]);
   // Marks on a picture stand out in red; a blank page starts in ink.
   const [color, setColor] = useState<Color>(image === null ? "ink" : "red");
   const [stroke, setStroke] = useState<Stroke>("thin");
@@ -755,7 +757,7 @@ const Editor = ({
           </p>
         )}
       </WindowHeader>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" ref={areaRef}>
         <section
           aria-label="Pins"
           className="absolute inset-0 outline-none"
