@@ -357,6 +357,14 @@ export const DueMenu = ({
   // Pick a date… opens the calendar once the menu has closed, so the menu doesn't take focus back to the trigger.
   const pickDate = useRef(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  // A press outside closed the calendar: the keyboard goes where that press aims, not back to Due.
+  const pressedOutside = useRef(false);
+
+  // The trigger may be a new one by now: Set Due becomes the chip once a day is picked.
+  const toDue = (): void => {
+    trigger.current?.focus();
+  };
+
   const day = due === null ? undefined : (parseDay(due) ?? undefined);
 
   return (
@@ -427,12 +435,35 @@ export const DueMenu = ({
         // The calendar focuses its own day: the Due date, else today.
         onOpenAutoFocus={(event) => {
           event.preventDefault();
+          pressedOutside.current = false;
+        }}
+        onPointerDownOutside={() => {
+          pressedOutside.current = true;
         }}
         size="fit"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          // The trigger may be a new one by now: Set Due becomes the chip once a day is picked.
-          trigger.current?.focus();
+
+          // A press elsewhere aims the keyboard there, and the field it hits takes it only after
+          // this runs. So wait a frame: only when nothing took it (empty space, plain text) does it
+          // go back to Due, as after Escape or a pick.
+          if (pressedOutside.current) {
+            pressedOutside.current = false;
+            requestAnimationFrame(() => {
+              setTimeout(() => {
+                if (
+                  document.activeElement === null ||
+                  document.activeElement === document.body
+                ) {
+                  toDue();
+                }
+              }, 0);
+            });
+
+            return;
+          }
+
+          toDue();
         }}
       >
         <Calendar

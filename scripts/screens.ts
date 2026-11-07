@@ -2389,6 +2389,22 @@ const calendarKeysCheck = async (page: Page): Promise<string | null> => {
     return `the first Esc left details or put focus on “${String(back)}”, not the Due chip`;
   }
 
+  // A click on text that takes no keyboard (empty space, in effect) closes the calendar and,
+  // as nothing took the keyboard, gives it back to Due.
+  await openCalendar(page, /^Due Today/u);
+  await page.getByText("Book the movers for Monday").first().click();
+  await calendar(page).waitFor({ state: "detached" });
+  await page.waitForTimeout(150);
+
+  const emptyClick = await page.evaluate(
+    "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? ''"
+  );
+
+  if (!String(emptyClick).startsWith("Due Today")) {
+    return `a click on plain text closed the calendar but left focus on “${String(emptyClick)}”, not Due`;
+  }
+
+  await page.getByRole("button", { name: /^Due Today/u }).focus();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
 
@@ -2943,6 +2959,34 @@ const SCENES: readonly Scene[] = [
     check: setDueCheck,
     data: { view: shelfView() },
     name: "shelf-due-calendar-set-due",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await openCalendar(page, /^Due Today/u);
+    },
+    // A click on a field closes the calendar and the keyboard stays in that field, not on Due.
+    check: async (page) => {
+      // A CSS locator: while the calendar is open, the page around it is hidden from the a11y tree.
+      const field = page
+        .locator('[data-details] textarea[aria-label="Description"]')
+        .first();
+
+      await field.click();
+      await calendar(page).waitFor({ state: "detached" });
+      await page.waitForTimeout(150);
+
+      const focus = await page.evaluate(
+        "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? ''"
+      );
+
+      return focus === "Description"
+        ? null
+        : `a click on Description closed the calendar but left focus on “${String(focus)}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-due-calendar-click-field",
     page: "shelf",
   },
   {
