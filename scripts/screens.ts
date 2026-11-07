@@ -669,13 +669,14 @@ const keepSavedPng = async (page: Page): Promise<void> => {
 
 const PngSchema = z.array(z.number()).nullable();
 
-/** Keeps the marks each save sends and its picture's width, so a scene can check what Annotate keeps. */
+/** Keeps the marks and pins each save sends and its picture's width, so a scene can check what Annotate keeps. */
 const keepSavedMarks = async (page: Page): Promise<void> => {
   await page.evaluate(`(() => {
     const save = globalThis.insetDrawing.save;
     globalThis.insetDrawing.save = (drawing) => {
       globalThis.__kept = {
         marks: drawing.marks,
+        pins: drawing.pins,
         width: drawing.png === null ? null : new DataView(drawing.png.buffer, drawing.png.byteOffset).getUint32(16),
       };
       return save(drawing);
@@ -685,8 +686,27 @@ const keepSavedMarks = async (page: Page): Promise<void> => {
 
 const KeptSchema = z.object({
   marks: z.array(z.unknown()),
+  pins: z.array(z.object({ x: z.number(), y: z.number() })),
   width: z.number().nullable(),
 });
+
+const KeptBoxSchema = z.object({
+  from: z.object({ x: z.number(), y: z.number() }),
+  kind: z.literal("rect"),
+  to: z.object({ x: z.number(), y: z.number() }),
+  width: z.number(),
+});
+
+/** What the last save kept; it is let go of, so the next save's can be waited for. */
+const takeKept = async (page: Page) => {
+  await page.waitForFunction("globalThis.__kept !== undefined");
+
+  const kept = KeptSchema.parse(await page.evaluate("globalThis.__kept"));
+
+  await page.evaluate("globalThis.__kept = undefined");
+
+  return kept;
+};
 
 /** Where a point of the sign-in screenshot under the marks, in its DIP, is on the screen. */
 const onImage = async (
@@ -4338,9 +4358,8 @@ const SCENES: readonly Scene[] = [
       await page.keyboard.type(" first");
       await page.keyboard.press("Enter");
       await page.getByRole("button", { exact: true, name: "Save" }).click();
-      await page.waitForFunction("globalThis.__kept !== undefined");
 
-      const kept = KeptSchema.parse(await page.evaluate("globalThis.__kept"));
+      const kept = await takeKept(page);
       const [box, text] = KEPT;
 
       const problems = [
@@ -4357,6 +4376,7 @@ const SCENES: readonly Scene[] = [
           : `a double-click on the kept text opened ${JSON.stringify(reopened)}`,
         isDeepStrictEqual(kept, {
           marks: [box, { ...text, text: "Fix this first" }],
+          pins: [],
           width: LOGIN.widthPx,
         })
           ? null
@@ -4367,6 +4387,90 @@ const SCENES: readonly Scene[] = [
     },
     data: { pictureBytes: true, view: drawingView([], false, KEPT) },
     name: "drawing-reopen-editable",
+    page: "drawing",
+  },
+  {
+    // Round 13: a new drawing keeps its marks at its trimmed picture's corner and its pin in that picture's pixels, and opens blank again with both editable.
+    act: async (page) => {
+      await keepSavedMarks(page);
+      await page.keyboard.press("r");
+      await dragCanvas(page, [200, 200], [440, 340]);
+      // Inside the box, so moving the pin later doesn't change the picture's frame.
+      await page.keyboard.press("p");
+      await clickCanvas(page, 300, 300);
+      await page.getByRole("button", { exact: true, name: "Save" }).click();
+
+      const kept = await takeKept(page);
+      const [pin] = kept.pins;
+
+      await page.evaluate(`(() => {
+        globalThis.__first = ${JSON.stringify(kept)};
+        globalThis.__emit("view", ${JSON.stringify({
+          ...BLANK_DRAWING,
+          marks: [
+            ...kept.marks,
+            {
+              at: { x: (pin?.x ?? 0) / 2, y: (pin?.y ?? 0) / 2 },
+              kind: "pin",
+            },
+          ],
+          seq: 2,
+        })});
+      })()`);
+      await page.waitForTimeout(200);
+
+      const box = KeptBoxSchema.parse(kept.marks[0]);
+
+      await clickCanvas(page, (box.from.x + box.to.x) / 2, box.from.y);
+    },
+    check: async (page) => {
+      const first = KeptSchema.parse(await page.evaluate("globalThis.__first"));
+      const box = KeptBoxSchema.parse(first.marks[0]);
+      const [pin] = first.pins;
+      const title = await page.locator("h1").textContent();
+
+      const selectTool = await page
+        .getByRole("button", { exact: true, name: "Select" })
+        .getAttribute("aria-pressed");
+
+      const handles = await page.locator("[data-handle]").count();
+
+      // The picture is trimmed to everything on it plus 24 px, so the box's outer edge sits 24 to 25 px from its corner.
+      const left = Math.min(box.from.x, box.to.x) - box.width / 2;
+      const top = Math.min(box.from.y, box.to.y) - box.width / 2;
+      // The box was drawn from 200, 200 on the page: the pin, at 300, 300, moved with it, in the picture's pixels (2 per px).
+      const shift = { x: 200 - box.from.x, y: 200 - box.from.y };
+      const pinAt = { x: (300 - shift.x) * 2, y: (300 - shift.y) * 2 };
+
+      await page.keyboard.press("1");
+      await page.keyboard.press("ArrowRight");
+      await page.getByRole("button", { exact: true, name: "Save" }).click();
+
+      const second = await takeKept(page);
+
+      const problems = [
+        first.marks.length === 1 && isDeepStrictEqual(first.pins, [pinAt])
+          ? null
+          : `the first save kept ${first.marks.length} marks and pins ${JSON.stringify(first.pins)}, not the box and a pin at ${JSON.stringify(pinAt)}`,
+        left >= 24 && left <= 25 && top >= 24 && top <= 25
+          ? null
+          : `the kept drawing's nearest edges are ${left}, ${top} from its corner, not 24 to 25`,
+        title === "Drawing" && selectTool === "true" && handles === 8
+          ? null
+          : `opened again it read ${JSON.stringify(title)}, pressed Select ${String(selectTool)}, and a click on the box showed ${handles} handles`,
+        isDeepStrictEqual(second, {
+          marks: first.marks,
+          pins: [{ x: (pin?.x ?? 0) + 1, y: pin?.y ?? 0 }],
+          width: first.width,
+        })
+          ? null
+          : `nudging the pin 1 px and saving again kept ${JSON.stringify(second)}, after ${JSON.stringify(first)}`,
+      ].filter((problem) => problem !== null);
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: BLANK_DRAWING },
+    name: "drawing-reopen-blank",
     page: "drawing",
   },
   {
