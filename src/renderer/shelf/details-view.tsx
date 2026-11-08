@@ -956,61 +956,34 @@ const FIELD_ICON: Readonly<Record<DetailField, typeof File01Icon>> = {
 
 const FIELDS: readonly DetailField[] = ["description", "steps", "due"];
 
-/** Back, the title, the one Add menu, ⋯ and Hide. */
-const DetailsHeader = ({
+/**
+ * The one Add menu, under the fields it adds to, so details read top to
+ * bottom: the item, its fields, then Add for the next one.
+ */
+const AddMenu = ({
   addable,
   item,
   onAdd,
-  onBack,
-  onHide,
   onLinkWindow,
-  onMenu,
   onOpenPins,
-  titleRef,
-}: Pick<
-  DetailsProps,
-  "item" | "onBack" | "onHide" | "onLinkWindow" | "onMenu" | "onOpenPins"
-> & {
+}: Pick<DetailsProps, "item" | "onLinkWindow" | "onOpenPins"> & {
   readonly addable: readonly DetailField[];
   readonly onAdd: (field: DetailField) => void;
-  readonly titleRef: RefObject<HTMLHeadingElement | null>;
 }) => {
   // The field picked in Add, opened once the menu has closed, so focus goes to it and not back to Add.
   const chosen = useRef<DetailField | null>(null);
 
   return (
-    <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-label="Back to the list"
-            onClick={onBack}
-            size="icon"
-            variant="ghost"
-          >
-            <HugeiconsIcon icon={ArrowLeft01Icon} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          Back <span className="opacity-70">{k("Left")} or Esc</span>
-        </TooltipContent>
-      </Tooltip>
-      <h2
-        className="min-w-0 flex-1 truncate text-sm font-medium outline-none"
-        ref={titleRef}
-        tabIndex={-1}
-      >
-        Details
-      </h2>
+    <div className="-mt-2">
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button aria-label="Add a field" size="sm" variant="ghost">
+          <Button aria-label="Add a field" size="xs" variant="quiet">
             <HugeiconsIcon data-icon="inline-start" icon={PlusSignIcon} />
             Add
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          align="end"
+          align="start"
           className="min-w-52"
           onCloseAutoFocus={(event) => {
             const field = chosen.current;
@@ -1047,45 +1020,80 @@ const DetailsHeader = ({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-label="More"
-            onClick={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-
-              onMenu({
-                align: "end",
-                height: box.height,
-                width: box.width,
-                x: box.left,
-                y: box.top,
-              });
-            }}
-            size="icon"
-            variant="ghost"
-          >
-            <HugeiconsIcon icon={MoreHorizontalIcon} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">More</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-label="Hide Shelf"
-            onClick={onHide}
-            size="icon"
-            variant="ghost"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Hide Shelf</TooltipContent>
-      </Tooltip>
-    </header>
+    </div>
   );
 };
+
+/** Back, the title, ⋯ and Hide. */
+const DetailsHeader = ({
+  onBack,
+  onHide,
+  onMenu,
+  titleRef,
+}: Pick<DetailsProps, "onBack" | "onHide" | "onMenu"> & {
+  readonly titleRef: RefObject<HTMLHeadingElement | null>;
+}) => (
+  <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label="Back to the list"
+          onClick={onBack}
+          size="icon"
+          variant="ghost"
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        Back <span className="opacity-70">{k("Left")} or Esc</span>
+      </TooltipContent>
+    </Tooltip>
+    <h2
+      className="min-w-0 flex-1 truncate text-sm font-medium outline-none"
+      ref={titleRef}
+      tabIndex={-1}
+    >
+      Details
+    </h2>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label="More"
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+
+            onMenu({
+              align: "end",
+              height: box.height,
+              width: box.width,
+              x: box.left,
+              y: box.top,
+            });
+          }}
+          size="icon"
+          variant="ghost"
+        >
+          <HugeiconsIcon icon={MoreHorizontalIcon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">More</TooltipContent>
+    </Tooltip>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label="Hide Shelf"
+          onClick={onHide}
+          size="icon"
+          variant="ghost"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">Hide Shelf</TooltipContent>
+    </Tooltip>
+  </header>
+);
 
 /**
  * Due: Set Due, or the chip once there is a day, both opening the Due
@@ -1255,8 +1263,8 @@ const WindowsField = ({
 
 /**
  * Level 2: everything about one item, for deliberate editing, as a view
- * pushed over the list. Empty fields take no room; Add (or ⌘D, ⇧⌘S,
- * ⇧⌘D) brings them in. Every edit saves as it is made.
+ * pushed over the list. Empty fields take no room; Add, under the fields
+ * (or ⌘D, ⇧⌘S, ⇧⌘D), brings them in. Every edit saves as it is made.
  */
 export const DetailsView = (props: DetailsProps) => {
   const { item, now, request } = props;
@@ -1369,14 +1377,9 @@ export const DetailsView = (props: DetailsProps) => {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-details-view>
       <DetailsHeader
-        addable={FIELDS.filter((field) => !shown[field])}
-        item={item}
-        onAdd={open}
         onBack={props.onBack}
         onHide={props.onHide}
-        onLinkWindow={props.onLinkWindow}
         onMenu={props.onMenu}
-        onOpenPins={props.onOpenPins}
         titleRef={titleRef}
       />
       <div className="pb-2 empty:hidden">{props.banner}</div>
@@ -1458,6 +1461,13 @@ export const DetailsView = (props: DetailsProps) => {
             open={dueOpen}
           />
         ) : null}
+        <AddMenu
+          addable={FIELDS.filter((field) => !shown[field])}
+          item={item}
+          onAdd={open}
+          onLinkWindow={props.onLinkWindow}
+          onOpenPins={props.onOpenPins}
+        />
         {item.windows.length === 0 ? null : (
           <WindowsField
             item={item}
