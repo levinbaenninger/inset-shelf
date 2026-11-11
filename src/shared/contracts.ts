@@ -3,6 +3,8 @@ import { z } from "zod";
 import { StrokeMarksSchema } from "./drawing-scene";
 import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
+import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
+import type { OnboardingView } from "./onboarding";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import {
@@ -12,6 +14,8 @@ import {
   WindowIdSchema,
 } from "./shelf";
 import type { ItemId, ShelfDoc } from "./shelf";
+import { TutorialActionSchema } from "./tutorial";
+import type { TutorialView } from "./tutorial";
 
 export type Permission = "granted" | "missing" | "notNeeded";
 
@@ -131,6 +135,17 @@ export type ActionResult =
 
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
+/**
+ * The in-app tutorial (src/main/tutorial/, src/renderer/tutorial/), in
+ * every window that shows a hint: its view, and what the page asks or reports.
+ */
+const tutorialEvents = { tutorial: event<TutorialView>() } as const;
+
+const tutorialMethods = {
+  getTutorial: invoke(z.void(), out<TutorialView>()),
+  tutorial: send(TutorialActionSchema),
+} as const;
+
 export const shelfContract = defineContract({
   events: {
     command: event<ShelfCommand>(),
@@ -139,9 +154,15 @@ export const shelfContract = defineContract({
     /** A short note on something main did, shown as a toast: a confirmation, or why it failed. */
     notice: event<{ readonly message: string; readonly tone: NoticeTone }>(),
     view: event<ShelfView>(),
+    ...tutorialEvents,
   },
   global: "insetShelf",
   methods: {
+    ...tutorialMethods,
+    /** Getting Started in the ⋯ menu (Windows): the checklist comes back. */
+    gettingStarted: send(z.void()),
+    /** Show Me Around in the ⋯ menu (Windows): the walkthrough. */
+    showMeAround: send(z.void()),
     /**
      * A menu in the shelf opened (true) or the last one closed: meanwhile
      * the menu takes every key, so main holds back the menu bar's keys.
@@ -195,7 +216,8 @@ export const shelfContract = defineContract({
     openImage: send(ItemIdSchema),
     /** Add Pins… and Move pins in details: the image opens with the Pin tool. */
     openPins: send(ItemIdSchema),
-    openKeySettings: send(z.void()),
+    /** Double Shift is off: the onboarding opens at Accessibility. */
+    setUpDoubleShift: send(z.void()),
     /**
      * Opens the page an item was captured from, or one of the links in it;
      * main opens only an address the item holds, over http or https.
@@ -248,9 +270,10 @@ export interface ScreenshotView {
 const Seq = z.number().int().min(0);
 
 export const screenshotContract = defineContract({
-  events: { view: event<ScreenshotView | null>() },
+  events: { view: event<ScreenshotView | null>(), ...tutorialEvents },
   global: "insetScreenshot",
   methods: {
+    ...tutorialMethods,
     addToShelf: send(Seq),
     /** Adds it to the shelf and opens it to draw on. */
     annotate: send(Seq),
@@ -320,9 +343,11 @@ export const drawingContract = defineContract({
     /** Retry in a held quit: the page saves its marks to the shelf, as Save does. */
     saveForQuit: event<null>(),
     view: event<DrawingView>(),
+    ...tutorialEvents,
   },
   global: "insetDrawing",
   methods: {
+    ...tutorialMethods,
     cancel: send(z.void()),
     /** The open image's PNG, so the page can draw the marks into it without a cross-origin canvas. */
     getImage: invoke(z.void(), out<Uint8Array | null>()),
@@ -360,7 +385,11 @@ export const settingsContract = defineContract({
     getView: invoke(z.void(), out<SettingsView>()),
     /** The page's height, so the window fits it without empty space. */
     fitHeight: send(z.number().int().min(120).max(1200)),
+    /** Reset Tutorial: the checklist and hints start over. */
+    resetTutorial: send(z.void()),
     setOpenAtLogin: send(z.boolean()),
+    /** Show tips: the tutorial's one-time hints. */
+    setTips: send(z.boolean()),
     update: send(SettingsSchema.partial()),
   },
   name: "settings",
@@ -399,22 +428,52 @@ export interface PickerView {
 
 /** The window-link picker: a window of its own, like New Drawing. */
 export const pickerContract = defineContract({
-  events: { view: event<PickerView>() },
+  events: { view: event<PickerView>(), ...tutorialEvents },
   global: "insetPicker",
   methods: {
+    ...tutorialMethods,
     cancel: send(z.void()),
     choose: invoke(
       z.array(z.string().min(1).max(100)).min(1).max(20),
       out<ActionResult>()
     ),
     getView: invoke(z.void(), out<PickerView>()),
-    openScreenSettings: send(z.void()),
+    /** Screen Recording is off: the onboarding opens at it, in place of the picker. */
+    setUpScreenRecording: send(z.void()),
     refresh: send(z.void()),
   },
   name: "picker",
 });
 
 export type PickerContract = typeof pickerContract;
+
+/** The first-run permission onboarding (src/main/permissions/, src/renderer/onboarding/). */
+export const onboardingContract = defineContract({
+  events: { view: event<OnboardingView>() },
+  global: "insetOnboarding",
+  methods: {
+    /** A row's Allow, or Waiting…, which asks again. */
+    allow: send(PermissionIdSchema),
+    /** Back, or ←. */
+    back: send(z.void()),
+    /** Done's buttons: start using the app, or start with the walkthrough. */
+    finish: send(HandOffChoiceSchema),
+    /** The page's height, so the window fits it without empty space. */
+    fitHeight: send(z.number().int().min(120).max(1200)),
+    getView: invoke(z.void(), out<OnboardingView>()),
+    /** Get Started, Continue, →, or Not now on Allow access. */
+    next: send(z.void()),
+    /** Reopen to finish, for Screen Recording. */
+    reopen: send(z.void()),
+    /** Not now on Welcome: the whole flow. */
+    skip: send(z.void()),
+    /** The app's tile, dragged into System Settings' list as the app bundle. */
+    startDrag: send(z.void()),
+  },
+  name: "onboarding",
+});
+
+export type OnboardingContract = typeof onboardingContract;
 
 export type ShelfContract = typeof shelfContract;
 

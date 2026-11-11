@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ScreenshotView } from "@shared/contracts";
+import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,20 @@ import {
 import { cn } from "@/lib/utils";
 import { screenshotBridge } from "@/shared/bridge";
 import { usePushedView } from "@/shared/use-pushed-view";
+import { coach } from "@/tutorial/anchors";
+import { PageHints } from "@/tutorial/hint-layer";
 
 const api = screenshotBridge();
+
+const tutorialSource = {
+  load: async () => await api.getTutorial(),
+  subscribe: (listener: (view: TutorialView) => void) =>
+    api.on("tutorial", listener),
+};
+
+const actTutorial = (action: TutorialAction): void => {
+  api.tutorial(action);
+};
 
 const load = async (): Promise<ScreenshotView | null> => await api.getView();
 
@@ -66,7 +79,10 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const [held, setHeld] = useState(false);
 
   return (
-    <main className="group bg-muted ring-foreground/10 relative h-svh overflow-hidden rounded-2xl ring-1 ring-inset">
+    <main
+      className="group bg-muted ring-foreground/10 relative h-svh overflow-hidden rounded-2xl ring-1 ring-inset"
+      {...coach("screenshot-card")}
+    >
       <button
         aria-label="Drag the screenshot into another app"
         className="block h-full w-full cursor-grab active:cursor-grabbing"
@@ -174,5 +190,10 @@ export const ScreenshotApp = () => {
 
   const view = usePushedView(load, subscribe, null);
 
-  return view === null ? null : <Card key={view.seq} view={view} />;
+  return (
+    <>
+      {view === null ? null : <Card key={view.seq} view={view} />}
+      <PageHints act={actTutorial} source={tutorialSource} />
+    </>
+  );
 };

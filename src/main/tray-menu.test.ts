@@ -4,7 +4,7 @@ import { trayMenu, trayTooltip } from "./tray-menu";
 import type { TrayItem, TrayModel } from "./tray-menu";
 
 const base: TrayModel = {
-  keys: "granted",
+  setUpPermissions: false,
   shelfVisible: false,
   shortcutsRegistered: true,
   update: { kind: "idle" },
@@ -31,6 +31,8 @@ describe(trayMenu, () => {
       "---",
       "Settings…",
       "Keyboard Shortcuts",
+      "Getting Started",
+      "Show Me Around",
       "---",
       "(Version 0.1.900)",
       "Check for Updates…",
@@ -61,10 +63,13 @@ describe(trayMenu, () => {
     ).toContain("(Downloading v0.1.901… 42%)");
   });
 
-  it("offers the permission only while it is missing", () => {
-    expect(names(trayMenu({ ...base, keys: "missing" }))).toContain(
-      "Turn On Double Shift…"
+  it("offers Set Up Permissions… after Settings… on macOS", () => {
+    const labels = names(trayMenu({ ...base, setUpPermissions: true }));
+
+    expect(labels.indexOf("Set Up Permissions…")).toBe(
+      labels.indexOf("Settings…") + 1
     );
+    expect(names(trayMenu(base))).not.toContain("Set Up Permissions…");
   });
 
   it("names the action that the shelf's state allows", () => {

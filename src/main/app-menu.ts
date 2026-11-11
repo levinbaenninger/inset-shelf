@@ -1,4 +1,4 @@
-import type { DetailField, ItemAction, Permission } from "@shared/contracts";
+import type { DetailField, ItemAction } from "@shared/contracts";
 import type { SectionId, ShelfDoc } from "@shared/shelf";
 import type { MenuItemConstructorOptions } from "electron";
 
@@ -12,7 +12,8 @@ const NUMBERED_SECTIONS = 9;
 
 export interface AppMenuState {
   readonly doc: ShelfDoc;
-  readonly keys: Permission;
+  /** macOS: Set Up Permissions… opens the onboarding at Allow access. */
+  readonly setUpPermissions: boolean;
   readonly floatOnTop: boolean;
   readonly update: UpdateState;
 }
@@ -37,7 +38,11 @@ export interface AppMenuActions {
   readonly item: (action: ItemAction) => void;
   readonly selectSection: (id: SectionId) => void;
   readonly setFloatOnTop: (on: boolean) => void;
-  readonly turnOnKeys: () => void;
+  readonly setUpPermissions: () => void;
+  /** Help › Getting Started: the checklist comes back on the shelf. */
+  readonly gettingStarted: () => void;
+  /** Help › Show Me Around: the spotlight walkthrough of the shelf. */
+  readonly showMeAround: () => void;
   readonly openSettings: () => void;
   readonly openHelp: () => void;
   readonly checkForUpdates: () => void;
@@ -69,8 +74,8 @@ const appSubmenu = (
     click: actions.openSettings,
     label: "Settings…",
   },
-  ...(state.keys === "missing"
-    ? [SEPARATOR, { click: actions.turnOnKeys, label: "Turn On Double Shift…" }]
+  ...(state.setUpPermissions
+    ? [{ click: actions.setUpPermissions, label: "Set Up Permissions…" }]
     : []),
   SEPARATOR,
   { role: "services" },
@@ -287,6 +292,9 @@ export const appMenuTemplate = (
         click: actions.showShortcuts,
         label: "Keyboard Shortcuts",
       },
+      { click: actions.gettingStarted, label: "Getting Started" },
+      { click: actions.showMeAround, label: "Show Me Around" },
+      SEPARATOR,
       { click: actions.openHelp, label: "Inset Shelf Help" },
       // Elsewhere About is part of Settings instead of a system message box.
       ...(mac

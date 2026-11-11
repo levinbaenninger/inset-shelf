@@ -5,6 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   drawingContract,
+  onboardingContract,
   pickerContract,
   screenshotContract,
   settingsContract,
@@ -21,6 +22,7 @@ import type {
 import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
+import type { OnboardingView } from "@shared/onboarding";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
 import type {
@@ -37,6 +39,7 @@ import {
   BrowserWindow,
   clipboard,
   ClipboardItem,
+  desktopCapturer,
   dialog,
   globalShortcut,
   ipcMain,
@@ -74,8 +77,14 @@ import {
   createMenuOpenTracker,
   holdMenuBarKeys,
 } from "./menu-open";
+import { createOnboardingWindow } from "./onboarding-window";
 import { openApp, openAppAt } from "./open-app";
 import { createPageSettle, followPage } from "./page-settle";
+import { appBundlePath, createAppTile } from "./permissions/bundle";
+import { createOnboarding } from "./permissions/onboarding";
+import { createPoller } from "./permissions/poller";
+import { createOnboardingStore } from "./permissions/store";
+import { createPermissionChecks } from "./permissions/system";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import {
@@ -92,16 +101,34 @@ import { captureSelection } from "./selection";
 import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
+import {
+  osMajor,
+  SHELF_PERMISSIONS,
+  SHELF_HANDOFF,
+  SHELF_TAGLINE,
+} from "./shelf-onboarding";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
 import type { WriteResult } from "./shelf-store";
+import {
+  CHECKLIST_TITLE,
+  checklistDoneText,
+  HOME_PAGE,
+  SHELF_TASK_IDS,
+  shelfExamples,
+  shelfHints,
+  shelfSpotlight,
+  shelfTasks,
+} from "./shelf-tutorial";
 import { createShelfWindow } from "./shelf-window";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
 import type { TrayAction } from "./tray-menu";
+import { createTutorialStore } from "./tutorial/store";
+import { createTutorial } from "./tutorial/tutorial";
 import { updateNotice } from "./update-state";
 import { createUpdater } from "./updater";
-import { canListWindows, createWindowLinker } from "./window-links";
+import { createWindowLinker } from "./window-links";
 import {
   appOrigin,
   pageUrl,
@@ -113,16 +140,11 @@ import {
 const PRODUCT_NAME = "Inset Shelf";
 
 const ignore = (): void => undefined;
+
+/** Until the windows exist, no page can show a hint. */
+const hiddenPage = (_page: string): boolean => false;
+
 const APP_ID = "ch.inset.prototype.shelf";
-
-/** Fixed constants: never built from renderer input. */
-const MAC_ACCESSIBILITY_SETTINGS =
-  "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-
-const MAC_SCREEN_SETTINGS =
-  "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
-
-const KEYS_POLL_MS = 3000;
 
 const TOAST_EXCERPT = 80;
 
@@ -338,6 +360,16 @@ const setTimer = (run: () => void, ms: number): (() => void) => {
   };
 };
 
+const exists = async (file: string): Promise<boolean> => {
+  try {
+    await access(file);
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const start = async (): Promise<void> => {
   await app.whenReady();
 
@@ -370,6 +402,11 @@ const start = async (): Promise<void> => {
 
   const dataDir = app.getPath("userData");
 
+  // Read before the stores below create their files: an install from before the onboarding existed.
+  const ranBefore =
+    (await exists(path.join(dataDir, "shelf.json"))) ||
+    (await exists(path.join(dataDir, "settings.json")));
+
   const store = await openShelfStore(dataDir, {
     fs:
       process.env.INSET_FAIL_NEXT_WRITE === "1"
@@ -384,8 +421,17 @@ const start = async (): Promise<void> => {
   // Not on Linux, where the synthetic copy has never been tried.
   const selectionCapture = isMac || process.platform === "win32";
 
-  const trusted = (): boolean =>
-    !isMac || systemPreferences.isTrustedAccessibilityClient(false);
+  // macOS 27 renamed the Accessibility list the onboarding names.
+  const macVersion = osMajor(process.getSystemVersion());
+
+  const permissions = createPermissionChecks({
+    desktopCapturer,
+    osMajor: macVersion,
+    platform: process.platform,
+    setTimer,
+    shell,
+    systemPreferences,
+  });
 
   const controller = createShelfController({
     deleteAttachment: store.deleteAttachment,
@@ -400,7 +446,7 @@ const start = async (): Promise<void> => {
     setTimer,
     status: {
       floatOnTop: true,
-      keys: keyPermission(true, trusted()),
+      keys: keyPermission(true, permissions.granted("accessibility")),
       problem: store.recovered,
       quitPrompt: null,
       readOnly: store.readOnly,
@@ -408,6 +454,72 @@ const start = async (): Promise<void> => {
       selectionCapture,
     },
   });
+
+  // Set once the windows the tutorial hints in, and their IPC servers, exist.
+  let pageVisible: (page: string) => boolean = hiddenPage;
+  let emitTutorial: () => void = ignore;
+  let holdScreenshotCard: () => void = ignore;
+
+  /**
+   * The in-app tutorial (src/main/tutorial/): the Getting started checklist,
+   * one-time hints and the walkthrough, on macOS and Windows alike.
+   */
+  const tutorial = createTutorial({
+    examples: {
+      exists: (id) => {
+        const parsed = ItemIdSchema.safeParse(id);
+
+        return parsed.success && controller.item(parsed.data) !== undefined;
+      },
+      remove: (ids) => {
+        for (const id of ids) {
+          const parsed = ItemIdSchema.safeParse(id);
+
+          if (parsed.success) {
+            controller.apply({ id: parsed.data, type: "remove" });
+          }
+        }
+      },
+      seed: () =>
+        shelfExamples(isMac).flatMap((example) => {
+          const id = controller.apply({
+            context: example.context,
+            html: null,
+            text: example.text,
+            type: "addText",
+            via: "typed",
+          });
+
+          return id === null ? [] : [id];
+        }),
+    },
+    firstRun: async () => await Promise.resolve(!ranBefore),
+    hints: shelfHints(isMac),
+    home: HOME_PAGE,
+    onChange: () => {
+      emitTutorial();
+    },
+    onHintShown: (hint) => {
+      // The card goes on its own after a few seconds: it stays while its hint is read.
+      if (hint.page === "screenshot") {
+        holdScreenshotCard();
+      }
+    },
+    pageVisible: (page) => pageVisible(page),
+    spotlight: shelfSpotlight(isMac),
+    store: createTutorialStore(
+      path.join(dataDir, "tutorial.json"),
+      nodeStoreFs
+    ),
+    doneText: checklistDoneText(isMac),
+    tasks: shelfTasks(isMac),
+    title: CHECKLIST_TITLE,
+    warn: (message) => {
+      console.warn(message);
+    },
+  });
+
+  await tutorial.load();
 
   const staging = createDragStaging(app.getPath("temp"));
 
@@ -480,6 +592,8 @@ const start = async (): Promise<void> => {
 
   // Set once the IPC servers exist; nothing can quit before then.
   let askPageToSettle: (seq: number) => void = ignore;
+  // Set once the onboarding exists.
+  let onQuitCancelled: () => void = ignore;
   let askDrawingToSave: () => void = ignore;
 
   // Quitting first asks the shelf page for an edit still being typed; it answers once it has sent it.
@@ -636,6 +750,7 @@ const start = async (): Promise<void> => {
       }
 
       e2eLog("itemAdded", { itemId: id, kind: "text", via: "selection" });
+      tutorial.complete(SHELF_TASK_IDS.doubleShift);
 
       if (shelf.isVisible()) {
         controller.focus(id);
@@ -668,34 +783,19 @@ const start = async (): Promise<void> => {
     void onDoubleTap();
   });
 
-  const startKeys = (): boolean => {
-    if (!trusted()) {
-      return false;
+  let keysRunning = false;
+
+  /** Double Shift starts once Accessibility is granted. */
+  const startKeys = (): void => {
+    if (keysRunning || !permissions.granted("accessibility")) {
+      return;
     }
 
-    const started = keyMonitor.start();
+    keysRunning = keyMonitor.start();
+    controller.setStatus({ keys: keyPermission(keysRunning, true) });
 
-    controller.setStatus({ keys: keyPermission(started, true) });
-
-    if (started) {
+    if (keysRunning) {
       e2eLog("keysReady");
-    }
-
-    return started;
-  };
-
-  if (!startKeys()) {
-    const poll = setInterval(() => {
-      if (startKeys()) {
-        clearInterval(poll);
-      }
-    }, KEYS_POLL_MS);
-  }
-
-  const openKeySettings = (): void => {
-    if (isMac) {
-      systemPreferences.isTrustedAccessibilityClient(true);
-      void shell.openExternal(MAC_ACCESSIBILITY_SETTINGS);
     }
   };
 
@@ -850,6 +950,8 @@ const start = async (): Promise<void> => {
     gate,
     mac: isMac,
     onCopied: (ids, kind) => {
+      tutorial.complete(SHELF_TASK_IDS.checkOrCopy);
+
       // Checked off as the items are now: one checked off while the copy waited stays checked.
       if (settings.current().markDoneOnCopy) {
         for (const id of ids) {
@@ -918,7 +1020,7 @@ const start = async (): Promise<void> => {
   const listWindows = async (): Promise<void> => {
     const { seq } = pickerView;
 
-    if (!canListWindows()) {
+    if (!permissions.granted("screen")) {
       setPickerView({ state: { kind: "permission" } });
 
       return;
@@ -1011,6 +1113,8 @@ const start = async (): Promise<void> => {
         );
       }
 
+      tutorial.complete(SHELF_TASK_IDS.windowLink);
+
       return { ok: true };
     } catch (error) {
       setPickerView({ linking: false });
@@ -1029,14 +1133,18 @@ const start = async (): Promise<void> => {
         picker.close();
       },
       choose: chooseWindows,
+      getTutorial: () => tutorial.view("picker"),
       getView: () => pickerView,
-      openScreenSettings: () => {
-        if (isMac) {
-          void shell.openExternal(MAC_SCREEN_SETTINGS);
-        }
+      setUpScreenRecording: () => {
+        picker.close();
+        // oxlint-disable-next-line no-use-before-define -- the onboarding is made once the quit path it reopens through exists.
+        onboarding.open("screen");
       },
       refresh: () => {
         void listWindows();
+      },
+      tutorial: (action) => {
+        tutorial.act("picker", action);
       },
     },
     {
@@ -1169,6 +1277,11 @@ const start = async (): Promise<void> => {
     },
     quitting: (busy) => {
       drawing.setQuitting(busy);
+
+      // Only a cancelled quit goes back to idle: a reopen it carried is no longer armed.
+      if (!busy) {
+        onQuitCancelled();
+      }
     },
     saveDrawing: async (stop) => {
       const saved = drawing.whenSaved();
@@ -1199,6 +1312,146 @@ const start = async (): Promise<void> => {
     quitHold.pageEnded();
   });
 
+  /**
+   * A second app.quit() after a held-back quit closes the windows but does
+   * not end the app on macOS when the quit came from the Quit menu item, so
+   * the app exits itself.
+   */
+  const exitNow = (): void => {
+    keyMonitor.stop();
+    screenshots.stop();
+    staging.clear();
+    globalShortcut.unregisterAll();
+    app.exit(0);
+  };
+
+  // The first-run onboarding: the permission kit (src/main/permissions/) wired to Inset Shelf's window, quit path and poll.
+  const onboardingWindow = createOnboardingWindow({
+    preload: preloadPath("onboarding"),
+    url: pageUrl("onboarding"),
+  });
+
+  const appTile = createAppTile({
+    bundlePath: appBundlePath(app.getPath("exe"), { packaged: app.isPackaged }),
+    loadIcon: async (bundle) =>
+      await app.getFileIcon(bundle, { size: "normal" }),
+    startDrag: ({ file, icon }) => {
+      onboardingWindow.webContents.startDrag({ file, icon });
+    },
+  });
+
+  // Set once the onboarding's IPC server exists.
+  let showOnboardingView: (view: OnboardingView) => void = ignore;
+
+  const onboarding = createOnboarding({
+    appName: PRODUCT_NAME,
+    checks: permissions,
+    mac: isMac,
+    handOff: SHELF_HANDOFF,
+    onClosed: (how) => {
+      // Done hands over to the shelf; the first run's Not now brings it up too, as it opened in its place.
+      if (how !== "skipped" || !shelf.isVisible()) {
+        void (async () => {
+          await showShelf();
+
+          if (how === "showAround") {
+            // oxlint-disable-next-line no-use-before-define -- the tutorial is made after the windows it hints in.
+            tutorial.showMeAround();
+          }
+        })();
+      }
+    },
+    onEnded: () => {
+      // oxlint-disable-next-line no-use-before-define -- it reads whether the onboarding is over.
+      startScreenshots();
+    },
+    onView: (view) => {
+      showOnboardingView(view);
+    },
+    osMajor: macVersion,
+    permissions: SHELF_PERMISSIONS,
+    pollFast: (on) => {
+      // oxlint-disable-next-line no-use-before-define -- the poll reads the onboarding in turn.
+      accessibilityPoll.setFast(on);
+    },
+    // The reopen goes through the normal quit: it relaunches only if the quit really ends the app.
+    quit: (atExit) => {
+      quitHold.request(() => {
+        atExit();
+        exitNow();
+      });
+    },
+    ranBefore: async () => await Promise.resolve(ranBefore),
+    relaunch: () => {
+      app.relaunch();
+    },
+    setTimer,
+    store: createOnboardingStore(
+      path.join(dataDir, "onboarding.json"),
+      nodeStoreFs
+    ),
+    tagline: SHELF_TAGLINE,
+    tile: appTile.view,
+    warn: (message) => {
+      console.warn(message);
+    },
+    window: onboardingWindow,
+  });
+
+  onQuitCancelled = onboarding.quitCancelled;
+  onboardingWindow.onClose(onboarding.close);
+
+  /**
+   * One poll for Accessibility: Double Shift starts once it is granted, and
+   * the onboarding's row turns green. Every 3 s until then, every 500 ms
+   * while the onboarding shows that row.
+   */
+  const accessibilityPoll = createPoller({
+    check: () => {
+      startKeys();
+      onboarding.observe();
+
+      return !keysRunning;
+    },
+    setTimer,
+  });
+
+  accessibilityPoll.start();
+
+  /** Watching the Desktop and Documents folders can raise macOS's folder prompts: not while the first-run onboarding is under way. */
+  const startScreenshots = (): void => {
+    if (onboarding.settled() && settings.current().screenshotCards) {
+      screenshots.start();
+    }
+  };
+
+  const onboardingServer = serveContract(
+    onboardingContract,
+    {
+      allow: onboarding.allow,
+      back: onboarding.back,
+      finish: onboarding.finish,
+      fitHeight: onboardingWindow.fitHeight,
+      getView: onboarding.view,
+      next: onboarding.next,
+      reopen: () => {
+        void onboarding.reopen();
+      },
+      skip: onboarding.skip,
+      startDrag: appTile.drag,
+    },
+    {
+      appOrigin: appOrigin(),
+      ipc: ipcMain,
+      onRejected: logRejected,
+      target: () => onboardingWindow.webContents,
+    }
+  );
+
+  showOnboardingView = (view) => {
+    onboardingServer.emit("view", view);
+  };
+
   const drawingServer = serveContract(
     drawingContract,
     {
@@ -1207,12 +1460,24 @@ const start = async (): Promise<void> => {
       },
       // The image the window opened on, whatever a save during a held quit has put on the shelf since.
       getImage: async () => await drawingSaves.image(),
+      getTutorial: () => tutorial.view("drawing"),
       getView: () => drawing.view(),
       setDirty: (dirty) => {
         drawing.setDirty(dirty);
         drawingSaves.changed();
       },
-      save: drawingSaves.save,
+      tutorial: (action) => {
+        tutorial.act("drawing", action);
+      },
+      save: async (drawn) => {
+        const result = await drawingSaves.save(drawn);
+
+        if (result.ok) {
+          tutorial.complete(SHELF_TASK_IDS.pinOrSketch);
+        }
+
+        return result;
+      },
     },
     {
       appOrigin: appOrigin(),
@@ -1305,6 +1570,10 @@ const start = async (): Promise<void> => {
       apply: (op) => {
         controller.apply(op);
 
+        if (op.type === "toggleDone" && controller.item(op.id)?.done === true) {
+          tutorial.complete(SHELF_TASK_IDS.checkOrCopy);
+        }
+
         if (op.type === "remove") {
           staging.clear(op.id);
         }
@@ -1341,7 +1610,11 @@ const start = async (): Promise<void> => {
       },
       drafts: pageSettle.setDrafts,
       settled: pageSettle.answered,
+      getTutorial: () => tutorial.view(HOME_PAGE),
       getView: () => controller.view(),
+      gettingStarted: () => {
+        tutorial.showChecklist();
+      },
       hide: () => {
         shelf.hide();
       },
@@ -1367,7 +1640,10 @@ const start = async (): Promise<void> => {
       openPins: (id) => {
         void openImage(id, true);
       },
-      openKeySettings,
+      setUpDoubleShift: () => {
+        // oxlint-disable-next-line no-use-before-define -- the onboarding is made once the quit path it reopens through exists.
+        onboarding.open("accessibility");
+      },
       openLink: ({ id, url }) => {
         const item = controller.item(id);
         const fromApp = openingApp(item?.context ?? null, isMac);
@@ -1426,8 +1702,14 @@ const start = async (): Promise<void> => {
         return { ok: true };
       },
       setFloatOnTop,
+      showMeAround: () => {
+        tutorial.showMeAround();
+      },
       startDrag: (id) => {
         void dragOut(id);
+      },
+      tutorial: (action) => {
+        tutorial.act(HOME_PAGE, action);
       },
     },
     {
@@ -1486,6 +1768,7 @@ const start = async (): Promise<void> => {
 
     if (id !== null) {
       e2eLog("itemAdded", { itemId: id, kind: "image", via: "screenshot" });
+      tutorial.complete(SHELF_TASK_IDS.screenshot);
     }
 
     return id;
@@ -1564,6 +1847,7 @@ const start = async (): Promise<void> => {
           screenshotCard.hide();
         }
       },
+      getTutorial: () => tutorial.view("screenshot"),
       getView: () => screenshotCard.view(),
       hold: (seq) => {
         if (currentShot(seq) !== null) {
@@ -1571,6 +1855,9 @@ const start = async (): Promise<void> => {
         }
       },
       hover: screenshotCard.hover,
+      tutorial: (action) => {
+        tutorial.act("screenshot", action);
+      },
       saveToDownloads: (seq) => {
         const current = currentShot(seq);
 
@@ -1641,6 +1928,69 @@ const start = async (): Promise<void> => {
     shelfServer.emit("command", command);
   };
 
+  // The tutorial in every window it hints in: each sees its own part.
+  const tutorialPages = new Map([
+    [
+      "drawing",
+      {
+        emit: () => {
+          drawingServer.emit("tutorial", tutorial.view("drawing"));
+        },
+        visible: () => drawing.isVisible(),
+        webContents: drawing.webContents,
+      },
+    ],
+    [
+      "picker",
+      {
+        emit: () => {
+          pickerServer.emit("tutorial", tutorial.view("picker"));
+        },
+        visible: () => picker.isVisible(),
+        webContents: picker.webContents,
+      },
+    ],
+    [
+      "screenshot",
+      {
+        emit: () => {
+          screenshotServer.emit("tutorial", tutorial.view("screenshot"));
+        },
+        visible: () => screenshotCard.isVisible(),
+        webContents: screenshotCard.webContents,
+      },
+    ],
+    [
+      HOME_PAGE,
+      {
+        emit: () => {
+          shelfServer.emit("tutorial", tutorial.view(HOME_PAGE));
+        },
+        visible: () => shelf.isVisible(),
+        webContents: shelf.webContents,
+      },
+    ],
+  ]);
+
+  pageVisible = (page) => tutorialPages.get(page)?.visible() === true;
+
+  emitTutorial = () => {
+    for (const page of tutorialPages.values()) {
+      page.emit();
+    }
+  };
+
+  holdScreenshotCard = () => {
+    screenshotCard.hold();
+  };
+
+  // A hidden window lets go of the bubble it held, so it never blocks the others.
+  for (const [page, { webContents: contents }] of tutorialPages) {
+    BrowserWindow.fromWebContents(contents)?.on("hide", () => {
+      tutorial.pageClosed(page);
+    });
+  }
+
   askPageToSettle = (seq) => {
     shelfServer.emit("settle", seq);
   };
@@ -1682,7 +2032,6 @@ const start = async (): Promise<void> => {
       doc.items.some(
         (item) => item.done && item.sectionId === doc.activeSectionId
       ),
-      status.keys,
       status.floatOnTop,
       updater.state(),
     ]);
@@ -1699,8 +2048,8 @@ const start = async (): Promise<void> => {
           {
             doc,
             floatOnTop: status.floatOnTop,
-            keys: status.keys,
             update: updater.state(),
+            setUpPermissions: isMac,
           },
           {
             checkForUpdates: updater.check,
@@ -1713,6 +2062,8 @@ const start = async (): Promise<void> => {
             closeWindow: () => {
               if (drawing.isFocused()) {
                 drawing.requestClose();
+              } else if (onboardingWindow.isFocused()) {
+                onboarding.close();
               } else if (picker.isFocused()) {
                 picker.close();
               } else if (settingsWindow.isFocused()) {
@@ -1722,7 +2073,12 @@ const start = async (): Promise<void> => {
               }
             },
             copy: () => {
-              sendCommand?.({ kind: "copy" });
+              // Try it: the ⌘C that Double Shift sends copies the onboarding's sample text.
+              if (onboardingWindow.isFocused()) {
+                onboardingWindow.webContents.copy();
+              } else {
+                sendCommand?.({ kind: "copy" });
+              }
             },
             // The shelf knows what is picked: the picked items, else the section's open ones.
             copyAsList: () => {
@@ -1778,7 +2134,19 @@ const start = async (): Promise<void> => {
                 BrowserWindow.getFocusedWindow()?.webContents.redo();
               }
             },
-            turnOnKeys: openKeySettings,
+            setUpPermissions: () => {
+              onboarding.open();
+            },
+            gettingStarted: () => {
+              tutorial.showChecklist();
+              void showShelf();
+            },
+            showMeAround: () => {
+              void (async () => {
+                await showShelf();
+                tutorial.showMeAround();
+              })();
+            },
             undo: () => {
               if (drawing.isFocused()) {
                 drawingServer.emit("edit", "undo");
@@ -1859,8 +2227,23 @@ const start = async (): Promise<void> => {
         break;
       }
 
-      case "turnOnKeys": {
-        openKeySettings();
+      case "setUpPermissions": {
+        onboarding.open();
+        break;
+      }
+
+      case "gettingStarted": {
+        tutorial.showChecklist();
+        void showShelf({ dock: isMac });
+        break;
+      }
+
+      case "showMeAround": {
+        void (async () => {
+          await showShelf({ dock: isMac });
+          tutorial.showMeAround();
+        })();
+
         break;
       }
 
@@ -1902,7 +2285,7 @@ const start = async (): Promise<void> => {
       tray = createTray({
         iconPath: trayIconPath,
         model: () => ({
-          keys: controller.view().status.keys,
+          setUpPermissions: isMac,
           shelfVisible: shelf.isVisible(),
           shortcutsRegistered,
           update: updater.state(),
@@ -1925,6 +2308,7 @@ const start = async (): Promise<void> => {
   const settingsView = (): SettingsView => ({
     openAtLogin: app.getLoginItemSettings().openAtLogin,
     settings: settings.current(),
+    tips: tutorial.tips(),
     version: app.getVersion(),
   });
 
@@ -1933,8 +2317,17 @@ const start = async (): Promise<void> => {
     {
       fitHeight: settingsWindow.fitHeight,
       getView: settingsView,
+      resetTutorial: () => {
+        tutorial.reset();
+        settingsServer.emit("view", settingsView());
+        notify("Tutorial reset");
+      },
       setOpenAtLogin: (on) => {
         app.setLoginItemSettings({ openAtLogin: on });
+        settingsServer.emit("view", settingsView());
+      },
+      setTips: (on) => {
+        tutorial.setTips(on);
         settingsServer.emit("view", settingsView());
       },
       update: (change) => {
@@ -1948,7 +2341,7 @@ const start = async (): Promise<void> => {
           }
 
           if (settings.current().screenshotCards) {
-            screenshots.start();
+            startScreenshots();
           } else {
             screenshots.stop();
             screenshotCard.hide();
@@ -1979,20 +2372,9 @@ const start = async (): Promise<void> => {
     drawing.load(),
     settingsWindow.load(),
     picker.load(),
+    onboardingWindow.load(),
+    appTile.load(),
   ]);
-
-  /**
-   * A second app.quit() after a held-back quit closes the windows but does
-   * not end the app on macOS when the quit came from the Quit menu item, so
-   * the app exits itself.
-   */
-  const exitNow = (): void => {
-    keyMonitor.stop();
-    screenshots.stop();
-    staging.clear();
-    globalShortcut.unregisterAll();
-    app.exit(0);
-  };
 
   // The Quit items, the OS quitting the app, and the installer's quit after the update restart.
   app.on("before-quit", (event) => {
@@ -2017,14 +2399,17 @@ const start = async (): Promise<void> => {
     }
   });
 
-  if (settings.current().screenshotCards) {
-    screenshots.start();
-  }
+  // On macOS's first run the onboarding opens in place of the shelf.
+  const onboardingShown = await onboarding.launch();
 
+  startScreenshots();
   updater.start();
   e2eLog("launch");
+
   // Like any app's window, the shelf opens when the app starts.
-  await showShelf();
+  if (!onboardingShown) {
+    await showShelf();
+  }
 };
 
 const startOrExit = async (): Promise<void> => {

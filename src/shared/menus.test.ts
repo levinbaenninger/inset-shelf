@@ -78,7 +78,7 @@ describe(shelfMenu, () => {
     ]);
   });
 
-  it("holds Float on Top and Help where there is no menu bar", () => {
+  it("holds Float on Top, the tutorial and Help where there is no menu bar", () => {
     const entries = shelfMenu({ floatOnTop: true });
 
     expect(labels(entries)).toStrictEqual([
@@ -89,6 +89,8 @@ describe(shelfMenu, () => {
       "---",
       "Settings",
       "Keyboard Shortcuts",
+      "Getting Started",
+      "Show Me Around",
       "Inset Shelf Help",
     ]);
     expect(entries[3]).toMatchObject({

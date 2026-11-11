@@ -1,5 +1,6 @@
 /**
- * Screenshots the shelf, the window-link picker and the drawing window of the
+ * Screenshots the shelf, the window-link picker, the drawing window and the
+ * first-run onboarding of the
  * built renderer in their main states, light and dark, without Electron. Each
  * page runs in Playwright's Chromium with a fake preload bridge
  * (scripts/fixtures/screens-bridge.js) that answers from the sample data
@@ -12,7 +13,7 @@
  * The default output folder is release/screens.
  */
 import { once } from "node:events";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
@@ -139,6 +140,8 @@ const LOGIN_PAGE = `
   </style>
   <form><h1>Sign in</h1><label>Email<br><input value="anna@keller.ch"></label><label>Password<br><input type="password" value="secret"></label><div class="error">Something went wrong</div><button>Sign in</button></form>`;
 
+const APP_ICON = "app-icon.png";
+
 const LOGIN = {
   file: png(201),
   heightPx: 1200,
@@ -171,6 +174,12 @@ const renderFixtures = async (browser: Browser): Promise<void> => {
   await login.setContent(LOGIN_PAGE);
   await login.screenshot({ path: path.join(FIXTURES, LOGIN.file) });
   await login.close();
+
+  // The onboarding's tile shows the app's icon, as main reads it from the bundle.
+  await copyFile(
+    path.join(ROOT, "build", "icon.png"),
+    path.join(FIXTURES, APP_ICON)
+  );
 };
 
 // The shelf's sample document
@@ -368,7 +377,7 @@ const STATUS = {
   selectionCapture: true,
 };
 
-type ShelfFixture = typeof DOC | typeof EMPTY_DOC;
+type ShelfFixture = typeof DOC | typeof EMPTY_DOC | typeof EXAMPLE_DOC;
 
 const shelfView = (doc: ShelfFixture = DOC) => ({
   canUndo: false,
@@ -442,9 +451,389 @@ const drawingView = (
   seq: 1,
 });
 
+// The permission onboarding's sample states (src/shared/onboarding.ts)
+
+type RowState = "allow" | "waiting" | "allowed" | "reopen" | "reopening";
+
+type OnboardingKind = "welcome" | "access" | "done";
+
+const onboardingView = (
+  current: OnboardingKind,
+  rows: { readonly accessibility: RowState; readonly screen: RowState },
+  steps: readonly OnboardingKind[] = ["welcome", "access", "done"]
+) => ({
+  appName: "Inset Shelf",
+  focus: rows.accessibility === "allowed" ? "screen" : "accessibility",
+  handOff: {
+    later:
+      "Inset Shelf works without the permissions you skipped. Set Up Permissions… in the Inset Shelf menu or the menu bar icon’s menu asks again.",
+    ready:
+      "Inset Shelf is ready. A short Getting started list on the shelf shows the rest.",
+    showAround: "Show Me Around",
+    start: "Start Using Inset Shelf",
+  },
+  permissions: [
+    {
+      features: ["Double Shift"],
+      id: "accessibility",
+      listName: "Accessibility",
+      purpose:
+        "Notices Double Shift and reads the page address of what you save.",
+      state: rows.accessibility,
+      title: "Accessibility",
+    },
+    {
+      features: ["window links"],
+      id: "screen",
+      listName: "Screen & System Audio Recording",
+      purpose: "Shows window titles and lets you link windows.",
+      state: rows.screen,
+      title: "Screen Recording",
+    },
+  ],
+  step: { kind: current },
+  steps: steps.map((kind) => ({ kind })),
+  tagline: "Inset Shelf keeps what you capture in a list beside your work.",
+  tile: { icon: `/.fixtures/${APP_ICON}`, name: "Inset Shelf" },
+});
+
+const NOTHING_ALLOWED = { accessibility: "allow", screen: "allow" } as const;
+const ALL_ALLOWED = { accessibility: "allowed", screen: "allowed" } as const;
+
+const PageHeightSchema = z.number();
+
+/** The window takes the page's height: so does the shot, which then shows what the user sees. */
+const fitToPage = async (page: Page): Promise<number> => {
+  const height = PageHeightSchema.parse(
+    await page.evaluate(() =>
+      Math.ceil(
+        document.querySelector("main")?.getBoundingClientRect().height ?? 0
+      )
+    )
+  );
+
+  if (height > 0) {
+    await page.setViewportSize({
+      height,
+      width: page.viewportSize()?.width ?? 460,
+    });
+  }
+
+  return height;
+};
+
+/** A page sized to its content and no taller than this: no big empty area. */
+const compact = async (page: Page, most: number): Promise<string | null> => {
+  const height = await fitToPage(page);
+
+  return height > 0 && height <= most
+    ? null
+    : `the page is ${height}px tall, more than ${most}px`;
+};
+
+const DotsSchema = z.object({ count: z.number(), label: z.string() });
+
+/** One dot per page of the run, the current one named. */
+const dotsMatch = async (
+  page: Page,
+  count: number,
+  label: string
+): Promise<string | null> => {
+  const dots = DotsSchema.parse(
+    await page.evaluate(() => {
+      const list = document.querySelector("footer ol");
+
+      return {
+        count: list?.children.length ?? 0,
+        label: list?.getAttribute("aria-label") ?? "",
+      };
+    })
+  );
+
+  return dots.count === count && dots.label === label
+    ? null
+    : `dots: ${JSON.stringify(dots)}, wanted ${count} labelled “${label}”`;
+};
+
+// The in-app tutorial's sample states (src/shared/tutorial.ts), as src/main/shelf-tutorial.ts writes them for a Mac
+
+const TUTORIAL_TASKS = [
+  {
+    anchor: null,
+    how: "Select text in any app, then tap Shift twice (⇧ ⇧). It lands here, with the page it came from.",
+    id: "double-shift",
+    keys: "⇧ ⇧",
+    title: "Save selected text with Double Shift",
+  },
+  {
+    anchor: null,
+    how: "Press ⇧⌘4 and drag over an area. Click Add to Shelf on the card that appears beside the shelf.",
+    id: "screenshot",
+    keys: "⇧⌘4",
+    title: "Capture part of the screen",
+  },
+  {
+    anchor: "add-button",
+    how: "⌥⌘N, or + › New Drawing, opens a page to sketch on. To pin a spot, open an image and press P. Save puts it on the shelf.",
+    id: "pin-or-sketch",
+    keys: "⌥⌘N",
+    title: "Pin a spot or draw a sketch",
+  },
+  {
+    anchor: "add-button",
+    how: "⇧⌘L, or + › New Window Link, lists your open windows. Pick the ones to link, in order.",
+    id: "window-link",
+    keys: "⇧⌘L",
+    title: "Link a window",
+  },
+  {
+    anchor: "item-check",
+    how: "Click an item's circle or press Space to check it off. ⌘C copies the selected item back.",
+    id: "check-or-copy",
+    keys: "Space",
+    title: "Check off or copy an item back",
+  },
+];
+
+const SPOTLIGHT_STEPS = [
+  {
+    anchor: "shelf-list",
+    id: "list",
+    text: "Everything you capture lands here, in sections. Drag an item onto another section to move it.",
+    title: "Your shelf",
+  },
+  {
+    anchor: "item-source",
+    id: "source",
+    text: "The line under an item names the app, window or page it came from. Click it to open the page again.",
+    title: "Where it came from",
+  },
+  {
+    anchor: "composer",
+    id: "composer",
+    text: "Type a note or a prompt and press Return. # and a name starts a section.",
+    title: "Notes and prompts",
+  },
+  {
+    anchor: "add-button",
+    id: "add",
+    text: "Attach files, start a drawing or link open windows.",
+    title: "The + menu",
+  },
+  {
+    anchor: "item-check",
+    id: "check",
+    text: "Click the circle or press Space to check an item off. ⌘C copies the selected item back.",
+    title: "Check off and copy",
+  },
+  {
+    anchor: "shelf-menu",
+    id: "menu",
+    text: "New sections, Settings and Keyboard Shortcuts are here. The menu bar icon has them too.",
+    title: "Settings and more",
+  },
+];
+
+const PICKER_HINT = {
+  anchor: "picker-window",
+  id: "picker",
+  page: "picker",
+  placement: "below",
+  task: "window-link",
+  text: "Click each window to link. The number on it shows its place in the link.",
+  title: "Pick windows",
+};
+
+const DETAILS_HINT = {
+  anchor: "details-add",
+  id: "details-add",
+  page: "shelf",
+  placement: "below",
+  task: null,
+  text: "Add a description, next steps, a due date or linked windows. None of it is needed when you capture.",
+  title: null,
+};
+
+/** A hint as main grants it: showing now, on its page. */
+const grantedHint = (hint: typeof PICKER_HINT | typeof DETAILS_HINT) => ({
+  anchor: hint.anchor,
+  id: hint.id,
+  kind: "hint",
+  placement: hint.placement,
+  text: hint.text,
+  title: hint.title,
+});
+
+const EXAMPLE_IDS = [uuid(901), uuid(902), uuid(903), uuid(904)];
+
+interface FixtureContext {
+  readonly app: null;
+  readonly appLink: null;
+  readonly title: string;
+  readonly url: string;
+}
+
+const exampleItem = (
+  index: number,
+  text: string,
+  context: FixtureContext | null = null
+) => ({
+  ...base(901 + index, 10 - index, INBOX),
+  context,
+  html: null,
+  kind: "text",
+  links: [],
+  text,
+  via: "typed",
+});
+
+/** The first run's shelf: the examples, each a thing to try. */
+const EXAMPLE_DOC = {
+  activeSectionId: INBOX,
+  items: [
+    exampleItem(
+      0,
+      "Select any text in another app and tap Shift twice (⇧ ⇧) to save it here"
+    ),
+    exampleItem(1, "Check me off: click the circle or press Space"),
+    exampleItem(2, "Copy me back with ⌘C, or drag me into another app"),
+    exampleItem(
+      3,
+      "Saved from a web page: the line below says where, and opens it again",
+      {
+        app: null,
+        appLink: null,
+        title: "Inset Shelf: README",
+        url: "https://github.com/levinbaenninger/inset-shelf#readme",
+      }
+    ),
+  ],
+  schemaVersion: 3,
+  sections: [{ id: INBOX, name: "Inbox" }],
+};
+
+const tutorialView = (options: {
+  readonly done?: number;
+  readonly complete?: boolean;
+  readonly examples?: boolean;
+  readonly checklist?: boolean;
+  readonly active?: object | null;
+  readonly hints?: readonly object[];
+  readonly spotlight?: number | null;
+}) => {
+  const done = options.done ?? 0;
+
+  return {
+    active: options.active ?? null,
+    busy: false,
+    checklist:
+      options.checklist === false
+        ? null
+        : {
+            collapsed: false,
+            complete: options.complete ?? false,
+            doneText:
+              "That’s every way in. Help › Getting Started, or the menu bar icon’s menu, brings this back.",
+            done,
+            examples: options.examples ?? false,
+            tasks: TUTORIAL_TASKS.map((task, index) => ({
+              ...task,
+              done: index < done,
+            })),
+            title: "Getting started",
+            total: TUTORIAL_TASKS.length,
+          },
+    examples: options.examples === true ? EXAMPLE_IDS : [],
+    hints: options.hints ?? [],
+    spotlight:
+      options.spotlight === undefined || options.spotlight === null
+        ? null
+        : { seq: options.spotlight, steps: SPOTLIGHT_STEPS },
+  };
+};
+
+const BubbleSchema = z.object({ text: z.string(), visible: z.boolean() });
+
+/** The tutorial's bubble, drawn and saying this. */
+const bubbleSays = async (page: Page, text: string): Promise<string | null> => {
+  const bubble = BubbleSchema.parse(
+    await page.evaluate(() => {
+      const element = document.querySelector("[data-coach-bubble]");
+      const box = element?.getBoundingClientRect();
+
+      return {
+        text: element?.textContent ?? "",
+        visible:
+          element !== null &&
+          box !== undefined &&
+          box.width > 0 &&
+          getComputedStyle(element).visibility !== "hidden",
+      };
+    })
+  );
+
+  return bubble.visible && bubble.text.includes(text)
+    ? null
+    : `the bubble must show “${text}” (${JSON.stringify(bubble)})`;
+};
+
+type Check = (page: Page) => Promise<string | null>;
+
+/** Runs the checks in order: the first problem, or null. */
+const firstProblem = async (
+  page: Page,
+  checks: readonly Check[]
+): Promise<string | null> => {
+  for (const check of checks) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, the first problem wins.
+    const problem = await check(page);
+
+    if (problem !== null) {
+      return problem;
+    }
+  }
+
+  return null;
+};
+
+const shows = async (
+  page: Page,
+  role: "button" | "status",
+  name: string | RegExp
+): Promise<string | null> =>
+  (await page.getByRole(role, { name }).isVisible())
+    ? null
+    : `no ${role} “${String(name)}”`;
+
+const showsText = async (page: Page, text: string): Promise<string | null> =>
+  (await page.getByText(text, { exact: true }).isVisible())
+    ? null
+    : `no text “${text}”`;
+
+const PulseSchema = z.string();
+
+/** Reduced motion stops the Waiting… pulse. */
+const pulseRespectsMotion = async (page: Page): Promise<string | null> => {
+  const pulse = page.locator("button span[aria-hidden=true].rounded-full");
+
+  const moving = PulseSchema.parse(
+    await pulse.evaluate((element) => getComputedStyle(element).animationName)
+  );
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  const reduced = PulseSchema.parse(
+    await pulse.evaluate((element) => getComputedStyle(element).animationName)
+  );
+
+  return moving !== "none" && reduced === "none"
+    ? null
+    : `the pulse must stop with reduced motion (${moving} → ${reduced})`;
+};
+
 // Scenes
 
-type PageName = "shelf" | "picker" | "drawing";
+type PageName = "shelf" | "picker" | "drawing" | "onboarding";
 
 interface Scene {
   readonly name: string;
@@ -460,6 +849,8 @@ interface Scene {
   readonly keepPointer?: boolean;
   /** Runs after the screenshot: what went wrong, or null. */
   readonly check?: (page: Page) => Promise<string | null>;
+  /** The system asks for reduced motion. */
+  readonly reducedMotion?: boolean;
 }
 
 const AppliedSchema = z.array(
@@ -511,6 +902,19 @@ const calls = async (page: Page, from = 0) => {
   );
 
   return all.slice(from);
+};
+
+/** The tutorial actions the page sent, each kind and id once: a page asks again until main answers. */
+const tutorialAsks = async (page: Page): Promise<readonly string[]> => {
+  const sent = await calls(page);
+
+  return [
+    ...new Set(
+      sent
+        .filter((each) => each.call === "tutorial")
+        .map((each) => JSON.stringify(each.arg))
+    ),
+  ];
 };
 
 const FocusSchema = z.object({
@@ -3650,17 +4054,415 @@ const SCENES: readonly Scene[] = [
       const instructions = page.locator("[data-slot=empty-description]");
       const text = (await instructions.textContent()) ?? "";
 
-      return text.includes(
-        "If Inset Shelf is not listed, click Add (+), select Inset Shelf from Applications, and click Open. Turn on Inset Shelf, then quit and reopen the app."
-      ) &&
+      const button = page.getByRole("button", {
+        name: "Set Up Screen Recording…",
+      });
+
+      await button.click();
+
+      return text.includes("needs Screen Recording") &&
         (await instructions.isVisible()) &&
-        (await page.getByRole("button", { name: "Open Settings" }).isEnabled())
+        isDeepStrictEqual(await calls(page), [
+          { arg: null, call: "setUpScreenRecording" },
+        ])
         ? null
-        : "the permission scene must explain adding an absent app, granting access and restarting, with Open Settings available";
+        : "the permission scene must say why, and Set Up Screen Recording… must open the onboarding";
     },
     data: { view: pickerView({ kind: "permission" }) },
     name: "picker-permission",
     page: "picker",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await compact(on, 300),
+        async (on) => await dotsMatch(on, 3, "Step 1 of 3"),
+        async (on) => await shows(on, "button", "Get Started"),
+        async (on) => await shows(on, "button", "Not now"),
+      ]),
+    data: { view: onboardingView("welcome", NOTHING_ALLOWED) },
+    name: "onboarding-welcome",
+    page: "onboarding",
+  },
+  {
+    act: async (page) => {
+      await page.getByRole("button", { name: "Allow Accessibility" }).click();
+      await page.getByRole("button", { name: "Back" }).click();
+    },
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await compact(on, 480),
+        async (on) => await dotsMatch(on, 3, "Step 2 of 3"),
+        async (on) =>
+          isDeepStrictEqual(await calls(on), [
+            { arg: "accessibility", call: "allow" },
+            { arg: null, call: "back" },
+          ])
+            ? null
+            : "Allow must ask main for that permission, and Back go back",
+      ]),
+    data: { view: onboardingView("access", NOTHING_ALLOWED) },
+    name: "onboarding-access",
+    page: "onboarding",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await shows(on, "button", /^Waiting for Accessibility/u),
+        async (on) =>
+          await showsText(on, "↑ Drag Inset Shelf into the Accessibility list"),
+        async (on) => await compact(on, 560),
+        pulseRespectsMotion,
+      ]),
+    data: {
+      view: onboardingView("access", {
+        accessibility: "waiting",
+        screen: "allow",
+      }),
+    },
+    name: "onboarding-waiting",
+    page: "onboarding",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await compact(on, 480),
+        async (on) => await shows(on, "status", "Accessibility allowed"),
+        async (on) => await shows(on, "button", "Not now"),
+      ]),
+    data: {
+      view: onboardingView("access", {
+        accessibility: "allowed",
+        screen: "allow",
+      }),
+    },
+    name: "onboarding-allowed",
+    page: "onboarding",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await shows(on, "button", "Reopen to finish"),
+        async (on) =>
+          await showsText(
+            on,
+            "↑ Drag Inset Shelf into the Screen & System Audio Recording list"
+          ),
+        async (on) => await compact(on, 600),
+      ]),
+    data: {
+      view: onboardingView("access", {
+        accessibility: "allowed",
+        screen: "reopen",
+      }),
+    },
+    name: "onboarding-reopen",
+    page: "onboarding",
+  },
+  {
+    act: async (page) => {
+      await page.getByRole("button", { name: "Show Me Around" }).click();
+    },
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await compact(on, 300),
+        async (on) => await dotsMatch(on, 3, "Step 3 of 3"),
+        async (on) => await shows(on, "button", "Start Using Inset Shelf"),
+        async (on) =>
+          isDeepStrictEqual(await calls(on), [
+            { arg: "showAround", call: "finish" },
+          ])
+            ? null
+            : "Show Me Around must hand over to the walkthrough",
+      ]),
+    data: { view: onboardingView("done", ALL_ALLOWED) },
+    name: "onboarding-done",
+    page: "onboarding",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await compact(on, 340),
+        async (on) =>
+          await showsText(on, "Allow Accessibility to use Double Shift."),
+      ]),
+    data: { view: onboardingView("done", NOTHING_ALLOWED) },
+    name: "onboarding-done-skipped",
+    page: "onboarding",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await compact(on, 300),
+        async (on) => await dotsMatch(on, 2, "Step 2 of 2"),
+      ]),
+    data: { view: onboardingView("done", ALL_ALLOWED, ["welcome", "done"]) },
+    name: "onboarding-done-nothing-missing",
+    page: "onboarding",
+  },
+  {
+    act: async (page) => {
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      });
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("ArrowLeft");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Shift+ArrowLeft");
+    },
+    check: async (page) =>
+      isDeepStrictEqual(await calls(page), [
+        { arg: null, call: "back" },
+        { arg: "start", call: "finish" },
+      ])
+        ? null
+        : `← and Return must move through the pages, → and ⇧← nothing on Done (${JSON.stringify(await calls(page))})`,
+    data: { view: onboardingView("done", ALL_ALLOWED) },
+    name: "onboarding-keys",
+    page: "onboarding",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await bubbleSays(on, "Pick windows"),
+        async (on) =>
+          isDeepStrictEqual(await calls(on), [
+            { arg: { id: "picker", kind: "hintShown" }, call: "tutorial" },
+          ])
+            ? null
+            : `a drawn hint must say it was seen (${JSON.stringify(await calls(on))})`,
+      ]),
+    data: {
+      tutorial: tutorialView({
+        active: grantedHint(PICKER_HINT),
+        checklist: false,
+      }),
+      view: pickerView({ candidates: CANDIDATES, kind: "ready" }),
+    },
+    name: "tutorial-picker-hint",
+    page: "picker",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await showsText(on, "Getting started"),
+        async (on) => await showsText(on, "· 0 of 5"),
+        async (on) =>
+          (await on.getByText("Example", { exact: true }).count()) === 4
+            ? null
+            : "every example item must be tagged Example",
+      ]),
+    data: {
+      tutorial: tutorialView({ done: 0, examples: true }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    layoutCheck: true,
+    name: "tutorial-checklist-start",
+    page: "shelf",
+  },
+  {
+    data: {
+      tutorial: tutorialView({ done: 0, examples: true }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    layoutCheck: true,
+    name: "tutorial-examples-narrow",
+    page: "shelf",
+    width: 300,
+  },
+  {
+    act: async (page) => {
+      await page.getByRole("button", { name: /^Link a window/u }).click();
+    },
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await showsText(on, "· 3 of 5"),
+        async (on) =>
+          isDeepStrictEqual(await calls(on), [
+            { arg: { id: "window-link", kind: "taskHint" }, call: "tutorial" },
+          ])
+            ? null
+            : `a task's row must ask for its how-to, and tick nothing off (${JSON.stringify(await calls(on))})`,
+      ]),
+    data: {
+      tutorial: tutorialView({ done: 3, examples: true }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-checklist-progress",
+    page: "shelf",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await bubbleSays(on, "Pick the ones to link, in order."),
+      ]),
+    data: {
+      tutorial: tutorialView({
+        active: {
+          anchor: "add-button",
+          id: "window-link",
+          kind: "task",
+          placement: "below",
+          text: "⇧⌘L, or + › New Window Link, lists your open windows. Pick the ones to link, in order.",
+          title: "Link a window",
+        },
+        done: 3,
+        examples: true,
+      }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-task-hint",
+    page: "shelf",
+  },
+  {
+    check: async (page) =>
+      await firstProblem(page, [async (on) => await showsText(on, "· Done")]),
+    data: {
+      tutorial: tutorialView({ complete: true, done: 5 }),
+      view: shelfView(),
+    },
+    name: "tutorial-checklist-done",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      // An item picked first, so Space and ⌫ would act on it if they got through.
+      await page
+        .getByText("Check me off: click the circle or press Space", {
+          exact: true,
+        })
+        .click();
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ examples: true, spotlight: 1 }))})`
+      );
+      await page.waitForSelector("[data-spotlight-dimmer]");
+    },
+    check: async (page) => {
+      const picked = await selectedRow(page);
+      const before = await callCount(page);
+
+      // The walk takes the keys the list would act on.
+      for (const key of [" ", "Backspace", "ArrowDown"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one key after another.
+        await page.keyboard.press(key);
+      }
+
+      const problem = await bubbleSays(page, "1 of 6");
+
+      if (problem !== null) {
+        return problem;
+      }
+
+      const duringCalls = await calls(page, before);
+      const during = duringCalls.filter((each) => each.call === "apply");
+
+      const stillPicked = await selectedRow(page);
+
+      // The same keys once the walk is over do reach the list: the check above can fail.
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ examples: true }))})`
+      );
+      await page.waitForSelector("[data-spotlight-dimmer]", {
+        state: "detached",
+      });
+      await page.keyboard.press(" ");
+
+      const afterCalls = await calls(page, before);
+      const after = afterCalls.filter((each) => each.call === "apply");
+
+      if (picked === null || during.length > 0 || stillPicked !== picked) {
+        return `keys during the walkthrough reached the shelf: ${JSON.stringify({ during, picked, stillPicked })}`;
+      }
+
+      return after.length === 1
+        ? null
+        : `without the walkthrough Space must check the item off (${JSON.stringify(after)})`;
+    },
+    data: {
+      tutorial: tutorialView({ examples: true }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-spotlight-list",
+    page: "shelf",
+  },
+  {
+    check: async (page) => {
+      const asked = await tutorialAsks(page);
+
+      return isDeepStrictEqual(asked, [
+        JSON.stringify({ id: "picker", kind: "requestHint" }),
+      ])
+        ? null
+        : `the picker must ask for its tip once its first window shows (${asked.join(", ")})`;
+    },
+
+    data: {
+      tutorial: tutorialView({ checklist: false, hints: [PICKER_HINT] }),
+      view: pickerView({ candidates: CANDIDATES, kind: "ready" }),
+    },
+    name: "tutorial-picker-hint-request",
+    page: "picker",
+  },
+  {
+    act: async (page) => {
+      await page
+        .getByText("Check me off: click the circle or press Space", {
+          exact: true,
+        })
+        .click();
+      await page.keyboard.press("ArrowRight");
+      await page.getByRole("button", { name: "Add a field" }).waitFor();
+      await page.waitForTimeout(500);
+
+      const asked = await tutorialAsks(page);
+
+      if (
+        !isDeepStrictEqual(asked, [
+          JSON.stringify({ id: "details-add", kind: "requestHint" }),
+        ])
+      ) {
+        throw new Error(
+          `details must ask for the Add tip (${asked.join(", ")})`
+        );
+      }
+
+      // Main grants it: the bubble shows at Add.
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ active: grantedHint(DETAILS_HINT), checklist: false, examples: true }))})`
+      );
+      await page.waitForTimeout(400);
+    },
+    check: async (page) =>
+      await bubbleSays(page, "None of it is needed when you capture."),
+    data: {
+      tutorial: tutorialView({
+        checklist: false,
+        examples: true,
+        hints: [DETAILS_HINT],
+      }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-details-hint",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page.waitForSelector("[data-spotlight-dimmer]");
+      await page.keyboard.press("ArrowRight");
+    },
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await bubbleSays(on, "2 of 6"),
+        async (on) => await bubbleSays(on, "Where it came from"),
+      ]),
+    data: {
+      tutorial: tutorialView({ examples: true, spotlight: 1 }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-spotlight-source",
+    page: "shelf",
   },
   {
     act: async (page) => {
@@ -4658,6 +5460,7 @@ const SCENES: readonly Scene[] = [
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   drawing: { height: 720, width: 1040 },
+  onboarding: { height: 640, width: 460 },
   picker: { height: 520, width: 600 },
   shelf: { height: 620, width: 360 },
 };
@@ -4813,6 +5616,7 @@ const shoot = async (
     colorScheme: theme,
     deviceScaleFactor: 2,
     locale: "en-US",
+    reducedMotion: scene.reducedMotion === true ? "reduce" : "no-preference",
     userAgent: USER_AGENT[platform],
     viewport: size,
   });

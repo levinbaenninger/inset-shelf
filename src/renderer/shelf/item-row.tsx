@@ -45,6 +45,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
+import { coach } from "@/tutorial/anchors";
 
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
@@ -157,6 +158,7 @@ export const SourceLine = ({
   return (
     <button
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
+      {...coach("item-source")}
       onClick={onOpenLink}
       title={app === null ? (context.url ?? undefined) : `Open ${app}`}
       type="button"
@@ -345,6 +347,8 @@ export interface RowHandlers {
 
 export interface ItemRowProps extends RowHandlers {
   readonly item: ShelfItem;
+  /** One of the first run's example items (the tutorial's), tagged so. */
+  readonly example?: boolean;
   readonly selected: boolean;
   readonly editing: boolean;
   readonly copied: boolean;
@@ -1040,8 +1044,14 @@ export const ItemRow = (props: ItemRowProps) => {
         checked={item.done}
         className="mt-0.5"
         onCheckedChange={props.onToggle}
+        {...coach("item-check")}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {props.example === true ? (
+          <span className="bg-foreground/5 text-muted-foreground w-fit rounded-sm px-1.5 text-xs">
+            Example
+          </span>
+        ) : null}
         {item.kind === "text" ? (
           <TextBody
             editing={editing}
