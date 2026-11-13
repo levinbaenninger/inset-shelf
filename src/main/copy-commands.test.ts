@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { pathToFileURL } from "node:url";
 
 import type { ActionResult } from "@shared/contracts";
 import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
@@ -720,8 +721,9 @@ describe(createCopyCommands, () => {
     await commands.copyList([items.text, items.image]);
 
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      // The system's own file URL for the staged path: file:///C:/tmp/… on Windows.
       'electron application/osclipboard;format="public.file-url"':
-        "file:///tmp/staged/plan.pdf",
+        pathToFileURL("/tmp/staged/plan.pdf").href,
       "text/plain": "plan.pdf",
     });
     await expect(formats(written[1]?.[0])).resolves.toStrictEqual({

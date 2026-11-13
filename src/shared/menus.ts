@@ -70,6 +70,8 @@ export type MenuIcon =
   | "settings"
   | "float"
   | "help"
+  | "checklist"
+  | "tour"
   | "copy"
   | "link"
   | "open"
@@ -171,12 +173,14 @@ export const shelfMenu = (
         {
           choice: { kind: "gettingStarted" },
           enabled: true,
+          icon: "checklist",
           kind: "choice",
           label: "Getting Started",
         } as const,
         {
           choice: { kind: "showMeAround" },
           enabled: true,
+          icon: "tour",
           kind: "choice",
           label: "Show Me Around",
         } as const,

@@ -802,12 +802,40 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }
   }, [focus]);
 
-  // New items arrive at the bottom: keep the newest in view.
+  const hasChecklist = tutorial.checklist !== null;
+  const checklistUp = useRef(hasChecklist);
+
   useEffect(() => {
-    if (newest !== undefined) {
+    checklistUp.current = hasChecklist;
+  }, [hasChecklist]);
+
+  // New items arrive at the bottom: keep the newest in view. The shelf
+  // opens on the checklist while it shows, though: the first newest item
+  // is passed over then, whichever of the shelf and the tutorial loads first.
+  const opened = useRef(false);
+
+  useEffect(() => {
+    if (newest === undefined) {
+      return;
+    }
+
+    const first = !opened.current;
+
+    opened.current = true;
+
+    if (!(first && checklistUp.current)) {
       reveal(newest);
     }
   }, [newest]);
+
+  // The checklist coming up, at launch or from Getting Started, brings the list back to it.
+  useEffect(() => {
+    if (hasChecklist) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollTo({ top: 0 });
+      });
+    }
+  }, [hasChecklist]);
 
   const selected = items.find((item) => item.id === selectedId);
   const pickedItems = items.filter((item) => picked.includes(item.id));

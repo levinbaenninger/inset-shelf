@@ -581,7 +581,7 @@ const TUTORIAL_TASKS = [
   },
   {
     anchor: "add-button",
-    how: "⇧⌘L, or + › New Window Link, lists your open windows. Pick the ones to link, in order.",
+    how: "⇧⌘L, or + › New Window Link, lists your open windows. Click each one to link.",
     id: "window-link",
     keys: "⇧⌘L",
     title: "Link a window",
@@ -755,6 +755,22 @@ const tutorialView = (options: {
 const BubbleSchema = z.object({ text: z.string(), visible: z.boolean() });
 
 /** The tutorial's bubble, drawn and saying this. */
+/** The text of the focused button, when focus is in the tutorial's bubble; null elsewhere. */
+const bubbleFocus = async (page: Page): Promise<string | null> =>
+  z
+    .string()
+    .nullable()
+    .parse(
+      await page.evaluate(() => {
+        const active = document.activeElement;
+
+        return active instanceof HTMLButtonElement &&
+          active.closest("[data-coach-bubble]") !== null
+          ? (active.textContent ?? "").trim()
+          : null;
+      })
+    );
+
 const bubbleSays = async (page: Page, text: string): Promise<string | null> => {
   const bubble = BubbleSchema.parse(
     await page.evaluate(() => {
@@ -763,10 +779,13 @@ const bubbleSays = async (page: Page, text: string): Promise<string | null> => {
 
       return {
         text: element?.textContent ?? "",
+        // Placed on the page: an unplaced bubble waits off screen.
         visible:
           element !== null &&
           box !== undefined &&
           box.width > 0 &&
+          box.left >= 0 &&
+          box.right <= window.innerWidth &&
           getComputedStyle(element).visibility !== "hidden",
       };
     })
@@ -809,6 +828,34 @@ const showsText = async (page: Page, text: string): Promise<string | null> =>
   (await page.getByText(text, { exact: true }).isVisible())
     ? null
     : `no text “${text}”`;
+
+const ListScrollSchema = z.object({
+  scrollable: z.boolean(),
+  top: z.number(),
+});
+
+/** The list is long enough to scroll, and sits at the top, on the checklist. */
+const opensOnChecklist = async (page: Page): Promise<string | null> => {
+  const list = ListScrollSchema.parse(
+    await page.evaluate(() => {
+      const element = document.querySelector("[data-coach='shelf-list']");
+
+      return {
+        scrollable:
+          element !== null && element.scrollHeight > element.clientHeight,
+        top: element?.scrollTop ?? -1,
+      };
+    })
+  );
+
+  if (!list.scrollable) {
+    return "the list must be long enough to scroll, or the check proves nothing";
+  }
+
+  return list.top === 0
+    ? await showsText(page, "Getting started")
+    : `the shelf must open on the checklist, not ${list.top}px down the list`;
+};
 
 const PulseSchema = z.string();
 
@@ -4263,6 +4310,35 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // The shelf loads first and opens on its newest item; the checklist arriving after brings the list back to it.
+    act: async (page) => {
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ done: 0 }))})`
+      );
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => await opensOnChecklist(page),
+    data: { view: shelfView() },
+    name: "tutorial-opens-on-checklist-shelf-first",
+    page: "shelf",
+  },
+  {
+    // The tutorial loads first: the shelf's items arriving after leave the list on the checklist.
+    act: async (page) => {
+      await page.evaluate(
+        `globalThis.__emit("view", ${JSON.stringify(shelfView())})`
+      );
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => await opensOnChecklist(page),
+    data: {
+      tutorial: tutorialView({ done: 0 }),
+      view: shelfView(EMPTY_DOC),
+    },
+    name: "tutorial-opens-on-checklist-tutorial-first",
+    page: "shelf",
+  },
+  {
     data: {
       tutorial: tutorialView({ done: 0, examples: true }),
       view: shelfView(EXAMPLE_DOC),
@@ -4296,7 +4372,7 @@ const SCENES: readonly Scene[] = [
   {
     check: async (page) =>
       await firstProblem(page, [
-        async (on) => await bubbleSays(on, "Pick the ones to link, in order."),
+        async (on) => await bubbleSays(on, "Click each one to link."),
       ]),
     data: {
       tutorial: tutorialView({
@@ -4305,7 +4381,7 @@ const SCENES: readonly Scene[] = [
           id: "window-link",
           kind: "task",
           placement: "below",
-          text: "⇧⌘L, or + › New Window Link, lists your open windows. Pick the ones to link, in order.",
+          text: "⇧⌘L, or + › New Window Link, lists your open windows. Click each one to link.",
           title: "Link a window",
         },
         done: 3,
@@ -4343,13 +4419,15 @@ const SCENES: readonly Scene[] = [
       const picked = await selectedRow(page);
       const before = await callCount(page);
 
-      // The walk takes the keys the list would act on.
+      // The walk takes the keys the list would act on: Space presses the bubble's focused Next instead.
       for (const key of [" ", "Backspace", "ArrowDown"]) {
         // oxlint-disable-next-line no-await-in-loop -- one key after another.
         await page.keyboard.press(key);
       }
 
-      const problem = await bubbleSays(page, "1 of 6");
+      await page.waitForTimeout(300);
+
+      const problem = await bubbleSays(page, "2 of 6");
 
       if (problem !== null) {
         return problem;
@@ -4450,12 +4528,31 @@ const SCENES: readonly Scene[] = [
   {
     act: async (page) => {
       await page.waitForSelector("[data-spotlight-dimmer]");
+      await page.waitForTimeout(200);
+
+      const first = await bubbleFocus(page);
+
+      // The note field takes focus as the page loads: the walk must take it back.
+      if (first !== "Next") {
+        throw new Error(
+          `focus must start on the bubble's Next, not ${first ?? "outside the bubble"}`
+        );
+      }
+
       await page.keyboard.press("ArrowRight");
+      await page.waitForTimeout(200);
     },
     check: async (page) =>
       await firstProblem(page, [
         async (on) => await bubbleSays(on, "2 of 6"),
         async (on) => await bubbleSays(on, "Where it came from"),
+        async (on) => {
+          const label = await bubbleFocus(on);
+
+          return label === "Next"
+            ? null
+            : `focus must stay on the bubble's Next at step 2, not ${label ?? "outside the bubble"}`;
+        },
       ]),
     data: {
       tutorial: tutorialView({ examples: true, spotlight: 1 }),

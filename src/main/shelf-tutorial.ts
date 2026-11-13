@@ -76,7 +76,7 @@ export const shelfTasks = (mac: boolean): readonly TutorialTask[] => {
     },
     {
       anchor: "add-button",
-      how: `${keys.windowLink}, or + › New Window Link, lists your open windows. Pick the ones to link, in order.`,
+      how: `${keys.windowLink}, or + › New Window Link, lists your open windows. Click each one to link.`,
       id: SHELF_TASK_IDS.windowLink,
       keys: keys.windowLink,
       title: "Link a window",

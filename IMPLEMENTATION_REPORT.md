@@ -125,7 +125,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Setup window and tutorial
 
-- `pnpm screens` renders the setup window and the tutorial in light and dark. 220 screenshots in the whole run, all passing.
+- `pnpm screens` renders the setup window and the tutorial in light and dark. 224 screenshots in the whole run, all passing.
   - **Setup window:**
     - Every page, sized to its content.
     - Welcome and Done are no taller than 300 px, and the dots read "Step n of 3", or "Step 2 of 2" with nothing missing.
@@ -141,7 +141,9 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
     - The picker's tip, which reports `hintShown`.
     - The picker asking for its tip once its first window shows.
     - Details asking for the Add tip, then showing it.
-    - Walkthrough steps 1 and 2. With an item picked, Space, ⌫ and ↓ during the walkthrough send nothing and keep the pick. After it, Space checks the item off, so the check can fail.
+    - Walkthrough steps 1 and 2. With an item picked, Space, ⌫ and ↓ during the walkthrough send nothing to the shelf and keep the pick; Space presses the bubble's focused Next. After it, Space checks the item off, so the check can fail.
+    - Focus on the bubble's Next at steps 1 and 2, although the note field takes focus as the page loads. This check failed before the fix.
+    - The shelf opening on the checklist whichever of the shelf and the tutorial loads first, on a list long enough to scroll. The tutorial-first order failed before the fix, 228 px down the list.
 - The built app ran on macOS 27.2 with an empty data folder, driven by Playwright's Electron mode.
   - The setup window opened alone at 460 × 236.
   - Both permissions were inherited from the host, so **Get Started** went straight to Done.
@@ -207,6 +209,32 @@ A later pass compared the Windows build with the macOS behaviour. It ran the bui
 
 Typecheck, lint and the Vitest suite pass, and the changed files pass the format check.
 
+### Tutorial on Windows
+
+The built app (`out/`) ran on Windows 11 on a fresh data folder, driven through Playwright with desktop screenshots. Every check passed:
+
+- The first launch opened the shelf with "Getting started · 0 of 5" and four examples, with keys in their Windows forms (`Shift Shift`, `Win+Shift+S`, `Ctrl+Alt+N`, `Ctrl+Shift+L`).
+- The **⋯** menu held Getting Started and Show Me Around.
+- Show Me Around ran all six steps; Space on a selected item did nothing meanwhile.
+- All five tasks ticked off from real actions:
+  - a check-off;
+  - a drawing with pins;
+  - a window link;
+  - a PNG saved to the Screenshots folder, then **Add to Shelf**;
+  - double Shift over a line in Notepad, sent with real key presses.
+- All four tips showed once each.
+- The done message, Remove Examples across a relaunch, **Show tips** and **Reset Tutorial** behaved as on macOS.
+
+The run found these problems, now fixed:
+
+- **Screenshot tip.** It covered the card's Copy and Add to Shelf until **Got it**. It now goes away once the pointer moves onto the card.
+- **Walkthrough focus.** Focus stayed on the page instead of the bubble. The bubble waited for its place hidden, and its buttons' own transition kept them hidden, and unable to take focus, for a moment after. It now waits off screen, and takes focus back from anything that grabs it while the walk runs.
+- **First-launch scroll.** The shelf sometimes opened scrolled to its newest example, below the checklist. That happened when the tutorial loaded before the shelf. The shelf now opens on the checklist either way, and Getting Started scrolls back to it.
+- **Window-link how-to.** It said "in order" where the picker says "in any order".
+- **⋯ menu icons.** Getting Started and Show Me Around had none, so they didn't line up with the other items.
+- **Dark dimmer.** The walkthrough's dimmer was barely visible in dark mode.
+- **Line endings.** Two unit tests failed on a CRLF checkout, and one expected a POSIX file URL. The repo now has `.gitattributes` with LF line endings, and the tests accept either.
+
 ## What was not tested
 
 - **Windows, partly.** The NSIS installer, the Arm64 build, SmartScreen, displays above 100% scaling (bounds from `get-windows` are converted from physical pixels, but this was not observed), and a capture on a display left of the primary. Edge was not installed, so its window titles (its name has a zero-width space; it may add a profile name and "and N more pages") are handled from what is known, not observed. Pasting a copied list into Teams itself, and opening a Claude, Notion or T3 Code link from the item menu, were not tried. Neither was a double-Shift capture in Firefox, or whether Firefox's note holds the full page address on an ordinary page. A screenshot that only goes to the clipboard (`Alt+PrtScn`, or Snipping Tool with automatic saving off) shows no card. The macOS build was not run after the parity pass, which also changed shared code: the drawing toolbar, the non-modal **⋯** menu, Copy as List (no separate image on the clipboard there either), the source labels, and the tray menu's Hide, which now goes by whether the shelf is on screen.
@@ -221,9 +249,8 @@ Typecheck, lint and the Vitest suite pass, and the changed files pass the format
   - macOS's own Quit & Reopen.
   - The **Double Shift is off** banner.
 - **Dragging the tile into System Settings.** `webContents.startDrag` with the `.app` bundle as the file was never dropped into a Privacy & Security list on a real machine.
-- **Tasks ticking off in the real app.** The completion points were checked in code and with unit tests, but no real double Shift, screenshot card, saved drawing, window link, check-off or copy was performed in a driven run.
-- **Tips on the picker, the screenshot card and the Add menu in the real app**, and the screenshot card staying up while its tip shows. Only the drawing's tip was seen in the real app; the picker's was seen in the harness.
-- **The tutorial on Windows.** It is built for Windows too (the shelf's **⋯** holds Getting Started and Show Me Around, and keys read Ctrl and Win), but it was not run there.
+- **The tutorial's keys on a real Windows keyboard.** The Windows run sent `Ctrl+Alt+N`, `Ctrl+Shift+L` and `Ctrl+,` as Electron input events; only double Shift came from real key presses. On the Swiss German layout `Ctrl+Alt` is AltGr, which was not tried.
+- **Tasks ticking off on macOS in a driven run**, apart from a check-off. A person did all five in the dev build, and `tutorial.json` recorded each one.
 - **Reduced motion in the real app.** Bubbles and the dimmer animate through `motion-safe:` classes; macOS's **Reduce motion** switch was not tried.
 - **`scripts/e2e/verify-macos.ts`** now writes a finished `onboarding.json` and a closed, tip-less `tutorial.json` into its data folder before launch. It was not run after these changes, so its 35 of 35 above dates from before them.
 - **Re-granting after an update.** That an ad-hoc signed update needs the permissions again is expected from how macOS ties grants to signatures, not observed.

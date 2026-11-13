@@ -116,8 +116,9 @@ type PromptFactory = (
 const mainPrompt = async (shelf: ShelfWindow): Promise<PromptCallback> => {
   const source = await readFile(new URL("index.ts", import.meta.url), "utf-8");
 
+  // \r?\n: a Windows checkout made before .gitattributes still has CRLF.
   const callback =
-    /\n {4}prompt: (?<body>\(quitPrompt\) => \{\n[\s\S]*?\n {4}\}),\n {4}quitting:/u.exec(
+    /\r?\n {4}prompt: (?<body>\(quitPrompt\) => \{\r?\n[\s\S]*?\r?\n {4}\}),\r?\n {4}quitting:/u.exec(
       source
     )?.groups?.body;
 
