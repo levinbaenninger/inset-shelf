@@ -4526,6 +4526,75 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A tip inside its control covers it, as on the screenshot card: pointing at the control puts it away.
+    act: async (page) => {
+      await page.waitForSelector("[data-coach-bubble]");
+      await page.waitForTimeout(300);
+
+      const free = await page.evaluate(() => {
+        const list = document
+          .querySelector("[data-coach='shelf-list']")
+          ?.getBoundingClientRect();
+        const bubble = document
+          .querySelector("[data-coach-bubble]")
+          ?.getBoundingClientRect();
+
+        if (list === undefined || bubble === undefined) {
+          return null;
+        }
+
+        const inBubble = (x: number, y: number): boolean =>
+          x >= bubble.left &&
+          x <= bubble.right &&
+          y >= bubble.top &&
+          y <= bubble.bottom;
+
+        const corners = [
+          [list.left + 12, list.top + 12],
+          [list.right - 12, list.bottom - 12],
+          [list.left + 12, list.bottom - 12],
+          [list.right - 12, list.top + 12],
+        ];
+
+        return corners.find(([x = 0, y = 0]) => !inBubble(x, y)) ?? null;
+      });
+
+      if (free === null) {
+        throw new Error("no point on the list outside the tip");
+      }
+
+      const [x = 0, y = 0] = free;
+
+      await page.mouse.move(x, y, { steps: 3 });
+      await page.waitForTimeout(200);
+    },
+    check: async (page) => {
+      const asked = await tutorialAsks(page);
+
+      return asked.includes(
+        JSON.stringify({ id: "inside-tip", kind: "dismissHint" })
+      )
+        ? null
+        : `pointing at the control must put an inside tip away (${asked.join(", ")})`;
+    },
+    data: {
+      tutorial: tutorialView({
+        active: {
+          anchor: "shelf-list",
+          id: "inside-tip",
+          kind: "hint",
+          placement: "inside",
+          text: "Hover for Copy and Add to Shelf.",
+          title: null,
+        },
+        checklist: false,
+      }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-inside-tip-pointed-at",
+    page: "shelf",
+  },
+  {
     act: async (page) => {
       await page.waitForSelector("[data-spotlight-dimmer]");
       await page.waitForTimeout(200);

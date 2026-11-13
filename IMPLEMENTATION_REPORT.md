@@ -125,7 +125,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Setup window and tutorial
 
-- `pnpm screens` renders the setup window and the tutorial in light and dark. 224 screenshots in the whole run, all passing.
+- `pnpm screens` renders the setup window and the tutorial in light and dark. 226 screenshots in the whole run, all passing.
   - **Setup window:**
     - Every page, sized to its content.
     - Welcome and Done are no taller than 300 px, and the dots read "Step n of 3", or "Step 2 of 2" with nothing missing.
@@ -143,6 +143,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
     - Details asking for the Add tip, then showing it.
     - Walkthrough steps 1 and 2. With an item picked, Space, ⌫ and ↓ during the walkthrough send nothing to the shelf and keep the pick; Space presses the bubble's focused Next. After it, Space checks the item off, so the check can fail.
     - Focus on the bubble's Next at steps 1 and 2, although the note field takes focus as the page loads. This check failed before the fix.
+    - A tip inside its control going away once the pointer moves onto the control, outside the tip. This check failed before the fix.
     - The shelf opening on the checklist whichever of the shelf and the tutorial loads first, on a list long enough to scroll. The tutorial-first order failed before the fix, 228 px down the list.
 - The built app ran on macOS 27.2 with an empty data folder, driven by Playwright's Electron mode.
   - The setup window opened alone at 460 × 236.
