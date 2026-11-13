@@ -4535,6 +4535,7 @@ const SCENES: readonly Scene[] = [
         const list = document
           .querySelector("[data-coach='shelf-list']")
           ?.getBoundingClientRect();
+
         const bubble = document
           .querySelector("[data-coach-bubble]")
           ?.getBoundingClientRect();
