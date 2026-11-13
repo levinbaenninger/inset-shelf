@@ -5,6 +5,7 @@ import type {
   DrawingView,
 } from "@shared/contracts";
 import type { Pin } from "@shared/shelf";
+import { keyText } from "@shared/shortcut";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { drawingBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
+import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
@@ -257,7 +259,7 @@ const pageNotice = (quitting: boolean, refused: boolean): string | null => {
 const pinHint = (selectedPin: number | null, pinCount: number): string =>
   selectedPin === null
     ? `Click to place pin ${pinCount + 1}`
-    : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ⌫ removes it`;
+    : `Pin ${selectedPin + 1}: drag or use the arrow keys to move, ${keyText("Backspace", isMac)} removes it`;
 
 /** The pill over the page: the page's notice, otherwise the Pin tool's hint. */
 const PagePill = ({
