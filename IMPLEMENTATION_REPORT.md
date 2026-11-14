@@ -125,7 +125,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Setup window and tutorial
 
-- `pnpm screens` renders the setup window and the tutorial in light and dark. 226 screenshots in the whole run, all passing.
+- `pnpm screens` renders the setup window and the tutorial in light and dark. 228 screenshots in the whole run, all passing.
   - **Setup window:**
     - Every page, sized to its content.
     - Welcome and Done are no taller than 300 px, and the dots read "Step n of 3", or "Step 2 of 2" with nothing missing.
@@ -144,6 +144,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
     - Walkthrough steps 1 and 2. With an item picked, Space, ⌫ and ↓ during the walkthrough send nothing to the shelf and keep the pick; Space presses the bubble's focused Next. After it, Space checks the item off, so the check can fail.
     - Focus on the bubble's Next at steps 1 and 2, although the note field takes focus as the page loads. This check failed before the fix.
     - A tip inside its control going away once the pointer moves onto the control, outside the tip. This check failed before the fix.
+    - A walkthrough started from the **⋯** menu (Windows) giving focus back to the **⋯** button when it ends. This check failed before the fix.
     - The shelf opening on the checklist whichever of the shelf and the tutorial loads first, on a list long enough to scroll. The tutorial-first order failed before the fix, 228 px down the list.
 - The built app ran on macOS 27.2 with an empty data folder, driven by Playwright's Electron mode.
   - The setup window opened alone at 460 × 236.
@@ -235,6 +236,19 @@ The run found these problems, now fixed:
 - **⋯ menu icons.** Getting Started and Show Me Around had none, so they didn't line up with the other items.
 - **Dark dimmer.** The walkthrough's dimmer was barely visible in dark mode.
 - **Line endings.** Two unit tests failed on a CRLF checkout, and one expected a POSIX file URL. The repo now has `.gitattributes` with LF line endings, and the tests accept either.
+
+A second run on the same PC, on a renormalized LF checkout, checked those fixes: 590 of 590 unit tests passed.
+
+- **Screenshot tip.** The pointer moving onto the card put the tip away within 82 to 93 ms. Copy and Add to Shelf were then on top and clickable.
+- **Focus.** It was on Next at steps 1 to 5 and on Done at step 6.
+- **Opening on the checklist.** The shelf opened on the checklist in 5 of 5 fresh launches, with scrollTop 0.
+- **The ⋯ menu icons** line up with the other items.
+- **Dark dimmer.** It measured `oklab(0 0 0 / 0.7)`.
+
+It found two more problems, now fixed:
+
+- **Focus after a walkthrough started from the ⋯ menu.** Focus was meant to go back to the menu item, which is gone once its menu closes, so it fell to the page. It now goes back to the ⋯ button that opened the menu.
+- **A crash dialog while quitting.** "Object has been destroyed" appeared once in 8 quits right after launch. The tutorial asked whether the drawing window was visible after it was destroyed. The drawing, picker and screenshot windows now check for that, as the shelf window already did.
 
 ## What was not tested
 

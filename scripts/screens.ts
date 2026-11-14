@@ -4596,6 +4596,51 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // Started from the ⋯ menu, as on Windows: its item is gone when the walk ends, so focus goes back to the ⋯ button.
+    act: async (page) => {
+      await page.locator("[data-coach='shelf-menu']").click();
+      await page.getByRole("menuitem", { name: "Show Me Around" }).click();
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ examples: true, spotlight: 1 }))})`
+      );
+      await page.waitForSelector("[data-spotlight-dimmer]");
+      await page.waitForTimeout(400);
+      await page.keyboard.press("Escape");
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ examples: true }))})`
+      );
+      await page.waitForSelector("[data-spotlight-dimmer]", {
+        state: "detached",
+      });
+      await page.waitForTimeout(200);
+    },
+    check: async (page) => {
+      const label = z
+        .string()
+        .nullable()
+        .parse(
+          await page.evaluate(() => {
+            const active = document.activeElement;
+
+            return active instanceof HTMLElement
+              ? (active.dataset.coach ?? null)
+              : null;
+          })
+        );
+
+      return label === "shelf-menu"
+        ? null
+        : `focus must go back to the ⋯ button that opened the walk, not ${label ?? "the page"}`;
+    },
+    data: {
+      tutorial: tutorialView({ examples: true }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-walk-from-menu-focus",
+    page: "shelf",
+    platforms: ["windows"],
+  },
+  {
     act: async (page) => {
       await page.waitForSelector("[data-spotlight-dimmer]");
       await page.waitForTimeout(200);
