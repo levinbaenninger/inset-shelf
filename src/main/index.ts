@@ -56,6 +56,7 @@ import type {
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
+import { holdsAgain, sameClipboard } from "./clipboard-match";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -181,8 +182,13 @@ const excerpt = (text: string): string => {
     : line;
 };
 
+/** Electron reads an empty clipboard (or one it can't open) as one item with no formats: that is nothing to keep. */
+const withFormats = (
+  items: readonly ClipboardItem[]
+): readonly ClipboardItem[] => items.filter((item) => item.types.length > 0);
+
 const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
-  const items = await clipboard.read();
+  const items = withFormats(await clipboard.read());
 
   return await Promise.all(
     items.map(async (item) =>
@@ -587,11 +593,22 @@ const start = async (): Promise<void> => {
       const capture = captureSelection({
         clear: gate.clearForSelection,
         copy: keyMonitor.copy,
+        holds: async (saved) => {
+          const items = await clipboard.read();
+
+          return await holdsAgain(
+            saved,
+            items.flatMap((item) => item.types),
+            await clipboard.readText()
+          );
+        },
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),
         restore: gate.restore,
         snapshot: snapshotClipboard,
+        unchanged: async (copied) =>
+          await sameClipboard(copied, await snapshotClipboard()),
         wait: delay,
       });
 

@@ -10,11 +10,24 @@ export interface SelectionDeps<S> {
   readonly readSource: () => Promise<string>;
   /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
+  /** Whether the clipboard holds that snapshot's content again: put back, or still empty for an empty one. */
+  readonly holds: (snapshot: S) => Promise<boolean>;
+  /** Whether every format still matches the capture, with no newer copy to preserve. */
+  readonly unchanged: (snapshot: S) => Promise<boolean>;
   readonly wait: (ms: number) => Promise<void>;
 }
 
 const POLL_MS = 25;
 const POLL_LIMIT = 20;
+
+/**
+ * While another app has the clipboard open, Windows lets a write do nothing
+ * without an error: the clipboard keeps the copied selection, or stays empty.
+ * Putting it back is checked, and tried again for a little over two seconds
+ * before giving up, unless a newer copy has superseded the capture.
+ */
+const RESTORE_ATTEMPTS = 10;
+const RESTORE_RETRY_MS = 250;
 
 export type SelectionResult =
   | {
@@ -42,6 +55,39 @@ const pollText = async <S>(
     : await pollText(deps, attempts - 1);
 };
 
+/** Puts the clipboard back, and checks it took: true once it holds what it held. */
+const putBack = async <S>(
+  deps: SelectionDeps<S>,
+  saved: S,
+  copied: S | null,
+  attempts: number
+): Promise<boolean> => {
+  let wrote = true;
+
+  try {
+    await deps.restore(saved);
+  } catch {
+    wrote = false;
+  }
+
+  if (wrote && (await deps.holds(saved))) {
+    return true;
+  }
+
+  if (attempts <= 1 || copied === null) {
+    return false;
+  }
+
+  await deps.wait(RESTORE_RETRY_MS);
+
+  // Ordinary copies are not blocked by a capture. Never replace a newer one.
+  if (!(await deps.unchanged(copied).catch(() => false))) {
+    return false;
+  }
+
+  return await putBack(deps, saved, copied, attempts - 1);
+};
+
 /**
  * Copies the selection of the app in front and puts the clipboard back as it was.
  * The clipboard is cleared first, so "nothing copied" is told apart from
@@ -60,13 +106,8 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  let restored = true;
-
-  try {
-    await deps.restore(saved);
-  } catch {
-    restored = false;
-  }
+  const copied = await deps.snapshot().catch(() => null);
+  const restored = await putBack(deps, saved, copied, RESTORE_ATTEMPTS);
 
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
   return text.trim() === ""

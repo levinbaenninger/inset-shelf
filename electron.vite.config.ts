@@ -35,6 +35,9 @@ export default defineConfig({
     root: renderer,
     resolve: { alias: { "@": renderer, "@shared": shared } },
     build: {
+      // Fonts stay files: the pages' policy is font-src 'self', which blocks the data: URLs small ones would be inlined as.
+      assetsInlineLimit: (file) =>
+        /\.(?:woff2?|ttf|otf)$/u.test(file) ? false : undefined,
       rolldownOptions: {
         input: {
           drawing: path.resolve(renderer, "drawing.html"),

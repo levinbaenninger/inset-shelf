@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { watch } from "node:fs";
-import type { FSWatcher } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -12,6 +10,8 @@ import { app, clipboard, nativeImage } from "electron";
 import type { NativeImage } from "electron";
 import { z } from "zod";
 
+import { followFolder } from "./follow-folder";
+import type { FolderFollower } from "./follow-folder";
 import { isScreenshotClipboard } from "./screenshot-clipboard";
 
 /**
@@ -52,7 +52,7 @@ const SCREEN_CAPTURE_MARK = "com.apple.metadata:kMDItemIsScreenCapture";
 const LOAD_ATTEMPTS = 20;
 const LOAD_RETRY_MS = 150;
 
-/** Windows makes the Screenshots folder with the first screenshot saved; until then it is looked for again. */
+/** Windows makes the Screenshots folder with the first screenshot saved; when even its parent can't be watched, it is looked for again. */
 const FOLDER_RETRY_MS = 60_000;
 
 const isMac = process.platform === "darwin";
@@ -239,8 +239,7 @@ export const createScreenshotWatcher = (
 ): ScreenshotWatcher => {
   let running = false;
   let child: ChildProcess | null = null;
-  let folder: FSWatcher | null = null;
-  let retry: NodeJS.Timeout | undefined;
+  let folder: FolderFollower | null = null;
   let ignoreUntil = 0;
   // Files shown, and files being read: Windows reports one file several times.
   const seen = new Set<string>();
@@ -297,27 +296,15 @@ export const createScreenshotWatcher = (
       return;
     }
 
-    try {
-      folder = watch(dir, (_event, name) => {
-        if (name !== null) {
-          void onFile(dir, name);
-        }
-      });
-      folder.on("error", () => {
-        folder?.close();
-        folder = null;
-      });
-    } catch {
-      // No access to the folder (macOS asks once for Desktop and Documents): only the clipboard is watched.
-      // On Windows the folder may not be there yet.
-      folder = null;
-
-      if (!isMac) {
-        retry = setTimeout(() => {
-          void watchFolder();
-        }, FOLDER_RETRY_MS);
-      }
-    }
+    // No access to the folder (macOS asks once for Desktop and Documents): only the clipboard is watched.
+    // On Windows the folder may not be there yet: it is waited for, and the screenshot that makes it shows.
+    folder = followFolder(
+      dir,
+      (name) => {
+        void onFile(dir, name);
+      },
+      { retryMs: FOLDER_RETRY_MS, waitForFolder: !isMac }
+    );
   };
 
   const watchClipboard = (): void => {
@@ -359,10 +346,9 @@ export const createScreenshotWatcher = (
     },
     stop: () => {
       running = false;
-      clearTimeout(retry);
       child?.kill();
       child = null;
-      folder?.close();
+      folder?.stop();
       folder = null;
     },
   };

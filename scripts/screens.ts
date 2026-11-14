@@ -3692,6 +3692,28 @@ const SCENES: readonly Scene[] = [
     page: "drawing",
   },
   {
+    act: async (page) => {
+      await page.keyboard.press("p");
+      await page.keyboard.press("2");
+    },
+    // The selected pin's line names the delete key as the system writes it: ⌫ on a Mac, Del on Windows.
+    check: async (page) => {
+      const mac = await page.evaluate(() =>
+        navigator.userAgent.includes("Mac")
+      );
+
+      const line = `Pin 2: drag or use the arrow keys to move, ${mac ? "⌫" : "Del"} removes it`;
+
+      return (await page.getByText(line, { exact: true }).isVisible())
+        ? null
+        : `the selected pin's line must read “${line}”`;
+    },
+    data: { view: drawingView(IMAGE.pins, false) },
+    name: "drawing-pin-selected",
+    page: "drawing",
+    platforms: ["macos", "windows"],
+  },
+  {
     data: { view: drawingView([], true) },
     name: "drawing-pin-hint",
     page: "drawing",

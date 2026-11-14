@@ -842,4 +842,42 @@ describe(createCopyGate, () => {
     expect(cleared).toBe(1);
     expect(waited).toBe(0);
   });
+
+  it("empties the clipboard for a snapshot of an empty one, which Electron reads as an item with no formats", async () => {
+    const written: ClipboardContents[][] = [];
+    let cleared = 0;
+
+    const gate = createCopyGate<ClipboardContents>({
+      clipboard: {
+        clear: () => {
+          cleared += 1;
+        },
+        write: async (items) => {
+          written.push(items);
+          await Promise.resolve();
+        },
+      },
+      copyState: () => ({ kind: "saved" }),
+      discards: () => 0,
+      onWrite: () => {},
+      persisted: async () => await Promise.resolve({ ok: true }),
+      readOnly: false,
+      snapshot: () => ({
+        doc: emptyShelf(SectionIdSchema.parse(uuid(1))),
+        rev: 1,
+      }),
+      // As Electron's ClipboardItem: "at least one MIME type is required".
+      toItem: (data) => {
+        if (Object.keys(data).length === 0) {
+          throw new TypeError("at least one MIME type is required");
+        }
+
+        return data;
+      },
+    });
+
+    await expect(gate.restore([{}])).resolves.toBeUndefined();
+    expect(written).toStrictEqual([]);
+    expect(cleared).toBe(1);
+  });
 });
