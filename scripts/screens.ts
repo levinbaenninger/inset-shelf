@@ -4580,6 +4580,53 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A tip shows while a control has focus; Got it takes focus to its button, and the control must get it back.
+    act: async (page) => {
+      await page
+        .getByText("Check me off: click the circle or press Space", {
+          exact: true,
+        })
+        .click();
+      await page.keyboard.press("ArrowRight");
+      await page.getByRole("button", { name: "Add a field" }).waitFor();
+      await page.getByRole("button", { name: "Back to the list" }).focus();
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ active: grantedHint(DETAILS_HINT), checklist: false, examples: true }))})`
+      );
+      await page.waitForTimeout(400);
+      await page.getByRole("button", { name: "Got it" }).click();
+      // Main lets go of the bubble.
+      await page.evaluate(
+        `globalThis.__emit("tutorial", ${JSON.stringify(tutorialView({ checklist: false, examples: true }))})`
+      );
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => {
+      const label = z
+        .string()
+        .nullable()
+        .parse(
+          await page.evaluate(
+            () => document.activeElement?.getAttribute("aria-label") ?? null
+          )
+        );
+
+      return label === "Back to the list"
+        ? null
+        : `Got it must give focus back to the control that had it, not ${label ?? "the page"}`;
+    },
+    data: {
+      tutorial: tutorialView({
+        checklist: false,
+        examples: true,
+        hints: [DETAILS_HINT],
+      }),
+      view: shelfView(EXAMPLE_DOC),
+    },
+    name: "tutorial-got-it-focus",
+    page: "shelf",
+  },
+  {
     // A tip inside its control covers it, as on the screenshot card: pointing at the control puts it away.
     act: async (page) => {
       await page.waitForSelector("[data-coach-bubble]");

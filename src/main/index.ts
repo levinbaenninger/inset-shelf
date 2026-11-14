@@ -471,15 +471,21 @@ const start = async (): Promise<void> => {
 
         return parsed.success && controller.item(parsed.data) !== undefined;
       },
-      remove: (ids) => {
-        for (const id of ids) {
-          const parsed = ItemIdSchema.safeParse(id);
+      // Removed at once; an id whose item is still there afterwards wasn't, and stays an example.
+      remove: async (ids) =>
+        await Promise.resolve(
+          ids.filter((id) => {
+            const parsed = ItemIdSchema.safeParse(id);
 
-          if (parsed.success) {
+            if (!parsed.success) {
+              return false;
+            }
+
             controller.apply({ id: parsed.data, type: "remove" });
-          }
-        }
-      },
+
+            return controller.item(parsed.data) === undefined;
+          })
+        ),
       seed: () =>
         shelfExamples(isMac).flatMap((example) => {
           const id = controller.apply({
