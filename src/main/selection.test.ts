@@ -9,13 +9,18 @@ const fakeClipboard = (
   initial: string,
   copied: string | null,
   copiedHtml = "",
-  copiedSource = ""
+  copiedSource = "",
+  /** How many writes back another app's hold on the clipboard swallows, as Windows does without an error: the selection stays. */
+  heldFor = 0
 ) => {
   let content = initial;
   let html = "";
   let source = "";
+  let held = heldFor;
   const restoredWith: Snapshot[] = [];
-  const snapshot: Snapshot = [{ "text/plain": new Blob([initial]) }];
+
+  const snapshot: Snapshot =
+    initial === "" ? [] : [{ "text/plain": new Blob([initial]) }];
 
   const deps: SelectionDeps<Snapshot> = {
     clear: () => {
@@ -30,14 +35,21 @@ const fakeClipboard = (
         source = copiedSource;
       }
     },
+    holds: async () => await Promise.resolve(content === initial),
     readHtml: async () => await Promise.resolve(html),
     readSource: async () => await Promise.resolve(source),
     readText: async () => await Promise.resolve(content),
     restore: async (saved) => {
       restoredWith.push(saved);
-      content = initial;
-      html = "";
-      source = "";
+
+      if (held > 0) {
+        held -= 1;
+      } else {
+        content = initial;
+        html = "";
+        source = "";
+      }
+
       await Promise.resolve();
     },
     snapshot: async () => await Promise.resolve(snapshot),
@@ -107,6 +119,36 @@ describe(captureSelection, () => {
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
       text: "Selection test\nThe second line",
     });
+  });
+
+  it("puts the clipboard back again while another app holds it, until it takes", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 2);
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+    });
+    expect(clip.restoredWith).toHaveLength(3);
+    expect(clip.content()).toBe("earlier");
+  });
+
+  it("says the clipboard could not be put back when it never takes", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 1000);
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: false,
+    });
+    expect(clip.content()).toBe("x");
+  });
+
+  it("leaves an empty clipboard empty, putting nothing back again", async () => {
+    const clip = fakeClipboard("", null);
+
+    await expect(captureSelection(clip.deps)).resolves.toStrictEqual({
+      kind: "none",
+      restored: true,
+    });
+    expect(clip.restoredWith).toStrictEqual([[]]);
   });
 
   it("says when the clipboard could not be put back", async () => {
