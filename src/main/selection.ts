@@ -12,6 +12,8 @@ export interface SelectionDeps<S> {
   readonly copy: () => void;
   /** Whether the clipboard holds that snapshot's content again: put back, or still empty for an empty one. */
   readonly holds: (snapshot: S) => Promise<boolean>;
+  /** Whether every format still matches the capture, with no newer copy to preserve. */
+  readonly unchanged: (snapshot: S) => Promise<boolean>;
   readonly wait: (ms: number) => Promise<void>;
 }
 
@@ -22,7 +24,7 @@ const POLL_LIMIT = 20;
  * While another app has the clipboard open, Windows lets a write do nothing
  * without an error: the clipboard keeps the copied selection, or stays empty.
  * Putting it back is checked, and tried again for a little over two seconds
- * before giving up.
+ * before giving up, unless a newer copy has superseded the capture.
  */
 const RESTORE_ATTEMPTS = 10;
 const RESTORE_RETRY_MS = 250;
@@ -57,6 +59,7 @@ const pollText = async <S>(
 const putBack = async <S>(
   deps: SelectionDeps<S>,
   saved: S,
+  copied: S | null,
   attempts: number
 ): Promise<boolean> => {
   let wrote = true;
@@ -71,13 +74,18 @@ const putBack = async <S>(
     return true;
   }
 
-  if (attempts <= 1) {
+  if (attempts <= 1 || copied === null) {
     return false;
   }
 
   await deps.wait(RESTORE_RETRY_MS);
 
-  return await putBack(deps, saved, attempts - 1);
+  // Ordinary copies are not blocked by a capture. Never replace a newer one.
+  if (!(await deps.unchanged(copied).catch(() => false))) {
+    return false;
+  }
+
+  return await putBack(deps, saved, copied, attempts - 1);
 };
 
 /**
@@ -98,7 +106,8 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const restored = await putBack(deps, saved, RESTORE_ATTEMPTS);
+  const copied = await deps.snapshot().catch(() => null);
+  const restored = await putBack(deps, saved, copied, RESTORE_ATTEMPTS);
 
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
   return text.trim() === ""
