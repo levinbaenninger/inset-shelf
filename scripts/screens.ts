@@ -4393,6 +4393,60 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // On an empty shelf there is no item's circle to point at: the how-to points at its own row instead.
+    check: async (page) =>
+      await firstProblem(page, [
+        async (on) => await bubbleSays(on, "Click an item's circle"),
+      ]),
+    data: {
+      tutorial: tutorialView({
+        active: {
+          anchor: "item-check",
+          id: "check-or-copy",
+          kind: "task",
+          placement: "below",
+          text: "Click an item's circle or press Space to check it off.",
+          title: "Check off or copy an item back",
+        },
+        done: 0,
+      }),
+      view: shelfView(EMPTY_DOC),
+    },
+    name: "tutorial-task-hint-row",
+    page: "shelf",
+  },
+  {
+    // A how-to with nothing to point at, the checklist closed: the page lets it go, so it never holds back the tips.
+    act: async (page) => {
+      await page.waitForTimeout(1600);
+    },
+    check: async (page) => {
+      const asked = await tutorialAsks(page);
+
+      return asked.includes(
+        JSON.stringify({ id: "check-or-copy", kind: "dismissHint" })
+      )
+        ? null
+        : `a how-to that can't show must be let go (${asked.join(", ")})`;
+    },
+    data: {
+      tutorial: tutorialView({
+        active: {
+          anchor: "item-check",
+          id: "check-or-copy",
+          kind: "task",
+          placement: "below",
+          text: "Click an item's circle or press Space to check it off.",
+          title: "Check off or copy an item back",
+        },
+        checklist: false,
+      }),
+      view: shelfView(EMPTY_DOC),
+    },
+    name: "tutorial-task-hint-released",
+    page: "shelf",
+  },
+  {
     check: async (page) =>
       await firstProblem(page, [async (on) => await showsText(on, "· Done")]),
     data: {

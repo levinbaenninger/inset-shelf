@@ -91,7 +91,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Automated tests
 
-`pnpm test` runs 590 Vitest tests in 52 files:
+`pnpm test` runs 592 Vitest tests in 52 files:
 
 - The double-tap state machine, including capitals, held keys, both Shift keys at once and a triple tap.
 - Every shelf operation, sections, moving and colouring items, undo, clearing checked items, grouping and search, the list export, the v1 to v2 migration, and that each result is a valid document.
@@ -120,12 +120,13 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
   - A task's how-to points at its control or its row, and doing the task takes it and its hint away.
   - Examples are added on the very first run only, never after they are removed, after an earlier install or after a damaged file. One deleted by hand stops being tagged.
   - Reset starts the checklist and hints over and keeps the examples.
+  - Saves run one at a time: with a store that refuses an overlapping write, as Windows' atomic rename does, the last task's "all done" is still saved. A hint let go before it was drawn is offered again.
   - The walkthrough's step resolver skips steps without an anchor, and bubble placement goes below, above or inside an anchor, inside the window.
   - Inset Shelf's data uses only real keys (macOS and Windows) and only anchors the pages mark, and its hints tie to tasks it has.
 
 ### Setup window and tutorial
 
-- `pnpm screens` renders the setup window and the tutorial in light and dark. 228 screenshots in the whole run, all passing.
+- `pnpm screens` renders the setup window and the tutorial in light and dark. 232 screenshots in the whole run, all passing.
   - **Setup window:**
     - Every page, sized to its content.
     - Welcome and Done are no taller than 300 px, and the dots read "Step n of 3", or "Step 2 of 2" with nothing missing.
@@ -145,6 +146,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
     - Focus on the bubble's Next at steps 1 and 2, although the note field takes focus as the page loads. This check failed before the fix.
     - A tip inside its control going away once the pointer moves onto the control, outside the tip. This check failed before the fix.
     - A walkthrough started from the **⋯** menu (Windows) giving focus back to the **⋯** button when it ends. This check failed before the fix.
+    - A task's how-to on an empty shelf, which has no item circle to point at, pointing at its own checklist row instead; and one with nothing at all to point at being let go after a second, so it never holds back the tips. Both checks failed before the fix.
     - The shelf opening on the checklist whichever of the shelf and the tutorial loads first, on a list long enough to scroll. The tutorial-first order failed before the fix, 228 px down the list.
 - The built app ran on macOS 27.2 with an empty data folder, driven by Playwright's Electron mode.
   - The setup window opened alone at 460 × 236.
