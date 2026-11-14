@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { followFolder } from "./follow-folder";
 import type { FolderFollower } from "./follow-folder";
 
+/** How long a file event may take: macOS reports through FSEvents, which can lag past a second when the machine is busy. */
+const WATCH_MS = 5000;
+
 describe(followFolder, () => {
   const followers: FolderFollower[] = [];
   const dirs: string[] = [];
@@ -55,9 +58,12 @@ describe(followFolder, () => {
 
     await writeFile(path.join(dir, "Screenshot 1.png"), "png");
 
-    await vi.waitFor(() => {
-      expect(names).toContain("Screenshot 1.png");
-    });
+    await vi.waitFor(
+      () => {
+        expect(names).toContain("Screenshot 1.png");
+      },
+      { timeout: WATCH_MS }
+    );
   });
 
   it("reports the file that made a missing folder, once the folder appears", async () => {
@@ -69,9 +75,12 @@ describe(followFolder, () => {
     await mkdir(dir);
     await writeFile(path.join(dir, "Screenshot 1.png"), "png");
 
-    await vi.waitFor(() => {
-      expect(names).toContain("Screenshot 1.png");
-    });
+    await vi.waitFor(
+      () => {
+        expect(names).toContain("Screenshot 1.png");
+      },
+      { timeout: WATCH_MS }
+    );
   });
 
   it("doesn't wait for a missing folder when told not to", async () => {
