@@ -448,20 +448,58 @@ describe(captureSelection, () => {
     });
   });
 
-  it("puts the clipboard back after a hold over the whole copy, once the hold ends", async () => {
-    // The selection was never read, so what comes back after the hold can't be told from a newer copy: it is put back.
-    // The hold outlasts the deadline, and the first read after it still falls under the hold, as in the Windows run.
+  it.each([
+    { markup: "", text: "new user copy" },
+    { markup: "<b>new user copy</b>", text: "new user copy" },
+    { markup: "", text: "" },
+  ])(
+    "preserves a newer copy when a hold kept the selection unreadable: $text $markup",
+    async ({ markup, text }) => {
+      const clip = fakeClipboard("earlier", "x", "", "", 0, {
+        from: 20,
+        to: 10_400,
+      });
+
+      await expect(
+        captureSelection({
+          ...clip.deps,
+          snapshot: async () => {
+            const read = await clip.deps.snapshot();
+
+            if (clip.deps.now() >= 10_000 && !clip.deps.readable(read)) {
+              // The holder copies before releasing, during the last held read.
+              clip.replace(text, markup);
+            }
+
+            return read;
+          },
+        })
+      ).resolves.toStrictEqual({
+        kind: "busy",
+        restored: false,
+        unchecked: false,
+      });
+      expect(clip.restoredWith).toHaveLength(0);
+      expect(clip.content()).toBe(text);
+      await expect(clip.deps.readHtml()).resolves.toBe(markup);
+    }
+  );
+
+  it("leaves unknown clipboard content alone after a hold over the whole copy", async () => {
+    // The selection was never read, so what comes back after the hold can't be told from a newer copy.
+    // The hold ends just after the deadline, as in the Windows run.
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 20,
       to: 10_400,
     });
 
-    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+    await expect(captureSelection(clip.deps)).resolves.toStrictEqual({
       kind: "busy",
-      restored: true,
+      restored: false,
       unchecked: false,
     });
-    expect(clip.content()).toBe("earlier");
+    expect(clip.restoredWith).toHaveLength(0);
+    expect(clip.content()).toBe("x");
   });
 
   it("keeps reading the selection while another app holds the clipboard, then copies it", async () => {

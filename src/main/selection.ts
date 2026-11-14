@@ -141,12 +141,10 @@ type Baseline<S> =
  * The clipboard right after the capture. A read under a hold says nothing:
  * what comes back after the hold is the capture only if it is exactly what
  * was copied, text and HTML; anything else is a newer copy to leave alone.
- * When a hold kept the selection from being read at all, nothing can be told
- * apart from it, so what comes back is taken as the capture.
  */
 const baseline = async <S>(
   deps: SelectionDeps<S>,
-  copied: { readonly html: string; readonly text: string } | null,
+  copied: { readonly html: string; readonly text: string },
   until: number
 ): Promise<Baseline<S>> => {
   const first = await deps.snapshot().catch(() => null);
@@ -163,10 +161,6 @@ const baseline = async <S>(
 
   if (later === null) {
     return { kind: "held" };
-  }
-
-  if (copied === null) {
-    return { kind: "read", snapshot: later };
   }
 
   // Judged from that one read: a second read could fall under a hold that starts meanwhile.
@@ -281,12 +275,16 @@ export const captureSelection = async <S>(
     until
   );
 
+  // Without a readable selection, a later snapshot could be a newer copy: never put back over it.
+  if (held) {
+    return { kind: "busy", ...NOT_TRIED };
+  }
+
   // Read with the text, before the clipboard goes back to what it held.
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  // A hold through the whole text read leaves the selection unknown.
-  const left = await baseline(deps, held ? null : { html, text }, until);
+  const left = await baseline(deps, { html, text }, until);
 
   let ended: PutBackResult;
 
@@ -318,7 +316,7 @@ export const captureSelection = async <S>(
   }
 
   if (text.trim() === "") {
-    return { kind: held ? "busy" : "none", ...ended };
+    return { kind: "none", ...ended };
   }
 
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
