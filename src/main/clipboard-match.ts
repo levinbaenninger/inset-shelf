@@ -62,9 +62,10 @@ export const readableClipboard = (
 
 /**
  * Retry only while every format still has the capture's bytes, including
- * pictures and raw formats. A format empty on one side is skipped: a read
- * that another app's hold cut short gets the first formats and none of the
- * rest, and that says nothing about them.
+ * pictures and raw formats. `before` is the capture's read: a raw format it
+ * got empty is skipped, since a read cut short by another app's hold gets
+ * the first formats and none of the rest. A format empty only in `after`,
+ * and any standard format, is compared whole: a newer copy can differ there.
  */
 export const sameClipboard = async (
   before: readonly ClipboardContents[],
@@ -75,9 +76,9 @@ export const sameClipboard = async (
   }
 
   const unread = new Set(
-    [...before, ...after].flatMap((item) =>
+    before.flatMap((item) =>
       Object.entries(item)
-        .filter(([, value]) => isEmpty(value))
+        .filter(([type, value]) => !STANDARD.has(type) && isEmpty(value))
         .map(([type]) => type)
     )
   );

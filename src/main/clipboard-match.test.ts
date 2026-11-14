@@ -46,7 +46,7 @@ describe(sameClipboard, () => {
     ).resolves.toBeFalsy();
   });
 
-  it("skips a format that came back empty on one side, as a read cut short by another app's hold leaves it", async () => {
+  it("skips a raw format the capture's read got empty, as a read cut short by another app's hold leaves it", async () => {
     await expect(
       sameClipboard(
         [{ [RAW]: new Blob([]), "text/plain": new Blob(["x"]) }],
@@ -57,6 +57,24 @@ describe(sameClipboard, () => {
       sameClipboard(
         [{ [RAW]: new Blob([]), "text/plain": new Blob(["x"]) }],
         [{ [RAW]: new Blob(["raw"]), "text/plain": new Blob(["newer"]) }]
+      )
+    ).resolves.toBeFalsy();
+  });
+
+  it("takes a raw format that is empty only now for a newer copy, never skipping it", async () => {
+    await expect(
+      sameClipboard(
+        [{ [RAW]: new Blob(["capture data"]), "text/plain": new Blob(["x"]) }],
+        [{ [RAW]: new Blob([]), "text/plain": new Blob(["x"]) }]
+      )
+    ).resolves.toBeFalsy();
+  });
+
+  it("compares the standard formats whole, even one the capture's read got empty", async () => {
+    await expect(
+      sameClipboard(
+        [{ "text/html": new Blob([]), "text/plain": new Blob(["x"]) }],
+        [{ "text/html": new Blob(["<b>x</b>"]), "text/plain": new Blob(["x"]) }]
       )
     ).resolves.toBeFalsy();
   });
@@ -150,7 +168,7 @@ describe(readableClipboard, () => {
     }).toStrictEqual({ empty: true, held: false, raw: true, text: true });
   });
 
-  it("reads a clipboard Windows has cleared, with only empty raw formats left, as readable and empty", () => {
+  it("reads a clipboard with only raw formats as readable, even ones with nothing in them", () => {
     expect(
       readableClipboard([
         {
