@@ -154,8 +154,13 @@ export const captureSelection = async <S>(
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
   const until = deps.now() + RESTORE_DEADLINE_MS;
-  const copied = await readSnapshot(deps, until, RESTORE_RETRY_MS);
-  const restored = await putBack(deps, saved, copied, until);
+  // A first snapshot read under a hold can't identify the capture. A later readable
+  // one might be a newer copy, so leave it alone rather than adopt it as the baseline.
+  const copied = await deps.snapshot().catch(() => null);
+
+  const restored =
+    (copied === null || deps.readable(copied)) &&
+    (await putBack(deps, saved, copied, until));
 
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
   return text.trim() === ""

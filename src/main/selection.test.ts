@@ -210,6 +210,40 @@ describe(captureSelection, () => {
     expect(clip.content()).toBe("new user copy");
   });
 
+  it.each([
+    { markup: "", text: "new user copy" },
+    { markup: "<i>x</i>", text: "x" },
+    { markup: "", text: "" },
+  ])(
+    "preserves a newer copy after a held first snapshot: $text $markup",
+    async ({ markup, text }) => {
+      const clip = fakeClipboard("earlier", "x", "<b>x</b>");
+      let snapshots = 0;
+
+      await expect(
+        captureSelection({
+          ...clip.deps,
+          snapshot: async () => {
+            snapshots += 1;
+
+            if (snapshots === 2) {
+              // The read started under a hold; the other app copies before it returns.
+              await clip.deps.wait(350);
+              clip.replace(text, markup);
+
+              return HELD_READ;
+            }
+
+            return await clip.deps.snapshot();
+          },
+        })
+      ).resolves.toMatchObject({ restored: false, text: "x" });
+      expect(clip.restoredWith).toHaveLength(0);
+      expect(clip.content()).toBe(text);
+      await expect(clip.deps.readHtml()).resolves.toBe(markup);
+    }
+  );
+
   it("preserves a newer copy with the same text but different HTML", async () => {
     const clip = fakeClipboard("earlier", "x", "<b>x</b>", "", 1);
 
@@ -292,6 +326,20 @@ describe(captureSelection, () => {
       text: "x",
     });
     expect(clip.content()).toBe("earlier");
+  });
+
+  it("leaves the clipboard alone when a hold prevents establishing the capture's baseline", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 30,
+      to: 1500,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: false,
+      text: "x",
+    });
+    expect(clip.restoredWith).toHaveLength(0);
+    expect(clip.content()).toBe("x");
   });
 
   it("says the clipboard could not be put back when another app holds it past the retries", async () => {
