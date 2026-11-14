@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clipboardContent,
   holdsAgain,
+  holdsAgainIn,
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
@@ -131,5 +133,35 @@ describe(readableClipboard, () => {
       raw: readableClipboard([{ [RAW]: new Blob(["x"]) }]),
       text: readableClipboard([{ "text/plain": new Blob(["earlier"]) }]),
     }).toStrictEqual({ empty: true, held: false, raw: true, text: true });
+  });
+});
+
+describe(holdsAgainIn, () => {
+  it("judges the read it is given: its formats and its plain text", async () => {
+    const saved = [{ "text/plain": new Blob(["earlier"]) }];
+
+    expect({
+      back: await holdsAgainIn(saved, [
+        { "text/plain": new Blob(["earlier"]) },
+      ]),
+      held: await holdsAgainIn(saved, [{ "text/plain": new Blob([]) }]),
+      selection: await holdsAgainIn(saved, [
+        { "text/plain": new Blob(["the selection"]) },
+      ]),
+    }).toStrictEqual({ back: true, held: false, selection: false });
+  });
+});
+
+describe(clipboardContent, () => {
+  it("reads the plain text and HTML of one read, empty for what it hasn't", async () => {
+    expect({
+      both: await clipboardContent([
+        { "text/html": new Blob(["<b>x</b>"]), "text/plain": new Blob(["x"]) },
+      ]),
+      none: await clipboardContent([]),
+    }).toStrictEqual({
+      both: { html: "<b>x</b>", text: "x" },
+      none: { html: "", text: "" },
+    });
   });
 });

@@ -95,3 +95,31 @@ export const holdsAgain = async (
 
   return was === null || plain(was) === plain(text);
 };
+
+const textIn = async (
+  read: readonly ClipboardContents[],
+  type: string
+): Promise<string> => {
+  const value = read.find((item) => type in item)?.[type];
+
+  return value instanceof Blob ? await value.text() : "";
+};
+
+/** The plain text and HTML in a read of the clipboard, "" for either it hasn't. */
+export const clipboardContent = async (
+  read: readonly ClipboardContents[]
+): Promise<{ readonly html: string; readonly text: string }> => ({
+  html: await textIn(read, "text/html"),
+  text: await textIn(read, "text/plain"),
+});
+
+/** holdsAgain, judged from one read of the clipboard rather than reading it again. */
+export const holdsAgainIn = async (
+  saved: readonly ClipboardContents[],
+  current: readonly ClipboardContents[]
+): Promise<boolean> =>
+  await holdsAgain(
+    saved,
+    current.flatMap((item) => Object.keys(item)),
+    await textIn(current, "text/plain")
+  );

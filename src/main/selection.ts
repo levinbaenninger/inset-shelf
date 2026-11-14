@@ -10,8 +10,16 @@ export interface SelectionDeps<S> {
   readonly readSource: () => Promise<string>;
   /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
-  /** Whether the clipboard holds that snapshot's content again: put back, or still empty for an empty one. */
-  readonly holds: (snapshot: S) => Promise<boolean>;
+  /**
+   * Whether the clipboard, read as `current`, holds `saved`'s content again: put back, or still empty for an
+   * empty one. It judges that read and makes none of its own, which a hold starting meanwhile would spoil.
+   */
+  readonly holds: (saved: S, current: S) => Promise<boolean>;
+  /** The plain text and HTML in a snapshot, "" for either it hasn't. */
+  readonly content: (snapshot: S) => Promise<{
+    readonly html: string;
+    readonly text: string;
+  }>;
   /** False for a read made while another app had the clipboard open: Electron hands back formats with nothing in them. */
   readonly readable: (snapshot: S) => boolean;
   /** Whether two snapshots hold the same content, format by format. */
@@ -132,10 +140,12 @@ type Baseline<S> =
  * The clipboard right after the capture. A read under a hold says nothing:
  * what comes back after the hold is the capture only if it is exactly what
  * was copied, text and HTML; anything else is a newer copy to leave alone.
+ * When a hold kept the selection from being read at all, nothing can be told
+ * apart from it, so what comes back is taken as the capture.
  */
 const baseline = async <S>(
   deps: SelectionDeps<S>,
-  copied: { readonly html: string; readonly text: string },
+  copied: { readonly html: string; readonly text: string } | null,
   until: number
 ): Promise<Baseline<S>> => {
   const first = await deps.snapshot().catch(() => null);
@@ -154,8 +164,12 @@ const baseline = async <S>(
     return { kind: "held" };
   }
 
-  const text = await deps.readText().catch(() => null);
-  const html = await deps.readHtml().catch(() => null);
+  if (copied === null) {
+    return { kind: "read", snapshot: later };
+  }
+
+  // Judged from that one read: a second read could fall under a hold that starts meanwhile.
+  const { html, text } = await deps.content(later);
 
   return text === copied.text && html === copied.html
     ? { kind: "read", snapshot: later }
@@ -177,7 +191,7 @@ const look = async <S>(
     return "held";
   }
 
-  if (await deps.holds(saved)) {
+  if (await deps.holds(saved, current)) {
     return "restored";
   }
 
@@ -267,7 +281,8 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const left = await baseline(deps, { html, text }, until);
+  // A hold through the whole text read leaves the selection unknown.
+  const left = await baseline(deps, held ? null : { html, text }, until);
 
   let ended: PutBackResult;
 

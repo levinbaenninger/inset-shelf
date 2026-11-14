@@ -60,7 +60,8 @@ import type {
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import {
-  holdsAgain,
+  clipboardContent,
+  holdsAgainIn,
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
@@ -733,15 +734,8 @@ const start = async (): Promise<void> => {
       const capture = captureSelection({
         clear: gate.clearForSelection,
         copy: keyMonitor.copy,
-        holds: async (saved) => {
-          const items = await clipboard.read();
-
-          return await holdsAgain(
-            saved,
-            items.flatMap((item) => item.types),
-            await clipboard.readText()
-          );
-        },
+        content: clipboardContent,
+        holds: holdsAgainIn,
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),

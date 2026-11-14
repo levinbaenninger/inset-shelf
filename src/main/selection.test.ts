@@ -71,7 +71,11 @@ const fakeClipboard = (
         source = copiedSource;
       }
     },
-    holds: async () => await Promise.resolve(!holding() && content === initial),
+    content: async (read) => ({
+      html: (await read[0]?.["text/html"]?.text()) ?? "",
+      text: (await read[0]?.["text/plain"]?.text()) ?? "",
+    }),
+    holds: async (saved, current) => await sameClipboard(saved, current),
     now: () => time,
     readable: readableClipboard,
     readHtml: async () => await Promise.resolve(html),
@@ -399,6 +403,36 @@ describe(captureSelection, () => {
       restored: false,
       unchecked: true,
     });
+  });
+
+  it("confirms a put back from the clipboard it read, when another app takes the clipboard just after that read", async () => {
+    // Put back at 36–38 ms, read back at 38–43 ms; the hold starts right after that read.
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 43,
+      to: 1500,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+      unchecked: false,
+    });
+  });
+
+  it("puts the clipboard back after a hold over the whole copy, once the hold ends", async () => {
+    // The selection was never read, so what comes back after the hold can't be told from a newer copy: it is put back.
+    // The hold outlasts the deadline, and the first read after it still falls under the hold, as in the Windows run.
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 20,
+      to: 3700,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "busy",
+      restored: true,
+      unchecked: false,
+    });
+    expect(clip.content()).toBe("earlier");
   });
 
   it("keeps reading the selection while another app holds the clipboard, then copies it", async () => {
