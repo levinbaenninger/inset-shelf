@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { holdsAgain, sameClipboard } from "./clipboard-match";
+import {
+  holdsAgain,
+  readableClipboard,
+  sameClipboard,
+} from "./clipboard-match";
 
 const RAW = 'electron application/osclipboard;format="DataObject"';
 
@@ -116,5 +120,16 @@ describe(holdsAgain, () => {
         "one\ntwo\0"
       )
     ).resolves.toBeTruthy();
+  });
+});
+
+describe(readableClipboard, () => {
+  it("takes formats with nothing in them for a read made while another app held the clipboard", () => {
+    expect({
+      empty: readableClipboard([]),
+      held: readableClipboard([{ "text/plain": new Blob([]) }]),
+      raw: readableClipboard([{ [RAW]: new Blob(["x"]) }]),
+      text: readableClipboard([{ "text/plain": new Blob(["earlier"]) }]),
+    }).toStrictEqual({ empty: true, held: false, raw: true, text: true });
   });
 });

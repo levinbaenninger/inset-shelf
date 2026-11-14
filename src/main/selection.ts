@@ -12,8 +12,11 @@ export interface SelectionDeps<S> {
   readonly copy: () => void;
   /** Whether the clipboard holds that snapshot's content again: put back, or still empty for an empty one. */
   readonly holds: (snapshot: S) => Promise<boolean>;
-  /** Whether every format still matches the capture, with no newer copy to preserve. */
-  readonly unchanged: (snapshot: S) => Promise<boolean>;
+  /** False for a read made while another app had the clipboard open: Electron hands back formats with nothing in them. */
+  readonly readable: (snapshot: S) => boolean;
+  /** Whether two snapshots hold the same content, format by format. */
+  readonly same: (a: S, b: S) => Promise<boolean>;
+  readonly now: () => number;
   readonly wait: (ms: number) => Promise<void>;
 }
 
@@ -22,12 +25,17 @@ const POLL_LIMIT = 20;
 
 /**
  * While another app has the clipboard open, Windows lets a write do nothing
- * without an error: the clipboard keeps the copied selection, or stays empty.
- * Putting it back is checked, and tried again for a little over two seconds
- * before giving up, unless a newer copy has superseded the capture.
+ * without an error (the clipboard keeps the copied selection), and a read
+ * takes about 350 ms and comes back as one empty text. Putting the clipboard
+ * back is checked, and tried again for up to three seconds, unless a newer
+ * copy has superseded the capture.
  */
-const RESTORE_ATTEMPTS = 10;
+const RESTORE_DEADLINE_MS = 3000;
 const RESTORE_RETRY_MS = 250;
+
+/** How long the capture waits for a clipboard another app holds, before leaving it alone. */
+const SNAPSHOT_WAIT_MS = 1000;
+const SNAPSHOT_RETRY_MS = 100;
 
 export type SelectionResult =
   | {
@@ -39,7 +47,9 @@ export type SelectionResult =
       readonly source: string | null;
       readonly restored: boolean;
     }
-  | { readonly kind: "none"; readonly restored: boolean };
+  | { readonly kind: "none"; readonly restored: boolean }
+  /** Another app held the clipboard throughout: it was left alone, and nothing was copied. */
+  | { readonly kind: "busy" };
 
 /** Waits for the copied text to arrive, up to `attempts` short waits. */
 const pollText = async <S>(
@@ -55,12 +65,33 @@ const pollText = async <S>(
     : await pollText(deps, attempts - 1);
 };
 
+/** A snapshot that could be read, waiting for another app to let go of the clipboard; null if it doesn't by `until`. */
+const readSnapshot = async <S>(
+  deps: SelectionDeps<S>,
+  until: number,
+  retryMs: number
+): Promise<S | null> => {
+  const snapshot = await deps.snapshot().catch(() => null);
+
+  if (snapshot !== null && deps.readable(snapshot)) {
+    return snapshot;
+  }
+
+  if (deps.now() >= until) {
+    return null;
+  }
+
+  await deps.wait(retryMs);
+
+  return await readSnapshot(deps, until, retryMs);
+};
+
 /** Puts the clipboard back, and checks it took: true once it holds what it held. */
 const putBack = async <S>(
   deps: SelectionDeps<S>,
   saved: S,
   copied: S | null,
-  attempts: number
+  until: number
 ): Promise<boolean> => {
   let wrote = true;
 
@@ -74,18 +105,25 @@ const putBack = async <S>(
     return true;
   }
 
-  if (attempts <= 1 || copied === null) {
+  // Without the clipboard as the capture left it, a newer copy couldn't be told apart: no retry.
+  if (copied === null || deps.now() >= until) {
     return false;
   }
 
   await deps.wait(RESTORE_RETRY_MS);
 
+  // An empty read only means another app still has it open: wait that out, then look again.
+  const current = await readSnapshot(deps, until, RESTORE_RETRY_MS);
+
   // Ordinary copies are not blocked by a capture. Never replace a newer one.
-  if (!(await deps.unchanged(copied).catch(() => false))) {
+  if (
+    current === null ||
+    !(await deps.same(copied, current).catch(() => false))
+  ) {
     return false;
   }
 
-  return await putBack(deps, saved, copied, attempts - 1);
+  return await putBack(deps, saved, copied, until);
 };
 
 /**
@@ -96,7 +134,16 @@ const putBack = async <S>(
 export const captureSelection = async <S>(
   deps: SelectionDeps<S>
 ): Promise<SelectionResult> => {
-  const saved = await deps.snapshot();
+  // A clipboard that can't be read can't be put back: it is left alone rather than emptied.
+  const saved = await readSnapshot(
+    deps,
+    deps.now() + SNAPSHOT_WAIT_MS,
+    SNAPSHOT_RETRY_MS
+  );
+
+  if (saved === null) {
+    return { kind: "busy" };
+  }
 
   deps.clear();
   deps.copy();
@@ -106,8 +153,9 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const copied = await deps.snapshot().catch(() => null);
-  const restored = await putBack(deps, saved, copied, RESTORE_ATTEMPTS);
+  const until = deps.now() + RESTORE_DEADLINE_MS;
+  const copied = await readSnapshot(deps, until, RESTORE_RETRY_MS);
+  const restored = await putBack(deps, saved, copied, until);
 
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
   return text.trim() === ""

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { sameClipboard } from "./clipboard-match";
+import { readableClipboard, sameClipboard } from "./clipboard-match";
 import { captureSelection } from "./selection";
 import type { SelectionDeps } from "./selection";
 
 type Snapshot = readonly Record<string, Blob>[];
+
+/** What Electron reads while another app has the clipboard open, as measured on Windows: one empty text. */
+const HELD_READ: Snapshot = [{ "text/plain": new Blob([]) }];
 
 const fakeClipboard = (
   initial: string,
@@ -12,18 +15,37 @@ const fakeClipboard = (
   copiedHtml = "",
   copiedSource = "",
   /** How many writes back another app's hold on the clipboard swallows, as Windows does without an error: the selection stays. */
-  heldFor = 0
+  heldFor = 0,
+  /**
+   * Another app holds the clipboard from `from` to `to` ms after the capture
+   * starts: reads come back as one empty text, and writes do nothing.
+   */
+  hold: { readonly from: number; readonly to: number } | null = null
 ) => {
   let content = initial;
   let html = "";
   let source = "";
   let held = heldFor;
+  let time = 0;
+  let cleared = 0;
   const restoredWith: Snapshot[] = [];
+
+  const holding = (): boolean =>
+    hold !== null && time >= hold.from && time < hold.to;
 
   const snapshot: Snapshot =
     initial === "" ? [] : [{ "text/plain": new Blob([initial]) }];
 
+  // A read takes a moment, and about 350 ms while another app holds the clipboard (measured on Windows).
   const readSnapshot = async (): Promise<Snapshot> => {
+    const wasHeld = holding();
+
+    time += wasHeld ? 350 : 5;
+
+    if (wasHeld) {
+      return await Promise.resolve(HELD_READ);
+    }
+
     if (content === "") {
       return [];
     }
@@ -37,6 +59,7 @@ const fakeClipboard = (
 
   const deps: SelectionDeps<Snapshot> = {
     clear: () => {
+      cleared += 1;
       content = "";
       html = "";
       source = "";
@@ -48,7 +71,9 @@ const fakeClipboard = (
         source = copiedSource;
       }
     },
-    holds: async () => await Promise.resolve(content === initial),
+    holds: async () => await Promise.resolve(!holding() && content === initial),
+    now: () => time,
+    readable: readableClipboard,
     readHtml: async () => await Promise.resolve(html),
     readSource: async () => await Promise.resolve(source),
     readText: async () => await Promise.resolve(content),
@@ -57,7 +82,7 @@ const fakeClipboard = (
 
       if (held > 0) {
         held -= 1;
-      } else {
+      } else if (!holding()) {
         content = initial;
         html = "";
         source = "";
@@ -65,15 +90,16 @@ const fakeClipboard = (
 
       await Promise.resolve();
     },
+    same: sameClipboard,
     snapshot: readSnapshot,
-    unchanged: async (copiedSnapshot) =>
-      await sameClipboard(copiedSnapshot, await readSnapshot()),
-    wait: async () => {
+    wait: async (ms) => {
+      time += ms;
       await Promise.resolve();
     },
   };
 
   return {
+    cleared: () => cleared,
     content: () => content,
     deps,
     replace: (text: string, markup = "") => {
@@ -176,7 +202,7 @@ describe(captureSelection, () => {
             clip.replace("new user copy");
           }
 
-          await Promise.resolve();
+          await clip.deps.wait(ms);
         },
       })
     ).resolves.toMatchObject({ restored: false, text: "x" });
@@ -195,7 +221,7 @@ describe(captureSelection, () => {
             clip.replace("x", "<i>x</i>");
           }
 
-          await Promise.resolve();
+          await clip.deps.wait(ms);
         },
       })
     ).resolves.toMatchObject({ restored: false, text: "x" });
@@ -209,7 +235,7 @@ describe(captureSelection, () => {
     await expect(
       captureSelection({
         ...clip.deps,
-        unchanged: async () =>
+        same: async () =>
           await Promise.reject(new Error("clipboard unavailable")),
       })
     ).resolves.toMatchObject({ restored: false });
@@ -227,7 +253,7 @@ describe(captureSelection, () => {
             clip.replace("new user copy");
           }
 
-          await Promise.resolve();
+          await clip.deps.wait(ms);
         },
       })
     ).resolves.toStrictEqual({ kind: "none", restored: false });
@@ -252,6 +278,58 @@ describe(captureSelection, () => {
       })
     ).resolves.toMatchObject({ restored: false });
     expect(clip.restoredWith).toHaveLength(1);
+  });
+
+  it("waits out another app's hold during the put back, instead of taking its empty read for a newer copy", async () => {
+    // Held from between the capture and the put back until 1.5 s in, as in the Windows run.
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 35,
+      to: 1500,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+    });
+    expect(clip.content()).toBe("earlier");
+  });
+
+  it("says the clipboard could not be put back when another app holds it past the retries", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 35,
+      to: 10_000,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: false,
+      text: "x",
+    });
+    expect(clip.deps.now()).toBeLessThan(4000);
+  });
+
+  it("waits briefly for a clipboard another app holds, then copies as usual", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, { from: 0, to: 400 });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+    });
+    expect(clip.content()).toBe("earlier");
+  });
+
+  it("leaves a clipboard it can't read alone, rather than empty one it couldn't save", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 0,
+      to: 10_000,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toStrictEqual({
+      kind: "busy",
+    });
+    expect({
+      cleared: clip.cleared(),
+      restored: clip.restoredWith.length,
+    }).toStrictEqual({ cleared: 0, restored: 0 });
   });
 
   it("leaves an empty clipboard empty, putting nothing back again", async () => {

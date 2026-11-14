@@ -23,6 +23,8 @@ export interface E2eDetails {
   readonly via?: string;
   readonly text?: string;
   readonly restored?: boolean;
+  /** Another app held the clipboard, so the selection wasn't copied. */
+  readonly busy?: boolean;
 }
 
 const logFile = process.env.INSET_E2E_LOG;

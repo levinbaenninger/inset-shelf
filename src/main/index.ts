@@ -59,7 +59,11 @@ import type {
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
-import { holdsAgain, sameClipboard } from "./clipboard-match";
+import {
+  holdsAgain,
+  readableClipboard,
+  sameClipboard,
+} from "./clipboard-match";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -727,8 +731,9 @@ const start = async (): Promise<void> => {
         readText: async () => await clipboard.readText(),
         restore: gate.restore,
         snapshot: snapshotClipboard,
-        unchanged: async (copied) =>
-          await sameClipboard(copied, await snapshotClipboard()),
+        now: () => performance.now(),
+        readable: readableClipboard,
+        same: sameClipboard,
         wait: delay,
       });
 
@@ -746,6 +751,16 @@ const start = async (): Promise<void> => {
       const front = frontWindow({ copiedFrom: copiedFrom(), page: true });
 
       const result = await capture;
+
+      if (result.kind === "busy") {
+        e2eLog("selection", { busy: true, restored: true, text: "" });
+        controller.setStatus({
+          problem:
+            "Another app was using the clipboard, so your selection wasn't copied. Try again.",
+        });
+
+        return;
+      }
 
       e2eLog("selection", {
         restored: result.restored,

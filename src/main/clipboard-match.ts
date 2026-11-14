@@ -39,6 +39,23 @@ const snapshotData = async (items: readonly ClipboardContents[]) =>
     )
   );
 
+/**
+ * Whether a read of the clipboard came back with content. While another app
+ * has the clipboard open, Electron hands back formats with nothing in them
+ * (on Windows, one empty text), which says nothing about what is there.
+ */
+export const readableClipboard = (
+  items: readonly ClipboardContents[]
+): boolean =>
+  !items.some((item) => {
+    const values = Object.values(item);
+
+    return (
+      values.length > 0 &&
+      values.every((value) => value instanceof Blob && value.size === 0)
+    );
+  });
+
 /** Retry only while every format still has the capture's bytes, including pictures and raw formats. */
 export const sameClipboard = async (
   before: readonly ClipboardContents[],
