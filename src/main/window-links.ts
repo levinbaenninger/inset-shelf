@@ -39,10 +39,6 @@ const sameWindow = (listed: Listed, id: number): boolean =>
 const orNull = (text: string | undefined): string | null =>
   text === undefined || text.trim() === "" ? null : text.trim();
 
-/** Whether windows can be listed: macOS needs Screen Recording for their pictures and titles. */
-export const canListWindows = (): boolean =>
-  !isMac || systemPreferences.getMediaAccessStatus("screen") === "granted";
-
 const listedWindows = async (): Promise<readonly Listed[]> => {
   try {
     return await openWindows({

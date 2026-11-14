@@ -14,16 +14,8 @@ import { isMac, isWindows } from "@/shared/platform";
 
 const keys = shortcutLabels(isMac);
 
-/** The system's own screenshot keys; a screenshot taken with them shows a card to keep it. */
-const screenshotKeys = (): string | null => {
-  if (isMac) {
-    return "⇧⌘4";
-  }
-
-  return isWindows ? "Win+Shift+S" : null;
-};
-
-const shot = screenshotKeys();
+/** The system's own screenshot keys; elsewhere a screenshot shows no card. */
+const shot = isMac || isWindows ? keys.screenshot : null;
 
 /** The ways in from another app, each with its key; the note field speaks for itself. */
 const STEPS = [

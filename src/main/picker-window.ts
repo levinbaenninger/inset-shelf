@@ -64,8 +64,10 @@ export const createPickerWindow = (options: {
     close: () => {
       hideWindow(window, { handOff: options.handOff, raise });
     },
-    isFocused: () => window.isVisible() && window.isFocused(),
-    isVisible: () => window.isVisible(),
+    isFocused: () =>
+      !window.isDestroyed() && window.isVisible() && window.isFocused(),
+    // Asked by the tutorial while the app quits, too: a destroyed window throws.
+    isVisible: () => !window.isDestroyed() && window.isVisible(),
     load: async () => {
       await window.loadURL(options.url);
     },

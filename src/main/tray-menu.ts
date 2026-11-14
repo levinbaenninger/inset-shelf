@@ -1,4 +1,3 @@
-import type { Permission } from "@shared/contracts";
 import { shortcutLabels, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 
 import { updateMenuItem } from "./update-state";
@@ -6,7 +5,9 @@ import type { UpdateAction, UpdateState } from "./update-state";
 
 export type TrayAction =
   | "toggleShelf"
-  | "turnOnKeys"
+  | "setUpPermissions"
+  | "gettingStarted"
+  | "showMeAround"
   | "openSettings"
   | "showShortcuts"
   | UpdateAction;
@@ -25,7 +26,8 @@ export type TrayItem =
 
 export interface TrayModel {
   readonly shelfVisible: boolean;
-  readonly keys: Permission;
+  /** macOS: Set Up Permissions… opens the onboarding at Allow access. */
+  readonly setUpPermissions: boolean;
   readonly shortcutsRegistered: boolean;
   readonly version: string;
   readonly update: UpdateState;
@@ -46,18 +48,6 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
   const accelerator = (value: string): { accelerator?: string } =>
     model.shortcutsRegistered ? { accelerator: value } : {};
 
-  const permission: readonly TrayItem[] =
-    model.keys === "missing"
-      ? [
-          SEPARATOR,
-          {
-            action: "turnOnKeys",
-            kind: "item",
-            label: "Turn On Double Shift…",
-          },
-        ]
-      : [];
-
   return [
     {
       action: "toggleShelf",
@@ -65,7 +55,6 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
       label: model.shelfVisible ? "Hide Inset Shelf" : "Show Inset Shelf",
       ...accelerator(TOGGLE_ACCELERATOR),
     },
-    ...permission,
     SEPARATOR,
     {
       action: "openSettings",
@@ -73,12 +62,24 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
       label: "Settings…",
       ...accelerator("CommandOrControl+,"),
     },
+    ...(model.setUpPermissions
+      ? [
+          {
+            action: "setUpPermissions",
+            kind: "item",
+            label: "Set Up Permissions…",
+          } as const,
+        ]
+      : []),
     {
       action: "showShortcuts",
       kind: "item",
       label: "Keyboard Shortcuts",
       ...accelerator("CommandOrControl+/"),
     },
+    // The tutorial, also here: without a Dock icon the app has no Help menu.
+    { action: "gettingStarted", kind: "item", label: "Getting Started" },
+    { action: "showMeAround", kind: "item", label: "Show Me Around" },
     SEPARATOR,
     { kind: "label", label: `Version ${model.version}` },
     updateItem(model.update),

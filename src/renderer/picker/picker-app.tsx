@@ -6,6 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { PickerView, WindowCandidate } from "@shared/contracts";
 import { keyText } from "@shared/shortcut";
+import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -25,10 +26,22 @@ import { useLocalKeys } from "@/shared/keys";
 import { isMac } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
+import { coach } from "@/tutorial/anchors";
+import { PageHints } from "@/tutorial/hint-layer";
 
 const api = pickerBridge();
 
 const load = async (): Promise<PickerView> => await api.getView();
+
+const tutorialSource = {
+  load: async () => await api.getTutorial(),
+  subscribe: (listener: (view: TutorialView) => void) =>
+    api.on("tutorial", listener),
+};
+
+const actTutorial = (action: TutorialAction): void => {
+  api.tutorial(action);
+};
 
 const subscribe = (listener: (view: PickerView | null) => void) =>
   api.on("view", listener);
@@ -45,10 +58,13 @@ const linkLabel = (linking: boolean, count: number): string => {
 
 /** One open window to pick: its picture, app and title; a click picks or drops it. */
 const Card = ({
+  anchor,
   candidate,
   onToggle,
   order,
 }: {
+  /** The tutorial's anchor, on the first window. */
+  readonly anchor?: ReturnType<typeof coach>;
   readonly candidate: WindowCandidate;
   /** Its place among the picked windows, or null. */
   readonly order: number | null;
@@ -57,6 +73,7 @@ const Card = ({
   <button
     aria-label={`${candidate.title ?? "Untitled window"}${candidate.app === null ? "" : `, ${candidate.app}`}`}
     aria-pressed={order !== null}
+    {...anchor}
     className={cn(
       "group/card focus-visible:ring-ring/50 relative flex min-w-0 flex-col gap-1.5 rounded-lg p-1.5 text-left outline-none focus-visible:ring-3",
       order === null ? "hover:bg-foreground/5" : "bg-primary/10"
@@ -169,8 +186,9 @@ const Picker = ({ view }: { readonly view: PickerView }) => {
         ) : null}
         {state.kind === "ready" && state.candidates.length > 0 ? (
           <Grid>
-            {state.candidates.map((candidate) => (
+            {state.candidates.map((candidate, index) => (
               <Card
+                anchor={index === 0 ? coach("picker-window") : undefined}
                 candidate={candidate}
                 key={candidate.id}
                 onToggle={() => {
@@ -206,21 +224,18 @@ const Picker = ({ view }: { readonly view: PickerView }) => {
               </EmptyMedia>
               <EmptyTitle>Allow Screen Recording</EmptyTitle>
               <EmptyDescription>
-                Inset Shelf needs Screen &amp; System Audio Recording to show
-                your windows. Open System Settings &gt; Privacy &amp; Security
-                &gt; Screen &amp; System Audio Recording. If Inset Shelf is not
-                listed, click Add (+), select Inset Shelf from Applications, and
-                click Open. Turn on Inset Shelf, then quit and reopen the app.
+                Inset Shelf needs Screen Recording to list your windows and
+                their titles.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
               <Button
                 onClick={() => {
-                  api.openScreenSettings();
+                  api.setUpScreenRecording();
                 }}
                 size="sm"
               >
-                Open Settings
+                Set Up Screen Recording…
               </Button>
             </EmptyContent>
           </Empty>
@@ -291,5 +306,10 @@ const Picker = ({ view }: { readonly view: PickerView }) => {
 export const PickerApp = () => {
   const view = usePushedView<PickerView | null>(load, subscribe, null);
 
-  return view === null ? null : <Picker key={view.seq} view={view} />;
+  return (
+    <>
+      {view === null ? null : <Picker key={view.seq} view={view} />}
+      <PageHints act={actTutorial} source={tutorialSource} />
+    </>
+  );
 };

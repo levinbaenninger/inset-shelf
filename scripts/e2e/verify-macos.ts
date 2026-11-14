@@ -835,6 +835,27 @@ const main = async (): Promise<void> => {
   }
 
   mkdirSync(bin, { recursive: true });
+  // The first-run onboarding is done: the run starts with the shelf, as an installed app does.
+  mkdirSync(userData, { recursive: true });
+  writeFileSync(
+    path.join(userData, "onboarding.json"),
+    `${JSON.stringify({ status: "finished", step: { kind: "done" }, version: 2 })}\n`
+  );
+  // The tutorial is done too: no examples on the shelf, no checklist, no hint over the strokes the test draws.
+  writeFileSync(
+    path.join(userData, "tutorial.json"),
+    `${JSON.stringify({
+      celebrated: true,
+      checklistClosed: true,
+      collapsed: false,
+      done: [],
+      examples: [],
+      examplesSeeded: true,
+      seen: [],
+      tips: false,
+      version: 1,
+    })}\n`
+  );
   buildHelpers();
 
   const clipboardBefore = pbpaste();

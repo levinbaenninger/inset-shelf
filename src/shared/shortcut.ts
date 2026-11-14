@@ -5,14 +5,17 @@ export interface ShortcutLabels {
   readonly toggle: string;
   readonly doubleShift: string;
   readonly copy: string;
+  /** The system's own screenshot keys: a screenshot taken with them shows a card to keep it. */
+  readonly screenshot: string;
 }
 
 export const shortcutLabels = (isMac: boolean): ShortcutLabels =>
   isMac
-    ? { copy: "⌘C", doubleShift: "⇧ ⇧", toggle: "⌃⌥S" }
+    ? { copy: "⌘C", doubleShift: "⇧ ⇧", screenshot: "⇧⌘4", toggle: "⌃⌥S" }
     : {
         copy: "Ctrl+C",
         doubleShift: "Shift Shift",
+        screenshot: "Win+Shift+S",
         toggle: "Ctrl+Alt+S",
       };
 

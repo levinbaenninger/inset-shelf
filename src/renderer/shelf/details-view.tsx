@@ -58,6 +58,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
+import { coach } from "@/tutorial/anchors";
 
 import {
   dueLabel,
@@ -977,7 +978,12 @@ const AddMenu = ({
     <div className="-mt-2">
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button aria-label="Add a field" size="xs" variant="quiet">
+          <Button
+            aria-label="Add a field"
+            size="xs"
+            variant="quiet"
+            {...coach("details-add")}
+          >
             <HugeiconsIcon data-icon="inline-start" icon={PlusSignIcon} />
             Add
           </Button>

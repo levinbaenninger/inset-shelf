@@ -146,8 +146,10 @@ export const createDrawingWindow = (options: {
     bringForward,
     close: hide,
     isDirty: () => dirty,
-    isFocused: () => window.isVisible() && window.isFocused(),
-    isVisible: () => window.isVisible(),
+    isFocused: () =>
+      !window.isDestroyed() && window.isVisible() && window.isFocused(),
+    // Asked by the tutorial while the app quits, too: a destroyed window throws.
+    isVisible: () => !window.isDestroyed() && window.isVisible(),
     requestClose: () => {
       window.close();
     },

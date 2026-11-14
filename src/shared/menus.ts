@@ -29,6 +29,10 @@ export type MenuChoice =
   | { readonly kind: "openSettings" }
   | { readonly kind: "setFloatOnTop"; readonly on: boolean }
   | { readonly kind: "openHelp" }
+  /** The tutorial's checklist comes back (Windows, where there is no Help menu). */
+  | { readonly kind: "gettingStarted" }
+  /** The tutorial's walkthrough (Windows, where there is no Help menu). */
+  | { readonly kind: "showMeAround" }
   | { readonly kind: "copy"; readonly id: ItemId }
   | { readonly kind: "copyWithLink"; readonly id: ItemId }
   | { readonly kind: "copyDetails"; readonly id: ItemId }
@@ -66,6 +70,8 @@ export type MenuIcon =
   | "settings"
   | "float"
   | "help"
+  | "checklist"
+  | "tour"
   | "copy"
   | "link"
   | "open"
@@ -164,6 +170,20 @@ export const shelfMenu = (
   ...(windowMenu === null
     ? []
     : [
+        {
+          choice: { kind: "gettingStarted" },
+          enabled: true,
+          icon: "checklist",
+          kind: "choice",
+          label: "Getting Started",
+        } as const,
+        {
+          choice: { kind: "showMeAround" },
+          enabled: true,
+          icon: "tour",
+          kind: "choice",
+          label: "Show Me Around",
+        } as const,
         {
           choice: { kind: "openHelp" },
           enabled: true,
