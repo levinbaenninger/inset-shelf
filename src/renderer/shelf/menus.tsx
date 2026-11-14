@@ -4,6 +4,7 @@ import {
   ArrowRight01Icon,
   ArrowUpRight01Icon,
   Attachment01Icon,
+  CheckListIcon,
   CheckmarkCircle02Icon,
   CleanIcon,
   Copy01Icon,
@@ -19,6 +20,7 @@ import {
   PaintBrush01Icon,
   PencilEdit02Icon,
   PinIcon,
+  Route01Icon,
   Settings02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -64,6 +66,7 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
   addHere: InboxDownloadIcon,
   annotate: PaintBrush01Icon,
   check: CheckmarkCircle02Icon,
+  checklist: CheckListIcon,
   clear: CleanIcon,
   copy: Copy01Icon,
   delete: Delete02Icon,
@@ -77,6 +80,7 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
   newSection: FolderAddIcon,
   open: ArrowUpRight01Icon,
   settings: Settings02Icon,
+  tour: Route01Icon,
   windowLink: AppWindowIcon,
 };
 

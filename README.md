@@ -17,10 +17,15 @@ The builds are not signed with a developer certificate, so each system warns onc
 1. Download `inset-shelf-<version>-mac-arm64.dmg` for Apple silicon, or `-mac-x64.dmg` for an Intel Mac.
 2. Open the disk image and drag **Inset Shelf** to **Applications**.
 3. Open the app. macOS blocks it the first time. Open **System Settings > Privacy & Security** and click **Open Anyway**. If you prefer the terminal, run `xattr -dr com.apple.quarantine "/Applications/Inset Shelf.app"` and open the app again.
-4. Grant the permissions you want:
-   - **Accessibility**, for double Shift and for a browser page's address. The shelf shows **Double Shift is off** with a button that opens the right settings page. Turn on **Inset Shelf** there. The app checks again every few seconds, so it should start listening without a restart.
-   - **Screen & System Audio Recording**, for the title of the window an item came from. The app never asks for it. Turn on **Inset Shelf** in that settings page (add it with **+** if it isn't listed), then quit and reopen the app.
-   - **Automation**, once per browser, the first time an item is saved from Safari, Chrome, Edge, Brave, Arc or another Chromium browser. It lets the app read the address of the page in front. Firefox, Zen and apps built on web views are read through Accessibility instead and don't ask.
+4. The first time it opens, a small setup window asks for the permissions. It has three pages: **Welcome**, **Allow access** and **Done**. Every page after Welcome has **Back**, `→` and `←` move between them, and **Not now** skips one. The app works without the permissions you skip.
+   - **Accessibility** (**Device Control and Data Access** from macOS 27), for double Shift and for a browser page's address. **Allow** shows macOS's prompt and opens the right settings page, and the window moves to the edge of the screen, beside it. Turn on **Inset Shelf** there. The row turns green within a second, and double Shift starts listening without a restart.
+   - **Screen & System Audio Recording**, for the title of the window an item came from and for window links. **Allow** works the same way. macOS applies this one only after the app opens again, so the row then offers **Reopen to finish**, and the app comes back on **Allow access**.
+   - If **Inset Shelf** isn't in the list, drag the **Inset Shelf** tile from the setup window into it.
+   - **Done** hands over to the shelf: **Start Using Inset Shelf**, or **Show Me Around** for a short walkthrough of it (see [Getting started](#getting-started)).
+   - **Set Up Permissions…** in the **Inset Shelf** menu and the menu bar icon's menu opens the window at **Allow access**. **Turn On…** in the shelf's **Double Shift is off** banner and **Set Up Screen Recording…** in the window-link picker do too, with their permission picked out.
+   - **Automation**, once per browser, the first time an item is saved from Safari, Chrome, Edge, Brave, Arc or another Chromium browser. It lets the app read the address of the page in front. The setup doesn't ask for it. Firefox, Zen and apps built on web views are read through Accessibility instead and don't ask.
+
+   An install that ran before the setup existed doesn't show it by itself. Screenshot cards start once the setup is done or skipped, so macOS's Desktop and Documents folder prompts don't come first.
 
 The app has a Dock icon, a menu bar and the Shelf mark (a rounded frame with a list in its open corner) in the menu bar's status area. **Settings…** (`⌘,`) can hide either icon.
 
@@ -79,6 +84,22 @@ The shelf is stored in one file, `shelf.json`, with images and files in an `atta
 - macOS: `~/Library/Application Support/Inset Shelf`
 - Windows: `%APPDATA%\Inset Shelf`
 
+### Getting started
+
+The app teaches itself in the shelf, on macOS and Windows:
+
+- **Getting started** is a short checklist at the top of the list, such as "Getting started · 2 of 5". It covers saving selected text with double Shift, capturing part of the screen, pinning a spot or drawing a sketch, linking a window, and checking off or copying an item back.
+  - Each task ticks itself off when you really do it, not when you click it. Clicking a task shows how, beside the control to use.
+  - The chevron folds the list, and **×** closes it. Once every task is done it says so once, then goes.
+  - **Help > Getting Started** brings it back, as does the menu bar icon's menu. On Windows it is in the shelf's **⋯** menu and the notification area icon's menu.
+- **Tips**: the first time you meet a few controls, a small bubble beside them says what they do. That happens on the window-link picker, a screenshot card, a new drawing and the **Add** menu in details. Only one tip shows at a time, and never over an open menu. `Esc`, a click elsewhere or using the control puts it away, and it never comes back.
+- **Show Me Around** (**Help > Show Me Around**, the menu bar icon's menu, or **Done** in the setup window) dims the shelf except for one control at a time, with a bubble saying what it does. It goes through the list, an item's source line, the note field, the **+** menu, checking off and copying, and the **⋯** menu. `→`, `←`, `Return` and `Esc` move through it.
+- **Examples**: the very first run puts four example items on the shelf, each tagged **Example** and each a thing to try. They behave like any item, so checking one off or copying it ticks the checklist too.
+  - **Remove Examples** in the checklist's **⋯** menu deletes them. They are never added again.
+  - **Copy as List** of a section's open items leaves them out.
+- **Settings > Tips** turns the tips off, and **Reset Tutorial** starts the checklist and the tips over. The examples are not added again.
+- An install that ran before the tutorial existed gets the checklist and tips, but no examples. With **Reduce motion** on, bubbles and the walkthrough appear without animation.
+
 ### Things to know about double Shift
 
 - The app copies your selection by sending `⌘C` (`Ctrl+Insert` on Windows) to the app in front, then puts the clipboard back. Clipboard history tools may still record that copy.
@@ -102,7 +123,7 @@ pnpm dev
 | `pnpm test` | Runs the Vitest suite. |
 | `pnpm build` | Builds the app into `out/` with electron-vite. |
 | `pnpm fix` | Formats the code and applies safe lint fixes. |
-| `pnpm screens` | Builds, then renders the shelf, the window-link picker and the drawing window in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. Writes PNGs to `release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name. |
+| `pnpm screens` | Builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. Writes PNGs to `release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name. |
 
 To build installers on your machine, run `pnpm package:mac` on macOS or `pnpm package:win` on Windows. The files land in `release/`.
 

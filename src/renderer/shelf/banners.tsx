@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 
 export interface BannersProps {
   readonly status: ShelfStatus;
-  readonly onOpenKeySettings: () => void;
+  /** Opens the onboarding at Accessibility. */
+  readonly onSetUpDoubleShift: () => void;
   readonly onDismissProblem: () => void;
   readonly onRetrySave: () => void;
 }
@@ -165,8 +166,8 @@ export const SaveErrorBanner = ({
 /** One line per thing that needs the user: a missing permission, a failed save, a failed capture. */
 export const Banners = ({
   onDismissProblem,
-  onOpenKeySettings,
   onRetrySave,
+  onSetUpDoubleShift,
   status,
 }: BannersProps) => (
   <>
@@ -174,8 +175,8 @@ export const Banners = ({
       <Banner
         actions={[
           {
-            label: "Open Accessibility settings",
-            run: onOpenKeySettings,
+            label: "Turn On…",
+            run: onSetUpDoubleShift,
           },
         ]}
         text="Allow Accessibility to save selected text."

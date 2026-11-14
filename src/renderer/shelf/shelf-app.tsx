@@ -20,6 +20,7 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
+import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ComponentProps, PointerEvent } from "react";
 import { toast } from "sonner";
@@ -37,6 +38,11 @@ import { filePath, shelfBridge } from "@/shared/bridge";
 import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
+import { coach } from "@/tutorial/anchors";
+import { Checklist } from "@/tutorial/checklist";
+import { HintLayer } from "@/tutorial/hint-layer";
+import { Spotlight } from "@/tutorial/spotlight";
+import { useTutorial } from "@/tutorial/use-tutorial";
 
 import { Banners, NotSavedBanner } from "./banners";
 import { Composer } from "./composer";
@@ -93,6 +99,33 @@ const apply = (op: ShelfOp): void => {
   api.apply(op);
 };
 
+/** The in-app tutorial (src/renderer/tutorial/), over the shelf's contract. */
+const tutorialSource = {
+  load: async () => await api.getTutorial(),
+  subscribe: (listener: (view: TutorialView) => void) =>
+    api.on("tutorial", listener),
+};
+
+const actTutorial = (action: TutorialAction): void => {
+  api.tutorial(action);
+};
+
+const endWalk = (): void => {
+  api.tutorial({ kind: "spotlightDone" });
+};
+
+/** Getting started at the top of the list, out of the way of a search. */
+const ShelfChecklist = ({
+  hidden,
+  view,
+}: {
+  readonly view: TutorialView;
+  readonly hidden: boolean;
+}) =>
+  view.checklist === null || hidden ? null : (
+    <Checklist act={actTutorial} view={view.checklist} />
+  );
+
 const reveal = (id: ItemId): void => {
   requestAnimationFrame(() => {
     document
@@ -104,13 +137,22 @@ const reveal = (id: ItemId): void => {
 /** The menu choices main carries out alone: Settings, and where there is no menu bar, Float on Top and Help. */
 type MainChoice = Extract<
   MenuChoice,
-  { readonly kind: "openSettings" | "setFloatOnTop" | "openHelp" }
+  {
+    readonly kind:
+      | "openSettings"
+      | "setFloatOnTop"
+      | "openHelp"
+      | "gettingStarted"
+      | "showMeAround";
+  }
 >;
 
 const MAIN_CHOICES = new Set<MenuChoice["kind"]>([
+  "gettingStarted",
   "openHelp",
   "openSettings",
   "setFloatOnTop",
+  "showMeAround",
 ]);
 
 const isMainChoice = (choice: MenuChoice): choice is MainChoice =>
@@ -130,6 +172,16 @@ const chooseInMain = (choice: MainChoice): void => {
 
     case "openHelp": {
       api.openHelp();
+      break;
+    }
+
+    case "gettingStarted": {
+      api.gettingStarted();
+      break;
+    }
+
+    case "showMeAround": {
+      api.showMeAround();
       break;
     }
 
@@ -670,6 +722,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const listRef = useRef<HTMLDivElement>(null);
   // Level 2: the item whose details are pushed over the list.
   const details = useDetails({ apply, doc, listRef });
+  const tutorial = useTutorial(tutorialSource);
+  const examples = new Set<string>(tutorial.examples);
   const detailsItem = details.item;
   const inDetails = detailsItem !== undefined;
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -748,12 +802,40 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }
   }, [focus]);
 
-  // New items arrive at the bottom: keep the newest in view.
+  const hasChecklist = tutorial.checklist !== null;
+  const checklistUp = useRef(hasChecklist);
+
   useEffect(() => {
-    if (newest !== undefined) {
+    checklistUp.current = hasChecklist;
+  }, [hasChecklist]);
+
+  // New items arrive at the bottom: keep the newest in view. The shelf
+  // opens on the checklist while it shows, though: the first newest item
+  // is passed over then, whichever of the shelf and the tutorial loads first.
+  const opened = useRef(false);
+
+  useEffect(() => {
+    if (newest === undefined) {
+      return;
+    }
+
+    const first = !opened.current;
+
+    opened.current = true;
+
+    if (!(first && checklistUp.current)) {
       reveal(newest);
     }
   }, [newest]);
+
+  // The checklist coming up, at launch or from Getting Started, brings the list back to it.
+  useEffect(() => {
+    if (hasChecklist) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollTo({ top: 0 });
+      });
+    }
+  }, [hasChecklist]);
 
   const selected = items.find((item) => item.id === selectedId);
   const pickedItems = items.filter((item) => picked.includes(item.id));
@@ -771,6 +853,22 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     setEditingId(null);
     details.close();
   };
+
+  // The walkthrough starts on the list as it is: details close, and an open menu or search with it.
+  const walked = useRef<number | null>(null);
+
+  const onTutorial = useEffectEvent((next: TutorialView) => {
+    const seq = next.spotlight?.seq ?? null;
+
+    if (seq !== null && seq !== walked.current) {
+      walked.current = seq;
+      closeDetails();
+      setOpenMenu(null);
+      setQuery("");
+    }
+  });
+
+  useEffect(() => api.on("tutorial", onTutorial), []);
 
   /** → and the field shortcuts: details for the one selected item; several picked get a hint. */
   const detailsFor = (field?: DetailField): void => {
@@ -791,13 +889,16 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     setPicked([]);
   };
 
-  /** ⇧⌘C: the picked items, else the open items of the section new items go to. */
+  /** ⇧⌘C: the picked items, else the open items of the section new items go to, leaving out the tutorial's examples. */
   const copyAsList = (): void => {
     void copyList(
       chosen.length > 0
         ? chosen
         : doc.items.filter(
-            (item) => item.sectionId === doc.activeSectionId && !item.done
+            (item) =>
+              item.sectionId === doc.activeSectionId &&
+              !item.done &&
+              !examples.has(item.id)
           )
     );
   };
@@ -1593,7 +1694,11 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             query={query}
           />
           <ShelfMenu floatOnTop={status.floatOnTop} onChoose={choose}>
-            <HeaderButton icon={MoreHorizontalIcon} label="More" />
+            <HeaderButton
+              icon={MoreHorizontalIcon}
+              label="More"
+              {...coach("shelf-menu")}
+            />
           </ShelfMenu>
           <HeaderButton
             icon={Cancel01Icon}
@@ -1607,8 +1712,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           onDismissProblem={() => {
             api.dismissProblem();
           }}
-          onOpenKeySettings={() => {
-            api.openKeySettings();
+          onSetUpDoubleShift={() => {
+            api.setUpDoubleShift();
           }}
           onRetrySave={() => {
             void retrySave();
@@ -1618,6 +1723,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         <div
           className="shelf-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-1 pl-2"
           ref={listRef}
+          {...coach("shelf-list")}
           onContextMenu={(event) => {
             // Items and section headings open their own menus.
             if (!event.defaultPrevented) {
@@ -1649,6 +1755,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
               query={query}
             />
           ) : null}
+          <ShelfChecklist hidden={searching} view={tutorial} />
           {firstRun ? <EmptyShelf /> : null}
           {(firstRun ? [] : groups).map((group) => {
             const open = isOpen(group.section.id);
@@ -1704,6 +1811,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                         copied={copiedId === item.id}
                         dragProps={drag.itemProps(item.id, itemText(item))}
                         dragging={drag.draggingId === item.id}
+                        example={examples.has(item.id)}
                         onPick={(mode) => {
                           pick(item.id, mode);
                         }}
@@ -1856,6 +1964,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         prompt={status.quitPrompt}
       />
       <ShortcutSheet onOpenChange={setSheetOpen} open={sheetOpen} />
+      <HintLayer act={actTutorial} view={tutorial} />
+      <Spotlight onDone={endWalk} run={tutorial.spotlight} />
       <ShelfToaster raised={!inDetails} />
       <Composer
         addActions={{

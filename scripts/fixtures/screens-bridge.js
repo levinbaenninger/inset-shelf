@@ -238,6 +238,9 @@ if (page === "shelf") {
       copyList: logged("copyList", copied),
       copyWithLink: logged("copyWithLink", copied),
       getView: () => Promise.resolve(view),
+      // `tutorial`: the in-app tutorial's view for this page; without it the page shows none.
+      getTutorial: resolved(data.tutorial),
+      tutorial: logged("tutorial", nothing),
       answerQuit: logged("answerQuit", nothing),
       menuOpen: (open) => {
         globalThis.__menuOpen.push(open);
@@ -274,8 +277,29 @@ if (page === "picker") {
   globalThis.insetPicker = withFallback(
     {
       choose: ok,
+      getTutorial: resolved(data.tutorial),
+      tutorial: logged("tutorial", nothing),
       getView: resolved(data.view),
       on,
+      setUpScreenRecording: logged("setUpScreenRecording", nothing),
+    },
+    nothing
+  );
+}
+
+if (page === "onboarding") {
+  globalThis.insetOnboarding = withFallback(
+    {
+      allow: logged("allow", nothing),
+      back: logged("back", nothing),
+      finish: logged("finish", nothing),
+      fitHeight: nothing,
+      getView: resolved(data.view),
+      next: logged("next", nothing),
+      on,
+      reopen: logged("reopen", nothing),
+      skip: logged("skip", nothing),
+      startDrag: logged("startDrag", nothing),
     },
     nothing
   );

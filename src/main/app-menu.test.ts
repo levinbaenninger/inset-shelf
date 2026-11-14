@@ -43,7 +43,9 @@ const actions: AppMenuActions = {
   openSettings: vi.fn<() => void>(),
   selectSection: vi.fn<(id: string) => void>(),
   setFloatOnTop: vi.fn<(on: boolean) => void>(),
-  turnOnKeys: vi.fn<() => void>(),
+  setUpPermissions: vi.fn<() => void>(),
+  gettingStarted: vi.fn<() => void>(),
+  showMeAround: vi.fn<() => void>(),
   redo: vi.fn<() => void>(),
   restartToUpdate: vi.fn<() => void>(),
   undo: vi.fn<() => void>(),
@@ -52,7 +54,7 @@ const actions: AppMenuActions = {
 const state: AppMenuState = {
   doc,
   floatOnTop: true,
-  keys: "granted",
+  setUpPermissions: true,
   update: { kind: "idle" },
 };
 
@@ -67,10 +69,11 @@ const submenu = (
   return Array.isArray(menu) ? menu : [];
 };
 
-const appMenuLabels = (keys: AppMenuState["keys"]) =>
-  submenu(appMenuTemplate({ ...state, keys }, actions), "Inset Shelf").map(
-    (item) => item.label
-  );
+const appMenuLabels = (setUpPermissions: boolean) =>
+  submenu(
+    appMenuTemplate({ ...state, setUpPermissions }, actions),
+    "Inset Shelf"
+  ).map((item) => item.label);
 
 const clearItem = (current: ShelfDoc) =>
   submenu(appMenuTemplate({ ...state, doc: current }, actions), "Edit").find(
@@ -109,9 +112,25 @@ describe(appMenuTemplate, () => {
     ]);
   });
 
-  it("offers the permission in the app menu only while it is missing", () => {
-    expect(appMenuLabels("missing")).toContain("Turn On Double Shift…");
-    expect(appMenuLabels("granted")).not.toContain("Turn On Double Shift…");
+  it("offers Set Up Permissions… after Settings… on macOS only", () => {
+    const labels = appMenuLabels(true);
+
+    expect(labels.indexOf("Set Up Permissions…")).toBe(
+      labels.indexOf("Settings…") + 1
+    );
+    expect(appMenuLabels(false)).not.toContain("Set Up Permissions…");
+  });
+
+  it("lists the tutorial in Help: Getting Started and Show Me Around", () => {
+    const help = submenu(appMenuTemplate(state, actions), "help").map(
+      (item) => item.label ?? "---"
+    );
+
+    expect(help.slice(0, 3)).toStrictEqual([
+      "Keyboard Shortcuts",
+      "Getting Started",
+      "Show Me Around",
+    ]);
   });
 
   it("puts the update after About, as a restart once it is ready", () => {

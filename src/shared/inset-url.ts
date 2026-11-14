@@ -9,7 +9,8 @@ export type PageName =
   | "drawing"
   | "settings"
   | "picker"
-  | "screenshot";
+  | "screenshot"
+  | "onboarding";
 
 export type InsetRequest =
   | { readonly kind: "app"; readonly path: string }

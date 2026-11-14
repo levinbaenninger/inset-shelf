@@ -5,6 +5,7 @@ import type {
   DrawingView,
 } from "@shared/contracts";
 import type { Pin } from "@shared/shelf";
+import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import {
@@ -22,6 +23,7 @@ import { useLocalKeys } from "@/shared/keys";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
+import { PageHints } from "@/tutorial/hint-layer";
 
 import { Page } from "./page";
 import type { PageImage } from "./page";
@@ -67,6 +69,16 @@ import { Toolbar } from "./toolbar";
 import { useDark, useDrawingKeys } from "./use-drawing-keys";
 
 const api = drawingBridge();
+
+const tutorialSource = {
+  load: async () => await api.getTutorial(),
+  subscribe: (listener: (view: TutorialView) => void) =>
+    api.on("tutorial", listener),
+};
+
+const actTutorial = (action: TutorialAction): void => {
+  api.tutorial(action);
+};
 
 const load = async (): Promise<DrawingView> => await api.getView();
 
@@ -877,6 +889,9 @@ export const DrawingApp = () => {
   }
 
   return view === null || opened?.seq !== view.seq ? null : (
-    <Editor key={opened.seq} opened={opened} quitting={view.quitting} />
+    <>
+      <Editor key={opened.seq} opened={opened} quitting={view.quitting} />
+      <PageHints act={actTutorial} source={tutorialSource} />
+    </>
   );
 };

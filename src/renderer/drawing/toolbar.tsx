@@ -23,6 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { coach } from "@/tutorial/anchors";
 
 import { inkColor } from "./render";
 import { COLORS, TOOLS } from "./sketch";
@@ -136,6 +137,7 @@ export const Toolbar = ({
       <Tip key={each} keys={TOOL_KEYS[each]} label={TOOL_LABEL[each]}>
         <Button
           aria-label={TOOL_LABEL[each]}
+          {...(each === "pin" ? coach("pin-tool") : {})}
           disabled={locked}
           aria-pressed={each === tool}
           onClick={() => {

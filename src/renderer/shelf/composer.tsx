@@ -10,6 +10,7 @@ import {
   InputGroupButton,
 } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
+import { coach } from "@/tutorial/anchors";
 
 import { MarkdownField } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
@@ -68,7 +69,10 @@ export const Composer = ({
     );
 
   return (
-    <div className={cn("px-2 pt-1 pb-2", hidden && "hidden")}>
+    <div
+      className={cn("px-2 pt-1 pb-2", hidden && "hidden")}
+      {...coach("composer")}
+    >
       <InputGroup className="h-auto items-start">
         <InputGroupAddon align="inline-start-top">
           <AddMenu
@@ -77,7 +81,11 @@ export const Composer = ({
               field.current?.focus();
             }}
           >
-            <InputGroupButton aria-label="Add" size="icon-xs">
+            <InputGroupButton
+              aria-label="Add"
+              size="icon-xs"
+              {...coach("add-button")}
+            >
               <HugeiconsIcon icon={PlusSignIcon} />
             </InputGroupButton>
           </AddMenu>

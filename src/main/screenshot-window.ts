@@ -149,7 +149,8 @@ export const createScreenshotWindow = (options: {
       held = true;
       clearTimeout(timer);
     },
-    isVisible: () => window.isVisible(),
+    // Asked by the tutorial while the app quits, too: a destroyed window throws.
+    isVisible: () => !window.isDestroyed() && window.isVisible(),
     load: async () => {
       await window.loadURL(options.url);
     },

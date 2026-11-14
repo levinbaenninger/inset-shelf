@@ -118,7 +118,9 @@ const actions: AppMenuActions = {
   selectSection: vi.fn<(id: string) => void>(),
   setFloatOnTop: vi.fn<(on: boolean) => void>(),
   showShortcuts: vi.fn<() => void>(),
-  turnOnKeys: vi.fn<() => void>(),
+  setUpPermissions: vi.fn<() => void>(),
+  gettingStarted: vi.fn<() => void>(),
+  showMeAround: vi.fn<() => void>(),
   undo: vi.fn<() => void>(),
 };
 
@@ -146,7 +148,7 @@ describe(menuEntryForKey, () => {
       {
         doc: emptyShelf(section),
         floatOnTop: true,
-        keys: "notNeeded",
+        setUpPermissions: false,
         update: { kind: "idle" },
       },
       actions,
