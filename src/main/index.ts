@@ -1925,6 +1925,12 @@ const start = async (): Promise<void> => {
   );
 
   sendCommand = (command) => {
+    // The walkthrough covers the shelf: menu keys (macOS accelerators, and answerMenuKeys on Windows, both
+    // before the page sees the key) and the tray act on nothing behind it.
+    if (tutorial.walking()) {
+      return;
+    }
+
     shelfServer.emit("command", command);
   };
 

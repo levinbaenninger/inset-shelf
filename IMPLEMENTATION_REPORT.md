@@ -62,7 +62,7 @@ Inset Shelf is a regular app with a Dock icon, a menu bar and a status-bar icon.
 | Setup window | 460 DIP wide, as tall as its page (`fitHeight`). Allow access floats one level above the shelf, on every Space and over full-screen apps. **Allow** shows macOS's prompt (`isTrustedAccessibilityClient(true)`, or a 1 × 1 `desktopCapturer` grab for Screen Recording) and opens the exact pane, twice in case System Settings starts cold. The window then moves to the right edge of the work area and shows without taking focus. In development, outside a bundle, for Electron.app and for a translocated copy, it has no drag tile. | `src/main/permissions/`, `src/main/onboarding-window.ts` |
 | Accessibility poll | One poll, every 3 s until Double Shift is listening and every 500 ms while the onboarding shows the Accessibility row. The row turns green, and 0.7 s later the flow moves on. | `createPoller`, `ADVANCE_MS` |
 | Screen Recording reopen | `getMediaAccessStatus` keeps its launch value, so the row offers **Reopen to finish**. That quits through the quit hold, and `app.relaunch()` runs only at the real exit of that quit. A cancelled quit disarms it, and a plain Quit that replaces it doesn't relaunch. The step is saved before the quit, so the app comes back on it, shows it as allowed and moves on. | `createSafeRelaunch`, `reopen` |
-| Tutorial bubbles | One bubble at a time across every window, granted by main to the page whose control is on screen, never while the walkthrough runs or a menu, dialog or drag is open. A hidden window lets go of its bubble. A tip is seen once drawn and never comes back; `Esc`, a click elsewhere or using the control puts it away. The walkthrough skips a step whose control isn't on screen and takes every key while it runs. Bubbles and the dimmer animate only without reduced motion. | `src/main/tutorial/`, `src/renderer/tutorial/` |
+| Tutorial bubbles | One bubble at a time across every window, granted by main to the page whose control is on screen, never while the walkthrough runs or a menu, dialog or drag is open. A hidden window lets go of its bubble. A tip is seen once drawn and never comes back; `Esc`, a click elsewhere or using the control puts it away. The walkthrough skips a step whose control isn't on screen and takes every key while it runs; menu shortcuts, which the main process handles before the page sees the key, don't reach the shelf meanwhile. Bubbles and the dimmer animate only without reduced motion. | `src/main/tutorial/`, `src/renderer/tutorial/` |
 | Tutorial tasks | Ticked off where the app does the thing: a selection saved with double Shift, a screenshot added from its card, a drawing saved, windows linked, an item checked off or copied. Clicking a task only shows how. | `SHELF_TASK_IDS` in `src/main/index.ts` |
 | Deferred screenshot watcher | The screenshot cards start once the setup window is done or skipped, so macOS's Desktop and Documents folder prompts don't come first. | `startScreenshots` |
 | Screenshot card | A new screenshot shows on a card beside the shelf. macOS: an image-only clipboard, or a file macOS marks as a screen capture. Windows: a new image in the Screenshots folder (its known-folder entry, else `Pictures\Screenshots`), read once it decodes; the card takes clicks without taking the keyboard (`focusable: false`). | `src/main/screenshot-watcher.ts`, `src/main/screenshot-window.ts` |
@@ -91,7 +91,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Automated tests
 
-`pnpm test` runs 592 Vitest tests in 52 files:
+`pnpm test` runs 595 Vitest tests in 52 files:
 
 - The double-tap state machine, including capitals, held keys, both Shift keys at once and a triple tap.
 - Every shelf operation, sections, moving and colouring items, undo, clearing checked items, grouping and search, the list export, the v1 to v2 migration, and that each result is a valid document.
@@ -121,6 +121,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
   - Examples are added on the very first run only, never after they are removed, after an earlier install or after a damaged file. One deleted by hand stops being tagged.
   - Reset starts the checklist and hints over and keeps the examples.
   - Saves run one at a time: with a store that refuses an overlapping write, as Windows' atomic rename does, the last task's "all done" is still saved. A hint let go before it was drawn is offered again.
+  - The onboarding and tutorial stores write one record at a time, in order: with a slow first write, the newest record is the one kept, and a failed write doesn't stop the next.
   - The walkthrough's step resolver skips steps without an anchor, and bubble placement goes below, above or inside an anchor, inside the window.
   - Inset Shelf's data uses only real keys (macOS and Windows) and only anchors the pages mark, and its hints tie to tasks it has.
 
@@ -148,6 +149,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
     - A walkthrough started from the **⋯** menu (Windows) giving focus back to the **⋯** button when it ends. This check failed before the fix.
     - A task's how-to on an empty shelf, which has no item circle to point at, pointing at its own checklist row instead; and one with nothing at all to point at being let go after a second, so it never holds back the tips. Both checks failed before the fix.
     - The shelf opening on the checklist whichever of the shelf and the tutorial loads first, on a list long enough to scroll. The tutorial-first order failed before the fix, 228 px down the list.
+- The built app on macOS: with an item picked and a second section, **Move to Next Section** (`⌥⌘↓`) during the walkthrough moved the item before the fix and leaves it now.
 - The built app ran on macOS 27.2 with an empty data folder, driven by Playwright's Electron mode.
   - The setup window opened alone at 460 × 236.
   - Both permissions were inherited from the host, so **Get Started** went straight to Done.
