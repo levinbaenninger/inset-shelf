@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { sameClipboard } from "./clipboard-match";
 import { captureSelection } from "./selection";
 import type { SelectionDeps } from "./selection";
 
@@ -21,6 +22,18 @@ const fakeClipboard = (
 
   const snapshot: Snapshot =
     initial === "" ? [] : [{ "text/plain": new Blob([initial]) }];
+
+  const readSnapshot = async (): Promise<Snapshot> => {
+    if (content === "") {
+      return [];
+    }
+
+    const item = { "text/plain": new Blob([content]) };
+
+    return await Promise.resolve([
+      html === "" ? item : { ...item, "text/html": new Blob([html]) },
+    ]);
+  };
 
   const deps: SelectionDeps<Snapshot> = {
     clear: () => {
@@ -52,13 +65,24 @@ const fakeClipboard = (
 
       await Promise.resolve();
     },
-    snapshot: async () => await Promise.resolve(snapshot),
+    snapshot: readSnapshot,
+    unchanged: async (copiedSnapshot) =>
+      await sameClipboard(copiedSnapshot, await readSnapshot()),
     wait: async () => {
       await Promise.resolve();
     },
   };
 
-  return { content: () => content, deps, restoredWith, snapshot };
+  return {
+    content: () => content,
+    deps,
+    replace: (text: string, markup = "") => {
+      content = text;
+      html = markup;
+    },
+    restoredWith,
+    snapshot,
+  };
 };
 
 describe(captureSelection, () => {
@@ -139,6 +163,95 @@ describe(captureSelection, () => {
       restored: false,
     });
     expect(clip.content()).toBe("x");
+  });
+
+  it("preserves a newer copy made while waiting to retry restoration", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 1);
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        wait: async (ms) => {
+          if (ms === 250) {
+            clip.replace("new user copy");
+          }
+
+          await Promise.resolve();
+        },
+      })
+    ).resolves.toMatchObject({ restored: false, text: "x" });
+    expect(clip.restoredWith).toHaveLength(1);
+    expect(clip.content()).toBe("new user copy");
+  });
+
+  it("preserves a newer copy with the same text but different HTML", async () => {
+    const clip = fakeClipboard("earlier", "x", "<b>x</b>", "", 1);
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        wait: async (ms) => {
+          if (ms === 250) {
+            clip.replace("x", "<i>x</i>");
+          }
+
+          await Promise.resolve();
+        },
+      })
+    ).resolves.toMatchObject({ restored: false, text: "x" });
+    expect(clip.restoredWith).toHaveLength(1);
+    await expect(clip.deps.readHtml()).resolves.toBe("<i>x</i>");
+  });
+
+  it("does not retry when the clipboard cannot be checked for a newer copy", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 1);
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        unchanged: async () =>
+          await Promise.reject(new Error("clipboard unavailable")),
+      })
+    ).resolves.toMatchObject({ restored: false });
+    expect(clip.restoredWith).toHaveLength(1);
+  });
+
+  it("preserves a newer copy when the captured clipboard was empty", async () => {
+    const clip = fakeClipboard("earlier", null, "", "", 1);
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        wait: async (ms) => {
+          if (ms === 250) {
+            clip.replace("new user copy");
+          }
+
+          await Promise.resolve();
+        },
+      })
+    ).resolves.toStrictEqual({ kind: "none", restored: false });
+    expect(clip.restoredWith).toHaveLength(1);
+    expect(clip.content()).toBe("new user copy");
+  });
+
+  it("still attempts restoration if the captured clipboard cannot be snapshotted", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 1);
+    let snapshots = 0;
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        snapshot: async () => {
+          snapshots += 1;
+
+          return snapshots === 1
+            ? await clip.deps.snapshot()
+            : await Promise.reject(new Error("clipboard unavailable"));
+        },
+      })
+    ).resolves.toMatchObject({ restored: false });
+    expect(clip.restoredWith).toHaveLength(1);
   });
 
   it("leaves an empty clipboard empty, putting nothing back again", async () => {

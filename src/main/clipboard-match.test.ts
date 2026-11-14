@@ -1,8 +1,60 @@
 import { describe, expect, it } from "vitest";
 
-import { holdsAgain } from "./clipboard-match";
+import { holdsAgain, sameClipboard } from "./clipboard-match";
 
 const RAW = 'electron application/osclipboard;format="DataObject"';
+
+describe(sameClipboard, () => {
+  it("compares the bytes of every format, regardless of format order", async () => {
+    await expect(
+      sameClipboard(
+        [
+          {
+            "text/html": new Blob(["<b>x</b>"]),
+            "text/plain": new Blob(["x"]),
+          },
+        ],
+        [{ "text/plain": new Blob(["x"]), "text/html": new Blob(["<b>x</b>"]) }]
+      )
+    ).resolves.toBeTruthy();
+  });
+
+  it("detects a different picture even with the same formats and text", async () => {
+    await expect(
+      sameClipboard(
+        [{ "image/png": new Blob(["first"]), "text/plain": new Blob(["x"]) }],
+        [{ "image/png": new Blob(["other"]), "text/plain": new Blob(["x"]) }]
+      )
+    ).resolves.toBeFalsy();
+  });
+
+  it("detects added formats and changes to raw formats", async () => {
+    await expect(
+      sameClipboard([], [{ "image/png": new Blob(["png"]) }])
+    ).resolves.toBeFalsy();
+    await expect(
+      sameClipboard(
+        [{ [RAW]: new Blob(["first"]) }],
+        [{ [RAW]: new Blob(["other"]) }]
+      )
+    ).resolves.toBeFalsy();
+  });
+
+  it("compares bookmark contents", async () => {
+    const type = "electron application/bookmark";
+    const bookmark = { title: "Page", url: "https://example.com" };
+
+    await expect(
+      sameClipboard([{ [type]: bookmark }], [{ [type]: { ...bookmark } }])
+    ).resolves.toBeTruthy();
+    await expect(
+      sameClipboard(
+        [{ [type]: bookmark }],
+        [{ [type]: { ...bookmark, url: "https://example.org" } }]
+      )
+    ).resolves.toBeFalsy();
+  });
+});
 
 describe(holdsAgain, () => {
   it("holds text put back", async () => {

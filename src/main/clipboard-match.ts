@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { ClipboardContents } from "./copy-gate";
 
 /**
@@ -16,6 +18,33 @@ const STANDARD = new Set([
 /** Text as the clipboard may hand it back: Windows line breaks, a trailing NUL. */
 const plain = (text: string): string =>
   text.replaceAll("\r\n", "\n").replace(/\0+$/u, "");
+
+const snapshotData = async (items: readonly ClipboardContents[]) =>
+  await Promise.all(
+    items.map(async (item) =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(item).map(async ([type, data]) => {
+            const value = await data;
+
+            return [
+              type,
+              value instanceof Blob
+                ? Buffer.from(await value.arrayBuffer())
+                : value,
+            ] as const;
+          })
+        )
+      )
+    )
+  );
+
+/** Retry only while every format still has the capture's bytes, including pictures and raw formats. */
+export const sameClipboard = async (
+  before: readonly ClipboardContents[],
+  after: readonly ClipboardContents[]
+): Promise<boolean> =>
+  isDeepStrictEqual(await snapshotData(before), await snapshotData(after));
 
 /**
  * Whether the clipboard, read again as `types` and `text`, holds what

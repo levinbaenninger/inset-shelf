@@ -59,7 +59,7 @@ import type {
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
-import { holdsAgain } from "./clipboard-match";
+import { holdsAgain, sameClipboard } from "./clipboard-match";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -727,6 +727,8 @@ const start = async (): Promise<void> => {
         readText: async () => await clipboard.readText(),
         restore: gate.restore,
         snapshot: snapshotClipboard,
+        unchanged: async (copied) =>
+          await sameClipboard(copied, await snapshotClipboard()),
         wait: delay,
       });
 
