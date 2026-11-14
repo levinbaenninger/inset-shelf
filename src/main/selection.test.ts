@@ -76,13 +76,23 @@ const fakeClipboard = (
     readable: readableClipboard,
     readHtml: async () => await Promise.resolve(html),
     readSource: async () => await Promise.resolve(source),
-    readText: async () => await Promise.resolve(content),
+    readText: async () => {
+      const wasHeld = holding();
+
+      time += wasHeld ? 350 : 1;
+
+      return await Promise.resolve(wasHeld ? "" : content);
+    },
     restore: async (saved) => {
       restoredWith.push(saved);
+      // The write is decided as it starts; it takes a moment.
+      time += 2;
 
       if (held > 0) {
         held -= 1;
-      } else if (!holding()) {
+      } else if (
+        !(hold !== null && time - 2 >= hold.from && time - 2 < hold.to)
+      ) {
         content = initial;
         html = "";
         source = "";
@@ -121,6 +131,7 @@ describe(captureSelection, () => {
       restored: true,
       source: null,
       text: "Total ignores the discount",
+      unchecked: false,
     });
     expect(clip.restoredWith).toStrictEqual([clip.snapshot]);
     expect(clip.content()).toBe("earlier");
@@ -132,6 +143,7 @@ describe(captureSelection, () => {
     await expect(captureSelection(clip.deps)).resolves.toStrictEqual({
       kind: "none",
       restored: true,
+      unchecked: false,
     });
     expect(clip.content()).toBe("earlier");
   });
@@ -290,7 +302,11 @@ describe(captureSelection, () => {
           await clip.deps.wait(ms);
         },
       })
-    ).resolves.toStrictEqual({ kind: "none", restored: false });
+    ).resolves.toStrictEqual({
+      kind: "none",
+      restored: false,
+      unchecked: false,
+    });
     expect(clip.restoredWith).toHaveLength(1);
     expect(clip.content()).toBe("new user copy");
   });
@@ -328,21 +344,22 @@ describe(captureSelection, () => {
     expect(clip.content()).toBe("earlier");
   });
 
-  it("leaves the clipboard alone when a hold prevents establishing the capture's baseline", async () => {
+  it("puts the clipboard back after a hold over the capture, when what comes back is exactly what was copied", async () => {
+    // The first read after the copy runs into the hold; afterwards the clipboard is still the selection, text and HTML.
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
-      from: 30,
+      from: 31,
       to: 1500,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
-      restored: false,
+      restored: true,
       text: "x",
     });
-    expect(clip.restoredWith).toHaveLength(0);
-    expect(clip.content()).toBe("x");
+    expect(clip.restoredWith).toHaveLength(1);
+    expect(clip.content()).toBe("earlier");
   });
 
-  it("says the clipboard could not be put back when another app holds it past the retries", async () => {
+  it("says it couldn't check the put back when another app holds the clipboard past the deadline", async () => {
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 35,
       to: 10_000,
@@ -351,8 +368,63 @@ describe(captureSelection, () => {
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
       restored: false,
       text: "x",
+      unchecked: true,
     });
-    expect(clip.deps.now()).toBeLessThan(4000);
+    // About three seconds after the copy, with the last held read.
+    expect(clip.deps.now()).toBeLessThan(3700);
+  });
+
+  it("confirms a put back that landed just before another app took the clipboard", async () => {
+    // The write goes through at 36 ms; the hold starts right after it and lasts to 1.5 s.
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 37,
+      to: 1500,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+      unchecked: false,
+    });
+    expect(clip.restoredWith).toHaveLength(1);
+  });
+
+  it("says it couldn't check a put back that landed when another app then holds the clipboard past the deadline", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 37,
+      to: 10_000,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: false,
+      unchecked: true,
+    });
+  });
+
+  it("keeps reading the selection while another app holds the clipboard, then copies it", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 20,
+      to: 1500,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+    });
+    expect(clip.content()).toBe("earlier");
+  });
+
+  it("says the clipboard was busy when another app holds it through the copy, never that nothing was selected", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 20,
+      to: 10_000,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "busy",
+      restored: false,
+      unchecked: true,
+    });
   });
 
   it("waits briefly for a clipboard another app holds, then copies as usual", async () => {
@@ -373,6 +445,8 @@ describe(captureSelection, () => {
 
     await expect(captureSelection(clip.deps)).resolves.toStrictEqual({
       kind: "busy",
+      restored: true,
+      unchecked: false,
     });
     expect({
       cleared: clip.cleared(),
@@ -386,6 +460,7 @@ describe(captureSelection, () => {
     await expect(captureSelection(clip.deps)).resolves.toStrictEqual({
       kind: "none",
       restored: true,
+      unchecked: false,
     });
     expect(clip.restoredWith).toStrictEqual([[]]);
   });

@@ -37,33 +37,28 @@ const RESTORE_RETRY_MS = 250;
 const SNAPSHOT_WAIT_MS = 1000;
 const SNAPSHOT_RETRY_MS = 100;
 
+/**
+ * How the capture ended. `restored`: the clipboard holds again what it held.
+ * `unchecked`: another app still held the clipboard when time ran out, so
+ * whether it was put back couldn't be read.
+ */
+interface PutBackResult {
+  readonly restored: boolean;
+  readonly unchecked: boolean;
+}
+
 export type SelectionResult =
-  | {
+  | (PutBackResult & {
       readonly kind: "text";
       readonly text: string;
       /** Null when the app put no HTML on the clipboard. */
       readonly html: string | null;
       /** Null when the app noted no page. */
       readonly source: string | null;
-      readonly restored: boolean;
-    }
-  | { readonly kind: "none"; readonly restored: boolean }
-  /** Another app held the clipboard throughout: it was left alone, and nothing was copied. */
-  | { readonly kind: "busy" };
-
-/** Waits for the copied text to arrive, up to `attempts` short waits. */
-const pollText = async <S>(
-  deps: SelectionDeps<S>,
-  attempts: number
-): Promise<string> => {
-  await deps.wait(POLL_MS);
-
-  const text = await deps.readText();
-
-  return text !== "" || attempts <= 1
-    ? text
-    : await pollText(deps, attempts - 1);
-};
+    })
+  | (PutBackResult & { readonly kind: "none" })
+  /** Another app held the clipboard, so the selection couldn't be copied. Left alone if it held it from the start. */
+  | (PutBackResult & { readonly kind: "busy" });
 
 /** A snapshot that could be read, waiting for another app to let go of the clipboard; null if it doesn't by `until`. */
 const readSnapshot = async <S>(
@@ -86,41 +81,152 @@ const readSnapshot = async <S>(
   return await readSnapshot(deps, until, retryMs);
 };
 
-/** Puts the clipboard back, and checks it took: true once it holds what it held. */
+/**
+ * Waits for the copied text. Nothing there yet is waited for a moment (the
+ * app is still copying, or nothing was selected); a clipboard another app
+ * holds, which reads as nothing too, is waited for until `until`.
+ */
+const pollText = async <S>(
+  deps: SelectionDeps<S>,
+  quietUntil: number,
+  until: number
+): Promise<{ readonly held: boolean; readonly text: string }> => {
+  await deps.wait(POLL_MS);
+
+  const text = await deps.readText();
+
+  if (text !== "") {
+    return { held: false, text };
+  }
+
+  const snapshot = await deps.snapshot().catch(() => null);
+  const held = snapshot !== null && !deps.readable(snapshot);
+
+  // The text read may have run into a hold that has ended since: read once more.
+  if (!held) {
+    const again = await deps.readText();
+
+    if (again !== "") {
+      return { held: false, text: again };
+    }
+  }
+
+  if (deps.now() >= (held ? until : quietUntil)) {
+    return { held, text: "" };
+  }
+
+  return await pollText(deps, quietUntil, until);
+};
+
+type Baseline<S> =
+  /** The clipboard as the capture left it, to tell a newer copy apart later. */
+  | { readonly kind: "read"; readonly snapshot: S }
+  /** It couldn't be read at all: one try to put back, without retries. */
+  | { readonly kind: "unread" }
+  /** Another app copied something newer meanwhile: it is left alone. */
+  | { readonly kind: "newer" }
+  /** Another app held the clipboard until time ran out. */
+  | { readonly kind: "held" };
+
+/**
+ * The clipboard right after the capture. A read under a hold says nothing:
+ * what comes back after the hold is the capture only if it is exactly what
+ * was copied, text and HTML; anything else is a newer copy to leave alone.
+ */
+const baseline = async <S>(
+  deps: SelectionDeps<S>,
+  copied: { readonly html: string; readonly text: string },
+  until: number
+): Promise<Baseline<S>> => {
+  const first = await deps.snapshot().catch(() => null);
+
+  if (first === null) {
+    return { kind: "unread" };
+  }
+
+  if (deps.readable(first)) {
+    return { kind: "read", snapshot: first };
+  }
+
+  const later = await readSnapshot(deps, until, RESTORE_RETRY_MS);
+
+  if (later === null) {
+    return { kind: "held" };
+  }
+
+  const text = await deps.readText().catch(() => null);
+  const html = await deps.readHtml().catch(() => null);
+
+  return text === copied.text && html === copied.html
+    ? { kind: "read", snapshot: later }
+    : { kind: "newer" };
+};
+
+/** What the clipboard holds now: put back, still the capture, something newer, or unreadable until time ran out. */
+type Look = "restored" | "unchanged" | "changed" | "held";
+
+const look = async <S>(
+  deps: SelectionDeps<S>,
+  saved: S,
+  copied: S | null,
+  until: number
+): Promise<Look> => {
+  const current = await readSnapshot(deps, until, RESTORE_RETRY_MS);
+
+  if (current === null) {
+    return "held";
+  }
+
+  if (await deps.holds(saved)) {
+    return "restored";
+  }
+
+  // Without the clipboard as the capture left it, a newer copy can't be told apart: treated as one.
+  if (copied === null) {
+    return "changed";
+  }
+
+  return (await deps.same(copied, current).catch(() => false))
+    ? "unchanged"
+    : "changed";
+};
+
+const ENDED: Readonly<Record<Look, PutBackResult>> = {
+  changed: { restored: false, unchecked: false },
+  held: { restored: false, unchecked: true },
+  restored: { restored: true, unchecked: false },
+  unchanged: { restored: false, unchecked: false },
+};
+
+/**
+ * Puts the clipboard back and checks it took, waiting out another app's
+ * hold before each look. It tries again while the clipboard is still as the
+ * capture left it, and never replaces a newer copy.
+ */
 const putBack = async <S>(
   deps: SelectionDeps<S>,
   saved: S,
   copied: S | null,
   until: number
-): Promise<boolean> => {
-  let wrote = true;
-
+): Promise<PutBackResult> => {
   try {
     await deps.restore(saved);
   } catch {
-    wrote = false;
+    // A write that failed is one more try; the look says what it left.
   }
 
-  if (wrote && (await deps.holds(saved))) {
-    return true;
-  }
+  const after = await look(deps, saved, copied, until);
 
-  // Without the clipboard as the capture left it, a newer copy couldn't be told apart: no retry.
-  if (copied === null || deps.now() >= until) {
-    return false;
+  if (after !== "unchanged" || deps.now() >= until) {
+    return ENDED[after];
   }
 
   await deps.wait(RESTORE_RETRY_MS);
 
-  // An empty read only means another app still has it open: wait that out, then look again.
-  const current = await readSnapshot(deps, until, RESTORE_RETRY_MS);
+  const before = await look(deps, saved, copied, until);
 
-  // Ordinary copies are not blocked by a capture. Never replace a newer one.
-  if (
-    current === null ||
-    !(await deps.same(copied, current).catch(() => false))
-  ) {
-    return false;
+  if (before !== "unchanged") {
+    return ENDED[before];
   }
 
   return await putBack(deps, saved, copied, until);
@@ -142,34 +248,66 @@ export const captureSelection = async <S>(
   );
 
   if (saved === null) {
-    return { kind: "busy" };
+    return { kind: "busy", restored: true, unchecked: false };
   }
 
   deps.clear();
   deps.copy();
 
-  const text = await pollText(deps, POLL_LIMIT);
+  const copiedAt = deps.now();
+  const until = copiedAt + RESTORE_DEADLINE_MS;
+
+  const { held, text } = await pollText(
+    deps,
+    copiedAt + POLL_MS * POLL_LIMIT,
+    until
+  );
+
   // Read with the text, before the clipboard goes back to what it held.
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const until = deps.now() + RESTORE_DEADLINE_MS;
-  // A first snapshot read under a hold can't identify the capture. A later readable
-  // one might be a newer copy, so leave it alone rather than adopt it as the baseline.
-  const copied = await deps.snapshot().catch(() => null);
+  const left = await baseline(deps, { html, text }, until);
 
-  const restored =
-    (copied === null || deps.readable(copied)) &&
-    (await putBack(deps, saved, copied, until));
+  let ended: PutBackResult;
+
+  switch (left.kind) {
+    case "read": {
+      ended = await putBack(deps, saved, left.snapshot, until);
+      break;
+    }
+
+    case "unread": {
+      ended = await putBack(deps, saved, null, until);
+      break;
+    }
+
+    case "newer": {
+      ended = ENDED.changed;
+      break;
+    }
+
+    case "held": {
+      ended = ENDED.held;
+      break;
+    }
+
+    default: {
+      ended = ENDED.held;
+      break;
+    }
+  }
+
+  if (text.trim() === "") {
+    return { kind: held ? "busy" : "none", ...ended };
+  }
 
   // Windows copies lines with CRLF; the shelf keeps the LF a text field would leave.
-  return text.trim() === ""
-    ? { kind: "none", restored }
-    : {
-        html: html.trim() === "" ? null : html,
-        kind: "text",
-        restored,
-        source: source.trim() === "" ? null : source.trim(),
-        text: text.replaceAll("\r\n", "\n"),
-      };
+  return {
+    html: html.trim() === "" ? null : html,
+    kind: "text",
+    source: source.trim() === "" ? null : source.trim(),
+    text: text.replaceAll("\r\n", "\n"),
+    ...ended,
+  };
 };

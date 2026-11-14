@@ -103,6 +103,7 @@ import { causeText, FsErrorSchema } from "./save-error";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
+import type { SelectionResult } from "./selection";
 import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
@@ -199,6 +200,21 @@ const trayIconPath = (): string => {
       ? "tray-on-dark.png"
       : "tray.png"
   );
+};
+
+/** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
+const selectionProblem = (result: SelectionResult): string | null => {
+  if (result.unchecked) {
+    return "Another app kept the clipboard busy, so Inset couldn't check it was put back after copying your selection.";
+  }
+
+  if (!result.restored) {
+    return "The clipboard could not be put back after copying your selection.";
+  }
+
+  return result.kind === "busy"
+    ? "Another app was using the clipboard, so your selection wasn't copied. Try again."
+    : null;
 };
 
 const excerpt = (text: string): string => {
@@ -752,20 +768,22 @@ const start = async (): Promise<void> => {
 
       const result = await capture;
 
-      if (result.kind === "busy") {
-        e2eLog("selection", { busy: true, restored: true, text: "" });
-        controller.setStatus({
-          problem:
-            "Another app was using the clipboard, so your selection wasn't copied. Try again.",
-        });
-
-        return;
-      }
-
       e2eLog("selection", {
+        busy: result.kind === "busy",
         restored: result.restored,
         text: result.kind === "text" ? result.text : "",
+        unchecked: result.unchecked,
       });
+
+      const problem = selectionProblem(result);
+
+      if (problem !== null) {
+        controller.setStatus({ problem });
+      }
+
+      if (result.kind === "busy") {
+        return;
+      }
 
       if (result.kind === "none") {
         void toggleShelf();
@@ -804,13 +822,6 @@ const start = async (): Promise<void> => {
           `Saved to ${section?.name ?? "the shelf"}`,
           excerpt(result.text)
         );
-      }
-
-      if (!result.restored) {
-        controller.setStatus({
-          problem:
-            "The clipboard could not be put back after copying your selection.",
-        });
       }
     } finally {
       capturingSelection = false;
