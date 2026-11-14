@@ -35,10 +35,11 @@ const POLL_LIMIT = 20;
  * While another app has the clipboard open, Windows lets a write do nothing
  * without an error (the clipboard keeps the copied selection), and a read
  * takes about 350 ms and comes back as one empty text. Putting the clipboard
- * back is checked, and tried again for up to three seconds, unless a newer
- * copy has superseded the capture.
+ * back is checked, and a hold is waited out for up to ten seconds after the
+ * copy, unless a newer copy has superseded the capture. The capture ends as
+ * soon as the hold does; holds of four seconds were seen on Windows.
  */
-const RESTORE_DEADLINE_MS = 3000;
+const RESTORE_DEADLINE_MS = 10_000;
 const RESTORE_RETRY_MS = 250;
 
 /** How long the capture waits for a clipboard another app holds, before leaving it alone. */
@@ -205,6 +206,9 @@ const look = async <S>(
     : "changed";
 };
 
+/** Another app held the clipboard from the capture until time ran out: the put back was never tried. */
+const NOT_TRIED: PutBackResult = { restored: false, unchecked: false };
+
 const ENDED: Readonly<Record<Look, PutBackResult>> = {
   changed: { restored: false, unchecked: false },
   held: { restored: false, unchecked: true },
@@ -303,12 +307,12 @@ export const captureSelection = async <S>(
     }
 
     case "held": {
-      ended = ENDED.held;
+      ended = NOT_TRIED;
       break;
     }
 
     default: {
-      ended = ENDED.held;
+      ended = NOT_TRIED;
       break;
     }
   }

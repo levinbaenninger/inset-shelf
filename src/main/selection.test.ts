@@ -366,7 +366,7 @@ describe(captureSelection, () => {
   it("says it couldn't check the put back when another app holds the clipboard past the deadline", async () => {
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 35,
-      to: 10_000,
+      to: 30_000,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
@@ -374,8 +374,37 @@ describe(captureSelection, () => {
       text: "x",
       unchecked: true,
     });
-    // About three seconds after the copy, with the last held read.
-    expect(clip.deps.now()).toBeLessThan(3700);
+    // About ten seconds after the copy, with the last held read.
+    expect(clip.deps.now()).toBeLessThan(10_700);
+  });
+
+  it("waits out a hold of several seconds between the selection's read and the put back, then puts the clipboard back", async () => {
+    // As in the Windows run: the hold opens right after the text read and lasts 4 s.
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 31,
+      to: 4000,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: true,
+      text: "x",
+      unchecked: false,
+    });
+    expect(clip.content()).toBe("earlier");
+  });
+
+  it("says the clipboard wasn't put back, not that it couldn't be checked, when a hold kept the put back from being tried", async () => {
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 31,
+      to: 30_000,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      restored: false,
+      text: "x",
+      unchecked: false,
+    });
+    expect(clip.restoredWith).toHaveLength(0);
   });
 
   it("confirms a put back that landed just before another app took the clipboard", async () => {
@@ -396,7 +425,7 @@ describe(captureSelection, () => {
   it("says it couldn't check a put back that landed when another app then holds the clipboard past the deadline", async () => {
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 37,
-      to: 10_000,
+      to: 30_000,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
@@ -424,7 +453,7 @@ describe(captureSelection, () => {
     // The hold outlasts the deadline, and the first read after it still falls under the hold, as in the Windows run.
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 20,
-      to: 3700,
+      to: 10_400,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
@@ -451,14 +480,16 @@ describe(captureSelection, () => {
   it("says the clipboard was busy when another app holds it through the copy, never that nothing was selected", async () => {
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 20,
-      to: 10_000,
+      to: 30_000,
     });
 
+    // Held from before the text read to past the deadline: the put back was never tried, and is reported as not done.
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
       kind: "busy",
       restored: false,
-      unchecked: true,
+      unchecked: false,
     });
+    expect(clip.restoredWith).toHaveLength(0);
   });
 
   it("waits briefly for a clipboard another app holds, then copies as usual", async () => {
