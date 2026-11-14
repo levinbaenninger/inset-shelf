@@ -110,6 +110,7 @@ import {
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";
 import type { WriteResult } from "./shelf-store";
 import {
+  removeShelfExamples,
   CHECKLIST_TITLE,
   checklistDoneText,
   HOME_PAGE,
@@ -471,21 +472,20 @@ const start = async (): Promise<void> => {
 
         return parsed.success && controller.item(parsed.data) !== undefined;
       },
-      // Removed at once; an id whose item is still there afterwards wasn't, and stays an example.
       remove: async (ids) =>
-        await Promise.resolve(
-          ids.filter((id) => {
-            const parsed = ItemIdSchema.safeParse(id);
+        await removeShelfExamples(ids, {
+          has: (id) => controller.item(id) !== undefined,
+          remove: (id) => {
+            controller.apply({ id, type: "remove" });
+          },
+          saved: async () => {
+            const written = await controller.persisted(
+              controller.snapshot().rev
+            );
 
-            if (!parsed.success) {
-              return false;
-            }
-
-            controller.apply({ id: parsed.data, type: "remove" });
-
-            return controller.item(parsed.data) === undefined;
-          })
-        ),
+            return written.ok;
+          },
+        }),
       seed: () =>
         shelfExamples(isMac).flatMap((example) => {
           const id = controller.apply({

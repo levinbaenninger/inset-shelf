@@ -1,4 +1,5 @@
-import type { ItemContext } from "@shared/shelf";
+import { ItemIdSchema } from "@shared/shelf";
+import type { ItemContext, ItemId } from "@shared/shelf";
 import { keyText, shortcutLabels } from "@shared/shortcut";
 import { DRAWING_TOOL_KEYS } from "@shared/shortcuts";
 import type {
@@ -211,4 +212,37 @@ export const shelfExamples = (mac: boolean): readonly ExampleItem[] => {
       text: "Saved from a web page: the line below says where, and opens it again",
     },
   ];
+};
+
+/** The shelf as removing the examples needs it. */
+export interface ExampleShelf {
+  readonly remove: (id: ItemId) => void;
+  readonly has: (id: ItemId) => boolean;
+  /** Resolves once the disk holds every change so far: true, or false when the save failed. */
+  readonly saved: () => Promise<boolean>;
+}
+
+/**
+ * Removes the example items; resolves with the ids gone from the shelf on
+ * disk. Until the save holds the removal none counts: when it fails, the
+ * items come back from disk at the next launch, still examples, to remove
+ * again.
+ */
+export const removeShelfExamples = async (
+  ids: readonly string[],
+  shelf: ExampleShelf
+): Promise<readonly string[]> => {
+  const gone = ids.flatMap((id) => {
+    const parsed = ItemIdSchema.safeParse(id);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    shelf.remove(parsed.data);
+
+    return shelf.has(parsed.data) ? [] : [parsed.data];
+  });
+
+  return gone.length > 0 && (await shelf.saved()) ? gone : [];
 };

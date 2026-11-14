@@ -91,7 +91,7 @@ Before the app existed, a throwaway Electron script tested `uiohook-napi` with r
 
 ### Automated tests
 
-`pnpm test` runs 597 Vitest tests in 52 files:
+`pnpm test` runs 599 Vitest tests in 52 files:
 
 - The double-tap state machine, including capitals, held keys, both Shift keys at once and a triple tap.
 - Every shelf operation, sections, moving and colouring items, undo, clearing checked items, grouping and search, the list export, the v1 to v2 migration, and that each result is a valid document.

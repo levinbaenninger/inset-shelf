@@ -1,11 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { ItemIdSchema } from "@shared/shelf";
+import type { ItemId } from "@shared/shelf";
 import { shortcutLabels } from "@shared/shortcut";
 import { DRAWING_TOOL_KEYS, shortcutSheet } from "@shared/shortcuts";
 import { describe, expect, it } from "vitest";
 
 import {
+  removeShelfExamples,
   SHELF_TASK_IDS,
   shelfExamples,
   shelfHints,
@@ -112,5 +115,43 @@ describe("Inset Shelf's tutorial", () => {
         (text) => text.includes("Shift Shift") || text.includes("Ctrl+C")
       ),
     }).toMatchObject({ mac: { length: 2 }, source: 1, windows: { length: 2 } });
+  });
+});
+
+describe(removeShelfExamples, () => {
+  const ids = [
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+  ].map((id) => ItemIdSchema.parse(id));
+
+  const shelf = (saves: boolean, stuck: ReadonlySet<string> = new Set()) => {
+    const items = new Set<ItemId>(ids);
+
+    return {
+      has: (id: ItemId) => items.has(id),
+      items,
+      remove: (id: ItemId) => {
+        if (!stuck.has(id)) {
+          items.delete(id);
+        }
+      },
+      saved: async () => await Promise.resolve(saves),
+    };
+  };
+
+  it("reports the examples removed once the shelf on disk no longer holds them", async () => {
+    const saving = shelf(true, new Set([ids[1] ?? ""]));
+
+    await expect(removeShelfExamples(ids, saving)).resolves.toStrictEqual([
+      ids[0],
+    ]);
+  });
+
+  it("reports none removed when the save fails, so they stay examples to remove again", async () => {
+    // As on Windows with a read-only shelf.json: gone from the shelf in memory, still on disk.
+    const failing = shelf(false);
+
+    await expect(removeShelfExamples(ids, failing)).resolves.toStrictEqual([]);
+    expect(failing.items.size).toBe(0);
   });
 });
