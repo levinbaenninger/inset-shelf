@@ -65,6 +65,11 @@ export const followFolder = (
       return false;
     }
 
+    // Found: stop waiting for it.
+    clearTimeout(retry);
+    parent?.close();
+    parent = null;
+
     if (appeared) {
       void reportPresent();
     }
@@ -83,29 +88,26 @@ export const followFolder = (
   const waitForIt = (): void => {
     const name = path.basename(dir).toLowerCase();
 
+    // The parent's watch, and a look now and then besides: a watch hears nothing until it has started, which on
+    // macOS lags behind watch() when the machine is busy, and the folder may appear in that gap.
+    lookAgainLater();
+
     try {
       parent = watch(path.dirname(dir), (_event, changed) => {
-        if (changed?.toLowerCase() === name && attach(true)) {
-          parent?.close();
-          parent = null;
+        if (changed?.toLowerCase() === name) {
+          attach(true);
         }
       });
       parent.on("error", () => {
         parent?.close();
         parent = null;
-        lookAgainLater();
       });
     } catch {
-      lookAgainLater();
-
       return;
     }
 
     // Made between the first look and the parent's watch.
-    if (attach(true)) {
-      parent.close();
-      parent = null;
-    }
+    attach(true);
   };
 
   if (!attach(false) && options.waitForFolder) {
