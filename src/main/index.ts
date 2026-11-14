@@ -59,6 +59,12 @@ import type {
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
+import {
+  clipboardContent,
+  holdsAgainIn,
+  readableClipboard,
+  sameClipboard,
+} from "./clipboard-match";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -98,6 +104,7 @@ import { causeText, FsErrorSchema } from "./save-error";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
+import type { SelectionResult } from "./selection";
 import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
@@ -196,6 +203,23 @@ const trayIconPath = (): string => {
   );
 };
 
+/** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
+const selectionProblem = (result: SelectionResult): string | null => {
+  if (result.unchecked) {
+    return "Another app kept the clipboard busy, so Inset couldn't check it was put back after copying your selection.";
+  }
+
+  if (!result.restored) {
+    return result.kind === "busy"
+      ? "Another app kept the clipboard busy, so your selection wasn't copied and the clipboard couldn't be put back."
+      : "The clipboard could not be put back after copying your selection.";
+  }
+
+  return result.kind === "busy"
+    ? "Another app was using the clipboard, so your selection wasn't copied. Try again."
+    : null;
+};
+
 const excerpt = (text: string): string => {
   const line = text.replaceAll(/\s+/gu, " ").trim();
 
@@ -204,8 +228,13 @@ const excerpt = (text: string): string => {
     : line;
 };
 
+/** Electron reads an empty clipboard (or one it can't open) as one item with no formats: that is nothing to keep. */
+const withFormats = (
+  items: readonly ClipboardItem[]
+): readonly ClipboardItem[] => items.filter((item) => item.types.length > 0);
+
 const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
-  const items = await clipboard.read();
+  const items = withFormats(await clipboard.read());
 
   return await Promise.all(
     items.map(async (item) =>
@@ -707,11 +736,16 @@ const start = async (): Promise<void> => {
       const capture = captureSelection({
         clear: gate.clearForSelection,
         copy: keyMonitor.copy,
+        content: clipboardContent,
+        holds: holdsAgainIn,
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),
         restore: gate.restore,
         snapshot: snapshotClipboard,
+        now: () => performance.now(),
+        readable: readableClipboard,
+        same: sameClipboard,
         wait: delay,
       });
 
@@ -731,9 +765,21 @@ const start = async (): Promise<void> => {
       const result = await capture;
 
       e2eLog("selection", {
+        busy: result.kind === "busy",
         restored: result.restored,
         text: result.kind === "text" ? result.text : "",
+        unchecked: result.unchecked,
       });
+
+      const problem = selectionProblem(result);
+
+      if (problem !== null) {
+        controller.setStatus({ problem });
+      }
+
+      if (result.kind === "busy") {
+        return;
+      }
 
       if (result.kind === "none") {
         void toggleShelf();
@@ -772,13 +818,6 @@ const start = async (): Promise<void> => {
           `Saved to ${section?.name ?? "the shelf"}`,
           excerpt(result.text)
         );
-      }
-
-      if (!result.restored) {
-        controller.setStatus({
-          problem:
-            "The clipboard could not be put back after copying your selection.",
-        });
       }
     } finally {
       capturingSelection = false;

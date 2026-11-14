@@ -158,13 +158,16 @@ export const createCopyGate = <Item>(deps: CopyGateDeps<Item>): CopyGate => {
     restore: async (saved) => {
       deps.onWrite();
 
-      if (saved.length === 0) {
+      // Electron reads an empty clipboard (or one it can't open) as one item with no formats, which it can't write back.
+      const items = saved.filter((entry) => Object.keys(entry).length > 0);
+
+      if (items.length === 0) {
         deps.clipboard.clear();
 
         return;
       }
 
-      await deps.clipboard.write(saved.map(deps.toItem));
+      await deps.clipboard.write(items.map(deps.toItem));
     },
   };
 };
