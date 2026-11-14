@@ -39,29 +39,61 @@ const snapshotData = async (items: readonly ClipboardContents[]) =>
     )
   );
 
+const isEmpty = (value: ClipboardContents[string]): boolean =>
+  value instanceof Blob ? value.size === 0 : value === "";
+
 /**
  * Whether a read of the clipboard came back with content. While another app
- * has the clipboard open, Electron hands back formats with nothing in them
- * (on Windows, one empty text), which says nothing about what is there.
+ * has the clipboard open, Electron hands back the standard formats with
+ * nothing in them (on Windows, one empty text), which says nothing about
+ * what is there. Raw formats can be empty for real: Windows leaves empty
+ * ones behind when it clears the clipboard.
  */
 export const readableClipboard = (
   items: readonly ClipboardContents[]
 ): boolean =>
   !items.some((item) => {
-    const values = Object.values(item);
-
-    return (
-      values.length > 0 &&
-      values.every((value) => value instanceof Blob && value.size === 0)
+    const standard = Object.entries(item).filter(([type]) =>
+      STANDARD.has(type)
     );
+
+    return standard.length > 0 && standard.every(([, value]) => isEmpty(value));
   });
 
-/** Retry only while every format still has the capture's bytes, including pictures and raw formats. */
+/**
+ * Retry only while every format still has the capture's bytes, including
+ * pictures and raw formats. A format empty on one side is skipped: a read
+ * that another app's hold cut short gets the first formats and none of the
+ * rest, and that says nothing about them.
+ */
 export const sameClipboard = async (
   before: readonly ClipboardContents[],
   after: readonly ClipboardContents[]
-): Promise<boolean> =>
-  isDeepStrictEqual(await snapshotData(before), await snapshotData(after));
+): Promise<boolean> => {
+  if (before.length !== after.length) {
+    return false;
+  }
+
+  const unread = new Set(
+    [...before, ...after].flatMap((item) =>
+      Object.entries(item)
+        .filter(([, value]) => isEmpty(value))
+        .map(([type]) => type)
+    )
+  );
+
+  const read = (items: readonly ClipboardContents[]) =>
+    items.map((item) =>
+      Object.fromEntries(
+        Object.entries(item).filter(([type]) => !unread.has(type))
+      )
+    );
+
+  return isDeepStrictEqual(
+    await snapshotData(read(before)),
+    await snapshotData(read(after))
+  );
+};
 
 /**
  * Whether the clipboard, read again as `types` and `text`, holds what

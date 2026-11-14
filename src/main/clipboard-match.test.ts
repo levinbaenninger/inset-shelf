@@ -46,6 +46,21 @@ describe(sameClipboard, () => {
     ).resolves.toBeFalsy();
   });
 
+  it("skips a format that came back empty on one side, as a read cut short by another app's hold leaves it", async () => {
+    await expect(
+      sameClipboard(
+        [{ [RAW]: new Blob([]), "text/plain": new Blob(["x"]) }],
+        [{ [RAW]: new Blob(["raw"]), "text/plain": new Blob(["x"]) }]
+      )
+    ).resolves.toBeTruthy();
+    await expect(
+      sameClipboard(
+        [{ [RAW]: new Blob([]), "text/plain": new Blob(["x"]) }],
+        [{ [RAW]: new Blob(["raw"]), "text/plain": new Blob(["newer"]) }]
+      )
+    ).resolves.toBeFalsy();
+  });
+
   it("compares bookmark contents", async () => {
     const type = "electron application/bookmark";
     const bookmark = { title: "Page", url: "https://example.com" };
@@ -133,6 +148,26 @@ describe(readableClipboard, () => {
       raw: readableClipboard([{ [RAW]: new Blob(["x"]) }]),
       text: readableClipboard([{ "text/plain": new Blob(["earlier"]) }]),
     }).toStrictEqual({ empty: true, held: false, raw: true, text: true });
+  });
+
+  it("reads a clipboard Windows has cleared, with only empty raw formats left, as readable and empty", () => {
+    expect(
+      readableClipboard([
+        {
+          [RAW]: new Blob([]),
+          'electron application/osclipboard;format="Ole Private Data"':
+            new Blob([]),
+        },
+      ])
+    ).toBeTruthy();
+  });
+
+  it("reads a read cut short by a hold, with the text in and raw formats empty, as readable", () => {
+    expect(
+      readableClipboard([
+        { [RAW]: new Blob([]), "text/plain": new Blob(["x"]) },
+      ])
+    ).toBeTruthy();
   });
 });
 

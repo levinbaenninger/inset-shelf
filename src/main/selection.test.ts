@@ -502,6 +502,39 @@ describe(captureSelection, () => {
     expect(clip.content()).toBe("x");
   });
 
+  it("puts the clipboard back when the read after the copy was cut short by a hold, its raw formats empty", async () => {
+    // As in the Windows run: that read got the text before the hold and the raw formats under it; the put back is
+    // written under the hold and dropped, and what comes back after the hold is still the capture.
+    const clip = fakeClipboard("earlier", "x", "", "", 0, {
+      from: 36,
+      to: 4000,
+    });
+
+    const raw = 'electron application/osclipboard;format="DataObject"';
+    let snapshots = 0;
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        snapshot: async () => {
+          snapshots += 1;
+
+          const read = await clip.deps.snapshot();
+          const [first] = read;
+
+          if (first === undefined || !("text/plain" in first)) {
+            return read;
+          }
+
+          return [
+            { ...first, [raw]: new Blob(snapshots === 2 ? [] : ["raw"]) },
+          ];
+        },
+      })
+    ).resolves.toMatchObject({ restored: true, text: "x" });
+    expect(clip.content()).toBe("earlier");
+  });
+
   it("keeps reading the selection while another app holds the clipboard, then copies it", async () => {
     const clip = fakeClipboard("earlier", "x", "", "", 0, {
       from: 20,

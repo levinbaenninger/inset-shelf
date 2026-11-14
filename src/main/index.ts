@@ -210,7 +210,9 @@ const selectionProblem = (result: SelectionResult): string | null => {
   }
 
   if (!result.restored) {
-    return "The clipboard could not be put back after copying your selection.";
+    return result.kind === "busy"
+      ? "Another app kept the clipboard busy, so your selection wasn't copied and the clipboard couldn't be put back."
+      : "The clipboard could not be put back after copying your selection.";
   }
 
   return result.kind === "busy"
