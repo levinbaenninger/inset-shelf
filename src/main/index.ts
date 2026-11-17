@@ -819,7 +819,7 @@ const start = async (): Promise<void> => {
               candidate.id === controller.view().doc.activeSectionId
           );
 
-        toast.show(`Saved to ${section?.name ?? "the shelf"}`);
+        toast.show(`Saved to ${section?.name ?? "the shelf"}`, "done", id);
       }
     } finally {
       capturingSelection = false;
@@ -961,7 +961,7 @@ const start = async (): Promise<void> => {
   // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
   let notify: (message: string, tone?: NoticeTone) => void = (
     message,
-    tone
+    tone = "done"
   ) => {
     toast.show(message, tone);
   };
@@ -1958,7 +1958,27 @@ const start = async (): Promise<void> => {
 
   const toastServer = serveContract(
     toastContract,
-    { getView: () => toast.view() },
+    {
+      getView: () => toast.view(),
+      hover: (on) => {
+        toast.hover(on);
+      },
+      open: (seq) => {
+        const taken = toast.take(seq);
+
+        if (taken === null) {
+          return;
+        }
+
+        void (async () => {
+          await showShelf();
+
+          if (taken.item !== null) {
+            controller.focus(taken.item);
+          }
+        })();
+      },
+    },
     {
       appOrigin: appOrigin(),
       ipc: ipcMain,

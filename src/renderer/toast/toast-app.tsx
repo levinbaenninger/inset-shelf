@@ -1,4 +1,8 @@
-import { Alert02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  ArrowRight01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { NoticeCorner, ToastView } from "@shared/contracts";
 
@@ -21,7 +25,7 @@ const PLACE: Readonly<Record<NoticeCorner, string>> = {
   "top-right": "items-start justify-end",
 };
 
-/** Confirms a capture made while the shelf was hidden, or says a copy failed, in a small pill beside the pointer; it never takes focus or clicks. */
+/** Confirms a capture made while the shelf was hidden, or says a copy failed, in a small pill beside the pointer. It never takes focus; a click on it opens the shelf there. */
 export const ToastApp = () => {
   const view = usePushedView(load, subscribe, null);
 
@@ -32,13 +36,27 @@ export const ToastApp = () => {
   const failed = view.tone === "failed";
 
   return (
-    <main className={cn("flex h-svh w-svw p-2", PLACE[view.corner])}>
-      <output
+    <main
+      aria-live="polite"
+      className={cn("flex h-svh w-svw p-2", PLACE[view.corner])}
+    >
+      <button
         className={cn(
           NOTICE_CLASS,
-          "animate-in fade-in-0 zoom-in-95 font-medium duration-150"
+          "animate-in fade-in-0 zoom-in-95 hover:bg-accent cursor-default text-left font-medium duration-150"
         )}
         key={view.seq}
+        onClick={() => {
+          api.open(view.seq);
+        }}
+        onMouseEnter={() => {
+          api.hover(true);
+        }}
+        onMouseLeave={() => {
+          api.hover(false);
+        }}
+        title="Open the shelf"
+        type="button"
       >
         <HugeiconsIcon
           className={cn(
@@ -52,7 +70,12 @@ export const ToastApp = () => {
         <span className={failed ? "line-clamp-2" : "truncate"}>
           {view.title}
         </span>
-      </output>
+        <HugeiconsIcon
+          className={cn(NOTICE_ICON_CLASS, "text-muted-foreground -mr-1")}
+          icon={ArrowRight01Icon}
+          size={12}
+        />
+      </button>
     </main>
   );
 };
