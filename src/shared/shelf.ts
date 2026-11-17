@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isValidDay, matchesDue, parseSearch } from "./due";
 import {
   isAppLink,
+  isPageAddress,
   LINK_TEXT_MAX,
   LINK_URL_MAX,
   LINKS_MAX,
@@ -214,8 +215,9 @@ export const ContextSchema = z.object({
   appLink: z.string().refine(isAppLink).nullable().default(null),
   title: z.string().max(WINDOW_TITLE_MAX).nullable(),
   url: z
-    .url({ protocol: /^https?$/u })
+    .url({ protocol: /^(?:https?|file)$/u })
     .max(PAGE_URL_MAX)
+    .refine(isPageAddress)
     .nullable(),
 });
 

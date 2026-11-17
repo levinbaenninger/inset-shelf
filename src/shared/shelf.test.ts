@@ -494,6 +494,25 @@ describe("selections with links", () => {
     );
   });
 
+  it("keeps a page opened from a file as the selection's source", () => {
+    const url =
+      "file:///Users/levin/Design-Expo/03_Standmaterial/Anforderung.html";
+
+    const { doc } = apply(emptyShelf(INBOX), [
+      {
+        context: { app: "Zen", appLink: null, title: "Anmeldung", url },
+        html: null,
+        text: "Anmeldung",
+        type: "addText",
+        via: "selection",
+      },
+    ]);
+
+    expect(
+      parseShelfDocument(JSON.stringify(doc))?.items[0]?.context?.url
+    ).toBe(url);
+  });
+
   it("drops the copied HTML once the text is edited", () => {
     const added = apply(emptyShelf(INBOX), [
       {

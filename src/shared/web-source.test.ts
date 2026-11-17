@@ -4,6 +4,7 @@ import {
   desktopApp,
   desktopLink,
   isAppLink,
+  isPageAddress,
   linksInHtml,
   sourceLabel,
   t3Thread,
@@ -43,6 +44,30 @@ describe(webUrl, () => {
     expect(webUrl("https://claude.ai/chat/1")).toBe("https://claude.ai/chat/1");
     expect(webUrl("file:///etc/hosts")).toBeNull();
     expect(webUrl("not a url")).toBeNull();
+  });
+});
+
+describe(isPageAddress, () => {
+  it("keeps web pages and pages opened from a file", () => {
+    expect(isPageAddress("https://claude.ai/chat/1")).toBeTruthy();
+    expect(
+      isPageAddress(
+        "file:///Users/levin/Design-Expo/03_Standmaterial/Anforderung.html"
+      )
+    ).toBeTruthy();
+    expect(isPageAddress("file:///Users/a%20b/%C3%BC.html")).toBeTruthy();
+  });
+
+  it("skips an app's own shell, other hosts and other schemes", () => {
+    expect(
+      isPageAddress("file:///Applications/T3 Code.app/Contents/index.html")
+    ).toBeFalsy();
+    expect(
+      isPageAddress("file:///opt/app/resources/app.asar/dist/index.html")
+    ).toBeFalsy();
+    expect(isPageAddress("file://server/share/page.html")).toBeFalsy();
+    expect(isPageAddress("app://-/index.html")).toBeFalsy();
+    expect(isPageAddress("not a url")).toBeFalsy();
   });
 });
 

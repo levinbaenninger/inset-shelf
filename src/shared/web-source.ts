@@ -82,6 +82,29 @@ export const webUrl = (raw: string): string | null => {
 };
 
 /**
+ * Where an item's page can be: a web address, or a page opened from a file
+ * on this computer (file:///…/index.html). A file inside an app's bundle is
+ * the app's own shell, not a page the user opened.
+ */
+export const isPageAddress = (raw: string): boolean => {
+  if (webUrl(raw) !== null) {
+    return true;
+  }
+
+  try {
+    const url = new URL(raw.trim());
+
+    return (
+      url.protocol === "file:" &&
+      url.host === "" &&
+      !/\.app\/|\.asar\//iu.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
  * The web links in copied HTML, in order, each once. Only absolute http and
  * https addresses count; the HTML itself is never shown, only read here.
  */
