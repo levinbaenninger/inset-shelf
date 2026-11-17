@@ -790,6 +790,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       setOpen(shown.sectionId, true);
     }
 
+    // A search left on from before would hide it.
+    if (
+      !groups.some((group) => group.items.some(({ id }) => id === focus.id))
+    ) {
+      setQuery("");
+    }
+
     setHandledFocus(focus.seq);
     setSelectedId(focus.id);
     setEditingId(kind === "image" || focus.edit === true ? focus.id : null);
