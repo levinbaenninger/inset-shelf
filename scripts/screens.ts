@@ -3218,6 +3218,42 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
+      await page.evaluate(
+        'globalThis.__emit("notice", { message: "Inset Shelf is up to date.", tone: "done" })'
+      );
+      await page.locator("[data-sonner-toast]").first().waitFor();
+      await page.waitForTimeout(500);
+    },
+    data: { view: shelfView() },
+    name: "shelf-notice-done",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page.evaluate(
+        'globalThis.__emit("notice", { message: "Couldn\'t check for updates. The server didn\'t answer.", tone: "failed" })'
+      );
+      await page.locator("[data-sonner-toast]").first().waitFor();
+      await page.waitForTimeout(500);
+    },
+    data: { view: shelfView() },
+    name: "shelf-notice-failed",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await select(page, 10);
+      await item(page, 10).locator("[data-row-keys]").first().focus();
+      await page.keyboard.press("Backspace");
+      await page.locator("[data-sonner-toast]").first().waitFor();
+      await page.waitForTimeout(500);
+    },
+    data: { view: shelfView() },
+    name: "shelf-notice-undo",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },

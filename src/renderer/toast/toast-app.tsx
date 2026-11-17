@@ -2,6 +2,7 @@ import { Alert02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { NoticeCorner, ToastView } from "@shared/contracts";
 
+import { NOTICE_CLASS, NOTICE_ICON_CLASS } from "@/components/ui/notice";
 import { cn } from "@/lib/utils";
 import { toastBridge } from "@/shared/bridge";
 import { usePushedView } from "@/shared/use-pushed-view";
@@ -34,13 +35,16 @@ export const ToastApp = () => {
     <main className={cn("flex h-svh w-svw p-2", PLACE[view.corner])}>
       <output
         className={cn(
-          "bg-popover/95 text-popover-foreground animate-in fade-in-0 zoom-in-95 flex max-w-full items-center gap-1.5 border text-xs font-medium shadow-md duration-150",
-          failed ? "rounded-lg px-2.5 py-1.5" : "h-7 rounded-full pr-3 pl-2"
+          NOTICE_CLASS,
+          "animate-in fade-in-0 zoom-in-95 font-medium duration-150"
         )}
         key={view.seq}
       >
         <HugeiconsIcon
-          className={cn("shrink-0", failed ? "text-destructive" : "text-pin")}
+          className={cn(
+            NOTICE_ICON_CLASS,
+            failed ? "text-destructive" : "text-pin"
+          )}
           icon={failed ? Alert02Icon : Tick02Icon}
           size={14}
           strokeWidth={2}
