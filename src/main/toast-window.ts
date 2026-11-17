@@ -1,19 +1,24 @@
-import type { NoticeTone, ToastView } from "@shared/contracts";
-import { BrowserWindow, nativeTheme, screen } from "electron";
+import type { NoticeCorner, NoticeTone, ToastView } from "@shared/contracts";
+import { noticeBesidePointer, pt, rect, size } from "@shared/geometry";
+import type { Point, Rect, Size } from "@shared/geometry";
+import { BrowserWindow, screen } from "electron";
 import type { WebContents } from "electron";
 
 import { harden, secureWebPreferences } from "./window-security";
 
-const WIDTH = 320;
-const HEIGHT = 64;
-const MARGIN = 12;
-const VISIBLE_MS = 1800;
+/** The window is clear; the notice is drawn inside it, hugging the corner nearest the pointer, with room for its shadow. */
+const SIZE: Readonly<Record<NoticeTone, Size<"screen">>> = {
+  done: size(260, 44),
+  failed: size(360, 72),
+};
+
+const VISIBLE_MS = 2500;
 
 export interface ToastWindow {
   readonly webContents: WebContents;
   readonly load: () => Promise<void>;
-  /** Shows a short confirmation without taking focus or mouse input. */
-  readonly show: (title: string, detail: string, tone?: NoticeTone) => void;
+  /** Shows a short confirmation beside the pointer, without taking focus or mouse input. */
+  readonly show: (title: string, tone?: NoticeTone) => void;
   readonly hide: () => void;
   readonly view: () => ToastView | null;
   readonly onView: (listener: (view: ToastView) => void) => void;
@@ -21,6 +26,12 @@ export interface ToastWindow {
 }
 
 const ignore = (): void => undefined;
+
+const cornerNear = (
+  pointer: Point<"screen">,
+  bounds: Rect<"screen">
+): NoticeCorner =>
+  `${bounds.y >= pointer.y ? "top" : "bottom"}-${bounds.x >= pointer.x ? "left" : "right"}`;
 
 export const createToastWindow = (options: {
   readonly preload: string;
@@ -33,17 +44,18 @@ export const createToastWindow = (options: {
   let listener: (view: ToastView) => void = ignore;
 
   const window = new BrowserWindow({
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#171717" : "#ffffff",
+    backgroundColor: "#00000000",
     focusable: false,
     frame: false,
-    hasShadow: true,
-    height: HEIGHT,
+    hasShadow: false,
+    height: SIZE.done.height,
     resizable: false,
     show: false,
     skipTaskbar: true,
+    transparent: true,
     type: process.platform === "darwin" ? "panel" : undefined,
     webPreferences: secureWebPreferences(options.preload),
-    width: WIDTH,
+    width: SIZE.done.width,
   });
 
   window.setAlwaysOnTop(true, "pop-up-menu");
@@ -79,20 +91,21 @@ export const createToastWindow = (options: {
     onView: (next) => {
       listener = next;
     },
-    show: (title, detail, tone = "done") => {
-      const { workArea } = screen.getDisplayNearestPoint(
-        screen.getCursorScreenPoint()
+    show: (title, tone = "done") => {
+      const cursor = screen.getCursorScreenPoint();
+      const { workArea } = screen.getDisplayNearestPoint(cursor);
+      const pointer = pt<"screen">(cursor.x, cursor.y);
+
+      const bounds = noticeBesidePointer(
+        pointer,
+        SIZE[tone],
+        rect(workArea.x, workArea.y, workArea.width, workArea.height)
       );
 
       seq += 1;
-      current = { detail, seq, title, tone };
+      current = { corner: cornerNear(pointer, bounds), seq, title, tone };
       listener(current);
-      window.setBounds({
-        height: HEIGHT,
-        width: WIDTH,
-        x: workArea.x + workArea.width - WIDTH - MARGIN,
-        y: workArea.y + MARGIN,
-      });
+      window.setBounds(bounds);
       window.showInactive();
       clearTimeout(timer);
       timer = setTimeout(hide, VISIBLE_MS);

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   dockShelf,
+  noticeBesidePointer,
+  pt,
   rect,
   size,
   viewerImageRect,
@@ -87,6 +89,31 @@ describe(dockShelf, () => {
 
   it("opens at the right without a window, centred on the screen's height", () => {
     expect(dockShelf(null, work)).toStrictEqual(rect(1092, 170, 340, 560));
+  });
+});
+
+describe(noticeBesidePointer, () => {
+  const notice = size<"screen">(320, 64);
+  const ultrawide = rect<"screen">(0, 25, 5120, 1415);
+
+  it("shows below and to the right of the pointer, anywhere on a wide screen", () => {
+    expect(noticeBesidePointer(pt(900, 700), notice, ultrawide)).toStrictEqual(
+      rect(912, 712, 320, 64)
+    );
+  });
+
+  it("flips to the left and above near the screen's right and bottom edges", () => {
+    expect(
+      noticeBesidePointer(pt(5000, 1400), notice, ultrawide)
+    ).toStrictEqual(rect(4668, 1324, 320, 64));
+  });
+
+  it("stays on a display left of the main one", () => {
+    const left = rect<"screen">(-1920, 0, 1920, 1080);
+
+    expect(noticeBesidePointer(pt(-1910, 5), notice, left)).toStrictEqual(
+      rect(-1898, 17, 320, 64)
+    );
   });
 });
 
