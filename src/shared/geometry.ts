@@ -140,6 +140,39 @@ export const intersects = (a: Rect<"screen">, b: Rect<"screen">): boolean =>
   a.y < b.y + b.height &&
   b.y < a.y + a.height;
 
+/** How far a notice sits from the pointer, so it covers neither the pointer nor the text just selected above it. */
+export const NOTICE_GAP_DIP = 12;
+
+/**
+ * A notice next to the pointer, where the user is looking: below and to the
+ * right of it, flipped above or to the left where the screen ends there.
+ */
+export const noticeBesidePointer = (
+  pointer: Point<"screen">,
+  notice: Size<"screen">,
+  workArea: Rect<"screen">
+): Rect<"screen"> => {
+  const right = workArea.x + workArea.width - notice.width;
+  const bottom = workArea.y + workArea.height - notice.height;
+  const besideX = pointer.x + NOTICE_GAP_DIP;
+  const belowY = pointer.y + NOTICE_GAP_DIP;
+
+  return rect(
+    clamp(
+      besideX <= right ? besideX : pointer.x - NOTICE_GAP_DIP - notice.width,
+      workArea.x,
+      right
+    ),
+    clamp(
+      belowY <= bottom ? belowY : pointer.y - NOTICE_GAP_DIP - notice.height,
+      workArea.y,
+      bottom
+    ),
+    notice.width,
+    notice.height
+  );
+};
+
 /** Room around an image on the drawing page; the bottom leaves space for the toolbar. */
 export const VIEWER_MARGIN = { bottom: 76, side: 24, top: 24 } as const;
 

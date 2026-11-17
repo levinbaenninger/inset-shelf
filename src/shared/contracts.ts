@@ -242,9 +242,16 @@ export const shelfContract = defineContract({
 /** A done thing gets a tick; a failed one says so. */
 export type NoticeTone = "done" | "failed";
 
+/** The notice window's corner nearest the pointer, where the notice is drawn. */
+export type NoticeCorner =
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
+
 export interface ToastView {
+  readonly corner: NoticeCorner;
   readonly title: string;
-  readonly detail: string;
   readonly seq: number;
   readonly tone: NoticeTone;
 }

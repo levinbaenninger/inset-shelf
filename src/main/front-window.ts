@@ -9,7 +9,7 @@ import {
   WINDOW_TITLE_MAX,
 } from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
-import { desktopLink, t3Thread } from "@shared/web-source";
+import { desktopLink, t3Thread, webUrl } from "@shared/web-source";
 import { withoutAppName } from "@shared/window-title";
 import { app, screen, systemPreferences } from "electron";
 import type { Rectangle } from "electron";
@@ -50,12 +50,17 @@ const isWindowsShell = (title: string, owner: string): boolean =>
   path.win32.basename(owner).toLowerCase() === "explorer.exe" &&
   (title === "Program Manager" || title.trim() === "");
 
-/** Only http and https pages are kept as links. */
+/** Only web pages and pages opened from a file are kept as links. */
 const pageUrl = (url: string | undefined): string | null => {
   const parsed = ContextSchema.shape.url.safeParse(orNull(url));
 
   return parsed.success ? parsed.data : null;
 };
+
+/** The page a window shows: a web page first, since a page from a file may be an app's own shell around it. */
+const shownPage = (areas: readonly WebArea[]): WebArea | undefined =>
+  areas.find((area) => webUrl(area.url) !== null) ??
+  areas.find((area) => pageUrl(area.url) !== null);
 
 /** The names cut to what the saved shelf keeps; a longer one would make it unreadable. */
 const fitted = (context: ItemContext): ItemContext => ({
@@ -75,7 +80,8 @@ const sourceContext = async (
   window: Omit<ItemContext, "appLink">,
   areas: readonly WebArea[] | null
 ): Promise<ItemContext> => {
-  const page = areas?.find((area) => pageUrl(area.url) !== null);
+  const page = shownPage(areas ?? []);
+
   const url = window.url ?? pageUrl(page?.url);
 
   const thread =

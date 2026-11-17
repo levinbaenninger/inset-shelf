@@ -49,7 +49,7 @@ The Windows build has been run on Windows 11; [IMPLEMENTATION_REPORT.md](IMPLEME
 
 | Keys | What happens |
 | --- | --- |
-| `⇧ ⇧` (tap Shift twice) with text selected | Saves the selection, with the app, window and page it came from, and the links inside it. A short notice confirms it when the shelf is hidden. Your clipboard is put back as it was. |
+| `⇧ ⇧` (tap Shift twice) with text selected | Saves the selection, with the app, window and page it came from, and the links inside it. A short notice beside the pointer confirms it when the shelf is hidden. Your clipboard is put back as it was. |
 | `⇧ ⇧` with nothing selected | Shows or hides the shelf. |
 | `⌃⌥S` (`Ctrl+Alt+S` on Windows) | Shows the shelf, or hides it when it is already in front. |
 

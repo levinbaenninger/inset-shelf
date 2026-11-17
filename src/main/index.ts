@@ -33,7 +33,12 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
-import { desktopLink, isAppLink, openingApp } from "@shared/web-source";
+import {
+  desktopLink,
+  isAppLink,
+  isPageAddress,
+  openingApp,
+} from "@shared/web-source";
 import {
   app,
   BrowserWindow,
@@ -814,10 +819,7 @@ const start = async (): Promise<void> => {
               candidate.id === controller.view().doc.activeSectionId
           );
 
-        toast.show(
-          `Saved to ${section?.name ?? "the shelf"}`,
-          excerpt(result.text)
-        );
+        toast.show(`Saved to ${section?.name ?? "the shelf"}`);
       }
     } finally {
       capturingSelection = false;
@@ -961,7 +963,7 @@ const start = async (): Promise<void> => {
     message,
     tone
   ) => {
-    toast.show(message, "", tone);
+    toast.show(message, tone);
   };
 
   const pickFiles = async (): Promise<void> => {
@@ -1700,17 +1702,13 @@ const start = async (): Promise<void> => {
           return;
         }
 
-        // Only the item's own page or a link in it opens, and only over http or https.
+        // Only the item's own page or a link in it opens: a web page, or a page from a file.
         const target =
           url === undefined
             ? (item?.context?.url ?? null)
             : itemAddresses(item, url).find((known) => known === url);
 
-        if (
-          target !== undefined &&
-          target !== null &&
-          /^https?:\/\//u.test(target)
-        ) {
+        if (target !== undefined && target !== null && isPageAddress(target)) {
           void shell.openExternal(target);
         }
       },
@@ -2050,7 +2048,7 @@ const start = async (): Promise<void> => {
     if (shelf.isVisible()) {
       shelfServer.emit("notice", { message, tone });
     } else {
-      toast.show(message, "", tone);
+      toast.show(message, tone);
     }
   };
 
