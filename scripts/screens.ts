@@ -3218,6 +3218,68 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
+      await page.evaluate(
+        'globalThis.__emit("notice", { message: "Inset Shelf is up to date.", tone: "done" })'
+      );
+      await page.locator("[data-sonner-toast]").first().waitFor();
+      await page.waitForTimeout(500);
+    },
+    data: { view: shelfView() },
+    name: "shelf-notice-done",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page.evaluate(
+        'globalThis.__emit("notice", { message: "Couldn\'t check for updates. The server didn\'t answer.", tone: "failed" })'
+      );
+      await page.locator("[data-sonner-toast]").first().waitFor();
+      await page.waitForTimeout(500);
+    },
+    data: { view: shelfView() },
+    name: "shelf-notice-failed",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page
+        .getByPlaceholder("Search or due:today")
+        .fill("unmatched-search");
+      await page.getByText("No matches").waitFor();
+      await page.evaluate(
+        `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), focus: { id: uuid(10), seq: 1 } })})`
+      );
+      await item(page, 10).waitFor();
+    },
+    check: async (page) => {
+      const search = await page
+        .getByPlaceholder("Search or due:today")
+        .inputValue();
+
+      const selected = await item(page, 10).getAttribute("aria-current");
+
+      return search === "" && selected === "true"
+        ? null
+        : `a capture behind a search left the search ${JSON.stringify(search)} and the item ${selected === "true" ? "selected" : "not selected"}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-focus-behind-search",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await select(page, 10);
+      await item(page, 10).locator("[data-row-keys]").first().focus();
+      await page.keyboard.press("Backspace");
+      await page.locator("[data-sonner-toast]").first().waitFor();
+      await page.waitForTimeout(500);
+    },
+    data: { view: shelfView() },
+    name: "shelf-notice-undo",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },

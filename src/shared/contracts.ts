@@ -256,15 +256,6 @@ export interface ToastView {
   readonly tone: NoticeTone;
 }
 
-export const toastContract = defineContract({
-  events: { view: event<ToastView>() },
-  global: "insetToast",
-  methods: {
-    getView: invoke(z.void(), out<ToastView | null>()),
-  },
-  name: "toast",
-});
-
 /** A new screenshot on its card beside the shelf. */
 export interface ScreenshotView {
   /** Changes with every screenshot; actions name it, so they never reach a newer one. */
@@ -275,6 +266,19 @@ export interface ScreenshotView {
 }
 
 const Seq = z.number().int().min(0);
+
+export const toastContract = defineContract({
+  events: { view: event<ToastView>() },
+  global: "insetToast",
+  methods: {
+    getView: invoke(z.void(), out<ToastView | null>()),
+    /** The pointer is on the notice: it takes the click and stays until the pointer leaves. */
+    hover: send(z.boolean()),
+    /** Opens the shelf at what the notice named; `seq` keeps a late click from reaching a newer notice. */
+    open: send(Seq),
+  },
+  name: "toast",
+});
 
 export const screenshotContract = defineContract({
   events: { view: event<ScreenshotView | null>(), ...tutorialEvents },

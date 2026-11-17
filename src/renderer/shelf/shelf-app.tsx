@@ -259,17 +259,17 @@ const noticeToast = (message: string): void => {
 
 const ignoreLink = (): void => undefined;
 
-/** An item's words for a toast: a note formatted as on its card, cut to two lines. */
+/** An item's words for a toast: a note formatted as on its card, cut to one line. */
 const Excerpt = ({ item }: { readonly item: ShelfItem }) =>
   item.kind === "text" ? (
     <Markdown
-      className="line-clamp-2 break-words"
+      className="line-clamp-1 break-words"
       interactive={false}
       onOpenLink={ignoreLink}
       text={item.text}
     />
   ) : (
-    <span className="line-clamp-2 break-words">{itemText(item)}</span>
+    <span className="line-clamp-1 break-words">{itemText(item)}</span>
   );
 
 const deletedToast = (id: ItemId): string => `deleted-${id}`;
@@ -788,6 +788,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     if (shown !== undefined) {
       setOpen(shown.sectionId, true);
+    }
+
+    // A search left on from before would hide it.
+    if (
+      !groups.some((group) => group.items.some(({ id }) => id === focus.id))
+    ) {
+      setQuery("");
     }
 
     setHandledFocus(focus.seq);
