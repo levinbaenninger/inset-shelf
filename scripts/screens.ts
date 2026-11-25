@@ -5058,12 +5058,16 @@ const listed = async (page: Page) => {
   return { ids, query };
 };
 
-const whyView = (phase: "taking" | "typing" | "saved") => ({
+const whyView = (phase: "taking" | "typing" | "saving" | "saved") => ({
   corner: "top-left",
   kind: "why",
   phase,
   seq: 2,
 });
+
+/** What main says when the disk refuses a write. */
+const PILL_WRITE_FAILED =
+  "The shelf could not be saved to disk. The disk is full.";
 
 const WHY_LONG = `Weil die ${LONG_WORD} das Protokoll der Quartalsübersicht vor Freitag braucht`;
 
@@ -5147,6 +5151,44 @@ const PILL_SCENES: readonly Scene[] = (
       data: { view: whyView("taking") },
       keepPointer: true,
       name: "pill-why-field-long-text",
+      width: WHY_WIDTH,
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.type("because the API changes");
+      },
+      check: async (page) => {
+        const shown = await page.getByText("Why saved").count();
+
+        return shown === 0
+          ? null
+          : "Why saved must wait until the disk holds the words";
+      },
+      data: { view: whyView("saving") },
+      keepPointer: true,
+      name: "pill-why-saving",
+      width: WHY_WIDTH,
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.type("because the API changes");
+      },
+      check: async (page) => {
+        const said = await page.getByRole("alert").textContent();
+
+        const kept = await page
+          .getByRole("textbox", { name: "Why this matters" })
+          .inputValue();
+
+        return said?.includes(PILL_WRITE_FAILED) === true &&
+          kept === "because the API changes"
+          ? null
+          : `a failed write must keep the words and say why: ${JSON.stringify({ kept, said })}`;
+      },
+      data: { view: { ...whyView("typing"), problem: PILL_WRITE_FAILED } },
+      height: 88,
+      keepPointer: true,
+      name: "pill-why-failed",
       width: WHY_WIDTH,
     },
     {

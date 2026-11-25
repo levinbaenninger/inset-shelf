@@ -523,8 +523,8 @@ const start = async (): Promise<void> => {
 
   const store = await openShelfStore(dataDir, {
     fs:
-      process.env.INSET_FAIL_NEXT_WRITE === "1"
-        ? failNextWrite(nodeStoreFs)
+      Number(process.env.INSET_FAIL_NEXT_WRITE ?? "0") > 0
+        ? failNextWrite(nodeStoreFs, Number(process.env.INSET_FAIL_NEXT_WRITE))
         : nodeStoreFs,
     newSectionId: () => SectionIdSchema.parse(randomUUID()),
     now: () => new Date(),
@@ -773,17 +773,28 @@ const start = async (): Promise<void> => {
       // oxlint-disable-next-line no-use-before-define -- recall watches input, so it is made with the key monitor.
       recall.ended(place, how);
     },
-    // Say why: the words go after what the item's description already says.
-    saveWhy: (item, text) => {
+    // Say why: the words go after what the item's description already says; the pill says so once the disk holds them.
+    saveWhy: async (item, text) => {
       const saved = controller.item(item);
 
-      if (saved !== undefined) {
-        controller.apply({
-          description: withWhy(saved.description, text),
-          id: item,
-          type: "setDescription",
-        });
+      if (saved === undefined) {
+        return { kind: "gone" };
       }
+
+      controller.apply({
+        description: withWhy(saved.description, text),
+        id: item,
+        type: "setDescription",
+      });
+
+      const written = await withinWait(
+        controller.persisted(controller.snapshot().rev),
+        setTimer
+      );
+
+      return written.ok
+        ? { kind: "saved" }
+        : { kind: "failed", message: written.message };
     },
     url: pageUrl("toast"),
   });

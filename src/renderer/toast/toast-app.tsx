@@ -124,16 +124,22 @@ const CaptureNotice = ({ view }: { readonly view: NoticeView }) => (
  * One line for why the capture matters. The caret and placeholder show only
  * once the window has the keyboard, so nobody types at a field that can't
  * hear them. Return saves, Esc throws the words away; main decides the rest.
+ * While the words are written the field keeps them and reads Saving…; when
+ * they couldn't be, it keeps them and says why under them, for Return to try
+ * again.
  */
 const WhyField = ({
   phase,
+  problem,
   seq,
 }: {
   readonly phase: Exclude<WhyPhase, "saved">;
+  readonly problem: string | undefined;
   readonly seq: number;
 }) => {
   const input = useRef<HTMLInputElement>(null);
   const typing = phase === "typing";
+  const saving = phase === "saving";
 
   useEffect(() => {
     input.current?.focus();
@@ -157,8 +163,9 @@ const WhyField = ({
     <label
       className={cn(
         NOTICE_CLASS,
-        "w-full cursor-text font-medium",
-        typing && "ring-ring/40 ring-2"
+        "w-full cursor-text flex-wrap font-medium",
+        (typing || saving) && "ring-ring/40 ring-2",
+        problem !== undefined && "ring-destructive/50"
       )}
     >
       <HugeiconsIcon
@@ -167,6 +174,7 @@ const WhyField = ({
         size={14}
       />
       <input
+        aria-describedby={problem === undefined ? undefined : "why-problem"}
         aria-label="Why this matters"
         className={cn(
           "placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent outline-none",
@@ -190,19 +198,30 @@ const WhyField = ({
           }
         }}
         placeholder={typing ? "Why this matters" : ""}
+        readOnly={saving}
         ref={input}
         spellCheck={false}
         type="text"
       />
       <span
-        aria-hidden="true"
+        aria-hidden={saving ? undefined : "true"}
         className={cn(
           "text-muted-foreground shrink-0 text-xs",
-          !typing && "invisible"
+          !typing && !saving && "invisible"
         )}
       >
-        ↩
+        {saving ? "Saving…" : "↩"}
       </span>
+      {problem === undefined ? null : (
+        <span
+          className="text-destructive line-clamp-2 basis-full pl-5.5 font-normal wrap-break-word"
+          id="why-problem"
+          role="alert"
+          title={tooltipText(problem)}
+        >
+          Not saved. {problem} ↩ tries again.
+        </span>
+      )}
     </label>
   );
 };
@@ -301,7 +320,12 @@ export const ToastApp = () => {
     return view.phase === "saved" ? (
       <WhySaved />
     ) : (
-      <WhyField key={view.seq} phase={view.phase} seq={view.seq} />
+      <WhyField
+        key={view.seq}
+        phase={view.phase}
+        problem={view.problem}
+        seq={view.seq}
+      />
     );
   })();
 

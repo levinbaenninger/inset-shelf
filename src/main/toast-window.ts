@@ -16,6 +16,7 @@ import type {
   PillState,
   PillView,
   WhyOffer,
+  WhyOutcome,
 } from "@shared/pill";
 import type { PlaceKey } from "@shared/recall";
 import type { ItemId } from "@shared/shelf";
@@ -29,7 +30,8 @@ import { harden, secureWebPreferences } from "./window-security";
 /** The window is clear; the pill is drawn inside it, hugging the corner nearest the pointer, with room for its shadow. */
 const sizeOf = (view: PillBody): Size<"screen"> => {
   if (view.kind === "why") {
-    return size(320, 44);
+    // A why that couldn't be written says so under the words.
+    return size(320, view.problem === undefined ? 44 : 88);
   }
 
   return view.kind === "notice" && view.tone === "failed"
@@ -73,8 +75,8 @@ export const createToastWindow = (options: {
     item: ItemId | null,
     field: "description" | null
   ) => void;
-  /** Return in the why field, or a click away from it: the item's description gets the words. */
-  readonly saveWhy: (item: ItemId, text: string) => void;
+  /** Return in the why field, or a click away from it: the item's description gets the words, and how the write ended comes back. */
+  readonly saveWhy: (item: ItemId, text: string) => Promise<WhyOutcome>;
   /** A click on the recall pill: the shelf opens filtered to the items from here. */
   readonly openRecall: (place: PlaceKey, ids: readonly ItemId[]) => void;
   /** The recall pill went: clicked, closed or left alone. */
@@ -268,8 +270,27 @@ export const createToastWindow = (options: {
       }
 
       case "saveWhy": {
-        options.saveWhy(effect.item, effect.text);
-        e2eLog("whySaved", { itemId: effect.item, text: effect.text });
+        void (async () => {
+          const outcome = await options.saveWhy(effect.item, effect.text);
+
+          if (outcome.kind === "saved") {
+            e2eLog("whySaved", { itemId: effect.item, text: effect.text });
+          } else {
+            e2eLog("whyNotSaved", {
+              itemId: effect.item,
+              reason: outcome.kind,
+            });
+          }
+
+          // oxlint-disable-next-line no-use-before-define -- how the write ended is the next event the pill steps through.
+          send({
+            outcome,
+            seq: effect.seq,
+            text: effect.text,
+            type: "whyStored",
+          });
+        })();
+
         break;
       }
 
