@@ -123,7 +123,10 @@ export const SiteHeader = () => {
               <HugeiconsIcon icon={Menu01Icon} className="size-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="right" className="w-full gap-0 sm:max-w-sm">
+          <SheetContent
+            side="right"
+            className="w-full gap-0 overflow-y-auto pb-8 sm:max-w-sm"
+          >
             <SheetTitle className="flex h-16 items-center px-7">
               <Logo />
             </SheetTitle>
