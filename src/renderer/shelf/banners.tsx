@@ -1,9 +1,12 @@
-import { Alert02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { NotSavedItem, ShelfStatus } from "@shared/contracts";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+import { Clamp } from "./clamp";
 
 export interface BannersProps {
   readonly status: ShelfStatus;
@@ -20,6 +23,16 @@ interface BannerAction {
   readonly destructive?: boolean;
 }
 
+type Tone = "notice" | "error";
+
+const TONE: Readonly<Record<Tone, string>> = {
+  error: "bg-destructive/10 text-destructive",
+  notice: "bg-foreground/5",
+};
+
+/** How many lines of its reason a banner shows before Show full message. */
+const BANNER_LINES = 4;
+
 const Banner = ({
   actions,
   text,
@@ -28,28 +41,29 @@ const Banner = ({
 }: {
   readonly title: string;
   readonly text: string;
-  readonly tone: "notice" | "error";
+  readonly tone: Tone;
   readonly actions: readonly BannerAction[];
 }) => (
   <div
-    className={
-      tone === "error"
-        ? "bg-destructive/10 text-destructive mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
-        : "bg-foreground/5 mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
-    }
+    className={cn(
+      "mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs",
+      TONE[tone]
+    )}
     role={tone === "error" ? "alert" : "status"}
   >
     <p className="text-sm font-medium">{title}</p>
-    {/* Four lines at most, so a long reason never pushes the list away; the whole of it shows on hover. */}
-    <p
+    {/* Four lines at most, so a long reason never pushes the list away; the rest opens in place, by keyboard too. */}
+    <Clamp
       className={cn(
-        "line-clamp-4 break-words",
+        "break-words",
         tone === "notice" && "text-muted-foreground"
       )}
-      title={text}
+      less="Show less"
+      lines={BANNER_LINES}
+      more="Show full message"
     >
       {text}
-    </p>
+    </Clamp>
     {actions.length === 0 ? null : (
       <div className="mt-1 flex flex-wrap gap-1.5">
         {actions.map((action) => (
@@ -150,56 +164,119 @@ export const NotSavedBanner = ({
   />
 );
 
-/**
- * A failed save, with Retry. The shelf keeps every change in memory, so it
- * shows over details too: an entry opened again shows what was typed and
- * that it isn't on disk yet.
- */
-export const SaveErrorBanner = ({
-  onRetry,
-  status,
-}: {
-  readonly status: ShelfStatus;
-  readonly onRetry: () => void;
-}) =>
-  status.saveError === null ? null : (
-    <Banner
-      actions={status.readOnly ? [] : [{ label: "Retry", run: onRetry }]}
-      text={status.saveError}
-      title="Not saved to disk"
-      tone="error"
-    />
-  );
+interface BannerEntry {
+  readonly id: "keys" | "save" | "problem";
+  readonly title: string;
+  readonly text: string;
+  readonly tone: Tone;
+  readonly actions: readonly BannerAction[];
+}
 
-/** One line per thing that needs the user: a missing permission, a failed save, a failed capture. */
-export const Banners = ({
+/** What needs the user, oldest kind first: a missing permission, a failed save, a failed capture. */
+const entriesOf = ({
   onDismissProblem,
   onRetrySave,
   onSetUpDoubleShift,
   status,
-}: BannersProps) => (
-  <>
-    {status.keys === "missing" ? (
-      <Banner
-        actions={[
-          {
-            label: "Turn On…",
-            run: onSetUpDoubleShift,
-          },
-        ]}
-        text="Allow Accessibility to save selected text."
-        title="Double Shift is off"
-        tone="notice"
-      />
-    ) : null}
-    <SaveErrorBanner onRetry={onRetrySave} status={status} />
-    {status.problem === null ? null : (
-      <Banner
-        actions={[{ label: "Dismiss", run: onDismissProblem }]}
-        text={status.problem}
-        title="Needs your attention"
-        tone="error"
-      />
+}: BannersProps): readonly BannerEntry[] => [
+  ...(status.keys === "missing"
+    ? [
+        {
+          actions: [{ label: "Turn On…", run: onSetUpDoubleShift }],
+          id: "keys" as const,
+          text: "Allow Accessibility to save selected text.",
+          title: "Double Shift is off",
+          tone: "notice" as const,
+        },
+      ]
+    : []),
+  ...(status.saveError === null
+    ? []
+    : [
+        {
+          actions: status.readOnly ? [] : [{ label: "Retry", run: onRetrySave }],
+          id: "save" as const,
+          text: status.saveError,
+          title: "Not saved to disk",
+          tone: "error" as const,
+        },
+      ]),
+  ...(status.problem === null
+    ? []
+    : [
+        {
+          actions: [{ label: "Dismiss", run: onDismissProblem }],
+          id: "problem" as const,
+          text: status.problem,
+          title: "Needs your attention",
+          tone: "error" as const,
+        },
+      ]),
+];
+
+/** A banner folded to its title, one line; a click opens it. */
+const FoldedBanner = ({
+  entry,
+  onOpen,
+}: {
+  readonly entry: BannerEntry;
+  readonly onOpen: () => void;
+}) => (
+  <button
+    aria-expanded={false}
+    className={cn(
+      "focus-visible:ring-ring/50 mx-3 mb-1.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs font-medium outline-none focus-visible:ring-3",
+      TONE[entry.tone]
     )}
-  </>
+    onClick={onOpen}
+    type="button"
+  >
+    <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+    <HugeiconsIcon className="size-3.5 shrink-0" icon={ArrowDown01Icon} />
+  </button>
 );
+
+/**
+ * One banner per thing that needs the user. With more than one, only the
+ * newest shows open; the others fold to one line each, and a click opens
+ * one instead.
+ */
+export const Banners = (props: BannersProps) => {
+  const entries = entriesOf(props);
+  const ids = entries.map((entry) => entry.id);
+  const [seen, setSeen] = useState(ids);
+  const [open, setOpen] = useState(ids.at(-1) ?? null);
+
+  // A banner that wasn't there before is the newest: it opens.
+  if (ids.join() !== seen.join()) {
+    const arrived = ids.findLast((id) => !seen.includes(id));
+
+    setSeen(ids);
+
+    if (arrived !== undefined) {
+      setOpen(arrived);
+    }
+  }
+
+  const shown = open !== null && ids.includes(open) ? open : ids.at(-1);
+
+  return entries.map((entry) =>
+    entry.id === shown ? (
+      <Banner
+        actions={entry.actions}
+        key={entry.id}
+        text={entry.text}
+        title={entry.title}
+        tone={entry.tone}
+      />
+    ) : (
+      <FoldedBanner
+        entry={entry}
+        key={entry.id}
+        onOpen={() => {
+          setOpen(entry.id);
+        }}
+      />
+    )
+  );
+};

@@ -3847,8 +3847,43 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      check: async (page) => {
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        return open === 1
+          ? null
+          : `${open} banners show open; only the newest should, the others one line each`;
+      },
       data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
       name: "stress-banners",
+      width: NARROWEST,
+    },
+    {
+      // The keyboard opens a folded banner and reads the whole of its message.
+      act: async (page) => {
+        await page.getByRole("button", { name: "Not saved to disk" }).focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("button", { name: "Show full message" }).focus();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(200);
+      },
+      check: async (page) => {
+        const alert = page.getByRole("alert");
+        const shown = await alert.innerText();
+
+        const whole = await alert.evaluate((element) => {
+          const text = element.querySelector("[aria-expanded]")?.previousElementSibling;
+
+          return text instanceof HTMLElement &&
+            text.scrollHeight <= text.clientHeight + 1;
+        });
+
+        return shown.includes(STRESS_STATUS.saveError) && whole
+          ? null
+          : "Show full message didn't show the whole failed save's message";
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-full",
       width: NARROWEST,
     },
     {
