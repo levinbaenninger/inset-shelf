@@ -53,7 +53,7 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="mt-16 flex flex-col gap-2 border-t pt-6 text-[13px] text-muted-foreground sm:flex-row sm:justify-between">
-        <p>© 2026 Inset Shelf, a school innovation project</p>
+        <p>© 2026 Inset Shelf</p>
         <p>Product names and logos are trademarks of their owners</p>
       </div>
     </footer>

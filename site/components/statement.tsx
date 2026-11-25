@@ -3,9 +3,9 @@
 import ScrollReveal from "./react-bits/ScrollReveal";
 
 const STATEMENT =
-  "A sentence pasted into a notes app forgets its chat, its pull request, its page. Inset Shelf keeps the source with every item, and one click opens it again. 11 of 12 people we interviewed had already given up a tool for this.";
+  "Pasted notes forget where they came from. Inset Shelf keeps the source, one click away.";
 
-// The case for the shelf in one paragraph, its words darkening as it scrolls into view.
+// The case for the shelf in one line, its words darkening as it scrolls into view.
 export function Statement() {
   return (
     <section className="gutter py-28 md:py-40">

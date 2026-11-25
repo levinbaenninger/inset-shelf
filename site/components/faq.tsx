@@ -28,7 +28,7 @@ const QUESTIONS = [
   },
   {
     q: "Is Inset Shelf finished?",
-    a: "No. It is the third Inset prototype, from a school innovation project, built to test a running list beside your work.",
+    a: "No. It is the third Inset prototype, built to test a running list beside your work.",
   },
 ];
 
