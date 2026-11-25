@@ -4102,6 +4102,83 @@ const STRESS_SCENES: readonly Scene[] = (
       name: "stress-edit-in-place-note",
     },
     {
+      // In details, one click on the words edits them there, as on the open row.
+      act: async (page) => {
+        await details(page, 720);
+
+        const word = page.locator("[data-details]").getByText("Monday", {
+          exact: false,
+        });
+
+        const box = await word.first().evaluate((element) => {
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT
+          );
+
+          for (
+            let node = walker.nextNode();
+            node !== null;
+            node = walker.nextNode()
+          ) {
+            const at = (node.textContent ?? "").indexOf("Monday");
+
+            if (at !== -1) {
+              const range = document.createRange();
+
+              range.setStart(node, at);
+              range.setEnd(node, at + 6);
+
+              const rect = range.getBoundingClientRect();
+
+              return {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+              };
+            }
+          }
+
+          return null;
+        });
+
+        if (box !== null) {
+          await page.mouse.click(box.x, box.y);
+        }
+
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const editing = await page
+          .getByRole("textbox", { name: "Edit item" })
+          .count();
+
+        const at = await caretWord(page);
+
+        return editing === 1 && at === "Monday"
+          ? null
+          : `one click on the words in details ${editing === 1 ? `put the caret in “${at}”` : "started no edit"}, not in “Monday”`;
+      },
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-details-click-edits",
+    },
+    {
+      // A note being typed under a picture ends its edit when the keyboard leaves it, as the words' editor does.
+      act: async (page) => {
+        await clickToEdit(page, 722, "button");
+        await page.getByRole("textbox", { name: /^New note in/u }).focus();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) =>
+        (await page
+          .getByRole("textbox", { name: "Note for this image" })
+          .count()) === 0
+          ? null
+          : "the note's field stayed open after the keyboard left it",
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-note-blur",
+    },
+    {
       data: {
         view: {
           corner: "bottom-right",

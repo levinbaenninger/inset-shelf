@@ -60,6 +60,7 @@ import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import {
   dueLabel,
   DueMenu,
@@ -70,6 +71,7 @@ import {
 } from "./item-meta";
 import { LinkList, SourceLine, TextEditor } from "./item-row";
 import { Markdown } from "./markdown";
+import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 
 /** What ⌘Z in details can bring back. */
@@ -864,11 +866,14 @@ const TextContent = ({
   onStopEditing,
 }: Omit<ContentProps, "item" | "onOpenImage" | "onOpenPins" | "onUndoable"> & {
   readonly item: TextItem;
-}) =>
-  editing ? (
+}) => {
+  const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+
+  return editing ? (
     // The same card as the words read in, so starting an edit moves nothing.
     <div className={cn(SURFACE, "px-3 py-2.5")}>
       <TextEditor
+        caretAt={caretAt}
         item={item}
         onDone={onStopEditing}
         onSave={(text) => {
@@ -877,7 +882,19 @@ const TextContent = ({
       />
     </div>
   ) : (
-    <div className={cn(SURFACE, "px-3 py-2.5")} onDoubleClick={onEdit}>
+    // A click on the words edits them there, as in the open row; a link still opens.
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Edit in the item menu (Return) edits from the keyboard; the click only says where the caret goes.
+    <div
+      className={cn(SURFACE, "cursor-text px-3 py-2.5")}
+      onClick={(event) => {
+        const point = editPoint(wordsClick(event));
+
+        if (point !== null) {
+          setCaretAt(point);
+          onEdit();
+        }
+      }}
+    >
       <Markdown
         className="text-sm leading-snug break-words"
         interactive
@@ -886,6 +903,7 @@ const TextContent = ({
       />
     </div>
   );
+};
 
 /** The item's own content at the top: its words, or its image or file with title, pins and note. */
 const Content = (props: ContentProps) => {

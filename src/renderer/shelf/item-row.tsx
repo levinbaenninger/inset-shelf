@@ -50,6 +50,7 @@ import { coach } from "@/tutorial/anchors";
 
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
+import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import { whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
@@ -449,35 +450,9 @@ const TITLE_LINES = 3;
 
 const DONE = "text-muted-foreground line-through";
 
-/**
- * Where a click on an open item's words starts an edit: at the click, unless
- * it was on a link (which opens) or ended a drag that selected words (which
- * stay selected to copy). Null when it starts none.
- */
-const editPoint = (event: MouseEvent): ScreenPoint | null =>
-  (event.target instanceof Element && event.target.closest("a") !== null) ||
-  window.getSelection()?.isCollapsed === false
-    ? null
-    : { x: event.clientX, y: event.clientY };
-
-/**
- * Where a click asked for the caret, kept from the click until the edit it
- * starts mounts, and forgotten once that edit ends.
- */
-const useCaretStart = <T,>(editing: boolean) => {
-  const [start, setStart] = useState<T | null>(null);
-  const [wasEditing, setWasEditing] = useState(editing);
-
-  if (editing !== wasEditing) {
-    setWasEditing(editing);
-
-    if (!editing) {
-      setStart(null);
-    }
-  }
-
-  return [start, setStart] as const;
-};
+/** Words being typed in where they are read: the quiet tint details' fields have, drawn around them, so nothing moves (as the inline Textarea). */
+const EDITING =
+  "bg-muted ring-muted dark:bg-muted/50 dark:ring-muted/50 rounded-xs ring-4";
 
 /**
  * Edits a text item in place, with its Markdown formatted as it is typed;
@@ -537,7 +512,7 @@ export const TextEditor = ({
       autoFocus
       caretAt={caretAt}
       // The read text's own type, so the words stay exactly where they were.
-      className={cn("min-h-0", WORDS, item.done && DONE)}
+      className={cn("min-h-0", WORDS, item.done && DONE, EDITING)}
       keys={{
         onEscape: () => {
           cancelled.current = true;
@@ -617,6 +592,7 @@ const NoteField = ({
         }
         variant="inline"
         maxLength={TEXT_MAX}
+        onBlur={onDone}
         onChange={(event) => {
           setNote(event.target.value);
           onChange(event.target.value);
@@ -632,8 +608,8 @@ const NoteField = ({
           ) {
             event.preventDefault();
             event.stopPropagation();
+            // Leaving the field ends the edit (onBlur).
             event.currentTarget.blur();
-            onDone();
 
             if (escape) {
               onHide();
@@ -1073,7 +1049,7 @@ const TextBody = ({
             className="cursor-text rounded-sm outline-none"
             data-row-keys
             onClick={(event) => {
-              const point = editPoint(event);
+              const point = editPoint(wordsClick(event));
 
               if (point !== null) {
                 setCaretAt(point);
