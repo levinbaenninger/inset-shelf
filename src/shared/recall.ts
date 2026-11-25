@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { ItemGroup, ItemId, ShelfDoc, ShelfItem } from "./shelf";
-import { serviceOfHost } from "./web-source";
+import { serviceOfHost, sourceLabel } from "./web-source";
 import { withoutAppName } from "./window-title";
 
 /**
@@ -246,6 +246,41 @@ export const itemsFrom = (
           item.sectionId === section.id && !item.done && fromHere(item, front)
       )
       .map((item) => item.id)
+  );
+
+/** The open items from the window the shelf opens beside, and its place in a few words; null when none came from it. */
+export const hereOf = (
+  doc: ShelfDoc,
+  front: PlaceSource | null
+): { readonly ids: readonly ItemId[]; readonly label: string } | null => {
+  const ids = front === null ? [] : itemsFrom(doc, front);
+
+  return front === null || ids.length === 0
+    ? null
+    : { ids, label: sourceLabel(front).label };
+};
+
+/** Some open item has a source to match, so the front window is worth reading at all. An empty shelf costs nothing. */
+export const hasPlaces = (doc: ShelfDoc): boolean =>
+  doc.items.some(
+    (item) => !item.done && (item.context !== null || item.windows.length > 0)
+  );
+
+/**
+ * Some open item came from a page or an app link in this app: only then is
+ * the window's address asked for, which costs an Apple Event, and which can
+ * prompt only for a browser the user already let Inset read during a capture.
+ */
+export const holdsPagesFrom = (doc: ShelfDoc, app: string | null): boolean =>
+  app !== null &&
+  doc.items.some(
+    (item) =>
+      !item.done &&
+      ((item.context?.app === app &&
+        (item.context.url !== null || item.context.appLink !== null)) ||
+        item.windows.some(
+          (window) => window.app === app && window.url !== null
+        ))
   );
 
 /** Only these items, and only the sections that still hold one. */

@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   AWAY_MS,
   GAP_MS,
+  hasPlaces,
+  hereOf,
+  holdsPagesFrom,
   INITIAL_RECALL,
   itemsFrom,
   onlyItems,
@@ -393,6 +396,43 @@ describe(itemsFrom, () => {
         source({ app: "Safari", url: "https://github.com/acme/app/pull/99" })
       )
     ).toStrictEqual([]);
+  });
+});
+
+describe(holdsPagesFrom, () => {
+  it("asks for an app's page address only when an open item came from a page in it", () => {
+    const doc = shelf();
+
+    expect(holdsPagesFrom(doc, "Safari")).toBeTruthy();
+    expect(holdsPagesFrom(doc, "Google Chrome")).toBeFalsy();
+    expect(holdsPagesFrom(doc, null)).toBeFalsy();
+  });
+});
+
+describe(hereOf, () => {
+  it("names the window the shelf opens beside and its items, or nothing", () => {
+    const doc = shelf();
+
+    const pr = source({
+      app: "Safari",
+      url: "https://github.com/acme/app/pull/12",
+    });
+
+    expect(hereOf(doc, pr)).toStrictEqual({
+      ids: itemsFrom(doc, pr),
+      label: "GitHub · acme/app #12",
+    });
+    expect(hereOf(doc, source({ app: "Notes", title: "Standup" }))).toBeNull();
+    expect(hereOf(doc, null)).toBeNull();
+  });
+});
+
+describe(hasPlaces, () => {
+  it("is false for a shelf whose open items came from nowhere", () => {
+    const empty = emptyShelf(SectionIdSchema.parse(uuid(1)));
+
+    expect(hasPlaces(empty)).toBeFalsy();
+    expect(hasPlaces(shelf())).toBeTruthy();
   });
 });
 

@@ -18,12 +18,14 @@ import type {
   Permission,
   PickerView,
   ShelfCommand,
+  ShelfHere,
 } from "@shared/contracts";
 import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
 import { secondTap, withWhy } from "@shared/pill";
+import { hereOf } from "@shared/recall";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
 import type {
@@ -52,6 +54,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerMonitor,
   screen,
   shell,
   systemPreferences,
@@ -72,6 +75,7 @@ import {
   sameClipboard,
 } from "./clipboard-match";
 import { chatGptThreadLink } from "./codex-threads";
+import { createContextRecall } from "./context-recall";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
 import type { ClipboardContents } from "./copy-gate";
@@ -582,13 +586,46 @@ const start = async (): Promise<void> => {
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
 
+  // Recall: the open items from the window the shelf opened beside, sent with the shelf's view. Not shelf data.
+  let shelfHere: ShelfHere | null = null;
+  let hereSeq = 0;
+  // Set once the shelf's IPC server exists.
+  let emitShelfView: () => void = ignore;
+
+  /**
+   * Open decision 3: the shelf shows a "from here" chip whenever it opens
+   * beside a window open items came from. False keeps the filter for the
+   * recall pill's click only.
+   */
+  const HERE_CHIP = true;
+
+  const viewWithHere = () => ({ ...controller.view(), here: shelfHere });
+
+  const setHere = (
+    front: Awaited<ReturnType<typeof frontWindow>>,
+    filter: boolean
+  ): void => {
+    const found =
+      HERE_CHIP || filter
+        ? hereOf(controller.view().doc, front.own ? null : front.context)
+        : null;
+
+    hereSeq += 1;
+    shelfHere = found === null ? null : { ...found, filter, seq: hereSeq };
+    emitShelfView();
+  };
+
   /**
    * Docks to the window in front, read before the shelf takes any focus.
    * After a capture or a drawing, Inset's own window is in front: the shelf
    * goes back beside the window it was docked to.
    */
   const showShelf = async (
-    options: { readonly dock?: boolean } = {}
+    options: {
+      readonly dock?: boolean;
+      /** From the recall pill: the list starts filtered to the items from the window in front. */
+      readonly filterHere?: boolean;
+    } = {}
   ): Promise<void> => {
     // From the notification area, the window in front is a part of the taskbar.
     if (options.dock === false) {
@@ -598,6 +635,8 @@ const start = async (): Promise<void> => {
     }
 
     const front = await frontWindow();
+
+    setHere(front, options.filterHere === true);
 
     if (front.bounds !== null) {
       lastTarget = front.bounds;
@@ -652,12 +691,14 @@ const start = async (): Promise<void> => {
         }
       })();
     },
-    // Recall: wired to the watcher below, once it exists.
     openRecall: () => {
-      void showShelf();
+      void showShelf({ filterHere: true });
     },
     preload: preloadPath("toast"),
-    recallEnded: ignore,
+    recallEnded: (place, how) => {
+      // oxlint-disable-next-line no-use-before-define -- recall watches input, so it is made with the key monitor.
+      recall.ended(place, how);
+    },
     // Say why: the words go after what the item's description already says.
     saveWhy: (item, text) => {
       const saved = controller.item(item);
@@ -887,6 +928,52 @@ const start = async (): Promise<void> => {
   keyMonitor.onDoubleTap(() => {
     void onDoubleTap();
   });
+
+  // Context recall: the front window, read after a click or shortcut settles, and a pill when open items came from it.
+  const recall = createContextRecall({
+    // Any Inset window showing, the pill included, or a capture running.
+    busy: () =>
+      capturingSelection ||
+      BrowserWindow.getAllWindows().some((window) => window.isVisible()),
+    doc: () => controller.view().doc,
+    // Without Screen Recording or Accessibility nothing in front can be read.
+    enabled: () =>
+      settings.current().recall &&
+      (process.platform !== "darwin" ||
+        systemPreferences.getMediaAccessStatus("screen") === "granted" ||
+        systemPreferences.isTrustedAccessibilityClient(false)),
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    now: () => Date.now(),
+    probe: async (address) => {
+      const front = await frontWindow(
+        address ? { page: true } : { address: false }
+      );
+
+      return front.own || front.context === null
+        ? null
+        : { bounds: front.bounds, source: front.context };
+    },
+    setTimer,
+    show: (recalled) => {
+      const before = toast.view()?.seq;
+
+      toast.send({ ...recalled, type: "recalled" });
+
+      if (toast.view()?.seq !== before) {
+        e2eLog("recallShown", { count: recalled.ids.length });
+      }
+    },
+  });
+
+  keyMonitor.onActivity((kind) => {
+    // Typing hides a recall pill.
+    if (kind !== "pointer") {
+      toast.send({ type: "keyDown" });
+    }
+
+    recall.activity(kind);
+  });
+  recall.sync();
 
   let keysRunning = false;
 
@@ -1716,7 +1803,7 @@ const start = async (): Promise<void> => {
       drafts: pageSettle.setDrafts,
       settled: pageSettle.answered,
       getTutorial: () => tutorial.view(HOME_PAGE),
-      getView: () => controller.view(),
+      getView: () => viewWithHere(),
       gettingStarted: () => {
         tutorial.showChecklist();
       },
@@ -2129,6 +2216,10 @@ const start = async (): Promise<void> => {
     shelfServer.emit("settle", seq);
   };
 
+  emitShelfView = () => {
+    shelfServer.emit("view", viewWithHere());
+  };
+
   notify = (message, tone = "done") => {
     if (shelf.isVisible()) {
       shelfServer.emit("notice", { message, tone });
@@ -2314,7 +2405,7 @@ const start = async (): Promise<void> => {
     }
   });
   controller.subscribe(() => {
-    shelfServer.emit("view", controller.view());
+    shelfServer.emit("view", viewWithHere());
     refreshTray();
     refreshAppMenu();
   });
@@ -2480,6 +2571,8 @@ const start = async (): Promise<void> => {
             screenshots.stop();
             screenshotCard.hide();
           }
+
+          recall.sync();
 
           if (settings.current().iconIn !== before) {
             placeIcon(settings.current().iconIn);
