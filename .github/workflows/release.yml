@@ -110,6 +110,8 @@ jobs:
       # Installed apps read latest*.yml from /releases/latest/download, so the
       # release stays a draft until every file is up. A tag build is never Latest:
       # main already built that commit under a higher <major>.<minor>.<run number>.
+      # A retried main run older than the current Latest still publishes its own
+      # release, but moves neither Latest nor the preview feed back.
       - name: Publish the versioned release
         run: |
           set -euo pipefail
@@ -118,8 +120,20 @@ jobs:
             latest=false
           else
             create=(--target "$GITHUB_SHA")
-            latest=true
+            # Only "no release yet" counts as no Latest; any other error stops here.
+            if ! current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
+              grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+              current=""
+            fi
+            newest="$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sort -V | tail -n 1)"
+            if [ "$newest" = "${TAG#v}" ]; then
+              latest=true
+            else
+              echo "$current is newer than $TAG, so $TAG is not marked Latest."
+              latest=false
+            fi
           fi
+          echo "PROMOTE=$latest" >> "$GITHUB_ENV"
 
           draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null || echo missing)"
           case "$draft" in
@@ -137,11 +151,12 @@ jobs:
           gh release upload "$TAG" dist/* --clobber
           gh release edit "$TAG" --draft=false --latest="$latest"
       # Apps installed from a preview build read latest*.yml from this release.
-      # It now carries only those files, pinned to the versioned release published
-      # above. The files the previous feed named by bare name stay one more build,
-      # for apps that read it just before the switch.
+      # It now carries only those files, copied from the versioned release, so a
+      # re-run that rebuilt the packages still mirrors the checksums that release
+      # serves. The files the previous feed named by bare name stay one more
+      # build, for apps that read it just before the switch.
       - name: Point the legacy preview feed at the release
-        if: github.ref_type != 'tag'
+        if: github.ref_type != 'tag' && env.PROMOTE == 'true'
         run: |
           set -euo pipefail
           if ! gh release view preview > /dev/null 2>&1; then
@@ -154,9 +169,12 @@ jobs:
             gh release download preview --pattern "$feed" --output - 2> /dev/null || true
           done | sed -n -e 's/^ *- url: //p' > "$previous"
 
+          feeds="$(mktemp -d)"
+          gh release download "$TAG" --pattern 'latest*.yml' --dir "$feeds"
+
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/preview" \
             -f sha="$GITHUB_SHA" -F force=true > /dev/null
-          gh release upload preview dist/latest*.yml --clobber
+          gh release upload preview "$feeds"/latest*.yml --clobber
           gh release view preview --json assets --jq '.assets[].name' \
             | while read -r name; do
                 case "$name" in
