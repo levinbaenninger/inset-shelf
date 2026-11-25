@@ -766,6 +766,7 @@ const Editor = ({
           <p
             className="text-destructive mr-auto min-w-0 truncate text-xs"
             role="alert"
+            title={problem}
           >
             {problem}
           </p>

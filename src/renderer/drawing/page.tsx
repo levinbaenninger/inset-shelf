@@ -310,7 +310,8 @@ const TextField = ({
   return (
     <input
       aria-label="Text"
-      className="absolute top-(--y) left-(--x) field-sizing-content min-w-4 bg-transparent p-0 font-(family-name:--font) text-(length:--size) leading-tight font-normal text-(color:--ink) outline-none"
+      // Never past the page's right edge: longer words scroll inside the field instead of the window.
+      className="absolute top-(--y) left-(--x) field-sizing-content max-w-[calc(100%-var(--x))] min-w-4 bg-transparent p-0 font-(family-name:--font) text-(length:--size) leading-tight font-normal text-(color:--ink) outline-none"
       onBlur={() => {
         onCommit(true);
       }}
