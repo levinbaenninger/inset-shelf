@@ -328,13 +328,14 @@ export interface ScreenshotView {
 /** Which add saves the screenshot: Add to Shelf, or Add to “…”. */
 export type ShotSaveTo = "shelf" | "item";
 
-/** A screenshot card's save: none yet, writing (its button reads Saving…), or failed (the card says why and offers Retry). */
+/** A screenshot card's save: none yet, writing (its button reads Saving…), or failed (the card says why, and the button pressed reads Retry while it still goes where it went). */
 export type ShotSave =
   | { readonly state: "idle" }
   | { readonly state: "saving"; readonly to: ShotSaveTo }
   | {
       readonly state: "failed";
-      readonly to: ShotSaveTo;
+      /** The button that offers Retry; null when none does (the item it went to is gone, or the card names another now). */
+      readonly to: ShotSaveTo | null;
       readonly message: string;
     };
 

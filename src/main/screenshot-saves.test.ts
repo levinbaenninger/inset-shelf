@@ -380,9 +380,27 @@ describe("Add to “…” on the screenshot card", () => {
     expect(card.view()?.save).toStrictEqual({
       message: ITEM_GONE,
       state: "failed",
-      to: "item",
+      to: null,
     });
     expect(card.attached).toStrictEqual([]);
+  });
+
+  it("offers no Retry once the card names another item, so a press never goes somewhere unseen", async () => {
+    const card = setup();
+
+    const other = ItemIdSchema.parse(
+      card.controller.apply({ text: "Book the lift", type: "compose" })
+    );
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    card.failAttachments(DISK_FULL);
+    await card.saves.addToItem(1);
+    card.controller.apply({ id: card.note, type: "remove" });
+    card.select(other, true);
+
+    expect(card.view()?.target).toStrictEqual({ label: "Book the lift" });
+    expect(card.view()?.save).toMatchObject({ state: "failed", to: null });
   });
 });
 

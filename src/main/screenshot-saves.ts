@@ -65,11 +65,18 @@ interface Held<S extends Shot> {
   attachedTo: ItemId | null;
   /** A save is under way: a second click waits for it. */
   saving: boolean;
+  /** The item Add to “…” last tried: its Retry stands only while the card still names it. */
+  tried: ItemId | null;
 }
 
 type Placed =
   | { readonly ok: true; readonly id: ItemId }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      /** False when trying again can't help: the item is gone. */
+      readonly retry?: false;
+    };
 
 const excerpt = (text: string): string => {
   const line = text.replaceAll(/\s+/gu, " ").trim();
@@ -147,6 +154,17 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     if (next?.label !== view.target?.label) {
       card.update({ target: next });
     }
+
+    // Add to “…” names another item now: its button reads that name, not Retry, so a press never goes somewhere unseen.
+    const { save: shown } = view;
+
+    if (
+      shown.state === "failed" &&
+      shown.to === "item" &&
+      cardItem !== (held?.tried ?? null)
+    ) {
+      card.update({ save: { ...shown, to: null } });
+    }
   };
 
   /** The card's screenshot, when it is still the newest; null for an older card's request. */
@@ -190,9 +208,16 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     if (!written.ok) {
       if (mine) {
+        const retry = !("retry" in written) || written.retry !== false;
+
         card.update({
-          save: { message: written.message, state: "failed", to },
+          save: {
+            message: written.message,
+            state: "failed",
+            to: retry ? to : null,
+          },
         });
+        retarget();
       } else {
         deps.notify(written.message, "failed");
       }
@@ -231,22 +256,27 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return null;
       }
 
-      return await save(seq, "item", async (now) => {
-        if (deps.item(id) === undefined) {
-          now.attachedTo = null;
-          retarget();
+      const now = current(seq);
 
-          return { message: ITEM_GONE, ok: false };
+      if (now !== null && !now.saving) {
+        now.tried = id;
+      }
+
+      return await save(seq, "item", async (holding) => {
+        if (deps.item(id) === undefined) {
+          holding.attachedTo = null;
+
+          return { message: ITEM_GONE, ok: false, retry: false };
         }
 
-        if (now.attachedTo !== id) {
-          const result = await deps.attach(now.shot, id);
+        if (holding.attachedTo !== id) {
+          const result = await deps.attach(holding.shot, id);
 
           if (!result.ok) {
             return result;
           }
 
-          now.attachedTo = id;
+          holding.attachedTo = id;
           retarget();
         }
 
@@ -269,7 +299,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     /** A new screenshot: the card shows it, and the last one is forgotten. */
     show: (shot: S): void => {
-      held = { attachedTo: null, item: null, saving: false, shot };
+      held = { attachedTo: null, item: null, saving: false, shot, tried: null };
       card.show({
         heightPx: shot.heightPx,
         imageUrl: deps.imageUrl(shot),
