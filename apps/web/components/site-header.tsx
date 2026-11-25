@@ -2,35 +2,51 @@
 
 import { Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import { useEffect, useState } from "react";
 
-import { Button } from "@inset/ui/components/button";
-import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { NAV_LINKS, RELEASE_URL, REPO_URL } from "@/lib/site";
-import { cn } from "@inset/ui/lib/utils";
 
 import { DownloadButtons } from "./download-buttons";
 import { Logo } from "./logo";
 
-function useScrolled() {
+const useScrolled = () => {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
-    const update = () => setScrolled(window.scrollY > 8);
+    const update = () => {
+      setScrolled(window.scrollY > 8);
+    };
+
     update();
     window.addEventListener("scroll", update, { passive: true });
-    return () => window.removeEventListener("scroll", update);
+
+    return () => {
+      window.removeEventListener("scroll", update);
+    };
   }, []);
+
   return scrolled;
-}
+};
 
 // Clear over the hero's sky, then a white bar with a hairline once the page moves.
-export function SiteHeader() {
+export const SiteHeader = () => {
   const scrolled = useScrolled();
+
   return (
     <header
       className={cn(
         "fixed inset-x-0 top-0 z-30 border-b transition-[background-color,border-color] duration-200",
-        scrolled ? "border-border bg-white/85 backdrop-blur-md" : "border-transparent",
+        scrolled
+          ? "border-border bg-white/85 backdrop-blur-md"
+          : "border-transparent"
       )}
     >
       <a
@@ -42,18 +58,21 @@ export function SiteHeader() {
       <div
         className={cn(
           "rails relative flex items-center gap-2 px-7 transition-[height] duration-200 md:px-8 xl:px-2",
-          scrolled ? "h-16" : "h-[76px] sm:h-20",
+          scrolled ? "h-16" : "h-[76px] sm:h-20"
         )}
       >
         <Logo />
 
-        <nav aria-label="Main" className="absolute left-1/2 hidden -translate-x-1/2 md:block">
+        <nav
+          aria-label="Main"
+          className="absolute left-1/2 hidden -translate-x-1/2 md:block"
+        >
           <ul className="flex gap-1">
             {NAV_LINKS.map((link) => (
               <li key={link.href}>
                 <a
                   href={link.href}
-                  className="rounded-md px-3 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-black/5 hover:text-foreground"
+                  className="text-foreground/75 hover:text-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/5"
                 >
                   {link.label}
                 </a>
@@ -64,11 +83,14 @@ export function SiteHeader() {
 
         <a
           href={REPO_URL}
-          className="ml-auto hidden rounded-md px-3 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-black/5 hover:text-foreground sm:block"
+          className="text-foreground/75 hover:text-foreground ml-auto hidden rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/5 sm:block"
         >
           GitHub
         </a>
-        <Button asChild className="hidden h-9 rounded-[9px] px-4 sm:inline-flex">
+        <Button
+          asChild
+          className="hidden h-9 rounded-[9px] px-4 sm:inline-flex"
+        >
           <a href={RELEASE_URL}>Download</a>
         </Button>
 
@@ -89,18 +111,20 @@ export function SiteHeader() {
             </SheetTitle>
             <nav aria-label="Menu" className="grid gap-8 px-7 pt-4">
               <ul className="grid">
-                {[...NAV_LINKS, { href: REPO_URL, label: "GitHub" }].map((link) => (
-                  <li key={link.href}>
-                    <SheetClose asChild>
-                      <a
-                        href={link.href}
-                        className="flex h-14 items-center border-b text-lg font-medium tracking-[-0.02em]"
-                      >
-                        {link.label}
-                      </a>
-                    </SheetClose>
-                  </li>
-                ))}
+                {[...NAV_LINKS, { href: REPO_URL, label: "GitHub" }].map(
+                  (link) => (
+                    <li key={link.href}>
+                      <SheetClose asChild>
+                        <a
+                          href={link.href}
+                          className="flex h-14 items-center border-b text-lg font-medium tracking-[-0.02em]"
+                        >
+                          {link.label}
+                        </a>
+                      </SheetClose>
+                    </li>
+                  )
+                )}
               </ul>
               <DownloadButtons />
             </nav>
@@ -109,4 +133,4 @@ export function SiteHeader() {
       </div>
     </header>
   );
-}
+};

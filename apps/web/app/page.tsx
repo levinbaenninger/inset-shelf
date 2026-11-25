@@ -9,26 +9,26 @@ import { SiteHeader } from "@/components/site-header";
 import { Sources } from "@/components/sources";
 import { Statement } from "@/components/statement";
 
-export default function Home() {
-  return (
-    <>
-      <SiteHeader />
-      <main id="main">
-        <Hero />
-        <div className="rails border-rail md:border-x">
-          <Capture />
-          <Divider />
-          <Statement />
-          <Divider />
-          <Sources />
-          <Divider />
-          <Details />
-          <Divider />
-          <Faq />
-        </div>
-        <Closing />
-      </main>
-      <SiteFooter />
-    </>
-  );
-}
+const Home = () => (
+  <>
+    <SiteHeader />
+    <main id="main">
+      <Hero />
+      <div className="rails border-rail md:border-x">
+        <Capture />
+        <Divider />
+        <Statement />
+        <Divider />
+        <Sources />
+        <Divider />
+        <Details />
+        <Divider />
+        <Faq />
+      </div>
+      <Closing />
+    </main>
+    <SiteFooter />
+  </>
+);
+
+export default Home;

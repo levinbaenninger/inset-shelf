@@ -1,6 +1,13 @@
 "use client";
 
-import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 export type LogoItem =
   | {
@@ -181,9 +188,11 @@ interface EngineState {
   destroyed: boolean;
 }
 
-const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
+const cx = (...parts: Array<string | false | null | undefined>) =>
+  parts.filter(Boolean).join(" ");
 
 const SMOOTH_TAU = 0.25;
 const GLIDE_TAU = 0.8;
@@ -193,7 +202,8 @@ const INTRO_TIME = 0.7;
 const INTRO_STAGGER = 0.45;
 const HALF_SQRT_PI = Math.sqrt(Math.PI) / 2;
 
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
 
 const toCssLength = (value?: number | string): string | undefined =>
   typeof value === "number" ? `${value}px` : (value ?? undefined);
@@ -203,13 +213,16 @@ const erf = (x: number) => {
   const t = 1 / (1 + 0.3275911 * a);
   const y =
     1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
+      t +
+      0.254829592) *
       t *
       Math.exp(-a * a);
   return x < 0 ? -y : y;
 };
 
-const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeInOut = (t: number) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 
@@ -220,11 +233,13 @@ const fadeMask = (size: number, vertical: boolean) => {
   if (span <= 0) return undefined;
   const stops: string[] = [];
   for (let i = 0; i <= 12; i++) {
-    stops.push(`rgba(0,0,0,${smootherstep(i / 12).toFixed(4)}) ${((span * i) / 12).toFixed(3)}%`);
+    stops.push(
+      `rgba(0,0,0,${smootherstep(i / 12).toFixed(4)}) ${((span * i) / 12).toFixed(3)}%`
+    );
   }
   for (let i = 12; i >= 0; i--) {
     stops.push(
-      `rgba(0,0,0,${smootherstep(i / 12).toFixed(4)}) ${(100 - (span * i) / 12).toFixed(3)}%`,
+      `rgba(0,0,0,${smootherstep(i / 12).toFixed(4)}) ${(100 - (span * i) / 12).toFixed(3)}%`
     );
   }
   return `linear-gradient(${vertical ? "to bottom" : "to right"}, ${stops.join(", ")})`;
@@ -240,7 +255,12 @@ const rotationMatrix = (degX: number, degY: number): number[] => {
   return [cb, 0, sb, sa * sb, ca, -sa * cb, -ca * sb, sa, ca * cb];
 };
 
-const unproject = (m: number[], depth: number, sx: number, sy: number): [number, number] | null => {
+const unproject = (
+  m: number[],
+  depth: number,
+  sx: number,
+  sy: number
+): [number, number] | null => {
   const den = m[8] * depth - m[2] * sx - m[5] * sy;
   if (den <= 1e-6) return null;
   const t = (m[8] * depth) / den;
@@ -251,7 +271,12 @@ const unproject = (m: number[], depth: number, sx: number, sy: number): [number,
   return [m[0] * qx + m[3] * qy + m[6] * qz, m[1] * qx + m[4] * qy + m[7] * qz];
 };
 
-const project = (m: number[], depth: number, px: number, py: number): [number, number] => {
+const project = (
+  m: number[],
+  depth: number,
+  px: number,
+  py: number
+): [number, number] => {
   const k = depth / (depth - (m[6] * px + m[7] * py));
   return [(m[0] * px + m[1] * py) * k, (m[3] * px + m[4] * py) * k];
 };
@@ -260,7 +285,7 @@ const createEngine = (
   root: HTMLDivElement,
   track: HTMLDivElement,
   config: React.MutableRefObject<LoopConfig>,
-  setLayout: (layout: LoopLayout) => void,
+  setLayout: (layout: LoopLayout) => void
 ) => {
   const query =
     typeof window.matchMedia === "function"
@@ -392,14 +417,17 @@ const createEngine = (
       geo.sign = Math.sign(bend);
       geo.shift = sag / 2;
       geo.limit = Math.PI * 0.6;
-      const reach = R * Math.min(Math.PI / 2, Math.asin(Math.min(1, (L / 2 + w) / R))) + w;
+      const reach =
+        R * Math.min(Math.PI / 2, Math.asin(Math.min(1, (L / 2 + w) / R))) + w;
       geo.uMin = -reach;
       geo.uMax = reach;
       pad += sag / 2 + (w / 2) * Math.sin(edge) + (lens * hc) / 2;
     } else if (geo.mode === "orbit") {
       const R = Math.max(40, L * 0.43 - w * 0.2);
       const k = Math.max(1, Math.round((2 * Math.PI * R) / P));
-      const alpha = Math.sign(bend) * Math.atan2(Math.abs(bend) * Math.max(hc * 2, R * 0.36), R);
+      const alpha =
+        Math.sign(bend) *
+        Math.atan2(Math.abs(bend) * Math.max(hc * 2, R * 0.36), R);
       const depth = R * 5;
       const pf = depth / (depth - R * Math.cos(alpha));
       const pb = depth / (depth + R * Math.cos(alpha));
@@ -421,7 +449,9 @@ const createEngine = (
       pad += (lens * hc) / 2;
     }
     if (cfg.labels === "hover")
-      pad += cfg.vertical ? st.tipMax : hc * 0.2 + Math.max(11, hc * 0.26) * 1.3;
+      pad += cfg.vertical
+        ? st.tipMax
+        : hc * 0.2 + Math.max(11, hc * 0.26) * 1.3;
     const tx = clamp(cfg.tiltX, -60, 60);
     const ty = clamp(cfg.tiltY, -60, 60);
     if (Math.abs(tx) > 0.01 || Math.abs(ty) > 0.01) {
@@ -456,7 +486,10 @@ const createEngine = (
     }
     const extra = cfg.links ? 2 : 0;
     geo.lead = (Math.max(0, Math.ceil((-geo.uMin - L / 2) / P)) + extra) * P;
-    const copies = Math.max(2, Math.ceil((geo.uMax + L / 2 + geo.lead) / P) + 2 + (extra ? 1 : 0));
+    const copies = Math.max(
+      2,
+      Math.ceil((geo.uMax + L / 2 + geo.lead) / P) + 2 + (extra ? 1 : 0)
+    );
     const primary = Math.min(copies - 1, Math.floor((geo.lead + L / 2) / P));
     st.geo = geo;
     root.style.setProperty("--logoloop-pad", `${Math.ceil(pad)}px`);
@@ -481,7 +514,10 @@ const createEngine = (
     }
     if (cfg.vertical) {
       const parentHeight = root.parentElement?.clientHeight ?? 0;
-      if (parentHeight > 0 && root.style.height !== `${Math.ceil(parentHeight)}px`) {
+      if (
+        parentHeight > 0 &&
+        root.style.height !== `${Math.ceil(parentHeight)}px`
+      ) {
         root.style.height = `${Math.ceil(parentHeight)}px`;
       }
     } else if (root.style.height) {
@@ -498,23 +534,36 @@ const createEngine = (
     let tipMax = 0;
     for (const it of st.items) {
       const r = it.el.getBoundingClientRect();
-      it.center = ((cfg.vertical ? r.top + r.height / 2 : r.left + r.width / 2) - origin) / k;
+      it.center =
+        ((cfg.vertical ? r.top + r.height / 2 : r.left + r.width / 2) -
+          origin) /
+        k;
       it.size = (cfg.vertical ? r.height : r.width) / k;
       it.cross = (cfg.vertical ? r.width : r.height) / k;
       crossMax = Math.max(crossMax, it.cross);
       sizeMax = Math.max(sizeMax, it.size);
-      if (it.tip && it.copy === 0) tipMax = Math.max(tipMax, it.tip.offsetWidth);
+      if (it.tip && it.copy === 0)
+        tipMax = Math.max(tipMax, it.tip.offsetWidth);
     }
     const a = lists[0].getBoundingClientRect();
     const b = lists[1] ? lists[1].getBoundingClientRect() : null;
     st.period =
-      (b ? (cfg.vertical ? b.top - a.top : b.left - a.left) : cfg.vertical ? a.height : a.width) /
-      k;
+      (b
+        ? cfg.vertical
+          ? b.top - a.top
+          : b.left - a.left
+        : cfg.vertical
+          ? a.height
+          : a.width) / k;
     const cs = getComputedStyle(root);
     st.box = [root.offsetWidth, root.offsetHeight];
     st.length = cfg.vertical
-      ? root.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
-      : root.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      ? root.clientHeight -
+        parseFloat(cs.paddingTop) -
+        parseFloat(cs.paddingBottom)
+      : root.clientWidth -
+        parseFloat(cs.paddingLeft) -
+        parseFloat(cs.paddingRight);
     st.crossMax = crossMax;
     st.sizeMax = sizeMax;
     st.tipMax = tipMax + crossMax * 0.25;
@@ -539,8 +588,10 @@ const createEngine = (
       sy = p[1];
     }
     const s = cfg.vertical ? sy : sx;
-    if (geo.mode === "arc" && geo.R) return geo.R * Math.asin(clamp(s / geo.R, -1, 1));
-    if (geo.mode === "orbit") return Math.asin(clamp(s / (geo.R * geo.pf), -1, 1));
+    if (geo.mode === "arc" && geo.R)
+      return geo.R * Math.asin(clamp(s / geo.R, -1, 1));
+    if (geo.mode === "orbit")
+      return Math.asin(clamp(s / (geo.R * geo.pf), -1, 1));
     return s;
   };
 
@@ -554,7 +605,8 @@ const createEngine = (
         dir > 0
           ? s + P * Math.ceil((from + 0.5 - s) / P)
           : s + P * Math.floor((from - 0.5 - s) / P);
-      if (best === null || (dir > 0 ? candidate < best : candidate > best)) best = candidate;
+      if (best === null || (dir > 0 ? candidate < best : candidate > best))
+        best = candidate;
     }
     return best ?? from;
   };
@@ -576,7 +628,12 @@ const createEngine = (
   };
 
   const startMove = (target: number, duration: number) => {
-    st.move = { from: st.offset, delta: target - st.offset, t: 0, dur: duration };
+    st.move = {
+      from: st.offset,
+      delta: target - st.offset,
+      t: 0,
+      dur: duration,
+    };
   };
 
   const stepTiming = (speed: number) => {
@@ -590,7 +647,7 @@ const createEngine = (
     key: "t" | "o" | "v" | "z" | "s" | "p",
     prop: "transform" | "opacity" | "visibility" | "zIndex",
     value: string,
-    target: HTMLElement,
+    target: HTMLElement
   ) => {
     if (it[key] !== value) {
       it[key] = value;
@@ -612,11 +669,13 @@ const createEngine = (
       : lineT;
     const introRunning = st.introStart >= 0;
     const elapsed = introRunning ? (now - st.introStart) / 1000 : 0;
-    const lensFocus = geo.mode === "orbit" ? clamp(cfg.focus, 0, 1) * 0.9 : geo.focus;
+    const lensFocus =
+      geo.mode === "orbit" ? clamp(cfg.focus, 0, 1) * 0.9 : geo.focus;
     const lensMag = geo.magnify * st.mag;
     const cursorActive = lensMag > 0 && st.mag > 0.5 && geo.mode !== "orbit";
     const wantsActive = cfg.focus > 0 || cfg.step || cursorActive;
-    const needItems = geo.mode !== "line" || lensFocus > 0 || lensMag > 0.0005 || introRunning;
+    const needItems =
+      geo.mode !== "line" || lensFocus > 0 || lensMag > 0.0005 || introRunning;
     if (!needItems && st.itemMode) clearItems();
     st.itemMode = needItems;
     if (!needItems && !wantsActive) {
@@ -648,11 +707,15 @@ const createEngine = (
           x = geo.R * Math.sin(th) * p;
           y = Z * Math.sin(geo.alpha) * p - geo.shift;
           scale = p;
-          if (lensFocus > 0) scale *= 1 + lensFocus * Math.exp(-((th / 0.55) ** 2));
+          if (lensFocus > 0)
+            scale *= 1 + lensFocus * Math.exp(-((th / 0.55) ** 2));
           if (lensMag > 0) {
             const span = (geo.magSigma * 2 * Math.PI) / geo.C;
             scale *=
-              1 + lensMag * Math.max(0, Math.cos(th)) * Math.exp(-(((th - st.magU) / span) ** 2));
+              1 +
+              lensMag *
+                Math.max(0, Math.cos(th)) *
+                Math.exp(-(((th - st.magU) / span) ** 2));
           }
           const facing = (Math.cos(th) + 1) / 2;
           opacity = 0.25 + 0.75 * facing * facing;
@@ -664,7 +727,11 @@ const createEngine = (
         if (lensFocus > 0) {
           const kf = w / geo.focusSigma;
           scale *= 1 + lensFocus * Math.exp(-kf * kf);
-          opacity *= 1 - 0.45 * lensFocus * (1 - Math.exp(-((u / (geo.focusSigma * 1.8)) ** 2)));
+          opacity *=
+            1 -
+            0.45 *
+              lensFocus *
+              (1 - Math.exp(-((u / (geo.focusSigma * 1.8)) ** 2)));
           w += lensFocus * geo.focusSigma * HALF_SQRT_PI * erf(kf);
         }
         const near = Math.abs(w - st.magU);
@@ -676,7 +743,8 @@ const createEngine = (
         x = w;
         if (geo.mode === "wave") {
           y = geo.amp * Math.sin(geo.k * w);
-          rot = (Math.atan(geo.amp * geo.k * Math.cos(geo.k * w)) * 90) / Math.PI;
+          rot =
+            (Math.atan(geo.amp * geo.k * Math.cos(geo.k * w)) * 90) / Math.PI;
         } else if (geo.mode === "arc" && geo.R) {
           const phi = w / geo.R;
           if (Math.abs(phi) > geo.limit) hidden = true;
@@ -688,7 +756,9 @@ const createEngine = (
       }
       if (introRunning && !hidden) {
         const pos = clamp((x + half) / Math.max(1, L), 0, 1);
-        const e = easeOut(clamp((elapsed - pos * INTRO_STAGGER) / INTRO_TIME, 0, 1));
+        const e = easeOut(
+          clamp((elapsed - pos * INTRO_STAGGER) / INTRO_TIME, 0, 1)
+        );
         opacity *= e;
         y += (1 - e) * 14;
       }
@@ -704,7 +774,13 @@ const createEngine = (
             rot ? ` rotate(${(cfg.vertical ? -rot : rot).toFixed(2)}deg)` : ""
           }`;
       write(it, "t", "transform", t, it.el);
-      write(it, "o", "opacity", hidden ? "0" : opacity > 0.999 ? "" : opacity.toFixed(3), it.el);
+      write(
+        it,
+        "o",
+        "opacity",
+        hidden ? "0" : opacity > 0.999 ? "" : opacity.toFixed(3),
+        it.el
+      );
       write(it, "v", "visibility", hidden ? "hidden" : "", it.el);
       write(it, "z", "zIndex", z, it.el);
       if (it.content)
@@ -713,7 +789,7 @@ const createEngine = (
           "s",
           "transform",
           Math.abs(scale - 1) < 0.0005 ? "" : `scale(${scale.toFixed(4)})`,
-          it.content,
+          it.content
         );
       if (it.tip) {
         const lift = ((scale - 1) * it.cross) / 2;
@@ -726,11 +802,12 @@ const createEngine = (
             : cfg.vertical
               ? `translateX(${lift.toFixed(2)}px)`
               : `translateY(${lift.toFixed(2)}px)`,
-          it.tip,
+          it.tip
         );
       }
     }
-    const active = best && bestDist < Math.max(best.size, st.pitch) / 2 + 1 ? best : null;
+    const active =
+      best && bestDist < Math.max(best.size, st.pitch) / 2 + 1 ? best : null;
     if (active !== st.active) {
       st.active?.el.removeAttribute("data-active");
       active?.el.setAttribute("data-active", "");
@@ -773,7 +850,10 @@ const createEngine = (
     if (cfg.scrollBoost > 0 && !st.reduced) {
       st.scrollVel *= Math.exp(-dt / 0.18);
       if (Math.abs(st.scrollVel) > 1) busy = true;
-      target += clamp(st.scrollVel * cfg.scrollBoost, -3000, 3000) * travel * cfg.dirSign;
+      target +=
+        clamp(st.scrollVel * cfg.scrollBoost, -3000, 3000) *
+        travel *
+        cfg.dirSign;
     }
     if (st.drag?.active) {
       busy = true;
@@ -818,7 +898,8 @@ const createEngine = (
     }
     const wantMag = cfg.magnify > 0 && st.pointerInside && !st.reduced ? 1 : 0;
     if (st.mag !== wantMag) {
-      st.mag += (wantMag - st.mag) * (1 - Math.exp(-dt / (wantMag ? 0.12 : 0.25)));
+      st.mag +=
+        (wantMag - st.mag) * (1 - Math.exp(-dt / (wantMag ? 0.12 : 0.25)));
       if (Math.abs(wantMag - st.mag) < 0.002) st.mag = wantMag;
       busy = true;
     }
@@ -835,7 +916,8 @@ const createEngine = (
       st.magReady = false;
     }
     render(now);
-    if (busy && st.visible && !st.destroyed) st.raf = requestAnimationFrame(frame);
+    if (busy && st.visible && !st.destroyed)
+      st.raf = requestAnimationFrame(frame);
   };
 
   const wake = () => {
@@ -877,7 +959,11 @@ const createEngine = (
 
   const onDown = (e: PointerEvent) => {
     st.pressedAt = performance.now();
-    if (!config.current.draggable || (e.pointerType === "mouse" && e.button !== 0)) return;
+    if (
+      !config.current.draggable ||
+      (e.pointerType === "mouse" && e.button !== 0)
+    )
+      return;
     const [x, y] = local(e);
     if (e.pointerType !== "touch") st.pointer = [x, y];
     st.drag = {
@@ -927,7 +1013,8 @@ const createEngine = (
       d.offset += st.offset - next;
       const now = performance.now();
       d.samples.push([now, along]);
-      while (d.samples.length > 2 && now - d.samples[0][0] > 100) d.samples.shift();
+      while (d.samples.length > 2 && now - d.samples[0][0] > 100)
+        d.samples.shift();
     }
     wake();
   };
@@ -950,11 +1037,18 @@ const createEngine = (
       const [t0, a0] = s[0];
       const [t1, a1] = s[s.length - 1];
       if (t1 > t0 && now - t1 < 80)
-        v = clamp((-(a1 - a0) / (t1 - t0)) * 1000 * d.scale, -MAX_FLING, MAX_FLING);
+        v = clamp(
+          (-(a1 - a0) / (t1 - t0)) * 1000 * d.scale,
+          -MAX_FLING,
+          MAX_FLING
+        );
     }
     if (cfg.step && !st.reduced) {
       const target = nearestSnap(st.offset + v * 0.35);
-      startMove(target, clamp(0.3 + Math.abs(target - st.offset) / 1800, 0.3, 0.8));
+      startMove(
+        target,
+        clamp(0.3 + Math.abs(target - st.offset) / 1800, 0.3, 0.8)
+      );
       st.velocity = 0;
     } else {
       st.velocity = v;
@@ -985,7 +1079,8 @@ const createEngine = (
     const it = st.items.find((item) => item.el.contains(target));
     if (it && st.geo) {
       const u = -st.offset - st.geo.lead + it.center - st.length / 2;
-      const comfortable = st.geo.mode === "orbit" ? 1 : Math.max(0, st.length / 2 - it.size);
+      const comfortable =
+        st.geo.mode === "orbit" ? 1 : Math.max(0, st.length / 2 - it.size);
       if (Math.abs(u) > comfortable) {
         st.move = null;
         st.seek = {
@@ -1082,7 +1177,7 @@ const createEngine = (
         st.visible = entry.isIntersecting;
         if (st.visible) wake();
       },
-      { threshold: 0.1 },
+      { threshold: 0.1 }
     );
     intersection.observe(root);
   }
@@ -1151,7 +1246,10 @@ export const LogoLoop = memo<LogoLoopProps>(
     const rootRef = useRef<HTMLDivElement>(null);
     const trackRef = useRef<HTMLDivElement>(null);
     const engineRef = useRef<ReturnType<typeof createEngine> | null>(null);
-    const [{ copies, primary }, setLayout] = useState<LoopLayout>({ copies: 3, primary: 1 });
+    const [{ copies, primary }, setLayout] = useState<LoopLayout>({
+      copies: 3,
+      primary: 1,
+    });
     const [introPending] = useState(intro);
 
     const vertical = direction === "up" || direction === "down";
@@ -1159,7 +1257,12 @@ export const LogoLoop = memo<LogoLoopProps>(
     config.current = {
       speed,
       dirSign: (vertical ? direction === "up" : direction !== "right") ? 1 : -1,
-      hoverValue: hoverSpeed !== undefined ? hoverSpeed : pauseOnHover === false ? undefined : 0,
+      hoverValue:
+        hoverSpeed !== undefined
+          ? hoverSpeed
+          : pauseOnHover === false
+            ? undefined
+            : 0,
       vertical,
       layout,
       bend,
@@ -1181,7 +1284,7 @@ export const LogoLoop = memo<LogoLoopProps>(
         rootRef.current as HTMLDivElement,
         trackRef.current as HTMLDivElement,
         config,
-        setLayout,
+        setLayout
       );
       engineRef.current = engine;
       return () => {
@@ -1219,7 +1322,7 @@ export const LogoLoop = memo<LogoLoopProps>(
     const lists = useMemo(() => {
       const itemClass = cx(
         "group/item relative flex-none text-[length:var(--logoloop-logoHeight)] leading-none group-data-[intro]/loop:opacity-0",
-        vertical ? "mb-[var(--logoloop-gap)]" : "mr-[var(--logoloop-gap)]",
+        vertical ? "mb-[var(--logoloop-gap)]" : "mr-[var(--logoloop-gap)]"
       );
       const contentClass = (item: LogoItem) =>
         cx(
@@ -1231,11 +1334,11 @@ export const LogoLoop = memo<LogoLoopProps>(
             "[filter:grayscale(var(--logoloop-gray))] opacity-[var(--logoloop-dim)] group-hover/item:[filter:none] group-hover/item:opacity-100 group-focus-within/item:[filter:none] group-focus-within/item:opacity-100 group-data-[active]/item:[filter:none] group-data-[active]/item:opacity-100",
           item.hoverColor &&
             "group-hover/item:text-[var(--logoloop-item-color)] group-focus-within/item:text-[var(--logoloop-item-color)] group-data-[active]/item:text-[var(--logoloop-item-color)]",
-          !isMuted && !item.hoverColor && !!item.href && "hover:opacity-80",
+          !isMuted && !item.hoverColor && !!item.href && "hover:opacity-80"
         );
       const zoomClass = cx(
         "transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none",
-        scaleOnHover && "group-hover/item:scale-120",
+        scaleOnHover && "group-hover/item:scale-120"
       );
       const labelClass =
         labels === "below"
@@ -1245,13 +1348,16 @@ export const LogoLoop = memo<LogoLoopProps>(
         "pointer-events-none absolute whitespace-nowrap text-[length:max(11px,calc(var(--logoloop-logoHeight)*0.26))] font-medium leading-[1.2] opacity-0 transition-[opacity,translate] duration-[250ms] ease-[ease] motion-reduce:transition-none group-hover/item:opacity-80 group-focus-within/item:opacity-80 group-data-[active]/item:opacity-80",
         vertical
           ? "left-full top-1/2 ml-[calc(var(--logoloop-logoHeight)*0.25)] [translate:4px_-50%] group-hover/item:[translate:0_-50%] group-focus-within/item:[translate:0_-50%] group-data-[active]/item:[translate:0_-50%]"
-          : "left-1/2 top-full mt-[calc(var(--logoloop-logoHeight)*0.2)] [translate:-50%_4px] group-hover/item:[translate:-50%_0] group-focus-within/item:[translate:-50%_0] group-data-[active]/item:[translate:-50%_0]",
+          : "left-1/2 top-full mt-[calc(var(--logoloop-logoHeight)*0.2)] [translate:-50%_4px] group-hover/item:[translate:-50%_0] group-focus-within/item:[translate:-50%_0] group-data-[active]/item:[translate:-50%_0]"
       );
       return Array.from({ length: copies }, (_, copyIndex) => {
         const isPrimary = copyIndex === primary;
         return (
           <ul
-            className={cx("m-0 flex list-none items-center p-0", vertical && "flex-col")}
+            className={cx(
+              "m-0 flex list-none items-center p-0",
+              vertical && "flex-col"
+            )}
             key={copyIndex}
             role="list"
             aria-hidden={isPrimary ? undefined : true}
@@ -1272,7 +1378,7 @@ export const LogoLoop = memo<LogoLoopProps>(
                 <img
                   className={cx(
                     "pointer-events-none block h-[var(--logoloop-logoHeight)] w-auto object-contain [-webkit-user-drag:none] [image-rendering:-webkit-optimize-contrast]",
-                    zoomClass,
+                    zoomClass
                   )}
                   src={item.src}
                   srcSet={item.srcSet}
@@ -1287,18 +1393,25 @@ export const LogoLoop = memo<LogoLoopProps>(
                 />
               );
               const text =
-                (labels === "inline" || labels === "below") && item.title ? item.title : null;
+                (labels === "inline" || labels === "below") && item.title
+                  ? item.title
+                  : null;
               const inner = (
                 <>
                   {visual}
                   {text && (
-                    <span className={labelClass} aria-hidden={!isNode && !!item.alt}>
+                    <span
+                      className={labelClass}
+                      aria-hidden={!isNode && !!item.alt}
+                    >
                       {text}
                     </span>
                   )}
                 </>
               );
-              const name = isNode ? (item.ariaLabel ?? item.title) : (item.alt ?? item.title);
+              const name = isNode
+                ? (item.ariaLabel ?? item.title)
+                : (item.alt ?? item.title);
               return (
                 <li
                   className={itemClass}
@@ -1307,7 +1420,9 @@ export const LogoLoop = memo<LogoLoopProps>(
                   data-color={item.hoverColor ? "" : undefined}
                   style={
                     item.hoverColor
-                      ? ({ "--logoloop-item-color": item.hoverColor } as React.CSSProperties)
+                      ? ({
+                          "--logoloop-item-color": item.hoverColor,
+                        } as React.CSSProperties)
                       : undefined
                   }
                 >
@@ -1337,7 +1452,16 @@ export const LogoLoop = memo<LogoLoopProps>(
           </ul>
         );
       });
-    }, [copies, primary, logos, renderItem, labels, vertical, scaleOnHover, isMuted]);
+    }, [
+      copies,
+      primary,
+      logos,
+      renderItem,
+      labels,
+      vertical,
+      scaleOnHover,
+      isMuted,
+    ]);
 
     const mask = fadeOut ? fadeMask(fadeOutWidth, vertical) : undefined;
 
@@ -1359,12 +1483,16 @@ export const LogoLoop = memo<LogoLoopProps>(
 
     const rootClassName = cx(
       "group/loop relative overflow-hidden [-webkit-tap-highlight-color:transparent]",
-      vertical ? "inline-block h-full px-[var(--logoloop-pad)]" : "py-[var(--logoloop-pad)]",
+      vertical
+        ? "inline-block h-full px-[var(--logoloop-pad)]"
+        : "py-[var(--logoloop-pad)]",
       draggable &&
         "cursor-grab data-[dragging]:cursor-grabbing [&[data-dragging]_*]:cursor-grabbing",
       draggable &&
-        (vertical ? "[touch-action:pan-x_pinch-zoom]" : "[touch-action:pan-y_pinch-zoom]"),
-      className,
+        (vertical
+          ? "[touch-action:pan-x_pinch-zoom]"
+          : "[touch-action:pan-y_pinch-zoom]"),
+      className
     );
 
     return (
@@ -1382,7 +1510,7 @@ export const LogoLoop = memo<LogoLoopProps>(
         <div
           className={cx(
             "relative z-0 flex select-none will-change-transform [-webkit-user-select:none]",
-            vertical ? "h-max w-full flex-col" : "w-max",
+            vertical ? "h-max w-full flex-col" : "w-max"
           )}
           ref={trackRef}
         >
@@ -1390,7 +1518,7 @@ export const LogoLoop = memo<LogoLoopProps>(
         </div>
       </div>
     );
-  },
+  }
 );
 
 LogoLoop.displayName = "LogoLoop";

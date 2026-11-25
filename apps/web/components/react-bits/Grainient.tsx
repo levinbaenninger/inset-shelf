@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties, type HTMLAttributes } from "react";
+import {
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type HTMLAttributes,
+} from "react";
 
 export type GrainientType = "linear" | "radial";
 
-export interface GrainientProps extends Omit<HTMLAttributes<HTMLDivElement>, "style"> {
+export interface GrainientProps extends Omit<
+  HTMLAttributes<HTMLDivElement>,
+  "style"
+> {
   colors?: string[];
   type?: GrainientType;
   angle?: number;
@@ -65,7 +73,10 @@ type Sample = {
 
 type Spin = { x: number; y: number; age: number; direction: number };
 
-type Program = { program: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> };
+type Program = {
+  program: WebGLProgram;
+  uniforms: Record<string, WebGLUniformLocation | null>;
+};
 
 const MAX_COLORS = 8;
 const MAX_STIRS = 24;
@@ -263,7 +274,8 @@ void main() {
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }`;
 
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
 
 const toLinear = (value: number) =>
   value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
@@ -272,9 +284,15 @@ const toLab = ([r, g, b]: number[]): number[] => {
   const lr = toLinear(r);
   const lg = toLinear(g);
   const lb = toLinear(b);
-  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
-  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
-  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  const l = Math.cbrt(
+    0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb
+  );
+  const m = Math.cbrt(
+    0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb
+  );
+  const s = Math.cbrt(
+    0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb
+  );
   return [
     0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
     1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
@@ -292,7 +310,10 @@ const compile = (gl: WebGL2RenderingContext, type: number, source: string) => {
   return null;
 };
 
-const link = (gl: WebGL2RenderingContext, fragmentSource: string): Program | null => {
+const link = (
+  gl: WebGL2RenderingContext,
+  fragmentSource: string
+): Program | null => {
   const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
   const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
@@ -346,10 +367,9 @@ const Grainient = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wakeRef = useRef<(() => void) | null>(null);
-  const palette = (Array.isArray(colors) && colors.length ? colors : DEFAULT_COLORS).slice(
-    0,
-    MAX_COLORS,
-  );
+  const palette = (
+    Array.isArray(colors) && colors.length ? colors : DEFAULT_COLORS
+  ).slice(0, MAX_COLORS);
   const settings: Settings = {
     colors: palette.length > 1 ? palette : [palette[0], palette[0]],
     type: TYPES[type] ?? 0,
@@ -402,7 +422,9 @@ const Grainient = ({
     const buffer = gl.createFramebuffer();
     const fieldSize = { width: 0, height: 0 };
 
-    const probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    const probe = document
+      .createElement("canvas")
+      .getContext("2d", { willReadFrequently: true });
     const colorCache = new Map<string, number[]>();
     const parse = (value: string): number[] => {
       const key = String(value);
@@ -421,7 +443,8 @@ const Grainient = ({
       return rgb;
     };
 
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const reduce =
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const view = { width: 1, height: 1, ratio: 1 };
     const ramp = new Float32Array(MAX_COLORS * 3);
     const stirs = new Float32Array(MAX_STIRS * 4);
@@ -429,7 +452,15 @@ const Grainient = ({
     const twirls = new Float32Array(MAX_TWIRLS * 4);
     const trail: Sample[] = [];
     const spins: Spin[] = [];
-    const pointer = { x: 0.5, y: 0.5, sx: 0.5, sy: 0.5, vx: 0, inside: false, fresh: true };
+    const pointer = {
+      x: 0.5,
+      y: 0.5,
+      sx: 0.5,
+      sy: 0.5,
+      vx: 0,
+      inside: false,
+      fresh: true,
+    };
     let paletteKey = "";
     let time = 0;
     let introClock = settingsRef.current.intro && !reduce ? 0 : 1;
@@ -473,7 +504,10 @@ const Grainient = ({
       const radians = (s.angle * Math.PI) / 180;
       gl.uniform1i(fu.uType, s.type);
       gl.uniform2f(fu.uDir, Math.sin(radians), Math.cos(radians));
-      gl.uniform1f(fu.uExtent, aspect * Math.abs(Math.sin(radians)) + Math.abs(Math.cos(radians)));
+      gl.uniform1f(
+        fu.uExtent,
+        aspect * Math.abs(Math.sin(radians)) + Math.abs(Math.cos(radians))
+      );
       gl.uniform1f(fu.uBands, s.bands);
       gl.uniform1f(fu.uSoftness, s.softness);
       gl.uniform1f(fu.uFlow, s.flow);
@@ -522,10 +556,16 @@ const Grainient = ({
           0,
           gl.RGBA,
           gl.UNSIGNED_BYTE,
-          null,
+          null
         );
         gl.bindFramebuffer(gl.FRAMEBUFFER, buffer);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+        gl.framebufferTexture2D(
+          gl.FRAMEBUFFER,
+          gl.COLOR_ATTACHMENT0,
+          gl.TEXTURE_2D,
+          target,
+          0
+        );
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       }
       draw();
@@ -546,9 +586,22 @@ const Grainient = ({
       trail.forEach((sample) => {
         if (sample.done) sample.age += dt;
       });
-      if (s.interactive && pointer.inside && Math.hypot(vx, vy) > 0.02 && !reduce) {
+      if (
+        s.interactive &&
+        pointer.inside &&
+        Math.hypot(vx, vy) > 0.02 &&
+        !reduce
+      ) {
         if (!head || head.done) {
-          trail.unshift({ x: 0, y: 0, vx: 0, vy: 0, age: 0, grow: 0, done: false });
+          trail.unshift({
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            age: 0,
+            grow: 0,
+            done: false,
+          });
           if (trail.length > MAX_STIRS) trail.pop();
         }
         const live = trail[0];
@@ -561,7 +614,8 @@ const Grainient = ({
       } else if (head) {
         head.done = true;
       }
-      while (trail.length && trail[trail.length - 1].age > STIR_LIFE) trail.pop();
+      while (trail.length && trail[trail.length - 1].age > STIR_LIFE)
+        trail.pop();
       for (let i = 0; i < MAX_STIRS; i++) {
         const sample = trail[i];
         if (!sample) {
@@ -569,14 +623,21 @@ const Grainient = ({
           continue;
         }
         const fade = 1 - sample.age / STIR_LIFE;
-        const cap = Math.min(1, 2.2 / Math.max(Math.hypot(sample.vx, sample.vy), 0.001));
-        stirs.set([sample.x, sample.y, sample.vx * cap, sample.vy * cap], i * 4);
+        const cap = Math.min(
+          1,
+          2.2 / Math.max(Math.hypot(sample.vx, sample.vy), 0.001)
+        );
+        stirs.set(
+          [sample.x, sample.y, sample.vx * cap, sample.vy * cap],
+          i * 4
+        );
         stirWeights[i] = fade * fade * sample.grow * s.stir * 0.05;
       }
       spins.forEach((spin) => {
         spin.age += dt;
       });
-      while (spins.length && spins[spins.length - 1].age > TWIRL_LIFE) spins.pop();
+      while (spins.length && spins[spins.length - 1].age > TWIRL_LIFE)
+        spins.pop();
       for (let i = 0; i < MAX_TWIRLS; i++) {
         const spin = spins[i];
         if (!spin) {
@@ -592,7 +653,7 @@ const Grainient = ({
             spin.direction * 2.4 * envelope,
             0.16 + 0.1 * Math.min(1, spin.age / 0.5),
           ],
-          i * 4,
+          i * 4
         );
       }
     };
@@ -604,7 +665,8 @@ const Grainient = ({
       const dt = last ? clamp((now - last) / 1000, 0.001, 0.05) : 1 / 60;
       last = now;
       if (!reduce) time += dt * s.speed * 0.16;
-      if (introClock < 1) introClock = Math.min(1, introClock + dt / INTRO_SECONDS);
+      if (introClock < 1)
+        introClock = Math.min(1, introClock + dt / INTRO_SECONDS);
       grainClock += dt;
       if (s.grainAnimated && !reduce && grainClock > 1 / 24) {
         grainClock = 0;
@@ -622,7 +684,8 @@ const Grainient = ({
     };
 
     function wake() {
-      if (!raf && visible && !document.hidden) raf = requestAnimationFrame(frame);
+      if (!raf && visible && !document.hidden)
+        raf = requestAnimationFrame(frame);
     }
 
     const locate = (event: PointerEvent) => {
@@ -691,14 +754,18 @@ const Grainient = ({
       intersection.disconnect();
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
-      document.documentElement.removeEventListener("pointerleave", onPointerLeave);
+      document.documentElement.removeEventListener(
+        "pointerleave",
+        onPointerLeave
+      );
       document.removeEventListener("visibilitychange", onVisibility);
       gl.deleteTexture(target);
       gl.deleteFramebuffer(buffer);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(field.program);
       gl.deleteProgram(composite.program);
-      if (!canvas.isConnected) gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (!canvas.isConnected)
+        gl.getExtension("WEBGL_lose_context")?.loseContext();
     };
   }, []);
 
@@ -709,11 +776,17 @@ const Grainient = ({
   return (
     <div
       ref={containerRef}
-      className={["relative h-full w-full overflow-hidden", className].filter(Boolean).join(" ")}
+      className={["relative h-full w-full overflow-hidden", className]
+        .filter(Boolean)
+        .join(" ")}
       style={style}
       {...rest}
     >
-      <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full" aria-hidden="true" />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 block h-full w-full"
+        aria-hidden="true"
+      />
     </div>
   );
 };

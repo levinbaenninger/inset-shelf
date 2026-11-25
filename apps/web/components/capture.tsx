@@ -1,6 +1,5 @@
 import {
   ArrowMoveUpRightIcon,
-  Cancel01Icon,
   CircleIcon,
   Cursor01Icon,
   Location01Icon,
@@ -11,9 +10,9 @@ import {
   UndoIcon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { cn } from "@inset/ui/lib/utils";
 
 import { REPO_URL } from "@/lib/site";
-import { cn } from "@inset/ui/lib/utils";
 
 import {
   CheckCircle,
@@ -28,77 +27,78 @@ import {
 } from "./app-ui";
 import { Section, SectionIntro, Tile } from "./section";
 
-const QUOTE = "Log every retry before you remove the flag, so the overlap shows up in CI.";
+const QUOTE =
+  "Log every retry before you remove the flag, so the overlap shows up in CI.";
 
-function KeyCap({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "flex h-14 w-16 flex-col items-start justify-between rounded-[10px] bg-white px-2.5 py-2 font-mono text-[11px] text-neutral-500 shadow-[0_0_0_1px_rgb(0_0_0/0.08),0_2px_0_1px_rgb(0_0_0/0.08),0_8px_16px_-6px_rgb(0_0_0/0.18)]",
-        className,
-      )}
-    >
-      <span className="text-[17px] leading-none text-neutral-800">⇧</span>
-      shift
-    </span>
-  );
-}
+const KeyCap = ({ className }: { className?: string }) => (
+  <span
+    className={cn(
+      "flex h-14 w-16 flex-col items-start justify-between rounded-[10px] bg-white px-2.5 py-2 font-mono text-[11px] text-neutral-500 shadow-[0_0_0_1px_rgb(0_0_0/0.08),0_2px_0_1px_rgb(0_0_0/0.08),0_8px_16px_-6px_rgb(0_0_0/0.18)]",
+      className
+    )}
+  >
+    <span className="text-[17px] leading-none text-neutral-800">⇧</span>
+    shift
+  </span>
+);
 
-function SelectedText() {
-  return (
-    <>
-      <div className="app-ui light absolute top-6 left-5 w-[290px] rounded-xl bg-white p-4 shadow-card sm:top-8 sm:left-8 sm:w-[330px]">
-        <SourceLine service="claude" label="Claude · Upload test retries" />
-        <p className="mt-3 text-[13px] leading-[1.6]">
-          Retries make a flaky test pass, so the failure stays out of sight.{" "}
-          <mark className="bg-selection text-inherit">{QUOTE}</mark> Then add a test that finishes
-          two uploads in the same second.
-        </p>
+const SelectedText = () => (
+  <>
+    <div className="app-ui light shadow-card absolute top-6 left-5 w-[290px] rounded-xl bg-white p-4 sm:top-8 sm:left-8 sm:w-[330px]">
+      <SourceLine service="claude" label="Claude · Upload test retries" />
+      <p className="mt-3 text-[13px] leading-[1.6]">
+        Retries make a flaky test pass, so the failure stays out of sight.{" "}
+        <mark className="bg-selection text-inherit">{QUOTE}</mark> Then add a
+        test that finishes two uploads in the same second.
+      </p>
+    </div>
+    <div className="absolute bottom-6 left-8 hidden gap-2 sm:bottom-8 sm:left-12 sm:flex">
+      <KeyCap className="motion-safe:animate-[press_2.4s_ease-in-out_infinite]" />
+      <KeyCap className="motion-safe:animate-[press_2.4s_ease-in-out_0.3s_infinite]" />
+    </div>
+    <ShelfPanel className="absolute top-[168px] left-10 w-[300px] sm:top-[164px] sm:right-8 sm:left-auto">
+      <div className="px-2 pb-2">
+        <SectionHeader name="Upload bug" current />
+        <ul>
+          <ShelfRow
+            item={{
+              text: QUOTE,
+              source: {
+                service: "claude",
+                label: "Claude · Upload test retries",
+              },
+              selected: true,
+            }}
+          />
+        </ul>
       </div>
-      <div className="absolute bottom-6 left-8 hidden gap-2 sm:bottom-8 sm:left-12 sm:flex">
-        <KeyCap className="motion-safe:animate-[press_2.4s_ease-in-out_infinite]" />
-        <KeyCap className="motion-safe:animate-[press_2.4s_ease-in-out_0.3s_infinite]" />
-      </div>
-      <ShelfPanel className="absolute top-[168px] left-10 w-[300px] sm:top-[164px] sm:right-8 sm:left-auto">
-        <div className="px-2 pb-2">
-          <SectionHeader name="Upload bug" current />
-          <ul>
-            <ShelfRow
-              item={{
-                text: QUOTE,
-                source: { service: "claude", label: "Claude · Upload test retries" },
-                selected: true,
-              }}
-            />
-          </ul>
-        </div>
-      </ShelfPanel>
-    </>
-  );
-}
+    </ShelfPanel>
+  </>
+);
 
 // The card under the pointer, and beside it the shelf's edge with the screenshot already added as an image.
-function Screenshot() {
-  return (
-    <>
-      <ScreenshotCard hover className="absolute top-16 left-5 h-[184px] sm:left-6" />
-      <ShelfPanel className="absolute top-8 left-[312px] w-[360px] sm:left-[318px]">
-        <div className="px-2 pb-2">
-          <SectionHeader name="Sign-in" current />
-          <ul>
-            <li className="flex items-start gap-3 rounded-lg border border-primary bg-background/60 px-3 py-2.5">
-              <CheckCircle className="mt-0.5" />
-              <span className="h-[72px] w-[120px] shrink-0 overflow-hidden rounded-md border">
-                <SignInShot className="h-[144px] w-[240px] [zoom:0.5]" />
-              </span>
-              <span className="text-sm font-medium">Screenshot</span>
-            </li>
-          </ul>
-        </div>
-      </ShelfPanel>
-    </>
-  );
-}
+const Screenshot = () => (
+  <>
+    <ScreenshotCard
+      hover
+      className="absolute top-16 left-5 h-[184px] sm:left-6"
+    />
+    <ShelfPanel className="absolute top-8 left-[312px] w-[360px] sm:left-[318px]">
+      <div className="px-2 pb-2">
+        <SectionHeader name="Sign-in" current />
+        <ul>
+          <li className="border-primary bg-background/60 flex items-start gap-3 rounded-lg border px-3 py-2.5">
+            <CheckCircle className="mt-0.5" />
+            <span className="h-[72px] w-[120px] shrink-0 overflow-hidden rounded-md border">
+              <SignInShot className="h-[144px] w-[240px] [zoom:0.5]" />
+            </span>
+            <span className="text-sm font-medium">Screenshot</span>
+          </li>
+        </ul>
+      </div>
+    </ShelfPanel>
+  </>
+);
 
 const TOOLS: IconSvgElement[] = [
   Cursor01Icon,
@@ -108,134 +108,136 @@ const TOOLS: IconSvgElement[] = [
   TextFontIcon,
 ];
 
-function Drawing() {
-  return (
-    <div className="app-ui light absolute top-6 left-1/2 w-[392px] -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-card">
-      <p className="border-b py-2.5 text-center text-[13px] font-medium">Annotate</p>
-      <div className="relative mx-3 mt-3 flex h-[178px] items-center justify-center border bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)]">
-        <div className="relative grid w-[176px] gap-1.5 rounded-lg bg-white p-3.5 text-[9px] text-neutral-500 shadow-[0_6px_18px_rgb(15_40_80/0.12)]">
-          <b className="text-[13px] leading-none font-bold text-neutral-900">Sign in</b>
-          <span className="mt-1">Email</span>
-          <span className="h-[18px] w-[96px] rounded border border-neutral-200" />
-          <span className="text-[9px] text-red-600">Something went wrong</span>
-          <span className="mt-1 flex h-[20px] items-center justify-center rounded bg-[#1f6feb] text-[9px] font-medium text-white">
-            Sign in
-          </span>
-          <PinMark number={1} className="absolute top-[12px] left-[64px]" />
-          <PinMark number={2} className="absolute top-[96px] left-[44px]" />
-          <PinMark number={3} className="absolute top-[118px] left-[140px]" />
-        </div>
-      </div>
-      <div className="flex justify-center py-3">
-        <div className="flex items-center gap-1 rounded-xl border bg-background px-1.5 py-1 shadow-sm">
-          {TOOLS.map((tool, index) => (
-            <span key={index} className="flex size-7 items-center justify-center">
-              <Icon icon={tool} size={15} />
-            </span>
-          ))}
-          <span className="flex size-7 items-center justify-center rounded-md bg-accent">
-            <Icon icon={Location01Icon} size={15} />
-          </span>
-          <span className="mx-1 h-5 w-px bg-border" />
-          <span className="size-4 rounded-full bg-neutral-900" />
-          <span className="mx-1 size-4 rounded-full bg-red-600 ring-2 ring-neutral-300 ring-offset-1" />
-          <span className="size-4 rounded-full bg-pin" />
-          <span className="mx-1 h-5 w-px bg-border" />
-          {[UndoIcon, RedoIcon].map((tool, index) => (
-            <span key={index} className="flex size-7 items-center justify-center">
-              <Icon icon={tool} size={15} />
-            </span>
-          ))}
-          <span className="flex size-7 items-center justify-center rounded-md bg-primary/50 text-white">
-            <Icon icon={Tick02Icon} size={15} />
-          </span>
-        </div>
+const Drawing = () => (
+  <div className="app-ui light shadow-card absolute top-6 left-1/2 w-[392px] -translate-x-1/2 overflow-hidden rounded-xl bg-white">
+    <p className="border-b py-2.5 text-center text-[13px] font-medium">
+      Annotate
+    </p>
+    <div className="relative mx-3 mt-3 flex h-[178px] items-center justify-center border bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)]">
+      <div className="relative grid w-[176px] gap-1.5 rounded-lg bg-white p-3.5 text-[9px] text-neutral-500 shadow-[0_6px_18px_rgb(15_40_80/0.12)]">
+        <b className="text-[13px] leading-none font-bold text-neutral-900">
+          Sign in
+        </b>
+        <span className="mt-1">Email</span>
+        <span className="h-[18px] w-[96px] rounded border border-neutral-200" />
+        <span className="text-[9px] text-red-600">Something went wrong</span>
+        <span className="mt-1 flex h-[20px] items-center justify-center rounded bg-[#1f6feb] text-[9px] font-medium text-white">
+          Sign in
+        </span>
+        <PinMark number={1} className="absolute top-[12px] left-[64px]" />
+        <PinMark number={2} className="absolute top-[96px] left-[44px]" />
+        <PinMark number={3} className="absolute top-[118px] left-[140px]" />
       </div>
     </div>
-  );
-}
-
-function FileDrop() {
-  return (
-    <>
-      <ShelfPanel className="absolute top-14 left-[84px] w-[316px] ring-2 ring-pin ring-inset sm:top-[68px] sm:right-10 sm:left-auto sm:w-[360px]">
-        <div className="px-2 pb-2">
-          <SectionHeader name="Office move" current />
-          <ul className="flex flex-col gap-2">
-            <ShelfRow
-              item={{ text: "Floor plan, level 3", file: "floor-plan-level-3.pdf", windows: 1 }}
-            />
-            <ShelfRow
-              item={{
-                text: "Book the movers for Monday",
-                due: { label: "Tomorrow", tone: "plain" },
-              }}
-            />
-          </ul>
-        </div>
-      </ShelfPanel>
-      <div className="absolute top-[150px] left-[40px] flex flex-col items-center gap-1.5 sm:top-[92px] sm:right-[396px] sm:left-auto motion-safe:animate-[drift_3.2s_ease-in-out_infinite]">
-        <span className="relative flex h-[68px] w-[54px] items-end justify-center rounded-[5px] bg-white pb-2 shadow-[0_0_0_1px_rgb(0_0_0/0.08),0_10px_24px_-8px_rgb(0_0_0/0.3)]">
-          <span className="absolute top-0 right-0 size-3.5 rounded-bl-[4px] bg-neutral-200" />
-          <span className="rounded-[3px] bg-[#e5372b] px-1 py-0.5 font-mono text-[9px] font-semibold text-white">
-            PDF
+    <div className="flex justify-center py-3">
+      <div className="bg-background flex items-center gap-1 rounded-xl border px-1.5 py-1 shadow-sm">
+        {TOOLS.map((tool, index) => (
+          <span key={index} className="flex size-7 items-center justify-center">
+            <Icon icon={tool} size={15} />
           </span>
-          <span className="absolute -right-2.5 -bottom-2.5 flex size-5 items-center justify-center rounded-full bg-[#28c840] text-[13px] leading-none font-bold text-white shadow">
-            +
-          </span>
+        ))}
+        <span className="bg-accent flex size-7 items-center justify-center rounded-md">
+          <Icon icon={Location01Icon} size={15} />
         </span>
-        <span className="rounded-[4px] bg-[#0a64d6] px-1.5 py-0.5 text-[11px] font-medium text-white">
-          movers-quote.pdf
+        <span className="bg-border mx-1 h-5 w-px" />
+        <span className="size-4 rounded-full bg-neutral-900" />
+        <span className="mx-1 size-4 rounded-full bg-red-600 ring-2 ring-neutral-300 ring-offset-1" />
+        <span className="bg-pin size-4 rounded-full" />
+        <span className="bg-border mx-1 h-5 w-px" />
+        {[UndoIcon, RedoIcon].map((tool, index) => (
+          <span key={index} className="flex size-7 items-center justify-center">
+            <Icon icon={tool} size={15} />
+          </span>
+        ))}
+        <span className="bg-primary/50 flex size-7 items-center justify-center rounded-md text-white">
+          <Icon icon={Tick02Icon} size={15} />
         </span>
       </div>
-    </>
-  );
-}
+    </div>
+  </div>
+);
 
-export function Capture() {
-  return (
-    <Section id="capture" aria-labelledby="capture-h">
-      <SectionIntro
-        id="capture-h"
-        eyebrow="How capture works"
-        href={`${REPO_URL}#use-it`}
-        title="Anything you find goes on the shelf."
-        lead="Selected text, a screenshot, a sketch with pins or a file. Each one takes a single step, and none of it asks you to fill anything in."
-      />
-      <div className="mt-14 grid gap-4 md:mt-16 lg:grid-cols-12">
-        <Tile
-          shrinkOnPhone
-          className="lg:col-span-7"
-          title="Selected text, with Shift twice"
-          line="Select text in any app and tap Shift twice. The shelf saves it with its app, window and page, and puts your clipboard back."
-        >
-          <SelectedText />
-        </Tile>
-        <Tile
-          shrinkOnPhone
-          className="lg:col-span-5"
-          title="Screenshots, as you take them"
-          line="Take a screenshot as usual and a card appears beside the shelf. Copy it, or add it."
-        >
-          <Screenshot />
-        </Tile>
-        <Tile
-          shrinkOnPhone
-          className="lg:col-span-5"
-          title="Sketches and numbered pins"
-          line="Draw on any image, or drop numbered pins on what needs fixing. Label each pin in the details."
-        >
-          <Drawing />
-        </Tile>
-        <Tile
-          shrinkOnPhone
-          className="lg:col-span-7"
-          title="Files, dropped or pasted"
-          line="Drop files on the shelf or paste an image. Drag them out again into any app."
-        >
-          <FileDrop />
-        </Tile>
+const FileDrop = () => (
+  <>
+    <ShelfPanel className="ring-pin absolute top-14 left-[84px] w-[316px] ring-2 ring-inset sm:top-[68px] sm:right-10 sm:left-auto sm:w-[360px]">
+      <div className="px-2 pb-2">
+        <SectionHeader name="Office move" current />
+        <ul className="flex flex-col gap-2">
+          <ShelfRow
+            item={{
+              text: "Floor plan, level 3",
+              file: "floor-plan-level-3.pdf",
+              windows: 1,
+            }}
+          />
+          <ShelfRow
+            item={{
+              text: "Book the movers for Monday",
+              due: { label: "Tomorrow", tone: "plain" },
+            }}
+          />
+        </ul>
       </div>
-    </Section>
-  );
-}
+    </ShelfPanel>
+    <div className="absolute top-[150px] left-[40px] flex flex-col items-center gap-1.5 motion-safe:animate-[drift_3.2s_ease-in-out_infinite] sm:top-[92px] sm:right-[396px] sm:left-auto">
+      <span className="relative flex h-[68px] w-[54px] items-end justify-center rounded-[5px] bg-white pb-2 shadow-[0_0_0_1px_rgb(0_0_0/0.08),0_10px_24px_-8px_rgb(0_0_0/0.3)]">
+        <span className="absolute top-0 right-0 size-3.5 rounded-bl-[4px] bg-neutral-200" />
+        <span className="rounded-[3px] bg-[#e5372b] px-1 py-0.5 font-mono text-[9px] font-semibold text-white">
+          PDF
+        </span>
+        <span className="absolute -right-2.5 -bottom-2.5 flex size-5 items-center justify-center rounded-full bg-[#28c840] text-[13px] leading-none font-bold text-white shadow">
+          +
+        </span>
+      </span>
+      <span className="rounded-[4px] bg-[#0a64d6] px-1.5 py-0.5 text-[11px] font-medium text-white">
+        movers-quote.pdf
+      </span>
+    </div>
+  </>
+);
+
+export const Capture = () => (
+  <Section id="capture" aria-labelledby="capture-h">
+    <SectionIntro
+      id="capture-h"
+      eyebrow="How capture works"
+      href={`${REPO_URL}#use-it`}
+      title="Anything you find goes on the shelf."
+      lead="Selected text, a screenshot, a sketch with pins or a file. Each one takes a single step, and none of it asks you to fill anything in."
+    />
+    <div className="mt-14 grid gap-4 md:mt-16 lg:grid-cols-12">
+      <Tile
+        shrinkOnPhone
+        className="lg:col-span-7"
+        title="Selected text, with Shift twice"
+        line="Select text in any app and tap Shift twice. The shelf saves it with its app, window and page, and puts your clipboard back."
+      >
+        <SelectedText />
+      </Tile>
+      <Tile
+        shrinkOnPhone
+        className="lg:col-span-5"
+        title="Screenshots, as you take them"
+        line="Take a screenshot as usual and a card appears beside the shelf. Copy it, or add it."
+      >
+        <Screenshot />
+      </Tile>
+      <Tile
+        shrinkOnPhone
+        className="lg:col-span-5"
+        title="Sketches and numbered pins"
+        line="Draw on any image, or drop numbered pins on what needs fixing. Label each pin in the details."
+      >
+        <Drawing />
+      </Tile>
+      <Tile
+        shrinkOnPhone
+        className="lg:col-span-7"
+        title="Files, dropped or pasted"
+        line="Drop files on the shelf or paste an image. Drag them out again into any app."
+      >
+        <FileDrop />
+      </Tile>
+    </div>
+  </Section>
+);

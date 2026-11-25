@@ -4,11 +4,18 @@ import type { ReactNode } from "react";
 
 import { REPO_URL } from "@/lib/site";
 
-import { ShelfPanel, ShelfRow, TrafficLights, type ShelfItem } from "./app-ui";
-import LogoLoop, { type LogoItem } from "./react-bits/LogoLoop";
+import { ShelfPanel, ShelfRow, TrafficLights } from "./app-ui";
+import type { ShelfItem } from "./app-ui";
+import { LogoLoop } from "./react-bits/LogoLoop";
+import type { LogoItem } from "./react-bits/LogoLoop";
 import { Section, SectionIntro, Tile } from "./section";
 
-type Mark = { name: string; icon: string; w: number; h: number };
+interface Mark {
+  name: string;
+  icon: string;
+  w: number;
+  h: number;
+}
 
 // Each mark's own proportions, so none is stretched.
 const PAGES: Mark[] = [
@@ -37,7 +44,7 @@ const toLogos = (marks: Mark[]): LogoItem[] =>
   marks.map((mark) => ({
     title: mark.name,
     node: (
-      <span className="flex h-12 items-center gap-2.5 rounded-xl bg-tile pr-4 pl-2 text-[15px] font-medium tracking-[-0.01em]">
+      <span className="bg-tile flex h-12 items-center gap-2.5 rounded-xl pr-4 pl-2 text-[15px] font-medium tracking-[-0.01em]">
         <span className="flex size-8 items-center justify-center rounded-lg bg-white shadow-[0_0_0_1px_rgb(0_0_0/0.05)]">
           <img
             src={`/icons/${mark.icon}.svg`}
@@ -53,7 +60,7 @@ const toLogos = (marks: Mark[]): LogoItem[] =>
     ),
   }));
 
-function Loop({
+const Loop = ({
   marks,
   direction,
   label,
@@ -61,70 +68,74 @@ function Loop({
   marks: Mark[];
   direction: "left" | "right";
   label: string;
-}) {
-  return (
-    <LogoLoop
-      logos={toLogos(marks)}
-      direction={direction}
-      speed={28}
-      gap={12}
-      logoHeight={48}
-      pauseOnHover
-      fadeOut
-      fadeOutColor="#ffffff"
-      fadeOutWidth={96}
-      ariaLabel={label}
+}) => (
+  <LogoLoop
+    logos={toLogos(marks)}
+    direction={direction}
+    speed={28}
+    gap={12}
+    logoHeight={48}
+    pauseOnHover
+    fadeOut
+    fadeOutColor="#ffffff"
+    fadeOutWidth={96}
+    ariaLabel={label}
+  />
+);
+
+const Pointer = ({ className }: { className: string }) => (
+  <svg
+    viewBox="0 0 16 22"
+    width={16}
+    height={22}
+    aria-hidden="true"
+    className={`absolute ${className}`}
+  >
+    <path
+      d="M1 1v17l4.2-4 2.9 6.6 2.7-1.2-2.8-6.4H14z"
+      fill="#111"
+      stroke="#fff"
+      strokeWidth={1.4}
+      strokeLinejoin="round"
     />
-  );
-}
+  </svg>
+);
 
-function Pointer({ className }: { className: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 22"
-      width={16}
-      height={22}
-      aria-hidden="true"
-      className={`absolute ${className}`}
-    >
-      <path
-        d="M1 1v17l4.2-4 2.9 6.6 2.7-1.2-2.8-6.4H14z"
-        fill="#111"
-        stroke="#fff"
-        strokeWidth={1.4}
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MiniWindow({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="app-ui light absolute top-[142px] left-1/2 w-[290px] -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-card">
-      <div className="flex h-9 items-center gap-3 border-b bg-[#f6f6f6] px-3">
-        <TrafficLights className="[&>i]:size-2.5 gap-1.5" />
-        <span className="flex h-6 min-w-0 flex-1 items-center justify-center truncate rounded-md bg-black/[0.05] px-2 text-[11px] text-[#3c3c43]">
-          {title}
-        </span>
-      </div>
-      <div className="h-[150px] p-4">{children}</div>
+const MiniWindow = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) => (
+  <div className="app-ui light shadow-card absolute top-[142px] left-1/2 w-[290px] -translate-x-1/2 overflow-hidden rounded-xl bg-white">
+    <div className="flex h-9 items-center gap-3 border-b bg-[#f6f6f6] px-3">
+      <TrafficLights className="gap-1.5 [&>i]:size-2.5" />
+      <span className="flex h-6 min-w-0 flex-1 items-center justify-center truncate rounded-md bg-black/[0.05] px-2 text-[11px] text-[#3c3c43]">
+        {title}
+      </span>
     </div>
-  );
-}
+    <div className="h-[150px] p-4">{children}</div>
+  </div>
+);
 
-function SourceStage({ item, window }: { item: ShelfItem; window: ReactNode }) {
-  return (
-    <>
-      <ShelfPanel className="absolute top-6 left-1/2 w-[300px] -translate-x-1/2 p-2">
-        <ul>
-          <ShelfRow item={item} />
-        </ul>
-      </ShelfPanel>
-      <Pointer className="top-[98px] left-[calc(50%-34px)]" />
-      {window}
-    </>
-  );
-}
+const SourceStage = ({
+  item,
+  window,
+}: {
+  item: ShelfItem;
+  window: ReactNode;
+}) => (
+  <>
+    <ShelfPanel className="absolute top-6 left-1/2 w-[300px] -translate-x-1/2 p-2">
+      <ul>
+        <ShelfRow item={item} />
+      </ul>
+    </ShelfPanel>
+    <Pointer className="top-[98px] left-[calc(50%-34px)]" />
+    {window}
+  </>
+);
 
 const TILES = [
   {
@@ -132,12 +143,17 @@ const TILES = [
     line: "A GitHub pull request or issue, a post on X or a YouTube video is named on the line. Click it to open the page.",
     item: {
       text: "The second upload overwrites the first file before the save is done.",
-      source: { service: "github", label: "GitHub · inset/shelf #482", active: true },
+      source: {
+        service: "github",
+        label: "GitHub · inset/shelf #482",
+        active: true,
+      },
     },
     window: (
       <MiniWindow title="github.com/inset/shelf/issues/482">
         <p className="text-[15px] leading-snug text-[#1f2328]">
-          The upload test fails one run in ten on CI <span className="text-[#59636e]">#482</span>
+          The upload test fails one run in ten on CI{" "}
+          <span className="text-[#59636e]">#482</span>
         </p>
         <span className="mt-3 inline-flex h-6 items-center gap-1 rounded-full bg-[#1f883d] px-2.5 text-[12px] font-medium text-white">
           <span className="size-2.5 rounded-full border-[1.5px] border-white" />
@@ -151,7 +167,11 @@ const TILES = [
     line: "On a Mac, a ChatGPT thread, a Claude chat and a Notion page open right where you left them.",
     item: {
       text: "Ask why the retry flag hides the failure",
-      source: { service: "claude", label: "Claude · Upload test retries", active: true },
+      source: {
+        service: "claude",
+        label: "Claude · Upload test retries",
+        active: true,
+      },
       due: { label: "Today", tone: "today" },
     },
     window: (
@@ -160,7 +180,7 @@ const TILES = [
         <p className="mt-3 ml-auto w-fit max-w-[85%] rounded-xl bg-[#f0eee6] px-3 py-2 text-[12px] leading-snug">
           Why does the retry flag hide the failure?
         </p>
-        <p className="mt-2 text-[12px] leading-snug text-muted-foreground">
+        <p className="text-muted-foreground mt-2 text-[12px] leading-snug">
           A retry runs the test again and keeps only the last result…
         </p>
       </MiniWindow>
@@ -194,29 +214,36 @@ const TILES = [
       </MiniWindow>
     ),
   },
-] satisfies { title: string; line: string; item: ShelfItem; window: ReactNode }[];
+] satisfies {
+  title: string;
+  line: string;
+  item: ShelfItem;
+  window: ReactNode;
+}[];
 
-export function Sources() {
-  return (
-    <Section id="sources" aria-labelledby="sources-h">
-      <SectionIntro
-        id="sources-h"
-        eyebrow="Source lines"
-        href={`${REPO_URL}#use-it`}
-        title="Every item knows where it came from."
-        lead="The line under each item names its app, window and page. Pages from these sites get their own name, and the address comes from your browser."
+export const Sources = () => (
+  <Section id="sources" aria-labelledby="sources-h">
+    <SectionIntro
+      id="sources-h"
+      eyebrow="Source lines"
+      href={`${REPO_URL}#use-it`}
+      title="Every item knows where it came from."
+      lead="The line under each item names its app, window and page. Pages from these sites get their own name, and the address comes from your browser."
+    />
+    <div className="-mx-5 mt-14 grid gap-3 md:-mx-10 md:mt-16">
+      <Loop marks={PAGES} direction="left" label="Pages the shelf names" />
+      <Loop
+        marks={BROWSERS}
+        direction="right"
+        label="Browsers the shelf reads addresses from"
       />
-      <div className="-mx-5 mt-14 grid gap-3 md:-mx-10 md:mt-16">
-        <Loop marks={PAGES} direction="left" label="Pages the shelf names" />
-        <Loop marks={BROWSERS} direction="right" label="Browsers the shelf reads addresses from" />
-      </div>
-      <div className="mt-14 grid gap-4 md:mt-16 lg:grid-cols-3">
-        {TILES.map((tile) => (
-          <Tile key={tile.title} title={tile.title} line={tile.line}>
-            <SourceStage item={tile.item} window={tile.window} />
-          </Tile>
-        ))}
-      </div>
-    </Section>
-  );
-}
+    </div>
+    <div className="mt-14 grid gap-4 md:mt-16 lg:grid-cols-3">
+      {TILES.map((tile) => (
+        <Tile key={tile.title} title={tile.title} line={tile.line}>
+          <SourceStage item={tile.item} window={tile.window} />
+        </Tile>
+      ))}
+    </div>
+  </Section>
+);

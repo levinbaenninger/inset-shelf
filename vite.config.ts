@@ -12,8 +12,7 @@ export default defineConfig({
     bracketSameLine: false,
     bracketSpacing: true,
     endOfLine: "lf",
-    // apps/web joins in the next commit, as a formatting-only change.
-    ignorePatterns: [...(core.ignorePatterns ?? []), "apps/web/**"],
+    ignorePatterns: core.ignorePatterns,
     jsxSingleQuote: false,
     printWidth: 80,
     proseWrap: "never",
@@ -36,7 +35,9 @@ export default defineConfig({
       ...(core.ignorePatterns ?? []),
       "apps/desktop/src/renderer/components/ui/**",
       "packages/ui/src/components/**",
-      "apps/web/**",
+      "apps/web/components/ui/**",
+      // Vendored from React Bits.
+      "apps/web/components/react-bits/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
@@ -46,6 +47,16 @@ export default defineConfig({
     options: { typeAware: true, typeCheck: false },
     rules: { "vite-plus/prefer-vite-plus-imports": "error" },
     overrides: [
+      {
+        // The page draws other apps' windows (macOS, GitHub, Slack) at their own
+        // sizes and colours, so the theme-token rules hold only outside it.
+        files: ["apps/web/**"],
+        rules: {
+          "shadcn/no-arbitrary-values": "off",
+          "shadcn/no-raw-colors": "off",
+          "shadcn/no-restyle": "off",
+        },
+      },
       {
         // Plain JavaScript the screens harness injects into a page: untyped by nature.
         files: ["apps/desktop/scripts/fixtures/**"],

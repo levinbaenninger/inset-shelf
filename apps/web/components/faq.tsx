@@ -32,53 +32,55 @@ const QUESTIONS = [
   },
 ];
 
-export function Faq() {
-  return (
-    <Section id="faq" aria-labelledby="faq-h">
-      <div className="grid gap-12 lg:grid-cols-12 lg:gap-8">
-        <div className="flex flex-col items-start lg:col-span-5">
-          <h2 id="faq-h" className="text-title">
-            Questions about the test build
-          </h2>
-          <p className="mt-5 max-w-[36ch] text-lead text-muted-foreground">
-            Everything else, from permissions to keys, is in the{" "}
-            <a
-              href={`${REPO_URL}#readme`}
-              className="text-brand underline-offset-4 hover:underline"
-            >
-              README
-            </a>
-            .
-          </p>
-          <ul className="mt-8 grid gap-3 text-[15px]">
-            <li className="flex items-center gap-3">
-              <AppleGlyph className="size-[18px]" />
-              macOS, Apple silicon and Intel
-            </li>
-            <li className="flex items-center gap-3">
-              <WindowsGlyph className="size-4 text-[#0078d4]" />
-              Windows 11
-            </li>
-          </ul>
-        </div>
-        <Accordion
-          type="single"
-          collapsible
-          defaultValue={QUESTIONS[0].q}
-          className="lg:col-span-7"
-        >
-          {QUESTIONS.map((item) => (
-            <AccordionItem key={item.q} value={item.q} className="border-b first:border-t">
-              <AccordionTrigger className="py-5 text-[17px] tracking-[-0.015em] hover:no-underline">
-                {item.q}
-              </AccordionTrigger>
-              <AccordionContent className="max-w-[60ch] pb-6 text-[15px] leading-6 text-muted-foreground">
-                {item.a}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+export const Faq = () => (
+  <Section id="faq" aria-labelledby="faq-h">
+    <div className="grid gap-12 lg:grid-cols-12 lg:gap-8">
+      <div className="flex flex-col items-start lg:col-span-5">
+        <h2 id="faq-h" className="text-title">
+          Questions about the test build
+        </h2>
+        <p className="text-lead text-muted-foreground mt-5 max-w-[36ch]">
+          Everything else, from permissions to keys, is in the{" "}
+          <a
+            href={`${REPO_URL}#readme`}
+            className="text-brand underline-offset-4 hover:underline"
+          >
+            README
+          </a>
+          .
+        </p>
+        <ul className="mt-8 grid gap-3 text-[15px]">
+          <li className="flex items-center gap-3">
+            <AppleGlyph className="size-[18px]" />
+            macOS, Apple silicon and Intel
+          </li>
+          <li className="flex items-center gap-3">
+            <WindowsGlyph className="size-4 text-[#0078d4]" />
+            Windows 11
+          </li>
+        </ul>
       </div>
-    </Section>
-  );
-}
+      <Accordion
+        type="single"
+        collapsible
+        defaultValue={QUESTIONS[0].q}
+        className="lg:col-span-7"
+      >
+        {QUESTIONS.map((item) => (
+          <AccordionItem
+            key={item.q}
+            value={item.q}
+            className="border-b first:border-t"
+          >
+            <AccordionTrigger className="py-5 text-[17px] tracking-[-0.015em] hover:no-underline">
+              {item.q}
+            </AccordionTrigger>
+            <AccordionContent className="text-muted-foreground max-w-[60ch] pb-6 text-[15px] leading-6">
+              {item.a}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    </div>
+  </Section>
+);

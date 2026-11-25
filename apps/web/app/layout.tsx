@@ -1,10 +1,10 @@
+import { cn } from "@inset/ui/lib/utils";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
-import { cn } from "@inset/ui/lib/utils";
 import { SITE_URL } from "@/lib/site";
 
 import "./globals.css";
@@ -41,10 +41,13 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
-  return (
-    <html lang="en" className={cn(GeistSans.variable, GeistMono.variable, inter.variable)}>
-      <body>{children}</body>
-    </html>
-  );
-}
+const RootLayout = ({ children }: { children: ReactNode }) => (
+  <html
+    lang="en"
+    className={cn(GeistSans.variable, GeistMono.variable, inter.variable)}
+  >
+    <body>{children}</body>
+  </html>
+);
+
+export default RootLayout;
