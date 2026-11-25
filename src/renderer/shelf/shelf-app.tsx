@@ -1848,6 +1848,15 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   section={group.section}
                   several={doc.sections.length > 1}
                 />
+                {/* Only where new items go: an empty section otherwise is just its heading. */}
+                {open &&
+                group.active &&
+                !searching &&
+                group.items.length === 0 ? (
+                  <p className="text-muted-foreground/70 px-7 pb-1 text-xs">
+                    New notes and captures land here
+                  </p>
+                ) : null}
                 {open ? (
                   <ul className="flex flex-col gap-1.5">
                     {group.items.map((item) => (
