@@ -3719,6 +3719,27 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // A linked window's actions sit over its name's end, shown for the keyboard as for the pointer.
+      act: async (page) => {
+        await details(page, 710);
+        await page
+          .getByRole("button", { name: /^More for /u })
+          .first()
+          .focus();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) => {
+        const { label, opacity } = await focusedOpacity(page);
+
+        return opacity > 0.5
+          ? null
+          : `the keyboard on “${label}” can't see it (opacity ${opacity})`;
+      },
+      data: { view: stressView() },
+      name: "stress-details-window-keys",
+      width: NARROWEST,
+    },
+    {
       act: async (page) => {
         await details(page, 711);
       },

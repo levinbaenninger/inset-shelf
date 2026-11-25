@@ -59,6 +59,7 @@ import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import { Truncated } from "./clamp";
 import {
   dueLabel,
   DueMenu,
@@ -667,7 +668,7 @@ const WindowRow = ({
   };
 
   return (
-    <li className="flex flex-col gap-1.5">
+    <li className="group/window relative flex flex-col gap-1.5">
       <div className="flex min-w-0 items-center gap-2.5">
         <button
           aria-label={`${reopen}: ${name}`}
@@ -677,20 +678,20 @@ const WindowRow = ({
         >
           <WindowThumb className="h-9 w-14" window={window} />
         </button>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <p
-            className="truncate text-sm leading-tight font-medium"
-            title={name}
-          >
-            {name}
-          </p>
-          <p
-            className="text-muted-foreground truncate text-xs"
-            title={windowPlace(window)}
-          >
-            {windowPlace(window)}
-          </p>
+        {/* The name has the row's width; on hover or focus it makes room for the actions. */}
+        <div className="flex min-w-0 flex-1 flex-col group-focus-within/window:pr-17 group-hover/window:pr-17 group-has-[[data-state=open]]/window:pr-17">
+          <Truncated
+            className="text-sm leading-tight font-medium"
+            text={name}
+          />
+          <Truncated
+            className="text-muted-foreground text-xs"
+            text={windowPlace(window)}
+          />
         </div>
+      </div>
+      {/* Shown on hover, or while the keyboard or a menu is on them, so the name has the row's width otherwise. */}
+      <div className="pointer-events-none absolute top-0 right-0 flex h-9 items-center gap-0.5 opacity-0 group-focus-within/window:opacity-100 group-hover/window:opacity-100 has-[[data-state=open]]:opacity-100 [&_button]:pointer-events-auto">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -748,7 +749,7 @@ const WindowRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex min-w-0 flex-col pl-16.5">
+      <div className="flex min-w-0 flex-col">
         <WindowDescription
           name={name}
           onSave={(description) => {
