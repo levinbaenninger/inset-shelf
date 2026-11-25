@@ -3699,6 +3699,24 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // Esc hides the shelf from the list; whatever brings it back, it opens on the note field.
+      act: async (page) => {
+        await focusRowOf(page, 710);
+        await page.keyboard.press("Escape");
+        await refocus(page);
+      },
+      check: async (page) => {
+        const owner = await focusOwner(page);
+
+        return owner.composer
+          ? null
+          : `hidden with Esc from an item and shown again, the shelf left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
+      },
+      data: { view: stressView() },
+      name: "stress-escape-then-open",
+      width: NARROWEST,
+    },
+    {
       act: async (page) => {
         await focusRowOf(page, 710);
         await refocus(page);
