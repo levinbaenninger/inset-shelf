@@ -8,7 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ScreenshotView, ShotSaveTo } from "@shared/contracts";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,8 @@ import { tooltipText } from "@/shared/clamp";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
+
+import { fitName } from "./fit-name";
 
 const api = screenshotBridge();
 
@@ -121,7 +123,11 @@ const SHELF_LABELS = Object.values(SHELF_LABEL);
 /** What Add to “…” reads before the item's name. */
 const ITEM_LEAD = { failed: "Retry adding to", idle: "Add to" } as const;
 
-/** “Name”, cut inside the quotes so the closing one always shows; `stacked` puts the name on a line of its own under the lead. */
+/**
+ * “Name”, cut inside the quotes so the closing one always shows, right after
+ * the ellipsis (fit-name.ts); `stacked` puts the name on a line of its own
+ * under the lead.
+ */
 const Quoted = ({
   lead,
   name,
@@ -130,21 +136,101 @@ const Quoted = ({
   readonly lead: string;
   readonly name: string;
   readonly stacked?: boolean;
-}) => (
-  <span
-    className={cn("flex min-w-0", stacked && "flex-col items-center")}
-    title={tooltipText(`${lead} “${name}”`)}
-  >
+}) => {
+  const line = useRef<HTMLSpanElement>(null);
+  const whole = useRef<HTMLSpanElement>(null);
+  const [shown, setShown] = useState(name);
+
+  useLayoutEffect(() => {
+    const range = document.createRange();
+
+    const fit = (): void => {
+      const row = line.current;
+      const text = whole.current?.firstChild;
+
+      if (row === null || !(text instanceof Text)) {
+        return;
+      }
+
+      const width = (from: number, to: number): number => {
+        range.setStart(text, from);
+        range.setEnd(text, to);
+
+        return range.getBoundingClientRect().width;
+      };
+
+      // The line's width, less the lead and the quotes that share it with the name.
+      let room = row.clientWidth;
+
+      for (const part of row.children) {
+        if (!part.contains(text)) {
+          room -= part.getBoundingClientRect().width;
+        }
+      }
+
+      setShown(
+        fitName(name, room, {
+          dots: width(name.length, name.length + 1),
+          upTo: (end) => width(0, end),
+        })
+      );
+    };
+
+    let showing = true;
+    const observer = new ResizeObserver(fit);
+
+    if (line.current !== null) {
+      observer.observe(line.current);
+    }
+
+    fit();
+
+    // The words are measured again once their font has loaded.
+    void (async () => {
+      await document.fonts.ready;
+
+      if (showing) {
+        fit();
+      }
+    })();
+
+    return () => {
+      showing = false;
+      observer.disconnect();
+    };
+  }, [name]);
+
+  const leadText = (
     <span className="shrink-0 whitespace-pre">
       {stacked ? lead : `${lead} `}
     </span>
-    <span className="flex max-w-full min-w-0">
-      <span className="shrink-0">“</span>
-      <span className="min-w-0 truncate">{name}</span>
-      <span className="shrink-0">”</span>
+  );
+
+  return (
+    <span
+      className={cn("flex w-full min-w-0", stacked && "flex-col items-center")}
+      title={tooltipText(`${lead} “${name}”`)}
+    >
+      {stacked ? leadText : null}
+      <span className="flex w-full min-w-0 justify-center" ref={line}>
+        {stacked ? null : leadText}
+        <span className="shrink-0">“</span>
+        <span className="relative min-w-0 overflow-hidden whitespace-nowrap">
+          {shown}
+          {/* The whole name with an ellipsis, never seen: what the cut is measured on. */}
+          <span
+            aria-hidden="true"
+            className="invisible absolute top-0 left-0"
+            ref={whole}
+          >
+            {`${name}…`}
+          </span>
+        </span>
+        <span className="shrink-0">”</span>
+      </span>
     </span>
-  </span>
-);
+  );
+};
 
 /** Shown after the reason a save failed: what it means for the screenshot. */
 const NOT_KEPT = "The screenshot isn’t saved yet.";

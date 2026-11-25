@@ -6478,6 +6478,36 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           return "the closing quote of Add to “…” is cut off";
         }
 
+        // The quote sits right after the ellipsis: no empty box between them.
+        const gap = z.number().parse(
+          await add.evaluate((button) => {
+            const name = [...button.querySelectorAll("span")].find(
+              (part) => part.firstChild?.nodeValue?.endsWith("…") === true
+            );
+
+            const quote = [...button.querySelectorAll("span")].find(
+              (part) => part.textContent === "”"
+            );
+
+            const range = document.createRange();
+
+            if (name?.firstChild === null || name?.firstChild === undefined) {
+              return -1;
+            }
+
+            range.selectNodeContents(name.firstChild);
+
+            return (
+              (quote?.getBoundingClientRect().left ?? Number.NaN) -
+              range.getBoundingClientRect().right
+            );
+          })
+        );
+
+        if (!(gap >= -0.5 && gap <= 1)) {
+          return `the closing quote of Add to “…” sits ${gap} px after the ellipsis`;
+        }
+
         // The press carries the item the button named, so main can refuse it once the card names another.
         return sent.some(
           (each) =>
