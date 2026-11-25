@@ -173,6 +173,36 @@ export const noticeBesidePointer = (
   );
 };
 
+/** A window's corner, named as the notice window names where it draws. */
+export type Corner = `${"top" | "bottom"}-${"left" | "right"}`;
+
+/**
+ * A window given a new size around one of its corners, which stays where it
+ * was, then kept inside the work area: the notice turning into the why field
+ * grows away from the corner it is drawn in.
+ */
+export const resizeAtCorner = (
+  bounds: Rect<"screen">,
+  corner: Corner,
+  next: Size<"screen">,
+  workArea: Rect<"screen">
+): Rect<"screen"> => {
+  const x = corner.endsWith("left")
+    ? bounds.x
+    : bounds.x + bounds.width - next.width;
+
+  const y = corner.startsWith("top")
+    ? bounds.y
+    : bounds.y + bounds.height - next.height;
+
+  return rect(
+    clamp(x, workArea.x, workArea.x + workArea.width - next.width),
+    clamp(y, workArea.y, workArea.y + workArea.height - next.height),
+    next.width,
+    next.height
+  );
+};
+
 /** Room around an image on the drawing page; the bottom leaves space for the toolbar. */
 export const VIEWER_MARGIN = { bottom: 76, side: 24, top: 24 } as const;
 

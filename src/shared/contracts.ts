@@ -84,6 +84,8 @@ export interface ShelfView {
     readonly id: ItemId;
     readonly seq: number;
     readonly edit?: boolean;
+    /** Opens the item's details at this field: the why field's way in when the pill couldn't get the keyboard. */
+    readonly field?: DetailField;
   } | null;
   /** An item can be restored with undoRemove. */
   readonly canUndo: boolean;

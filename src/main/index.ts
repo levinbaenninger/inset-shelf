@@ -23,6 +23,7 @@ import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
+import { secondTap, withWhy } from "@shared/pill";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
 import type {
@@ -642,16 +643,28 @@ const start = async (): Promise<void> => {
   });
 
   const toast = createToastWindow({
-    openShelf: (item) => {
+    openShelf: (item, field) => {
       void (async () => {
         await showShelf();
 
         if (item !== null) {
-          controller.focus(item);
+          controller.focus(item, false, field ?? undefined);
         }
       })();
     },
     preload: preloadPath("toast"),
+    // Say why: the words go after what the item's description already says.
+    saveWhy: (item, text) => {
+      const saved = controller.item(item);
+
+      if (saved !== undefined) {
+        controller.apply({
+          description: withWhy(saved.description, text),
+          id: item,
+          type: "setDescription",
+        });
+      }
+    },
     url: pageUrl("toast"),
   });
 
@@ -733,7 +746,8 @@ const start = async (): Promise<void> => {
   const onDoubleTap = async (): Promise<void> => {
     e2eLog("doubleTap");
 
-    if (capturingSelection) {
+    // The why field has the keyboard: a copy now would copy from it.
+    if (capturingSelection || toast.holdsKeys()) {
       return;
     }
 
@@ -745,6 +759,13 @@ const start = async (): Promise<void> => {
     }
 
     capturingSelection = true;
+
+    // The capture notice showing now: the copy decides whether this Double Shift means its why field. It waits meanwhile.
+    const offer = toast.offer();
+
+    if (offer !== null) {
+      toast.send({ on: true, seq: offer.seq, type: "holding" });
+    }
 
     try {
       const capture = captureSelection({
@@ -795,6 +816,19 @@ const start = async (): Promise<void> => {
         return;
       }
 
+      const move = secondTap(
+        offer,
+        result.kind === "text"
+          ? { kind: "text", text: result.text }
+          : { kind: "none" }
+      );
+
+      if (move === "why" && offer !== null) {
+        toast.send({ seq: offer.seq, type: "whyAsked" });
+
+        return;
+      }
+
       if (result.kind === "none") {
         void toggleShelf();
 
@@ -837,6 +871,11 @@ const start = async (): Promise<void> => {
       }
     } finally {
       capturingSelection = false;
+
+      // Ignored when the field opened or a new notice replaced it.
+      if (offer !== null) {
+        toast.send({ on: false, seq: offer.seq, type: "holding" });
+      }
     }
   };
 

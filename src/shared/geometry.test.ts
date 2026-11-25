@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   dockShelf,
   noticeBesidePointer,
+  resizeAtCorner,
   pt,
   rect,
   size,
@@ -156,5 +157,28 @@ describe(viewerWindowSize, () => {
       height: 929,
       width: 1728,
     });
+  });
+});
+
+describe(resizeAtCorner, () => {
+  const workArea = rect<"screen">(0, 25, 1440, 875);
+  const notice = rect<"screen">(500, 300, 260, 44);
+  const field = size<"screen">(320, 44);
+
+  it.each([
+    ["top-left", rect<"screen">(500, 300, 320, 44)],
+    ["top-right", rect<"screen">(440, 300, 320, 44)],
+    ["bottom-left", rect<"screen">(500, 300, 320, 44)],
+    ["bottom-right", rect<"screen">(440, 300, 320, 44)],
+  ] as const)("keeps the %s corner where it was", (corner, expected) => {
+    expect(resizeAtCorner(notice, corner, field, workArea)).toStrictEqual(
+      expected
+    );
+  });
+
+  it("stays inside the work area when the corner is near its edge", () => {
+    expect(
+      resizeAtCorner(rect(1170, 856, 260, 44), "top-left", field, workArea)
+    ).toStrictEqual(rect(1120, 856, 320, 44));
   });
 });

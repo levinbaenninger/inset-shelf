@@ -4311,6 +4311,29 @@ const PILL_SCENES: readonly Scene[] = (
       name: "pill-why-saved",
       width: WHY_WIDTH,
     },
+    {
+      // The why field couldn't get the keyboard: the shelf opens at the item's description instead.
+      act: async (page) => {
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), focus: { field: "description", id: uuid(10), seq: 1 } })})`
+        );
+        await page.getByRole("button", { name: "Back to the list" }).waitFor();
+      },
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: "Description" });
+
+        const focusedField = await field.evaluate(
+          (element) => document.activeElement === element
+        );
+
+        return focusedField
+          ? null
+          : "the description field must have the keyboard";
+      },
+      data: { view: shelfView() },
+      name: "pill-why-fallback-shelf",
+      page: "shelf",
+    },
   ] satisfies readonly StressScene[]
 ).map((scene) => stress({ page: "toast", ...scene }));
 

@@ -1,4 +1,9 @@
-import type { NotSavedItem, ShelfStatus, ShelfView } from "@shared/contracts";
+import type {
+  DetailField,
+  NotSavedItem,
+  ShelfStatus,
+  ShelfView,
+} from "@shared/contracts";
 import { applyOp, attachmentsOf, UNDO_MAX } from "@shared/shelf";
 import type {
   ItemId,
@@ -52,8 +57,8 @@ export interface ShelfController {
   /** Returns the id of an item the operation added. */
   readonly apply: (op: ShelfOp | MainOp) => ItemId | null;
   readonly item: (id: ItemId) => ShelfItem | undefined;
-  /** Selects an item in the shelf; `edit` opens its text for typing. */
-  readonly focus: (id: ItemId, edit?: boolean) => void;
+  /** Selects an item in the shelf; `edit` opens its text for typing, `field` its details at that field. */
+  readonly focus: (id: ItemId, edit?: boolean, field?: DetailField) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
   /** The shelf as it is now, with the revision that names it. Documents are never changed in place. */
@@ -577,9 +582,15 @@ export const createShelfController = (
     },
     discards: (ids) => ids.reduce((sum, id) => sum + epochOf(id), 0),
     flush: async () => await persisted(version),
-    focus: (id, edit = false) => {
+    focus: (id, edit, field) => {
       focusSeq += 1;
-      focus = edit ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
+      focus =
+        edit === true ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
+
+      if (field !== undefined) {
+        focus = { ...focus, field };
+      }
+
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),

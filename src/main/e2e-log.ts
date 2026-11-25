@@ -14,7 +14,11 @@ export type E2eEvent =
   | "drawingShown"
   | "screenshotShown"
   | "saveFailed"
-  | "copied";
+  | "copied"
+  // Say why: the field has the keyboard, saved its words, or gave way to the shelf's description field.
+  | "whyOpened"
+  | "whySaved"
+  | "whyFallback";
 
 export interface E2eDetails {
   readonly bounds?: Rectangle;

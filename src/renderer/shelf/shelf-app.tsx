@@ -77,6 +77,7 @@ import {
 } from "./selection";
 import { ShortcutSheet } from "./shortcut-sheet";
 import { useDetails } from "./use-details";
+import type { Details } from "./use-details";
 import { useItemDrag } from "./use-item-drag";
 import { useSearchHighlight } from "./use-search-highlight";
 import { isTextField, useShelfKeys } from "./use-shelf-keys";
@@ -622,6 +623,18 @@ const DetailsNotSaved = ({
     />
   );
 
+/** A capture's focus closes details, unless it asks for them at a field: the why field's way in when the pill couldn't get the keyboard. */
+const showFocusDetails = (
+  details: Details,
+  focus: NonNullable<ShelfView["focus"]>
+): void => {
+  if (focus.field === undefined) {
+    details.close();
+  } else {
+    details.open(focus.id, focus.field);
+  }
+};
+
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
   const [query, setQuery] = useState("");
@@ -815,7 +828,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     setHandledFocus(focus.seq);
     setSelectedId(focus.id);
     setEditingId(kind === "image" || focus.edit === true ? focus.id : null);
-    details.close();
+    showFocusDetails(details, focus);
   }
 
   useEffect(() => {
