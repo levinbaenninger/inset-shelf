@@ -1,7 +1,7 @@
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { parseComposer, TEXT_MAX } from "@shared/shelf";
-import { useImperativeHandle, useRef } from "react";
+import { useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 
 import {
@@ -20,9 +20,6 @@ import type { AddActions } from "./menus";
 
 export interface ComposerProps {
   readonly sectionName: string;
-  /** Held by the shelf as Markdown, so it can clear the field once a note is added. */
-  readonly text: string;
-  readonly onTextChange: (text: string) => void;
   readonly onSubmit: (text: string) => void;
   /** ↑ in an empty composer moves into the list. */
   readonly onLeaveUp: () => void;
@@ -40,6 +37,8 @@ export interface ComposerProps {
 /**
  * Return adds the note, ⇧↩ adds a line (or a list item), and "# Name"
  * switches to (or makes) a section. Markdown is formatted as it is typed.
+ * The note being typed is the composer's own: a keystroke renders the field,
+ * never the list above it.
  */
 export const Composer = ({
   addActions,
@@ -47,13 +46,13 @@ export const Composer = ({
   onEscape,
   onLeaveUp,
   onSubmit,
-  onTextChange,
   ref,
   sectionName,
   sectionNames,
-  text,
 }: ComposerProps) => {
   const field = useRef<MarkdownFieldHandle>(null);
+  // Markdown, so the field can be cleared once a note is added.
+  const [text, setText] = useState("");
 
   useImperativeHandle<MarkdownFieldHandle | null, MarkdownFieldHandle | null>(
     ref,
@@ -102,18 +101,18 @@ export const Composer = ({
               if (markdown.trim() === "") {
                 onEscape();
               } else {
-                onTextChange("");
+                setText("");
               }
             },
             onLeaveUp,
             onSubmit: (markdown) => {
               if (markdown.trim() !== "") {
                 onSubmit(markdown.slice(0, TEXT_MAX));
-                onTextChange("");
+                setText("");
               }
             },
           }}
-          onChange={onTextChange}
+          onChange={setText}
           placeholder="Jot down a thought…"
           ref={field}
           value={text}

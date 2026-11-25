@@ -907,7 +907,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     "";
 
   const [selectedId, setSelectedId] = useState<ItemId | null>(null);
-  const [draft, setDraft] = useState("");
   const [handledFocus, setHandledFocus] = useState(0);
   const [copiedId, setCopiedId] = useExpiringState<ItemId>(COPIED_MS);
   // The deletions shown as toasts, newest last, so ⌘Z can close the one it undoes.
@@ -2285,10 +2284,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           setOpen(doc.activeSectionId, true);
           apply({ text, type: "compose" });
         }}
-        onTextChange={setDraft}
         ref={composerRef}
         sectionName={sectionName}
-        text={draft}
       />
     </div>
   );
