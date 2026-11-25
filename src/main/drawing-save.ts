@@ -3,10 +3,14 @@ import { once } from "node:events";
 import type { ActionResult, DrawingOnShelf } from "@shared/contracts";
 import { parseSceneFile, sceneFileText } from "@shared/drawing-scene";
 import type { StrokeMark } from "@shared/drawing-scene";
+import { ATTACHMENTS_MAX, clampPins } from "@shared/shelf";
 import type {
+  AttachedImage,
+  AttachmentId,
   DrawingScene,
   ImageItem,
   ItemId,
+  Picture,
   Pin,
   ShelfImage,
   ShelfItem,
@@ -36,7 +40,31 @@ export interface DrawingSaveInput {
   readonly pins: readonly Pin[];
 }
 
-/** What Annotate opens an image item on: the picture under its marks, read, and the marks a save kept. */
+/** What the drawing window's marks go to. */
+export type DrawingTarget =
+  /** New Drawing: a new item. */
+  | { readonly kind: "new" }
+  /** Annotate on an image item. */
+  | { readonly kind: "item"; readonly id: ItemId }
+  /** New Drawing in an item's details: a new attachment of that item. */
+  | { readonly kind: "newAttachment"; readonly id: ItemId }
+  /** Annotate on a picture attached to an item. */
+  | {
+      readonly kind: "attachment";
+      readonly id: ItemId;
+      readonly attachmentId: AttachmentId;
+    };
+
+/** Where marks a save already put on the shelf are: an item, or one of its attachments. */
+type Placed = Extract<DrawingTarget, { readonly kind: "item" | "attachment" }>;
+
+export const sameTarget = (a: DrawingTarget, b: DrawingTarget): boolean =>
+  a.kind === b.kind &&
+  (a.kind === "new" || ("id" in b && a.id === b.id)) &&
+  (a.kind !== "attachment" ||
+    (b.kind === "attachment" && a.attachmentId === b.attachmentId));
+
+/** What Annotate opens a picture on: the picture under its marks, read, and the marks a save kept. */
 export interface DrawingOpening {
   /** Null for a drawing made on a blank page: it opens blank, its marks on it. */
   readonly picture: ShelfImage | null;
@@ -57,7 +85,14 @@ export interface DrawingSaveDeps {
   readonly readFile: (file: string) => Promise<Uint8Array | null>;
   /** The page's PNG as a picture; null when it isn't one. */
   readonly decode: (png: Uint8Array) => DrawingPicture | null;
-  readonly copies: Pick<CopyCommands, "copy" | "copyDrawing">;
+  readonly copies: Pick<
+    CopyCommands,
+    "copy" | "copyDrawing" | "copyOwnPicture" | "copyPicture"
+  >;
+  readonly newAttachmentId: () => AttachmentId;
+  readonly now: () => Date;
+  /** Says something the user didn't ask for happened to the marks. */
+  readonly notify: (message: string) => void;
   /** Hides the drawing window: its marks are on the shelf. */
   readonly close: () => void;
   /** A save the page asked for has ended, saved or not. */
@@ -82,12 +117,10 @@ export interface DrawingSaveState {
 }
 
 export interface DrawingSaves {
-  /** Reads what Annotate opens `item` on; changes nothing, so the caller can check the window is still free once it has. */
-  readonly opening: (item: ImageItem) => Promise<DrawingOpening>;
-  /** The window opens on an image item, or on a blank page (null). */
-  readonly open: (
-    item: { readonly id: ItemId; readonly opening: DrawingOpening } | null
-  ) => void;
+  /** Reads what Annotate opens a picture on; changes nothing, so the caller can check the window is still free once it has. */
+  readonly opening: (picture: Picture) => Promise<DrawingOpening>;
+  /** The window opens on a picture, with what was read for it, or on a blank page. */
+  readonly open: (target: DrawingTarget, opening?: DrawingOpening) => void;
   /** The picture the window opened on, to draw the marks into; the same bytes however often it saves. */
   readonly image: () => Promise<Uint8Array | null>;
   /** The page's Save, Copy and Save, or Retry in a held quit (`forQuit`). */
@@ -99,8 +132,8 @@ export interface DrawingSaves {
   readonly state: () => DrawingSaveState;
   /** What the shelf holds of the marks, for the close confirm. */
   readonly kept: () => DrawingOnShelf;
-  /** The image item the marks go to; null for a blank page no save has put on the shelf. */
-  readonly target: () => ItemId | null;
+  /** What the marks go to: where a held quit's save put them, else what the window opened as. */
+  readonly target: () => DrawingTarget;
 }
 
 /** A save's new picture for the item, and the marks drawn into it (none to keep: undefined). */
@@ -109,12 +142,30 @@ interface Drawn {
   readonly scene: DrawingScene | undefined;
 }
 
-/** The item a save put the marks on, and the shelf's revision that holds them. */
+/** Where a save put the marks, and the shelf's revision that holds them. */
 interface Put {
-  readonly id: ItemId;
+  readonly placed: Placed;
   readonly rev: number;
   readonly via: "annotation" | "drawing";
+  /** A new drawing: the user's own picture, copied even when the shelf can't save it. */
+  readonly own: boolean;
 }
+
+/** Where a save's marks go now, read from the shelf. */
+type Destination =
+  | { readonly kind: "newItem"; readonly full: boolean }
+  | { readonly kind: "item"; readonly item: ImageItem }
+  | { readonly kind: "attach"; readonly item: ShelfItem }
+  | {
+      readonly kind: "attachment";
+      readonly item: ShelfItem;
+      readonly attachment: AttachedImage;
+    }
+  | { readonly kind: "gone"; readonly message: string };
+
+const DRAWING_NAME = "Drawing";
+
+const FELL_BACK = `The item already holds ${ATTACHMENTS_MAX} attachments, so the drawing was saved as its own item.`;
 
 /** A drawing exported at twice its size, so it stays sharp on Retina displays. */
 export const DRAWING_PIXELS_PER_DIP = 2;
@@ -130,6 +181,27 @@ const whenStopped = async (stop: AbortSignal): Promise<typeof STOPPED> => {
   return STOPPED;
 };
 
+/** The picture attached to an item under this id, if it is a picture. */
+const attachedImage = (
+  item: ShelfItem | undefined,
+  attachmentId: AttachmentId
+): AttachedImage | undefined => {
+  const attachment = item?.attachments.find(
+    (candidate) => candidate.id === attachmentId
+  );
+
+  return attachment?.kind === "image" ? attachment : undefined;
+};
+
+/** The picture the marks were drawn on, when they go to one that exists. */
+const pictureOf = (to: Destination): ShelfImage | null => {
+  if (to.kind === "item") {
+    return to.item.image;
+  }
+
+  return to.kind === "attachment" ? to.attachment.image : null;
+};
+
 /**
  * The drawing window's saves. The user's own Save puts the marks on the
  * shelf and closes the window. A save during a held quit keeps the window
@@ -138,73 +210,237 @@ const whenStopped = async (stop: AbortSignal): Promise<typeof STOPPED> => {
  * Retry never adds the drawing twice.
  */
 export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
-  // The item the marks go to: the image opened, or the item a held quit's save made from a blank page.
-  let target: ItemId | null = null;
-  // Opened as New Drawing: no item yet, and a copy of it is the user's own picture.
-  let blank = true;
+  // What the window opened as.
+  let opened: DrawingTarget = { kind: "new" };
+  // Where a held quit's save put the marks: the next save replaces them there, so a Retry never adds them twice.
+  let made: Placed | null = null;
   let base: Promise<Uint8Array | null> = Promise.resolve(null);
   // The picture the window opened on, which the page shows under its marks; null for a blank page.
-  let opened: ShelfImage | null = null;
+  let openedPicture: ShelfImage | null = null;
   let quitStop: AbortSignal | null = null;
   // The item as a held quit's save left it: the marks count as on the shelf only while the shelf still holds exactly that.
   let applied: ShelfItem | null = null;
   let error: string | null = null;
 
-  /** The new picture and its marks (or, with none, only the pins) on the image the marks go to, or on a new item. */
+  /** A new drawing, not an annotation: the user's own picture. */
+  const own = (): boolean =>
+    opened.kind === "new" || opened.kind === "newAttachment";
+
+  /** A picture attached to an item, as the shelf holds it now; gone when either is. */
+  const attachmentDestination = (
+    id: ItemId,
+    attachmentId: AttachmentId
+  ): Destination => {
+    const item = deps.controller.item(id);
+    const attachment = attachedImage(item, attachmentId);
+
+    return item === undefined || attachment === undefined
+      ? { kind: "gone", message: "This picture is no longer on the shelf." }
+      : { attachment, item, kind: "attachment" };
+  };
+
+  /** Where the marks go now: what the window opened as, or where a held quit's save put them. */
+  const destination = (): Destination => {
+    switch (opened.kind) {
+      case "new": {
+        const item = made === null ? undefined : deps.controller.item(made.id);
+
+        return item?.kind === "image"
+          ? { item, kind: "item" }
+          : { full: false, kind: "newItem" };
+      }
+
+      case "item": {
+        const item = deps.controller.item(opened.id);
+
+        return item?.kind === "image"
+          ? { item, kind: "item" }
+          : { kind: "gone", message: "This image is no longer on the shelf." };
+      }
+
+      case "attachment": {
+        return attachmentDestination(opened.id, opened.attachmentId);
+      }
+
+      case "newAttachment": {
+        const item = deps.controller.item(opened.id);
+
+        if (item === undefined) {
+          return {
+            kind: "gone",
+            message: "This item is no longer on the shelf.",
+          };
+        }
+
+        if (
+          made?.kind === "attachment" &&
+          attachedImage(item, made.attachmentId) !== undefined
+        ) {
+          return attachmentDestination(made.id, made.attachmentId);
+        }
+
+        return item.attachments.length >= ATTACHMENTS_MAX
+          ? { full: true, kind: "newItem" }
+          : { item, kind: "attach" };
+      }
+
+      default: {
+        return {
+          kind: "gone",
+          message: "This item is no longer on the shelf.",
+        };
+      }
+    }
+  };
+
+  /** The new picture and its marks (or, with none, only the pins) where the marks go. */
   const place = (
-    item: ImageItem | null,
+    to: Destination,
     drawn: Drawn | null,
     pins: readonly Pin[]
   ): Put | ActionResult => {
-    if (item !== null) {
-      if (drawn !== null) {
-        deps.controller.apply({
-          id: item.id,
-          image: drawn.image,
-          scene: drawn.scene,
-          type: "replaceImage",
-        });
+    const via = own() ? "drawing" : "annotation";
+
+    switch (to.kind) {
+      case "gone": {
+        return { message: to.message, ok: false };
       }
 
-      deps.controller.apply({ id: item.id, pins: [...pins], type: "setPins" });
-      deps.clearStaging(item.id);
+      case "item": {
+        const { id } = to.item;
 
-      return {
-        id: item.id,
-        rev: deps.controller.snapshot().rev,
-        via: blank ? "drawing" : "annotation",
-      };
+        if (drawn !== null) {
+          deps.controller.apply({
+            id,
+            image: drawn.image,
+            scene: drawn.scene,
+            type: "replaceImage",
+          });
+        }
+
+        deps.controller.apply({ id, pins: [...pins], type: "setPins" });
+        deps.clearStaging(id);
+
+        return {
+          own: own(),
+          placed: { id, kind: "item" },
+          rev: deps.controller.snapshot().rev,
+          via,
+        };
+      }
+
+      case "attachment": {
+        const { id } = to.item;
+        const attachmentId = to.attachment.id;
+
+        if (drawn !== null) {
+          deps.controller.apply({
+            attachmentId,
+            id,
+            image: drawn.image,
+            scene: drawn.scene,
+            type: "replaceAttachmentImage",
+          });
+        }
+
+        deps.controller.apply({
+          attachmentId,
+          id,
+          pins: [...pins],
+          type: "setAttachmentPins",
+        });
+        deps.clearStaging(id);
+
+        return {
+          own: own(),
+          placed: { attachmentId, id, kind: "attachment" },
+          rev: deps.controller.snapshot().rev,
+          via,
+        };
+      }
+
+      case "attach": {
+        if (drawn === null) {
+          return { message: "There is nothing to save.", ok: false };
+        }
+
+        const attachmentId = deps.newAttachmentId();
+        const { id } = to.item;
+
+        const fresh: AttachedImage = {
+          addedAt: deps.now().toISOString(),
+          id: attachmentId,
+          image: drawn.image,
+          kind: "image",
+          name: DRAWING_NAME,
+          pins: clampPins(pins, drawn.image),
+        };
+
+        deps.controller.apply({
+          attachments: [
+            drawn.scene === undefined
+              ? fresh
+              : { ...fresh, scene: drawn.scene },
+          ],
+          id,
+          type: "attach",
+        });
+
+        return {
+          own: true,
+          placed: { attachmentId, id, kind: "attachment" },
+          rev: deps.controller.snapshot().rev,
+          via: "drawing",
+        };
+      }
+
+      case "newItem": {
+        if (drawn === null) {
+          return { message: "There is nothing to save.", ok: false };
+        }
+
+        const id = deps.controller.apply({
+          context: null,
+          image: drawn.image,
+          pins: [...pins],
+          scene: drawn.scene,
+          source: null,
+          type: "addImage",
+          via: "drawing",
+        });
+
+        if (id === null) {
+          return { message: "The drawing could not be added.", ok: false };
+        }
+
+        if (to.full) {
+          deps.notify(FELL_BACK);
+        }
+
+        return {
+          own: true,
+          placed: { id, kind: "item" },
+          rev: deps.controller.snapshot().rev,
+          via: "drawing",
+        };
+      }
+
+      default: {
+        return { message: "There is nothing to save.", ok: false };
+      }
     }
-
-    if (drawn === null) {
-      return { message: "There is nothing to save.", ok: false };
-    }
-
-    const id = deps.controller.apply({
-      context: null,
-      image: drawn.image,
-      pins: [...pins],
-      scene: drawn.scene,
-      source: null,
-      type: "addImage",
-      via: "drawing",
-    });
-
-    return id === null
-      ? { message: "The drawing could not be added.", ok: false }
-      : { id, rev: deps.controller.snapshot().rev, via: "drawing" };
   };
 
   /**
    * With only pins sent, the picture they sit on: none to change while the
-   * item still has the one the window opened on; that one again, without
-   * marks, once a save drew marks into the item that the page no longer has.
-   * Its file is still there: the marks kept with the item name it.
+   * destination still has the one the window opened on; that one again,
+   * without marks, once a save drew marks into it that the page no longer
+   * has. Its file is still there: the marks kept with it name it.
    */
-  const unmarked = (item: ImageItem): Drawn | null =>
-    opened === null || item.image.file === opened.file
+  const unmarked = (picture: ShelfImage): Drawn | null =>
+    openedPicture === null || picture.file === openedPicture.file
       ? null
-      : { image: opened, scene: undefined };
+      : { image: openedPicture, scene: undefined };
 
   /** An attachment's bytes; null when it can't be read. */
   const read = async (file: string): Promise<Uint8Array | null> => {
@@ -213,9 +449,9 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     return at === null ? null : await deps.readFile(at);
   };
 
-  /** Writes the picture and the marks drawn into it: the item's new picture. */
+  /** Writes the picture and the marks drawn into it: the new picture. */
   const write = async (
-    item: ShelfItem | undefined,
+    pixelsPerDip: number,
     picture: DrawingPicture,
     marks: readonly StrokeMark[]
   ): Promise<Drawn> => {
@@ -233,51 +469,82 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       image: {
         file,
         heightPx: picture.heightPx,
-        pixelsPerDip:
-          item?.kind === "image"
-            ? item.image.pixelsPerDip
-            : DRAWING_PIXELS_PER_DIP,
+        pixelsPerDip,
         widthPx: picture.widthPx,
       },
-      scene: kept === null ? undefined : { base: opened, file: kept },
+      scene: kept === null ? undefined : { base: openedPicture, file: kept },
     };
   };
 
-  /** Puts the marks on the shelf; the item and the revision that holds them, or why not. */
+  const forget = async (drawn: Drawn): Promise<void> => {
+    await Promise.all(
+      [drawn.image.file, drawn.scene?.file].flatMap((file) =>
+        file === undefined ? [] : [deps.store.deleteAttachment(file)]
+      )
+    );
+  };
+
+  /** Puts the marks on the shelf; where, and the revision that holds them, or why not. */
   const apply = async (
     input: DrawingSaveInput,
     stop: AbortSignal | null
   ): Promise<Put | ActionResult> => {
-    const item = target === null ? undefined : deps.controller.item(target);
+    const to = destination();
     const picture = input.png === null ? null : deps.decode(input.png);
 
     if (input.png !== null && picture === null) {
       return { message: "The drawing could not be read.", ok: false };
     }
 
-    if (!blank && item?.kind !== "image") {
-      return { message: "This image is no longer on the shelf.", ok: false };
+    if (to.kind === "gone") {
+      return { message: to.message, ok: false };
     }
+
+    const onto = pictureOf(to);
 
     if (picture === null) {
-      return item?.kind === "image"
-        ? place(item, unmarked(item), input.pins)
-        : { message: "There is nothing to save.", ok: false };
+      return onto === null
+        ? { message: "There is nothing to save.", ok: false }
+        : place(to, unmarked(onto), input.pins);
     }
 
-    const drawn = await write(item, picture, input.marks);
+    const drawn = await write(
+      onto?.pixelsPerDip ?? DRAWING_PIXELS_PER_DIP,
+      picture,
+      input.marks
+    );
 
     if (stop?.aborted === true) {
-      await Promise.all(
-        [drawn.image.file, drawn.scene?.file].flatMap((file) =>
-          file === undefined ? [] : [deps.store.deleteAttachment(file)]
-        )
-      );
+      await forget(drawn);
 
       return { ok: true };
     }
 
-    return place(item?.kind === "image" ? item : null, drawn, input.pins);
+    // Read again: the shelf can change while the picture is written.
+    const now = destination();
+
+    if (now.kind === "gone") {
+      await forget(drawn);
+    }
+
+    return place(now, drawn, input.pins);
+  };
+
+  /** The marks' own copy: a new drawing is the user's own picture, copied even when the shelf can't save it (Round 6). */
+  const copyOwn = async (put: Put): Promise<ActionResult | null> => {
+    const item = deps.controller.item(put.placed.id);
+
+    if (put.placed.kind === "item") {
+      return item?.kind === "image"
+        ? await deps.copies.copyDrawing(item)
+        : null;
+    }
+
+    const attachment = attachedImage(item, put.placed.attachmentId);
+
+    return attachment === undefined
+      ? null
+      : await deps.copies.copyOwnPicture(attachment);
   };
 
   /** The user's own Save: the window closes at once; a copy waits for its own save. */
@@ -289,19 +556,24 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     let saving: Promise<WriteResult> | null = null;
 
     if (input.copy) {
-      const added = deps.controller.item(put.id);
+      const mine = put.own ? await copyOwn(put) : null;
 
-      // A new drawing is the user's own picture: it is copied even when the shelf can't save it (Round 6).
-      if (blank && added?.kind === "image") {
-        copied = await deps.copies.copyDrawing(added);
-        saving = copied.ok ? deps.controller.persisted(put.rev) : null;
+      if (mine === null) {
+        copied =
+          put.placed.kind === "attachment"
+            ? await deps.copies.copyPicture(
+                put.placed.id,
+                put.placed.attachmentId
+              )
+            : await deps.copies.copy(put.placed.id);
       } else {
-        copied = await deps.copies.copy(put.id);
+        copied = mine;
+        saving = copied.ok ? deps.controller.persisted(put.rev) : null;
       }
     }
 
     deps.close();
-    deps.added(put.id, put.via);
+    deps.added(put.placed.id, put.via);
     deps.show(copied, saving);
 
     return { ok: true };
@@ -312,8 +584,8 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     put: Put,
     stop: AbortSignal
   ): Promise<ActionResult> => {
-    target = put.id;
-    applied = deps.controller.item(put.id) ?? null;
+    made = put.placed;
+    applied = deps.controller.item(put.placed.id) ?? null;
 
     const written = await Promise.race([
       deps.controller.persisted(put.rev),
@@ -329,16 +601,34 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     }
 
     deps.close();
-    deps.added(put.id, put.via);
+    deps.added(put.placed.id, put.via);
 
     return { ok: true };
   };
 
+  /** What the marks go to: where a held quit's save put them, else what the window opened as. */
+  const target = (): DrawingTarget => made ?? opened;
+
   // Deleted, discarded or edited since, the shelf no longer holds these marks.
   const onShelf = (): boolean =>
     applied !== null &&
-    target !== null &&
-    deps.controller.item(target) === applied;
+    made !== null &&
+    deps.controller.item(made.id) === applied;
+
+  /** Whether the shelf holds an earlier version of the marks: the picture they go to still exists. */
+  const onShelfEarlier = (): boolean => {
+    const now = target();
+
+    if (now.kind === "new" || now.kind === "newAttachment") {
+      return false;
+    }
+
+    const item = deps.controller.item(now.id);
+
+    return now.kind === "item"
+      ? item !== undefined
+      : attachedImage(item, now.attachmentId) !== undefined;
+  };
 
   const run = async (input: DrawingSaveInput): Promise<ActionResult> => {
     // After Cancel the window keeps its marks, so the page shows no problem either.
@@ -367,23 +657,23 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       quitStop = stop;
     },
     image: async () => await base,
-    open: (item) => {
-      target = item?.id ?? null;
-      blank = item === null;
+    open: (to, opening) => {
+      opened = to;
+      made = null;
       applied = null;
       error = null;
-      opened = item?.opening.picture ?? null;
-      base = Promise.resolve(item?.opening.bytes ?? null);
+      openedPicture = opening?.picture ?? null;
+      base = Promise.resolve(opening?.bytes ?? null);
     },
-    opening: async (item) => {
+    opening: async (picture) => {
       // Read now: a write that no longer names the picture can delete it while the window is still open.
       const asShown = async (): Promise<DrawingOpening> => ({
-        bytes: await read(item.image.file),
+        bytes: await read(picture.image.file),
         marks: [],
-        picture: item.image,
+        picture: picture.image,
       });
 
-      const { scene } = item;
+      const { scene } = picture;
 
       if (scene === undefined) {
         return await asShown();
@@ -396,7 +686,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
 
       const marks = file === null ? null : parseSceneFile(file);
 
-      // Marks, or the picture under them, that can't be read: the item opens as it shows, marks drawn in, as before they were kept.
+      // Marks, or the picture under them, that can't be read: the picture opens as it shows, marks drawn in, as before they were kept.
       return marks === null || (scene.base !== null && bytes === null)
         ? await asShown()
         : { bytes, marks, picture: scene.base };
@@ -418,11 +708,9 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
         return "asIs";
       }
 
-      return target !== null && deps.controller.item(target) !== undefined
-        ? "earlier"
-        : "none";
+      return onShelfEarlier() ? "earlier" : "none";
     },
     state: () => ({ error, onShelf: onShelf() }),
-    target: () => target,
+    target,
   };
 };

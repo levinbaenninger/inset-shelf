@@ -70,6 +70,8 @@ export interface CopyCommands {
   readonly copyScreenshot: (png: Uint8Array) => Promise<ActionResult>;
   /** A new drawing's Copy and Save, as it was just added: its own picture, so no save is waited for. */
   readonly copyDrawing: (item: ImageItem) => Promise<ActionResult>;
+  /** A new attached drawing's Copy and Save, as it was just attached: its own picture, so no save is waited for. */
+  readonly copyOwnPicture: (picture: Picture) => Promise<ActionResult>;
   /** Copy and Save for an attached picture: that picture alone, with its pins, once the disk holds it. */
   readonly copyPicture: (
     id: ItemId,
@@ -334,6 +336,15 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
       }
 
       return result;
+    },
+    copyOwnPicture: async (picture) => {
+      const exported = deps.exportImage(picture);
+
+      return exported === null
+        ? { message: "The image can’t be read.", ok: false }
+        : await deps.gate.copyOwn({
+            "image/png": new Blob([exported.png], { type: "image/png" }),
+          });
     },
     copyPicture: async (id, attachmentId) =>
       await deps.gate.copy([id], (doc) => {

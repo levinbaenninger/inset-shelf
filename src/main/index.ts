@@ -36,6 +36,8 @@ import type {
   ItemContext,
   ItemId,
   MainOp,
+  Picture,
+  Pin,
   ShelfItem,
   WindowRef,
 } from "@shared/shelf";
@@ -83,7 +85,8 @@ import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
 import type { ClipboardContents } from "./copy-gate";
 import { copySource } from "./copy-source";
-import { createDrawingSaves } from "./drawing-save";
+import { createDrawingSaves, sameTarget } from "./drawing-save";
+import type { DrawingTarget } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
@@ -1345,6 +1348,12 @@ const start = async (): Promise<void> => {
       void showSaved(copied, saving);
     },
     store,
+    // A new drawing attached to an item.
+    newAttachmentId: () => AttachmentIdSchema.parse(randomUUID()),
+    notify: (message) => {
+      notify(message);
+    },
+    now: () => new Date(),
   });
 
   /**
@@ -1615,17 +1624,17 @@ const start = async (): Promise<void> => {
       return;
     }
 
-    drawingSaves.open(null);
+    drawingSaves.open({ kind: "new" });
     drawing.open({ image: null, marks: [], pinMode: false });
   };
 
   /** Annotate on the picture the window already shows only brings it forward; other unsaved marks keep the window. True when the window is taken. */
-  const drawingTaken = (id: ItemId): boolean => {
+  const drawingTaken = (target: DrawingTarget): boolean => {
     if (!drawing.isDirty()) {
       return false;
     }
 
-    if (drawingSaves.target() === id) {
+    if (sameTarget(drawingSaves.target(), target)) {
       drawing.bringForward();
     } else {
       keepDrawing();
@@ -1634,35 +1643,57 @@ const start = async (): Promise<void> => {
     return true;
   };
 
-  /** Opens an image item to draw on, with the marks a save kept beside it to edit again. */
-  const openImage = async (id: ItemId, pinMode = false): Promise<void> => {
-    const before = controller.item(id);
+  /** An image item's picture, or a picture attached to an item, as the shelf holds it now. */
+  const pictureAt = (
+    target: Extract<DrawingTarget, { readonly kind: "item" | "attachment" }>
+  ): { readonly picture: Picture; readonly pins: readonly Pin[] } | null => {
+    const item = controller.item(target.id);
 
-    if (before?.kind !== "image" || drawingTaken(id)) {
+    if (target.kind === "item") {
+      return item?.kind === "image" ? { picture: item, pins: item.pins } : null;
+    }
+
+    const attachment = item?.attachments.find(
+      (candidate) => candidate.id === target.attachmentId
+    );
+
+    return attachment?.kind === "image"
+      ? { picture: attachment, pins: attachment.pins }
+      : null;
+  };
+
+  /** Opens a picture to draw on, an image item's or an attached one, with the marks a save kept beside it to edit again. */
+  const openPicture = async (
+    target: Extract<DrawingTarget, { readonly kind: "item" | "attachment" }>,
+    pinMode = false
+  ): Promise<void> => {
+    const before = pictureAt(target);
+
+    if (before === null || drawingTaken(target)) {
       return;
     }
 
-    const opening = await drawingSaves.opening(before);
-    const item = controller.item(id);
+    const opening = await drawingSaves.opening(before.picture);
+    const now = pictureAt(target);
 
-    // Anything can happen while the marks are read: the window and the item are checked again, as they are now.
-    if (item?.kind !== "image" || drawingTaken(id)) {
+    // Anything can happen while the marks are read: the window and the picture are checked again, as they are now.
+    if (now === null || drawingTaken(target)) {
       return;
     }
 
     if (
-      item.image.file !== before.image.file ||
-      item.scene?.file !== before.scene?.file
+      now.picture.image.file !== before.picture.image.file ||
+      now.picture.scene?.file !== before.picture.scene?.file
     ) {
-      await openImage(id, pinMode);
+      await openPicture(target, pinMode);
 
       return;
     }
 
     const { picture } = opening;
 
-    drawingSaves.open({ id, opening });
-    e2eLog("drawingShown", { itemId: id });
+    drawingSaves.open(target, opening);
+    e2eLog("drawingShown", { itemId: target.id });
     drawing.open({
       image:
         picture === null
@@ -1673,9 +1704,18 @@ const start = async (): Promise<void> => {
               url: insetUrl.attachment(picture.file),
               widthPx: picture.widthPx,
             },
-      marks: openedMarks(opening.marks, item.pins, item.image.pixelsPerDip),
+      marks: openedMarks(
+        opening.marks,
+        now.pins,
+        now.picture.image.pixelsPerDip
+      ),
       pinMode,
     });
+  };
+
+  /** Opens an image item to draw on, with the marks a save kept beside it to edit again. */
+  const openImage = async (id: ItemId, pinMode = false): Promise<void> => {
+    await openPicture({ id, kind: "item" }, pinMode);
   };
 
   // Attachments: what the shelf page asks for an item's pictures and files (attachments.ts).
@@ -1750,6 +1790,29 @@ const start = async (): Promise<void> => {
   };
 
   const attachmentHandlers = {
+    newDrawingFor: (id: ItemId): void => {
+      if (drawing.isDirty()) {
+        keepDrawing();
+
+        return;
+      }
+
+      if (controller.item(id) !== undefined) {
+        drawingSaves.open({ id, kind: "newAttachment" });
+        drawing.open({ image: null, marks: [], pinMode: false });
+      }
+    },
+    openAttachment: ({
+      attachmentId,
+      id,
+      pinMode,
+    }: {
+      readonly attachmentId: AttachmentId;
+      readonly id: ItemId;
+      readonly pinMode: boolean;
+    }): void => {
+      void openPicture({ attachmentId, id, kind: "attachment" }, pinMode);
+    },
     addFilesTo: async ({
       id,
       paths,

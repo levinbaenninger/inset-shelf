@@ -68,6 +68,11 @@ const ENTRY_POINTS: Record<keyof CopyCommands, EntryPoint> = {
       await commands.copyList([items.text, items.image, items.file]),
     waitsForSave: true,
   },
+  copyOwnPicture: {
+    run: async (commands, items) =>
+      await commands.copyOwnPicture(items.drawing),
+    waitsForSave: false,
+  },
   copyPicture: {
     run: async (commands, items) =>
       await commands.copyPicture(items.file, items.picture),
@@ -400,6 +405,7 @@ describe(createCopyCommands, () => {
       { name: "copyDetails", result: NOT_SAVED },
       { name: "copyDrawing", result: { ok: true } },
       { name: "copyList", result: NOT_SAVED },
+      { name: "copyOwnPicture", result: { ok: true } },
       { name: "copyPicture", result: NOT_SAVED },
       { name: "copyScreenshot", result: { ok: true } },
       { name: "copyWithLink", result: NOT_SAVED },
@@ -408,7 +414,11 @@ describe(createCopyCommands, () => {
     expect(events.filter((event) => event === "save")).toStrictEqual(["save"]);
     await expect(
       Promise.all(written.map(async (contents) => await formats(contents[0])))
-    ).resolves.toStrictEqual([{ "image/png": "PNG" }, { "image/png": "PNG" }]);
+    ).resolves.toStrictEqual([
+      { "image/png": "PNG" },
+      { "image/png": "PNG" },
+      { "image/png": "PNG" },
+    ]);
     // Only the drawing is an item; the setting may check it off.
     expect(copied).toStrictEqual(["item:1"]);
     expect(controller.view().status.saveError).toBe("disk full");

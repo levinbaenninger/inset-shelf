@@ -176,6 +176,16 @@ const attachmentMethods = {
   ),
   /** The item selected or open in details, so main knows what an attachment from outside the shelf goes to. */
   selection: send(ItemIdSchema.nullable()),
+  /** New Drawing in details: a blank page in the drawing window, saved as this item's attachment. */
+  newDrawingFor: send(ItemIdSchema),
+  /** Opens an attached picture in the drawing window, to look at or draw on; `pinMode` with the Pin tool. */
+  openAttachment: send(
+    z.object({
+      attachmentId: AttachmentIdSchema,
+      id: ItemIdSchema,
+      pinMode: z.boolean(),
+    })
+  ),
 } as const;
 
 export const shelfContract = defineContract({
