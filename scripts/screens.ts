@@ -4475,7 +4475,7 @@ const SCENES: readonly Scene[] = [
             .first(),
         ],
         ["Details", row.getByRole("button", { name: "Show details" })],
-        ["⋯", row.getByRole("button", { name: "More" })],
+        ["⋯", row.getByRole("button", { exact: true, name: "More" })],
       ]);
 
       for (const [name, control] of controls) {
