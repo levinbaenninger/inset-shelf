@@ -213,19 +213,28 @@ export const StepChecklist = ({
 );
 
 /** The labelled pins under an image, as "1 · label"; unlabelled pins are left out. */
-export const PinLegend = ({ pins }: { readonly pins: readonly Pin[] }) => (
+export const PinLegend = ({
+  pins,
+  shown,
+}: {
+  readonly pins: readonly Pin[];
+  /** How many labelled pins to list. */
+  readonly shown: number;
+}) => (
   <ol aria-label="Pin labels" className="flex flex-col gap-1">
-    {pins.map((pin, index) =>
-      pin.label === undefined ? null : (
-        // oxlint-disable-next-line react/no-array-index-key -- a pin's place is its number.
-        <li className="flex min-w-0 items-center gap-1.5 text-sm" key={index}>
-          <PinGlyph height={15} number={index + 1} />
-          <span className="min-w-0 truncate" title={pin.label}>
-            {pin.label}
+    {pins
+      .flatMap((pin, index) =>
+        pin.label === undefined ? [] : [{ label: pin.label, number: index + 1 }]
+      )
+      .slice(0, shown)
+      .map(({ label, number }) => (
+        <li className="flex min-w-0 items-center gap-1.5 text-sm" key={number}>
+          <PinGlyph height={15} number={number} />
+          <span className="min-w-0 truncate" title={label}>
+            {label}
           </span>
         </li>
-      )
-    )}
+      ))}
   </ol>
 );
 

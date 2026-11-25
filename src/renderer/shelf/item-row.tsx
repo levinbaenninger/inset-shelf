@@ -55,7 +55,7 @@ import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
-import { rowParts } from "./row-parts";
+import { filledSteps, moreText, rowParts } from "./row-parts";
 import type { RowExtras } from "./row-parts";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
@@ -930,34 +930,39 @@ const SourceRow = ({
 
 /**
  * What an open row shows besides its words, each only once it is set: pin
- * labels, the description (three lines; details hold the rest), checkable
- * steps and the linked windows.
+ * labels, the description (three lines), checkable steps and the linked
+ * windows, each list cut short (row-parts.ts) with one line that says how
+ * much more details hold and opens them.
  */
 const Expansion = ({
   extras,
   item,
   onReopenWindow,
+  onShowDetails,
   onToggleStep,
 }: {
   readonly extras: RowExtras;
   readonly item: ShelfItem;
   readonly onToggleStep: (step: Step) => void;
   readonly onReopenWindow: (window: WindowRef) => void;
+  readonly onShowDetails: () => void;
 }) => {
   if (
     !extras.description &&
-    !extras.steps &&
-    !extras.windows &&
-    !extras.pinLegend
+    extras.steps === null &&
+    extras.windows === null &&
+    extras.pinLegend === null
   ) {
     return null;
   }
 
+  const more = moreText(extras);
+
   return (
     <div className="flex flex-col gap-2 pt-0.5">
-      {extras.pinLegend && item.kind === "image" ? (
-        <PinLegend pins={item.pins} />
-      ) : null}
+      {extras.pinLegend === null || item.kind !== "image" ? null : (
+        <PinLegend pins={item.pins} shown={extras.pinLegend.shown} />
+      )}
       {extras.description ? (
         <p
           className="text-muted-foreground line-clamp-3 text-sm leading-snug break-words whitespace-pre-line"
@@ -966,12 +971,30 @@ const Expansion = ({
           {item.description.trim()}
         </p>
       ) : null}
-      {extras.steps ? (
-        <StepChecklist onToggle={onToggleStep} steps={item.steps} />
-      ) : null}
-      {extras.windows ? (
-        <WindowStrip onReopen={onReopenWindow} windows={item.windows} />
-      ) : null}
+      {extras.steps === null ? null : (
+        <StepChecklist
+          onToggle={onToggleStep}
+          steps={filledSteps(item.steps).slice(0, extras.steps.shown)}
+        />
+      )}
+      {extras.windows === null ? null : (
+        <WindowStrip
+          onReopen={onReopenWindow}
+          windows={item.windows.slice(0, extras.windows.shown)}
+        />
+      )}
+      {more === null ? null : (
+        <Button
+          className="-ml-2 max-w-full self-start"
+          onClick={onShowDetails}
+          size="xs"
+          title={more}
+          variant="quiet"
+        >
+          <span className="min-w-0 truncate">{more}</span>
+          <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
+        </Button>
+      )}
     </div>
   );
 };
@@ -1174,6 +1197,7 @@ export const ItemRow = (props: ItemRowProps) => {
             extras={parts.extras}
             item={item}
             onReopenWindow={props.onReopenWindow}
+            onShowDetails={props.onShowDetails}
             onToggleStep={props.onToggleStep}
           />
         )}

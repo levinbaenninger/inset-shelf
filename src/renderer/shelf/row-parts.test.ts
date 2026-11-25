@@ -2,7 +2,7 @@ import { FileItemSchema, ImageItemSchema, TextItemSchema } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { rowParts } from "./row-parts";
+import { moreText, rowParts } from "./row-parts";
 
 const uuid = (n: number): string =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -111,9 +111,9 @@ describe(rowParts, () => {
     expect(parts.extras).toStrictEqual({
       description: true,
       links: false,
-      pinLegend: false,
-      steps: true,
-      windows: true,
+      pinLegend: null,
+      steps: { more: 0, shown: 2 },
+      windows: { more: 0, shown: 2 },
     });
   });
 
@@ -126,9 +126,9 @@ describe(rowParts, () => {
     expect(parts.extras).toStrictEqual({
       description: false,
       links: false,
-      pinLegend: false,
-      steps: false,
-      windows: false,
+      pinLegend: null,
+      steps: null,
+      windows: null,
     });
     expect(parts.badges).toStrictEqual([{ count: 1, kind: "pins" }]);
   });
@@ -143,5 +143,28 @@ describe(rowParts, () => {
         false
       ).badgesOn
     ).toBe("source");
+  });
+
+  it("cuts an open row's long lists short and says how much more details hold", () => {
+    const crowded = image({
+      pins: Array.from({ length: 30 }, (_, n) => ({
+        label: `Pin ${n}`,
+        x: n,
+        y: n,
+      })),
+      steps: Array.from({ length: 6 }, (_, n) => step(10 + n, `Step ${n}`)),
+      windows: [windowRef(1)],
+    });
+
+    const { extras } = rowParts(crowded, true);
+
+    expect(extras?.pinLegend).toStrictEqual({ more: 27, shown: 3 });
+    expect(extras?.steps).toStrictEqual({ more: 1, shown: 5 });
+    expect(extras === null ? null : moreText(extras)).toBe(
+      "27 more pins · 1 more step"
+    );
+    const plain = rowParts(text(FULL), true).extras;
+
+    expect(plain === null ? null : moreText(plain)).toBeNull();
   });
 });
