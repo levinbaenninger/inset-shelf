@@ -1,0 +1,219 @@
+{
+  "activeSectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d401",
+  "items": [
+    {
+      "createdAt": "2026-11-12T08:14:03.512Z",
+      "done": false,
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d411",
+      "sectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d401",
+      "color": "orange",
+      "context": {
+        "app": "Safari",
+        "appLink": null,
+        "title": "Quote 2026-114 · Example Furniture",
+        "url": "https://example.com/quotes/2026-114"
+      },
+      "description": "Chairs are over budget and delivery is late.",
+      "due": "2026-11-28",
+      "steps": [
+        {
+          "done": true,
+          "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d421",
+          "text": "Ask whether the 21st works"
+        },
+        {
+          "done": false,
+          "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d422",
+          "text": "Get a second quote"
+        }
+      ],
+      "windows": [
+        {
+          "app": "Safari",
+          "appPath": "/Applications/Safari.app",
+          "capturedAt": "2026-11-12T08:14:05.000Z",
+          "description": "The total is over the cap",
+          "document": null,
+          "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d431",
+          "thumb": {
+            "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d501.png",
+            "heightPx": 720,
+            "pixelsPerDip": 2,
+            "widthPx": 1152
+          },
+          "title": "Quote 2026-114 · Example Furniture",
+          "url": "https://example.com/quotes/2026-114"
+        },
+        {
+          "app": "Numbers",
+          "appPath": "/Applications/Numbers.app",
+          "capturedAt": "2026-11-12T08:15:00.000Z",
+          "description": "",
+          "document": "/Users/someone/Documents/Budget.numbers",
+          "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d432",
+          "thumb": null,
+          "title": "Budget.numbers",
+          "url": null
+        }
+      ],
+      "html": "<p>The quote is <a href=\"https://example.com/quotes/2026-114\">here</a>.</p>",
+      "kind": "text",
+      "links": [
+        {
+          "text": "here",
+          "url": "https://example.com/quotes/2026-114"
+        }
+      ],
+      "text": "The quote is here.",
+      "via": "selection"
+    },
+    {
+      "createdAt": "2026-11-12T09:02:41.007Z",
+      "done": false,
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d412",
+      "sectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d401",
+      "color": null,
+      "context": {
+        "app": "T3 Code",
+        "appLink": "t3code://thread/8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d499",
+        "title": "Fix the upload test",
+        "url": null
+      },
+      "description": "",
+      "due": null,
+      "steps": [],
+      "windows": [],
+      "image": {
+        "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d502.png",
+        "heightPx": 1200,
+        "pixelsPerDip": 2,
+        "widthPx": 1920
+      },
+      "kind": "image",
+      "note": "Spacing and the error text",
+      "pins": [
+        {
+          "label": "Title too close to the field",
+          "x": 760,
+          "y": 380
+        },
+        {
+          "x": 1210,
+          "y": 900
+        }
+      ],
+      "scene": {
+        "base": {
+          "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d503.png",
+          "heightPx": 1200,
+          "pixelsPerDip": 2,
+          "widthPx": 1920
+        },
+        "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d504.json"
+      },
+      "source": "Built-in Retina Display",
+      "title": "Login screen: two things to fix",
+      "via": "screenshot"
+    },
+    {
+      "createdAt": "2026-11-13T10:20:00.000Z",
+      "done": true,
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d413",
+      "sectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d401",
+      "color": null,
+      "context": null,
+      "description": "",
+      "due": null,
+      "steps": [],
+      "windows": [],
+      "image": {
+        "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d505.png",
+        "heightPx": 480,
+        "pixelsPerDip": 1,
+        "widthPx": 640
+      },
+      "kind": "image",
+      "note": "",
+      "pins": [],
+      "source": null,
+      "title": null,
+      "via": "paste"
+    },
+    {
+      "createdAt": "2026-11-13T11:45:12.300Z",
+      "done": false,
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d414",
+      "sectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d402",
+      "color": "blue",
+      "context": null,
+      "description": "",
+      "due": null,
+      "steps": [],
+      "windows": [],
+      "image": {
+        "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d506.png",
+        "heightPx": 800,
+        "pixelsPerDip": 2,
+        "widthPx": 1200
+      },
+      "kind": "image",
+      "note": "",
+      "pins": [],
+      "scene": {
+        "base": null,
+        "file": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d507.json"
+      },
+      "source": null,
+      "title": null,
+      "via": "drawing"
+    },
+    {
+      "createdAt": "2026-11-14T07:30:00.000Z",
+      "done": false,
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d415",
+      "sectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d402",
+      "color": null,
+      "context": null,
+      "description": "Check the stair widths before ordering.",
+      "due": null,
+      "steps": [],
+      "windows": [],
+      "file": {
+        "bytes": 2480000,
+        "name": "floor-plan-level-3.pdf",
+        "stored": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d508.pdf"
+      },
+      "kind": "file",
+      "note": "From the landlord",
+      "title": "Floor plan, level 3"
+    },
+    {
+      "createdAt": "2026-11-14T07:31:00.000Z",
+      "done": true,
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d416",
+      "sectionId": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d402",
+      "color": null,
+      "context": null,
+      "description": "",
+      "due": null,
+      "steps": [],
+      "windows": [],
+      "html": null,
+      "kind": "text",
+      "links": [],
+      "text": "Call about the **budget cap**",
+      "via": "typed"
+    }
+  ],
+  "schemaVersion": 3,
+  "sections": [
+    {
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d401",
+      "name": "Office move"
+    },
+    {
+      "id": "8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d402",
+      "name": "Inbox"
+    }
+  ]
+}

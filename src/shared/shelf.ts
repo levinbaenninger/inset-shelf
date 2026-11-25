@@ -175,27 +175,12 @@ export const WindowRefSchema = z.object({
 
 export type WindowRef = z.output<typeof WindowRefSchema>;
 
-/** What every item can hold besides its content: all optional, all empty by default. */
-const MetaFields = {
+/** What every item could hold besides its content in version 3. */
+const MetaFieldsV3 = {
   description: z.string().max(DESCRIPTION_MAX),
   due: DueSchema.nullable(),
   steps: StepsSchema,
   windows: z.array(WindowRefSchema).max(WINDOWS_MAX),
-};
-
-export interface ItemMeta {
-  readonly description: string;
-  readonly due: string | null;
-  // Mutable like the schema's output, so an item can be built from it.
-  readonly steps: Step[];
-  readonly windows: WindowRef[];
-}
-
-export const NO_META: Readonly<ItemMeta> = {
-  description: "",
-  due: null,
-  steps: [],
-  windows: [],
 };
 
 const ItemBaseV1 = {
@@ -277,14 +262,21 @@ const ImageFieldsV2 = {
   via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
 };
 
-const ImageFields = {
+/** A picture with its pins and the marks kept beside it: an image item's, or an attached image's. */
+const PictureFields = {
   image: ImageSchema,
-  kind: z.literal("image"),
-  note: z.string().max(TEXT_MAX),
   /** Numbered pins, in image pixels; none by default. */
   pins: PinsSchema,
   /** Set by a save in Annotate or New Drawing; shelves from before it have none. */
   scene: DrawingSceneSchema.optional(),
+};
+
+export type Picture = z.output<z.ZodObject<typeof PictureFields>>;
+
+const ImageFields = {
+  ...PictureFields,
+  kind: z.literal("image"),
+  note: z.string().max(TEXT_MAX),
   /** The display an area or pin was captured on. */
   source: z.string().max(200).nullable(),
   /** Shown in place of the note as the item's main line when set. */
@@ -292,14 +284,85 @@ const ImageFields = {
   via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
 };
 
+export const ATTACHMENT_NAME_MAX = 255;
+
 export const StoredFileSchema = z.object({
   bytes: z.number().int().min(0),
   /** The name the file had, used again when it is dragged or copied out. */
-  name: z.string().min(1).max(255),
+  name: z.string().min(1).max(ATTACHMENT_NAME_MAX),
   stored: AttachmentFileSchema,
 });
 
 export type StoredFile = z.output<typeof StoredFileSchema>;
+
+export const ATTACHMENTS_MAX = 12;
+
+export const AttachmentIdSchema = z
+  .string()
+  .regex(LOWER_UUID)
+  .brand<"AttachmentId">();
+
+export type AttachmentId = z.output<typeof AttachmentIdSchema>;
+
+const AttachmentBase = { addedAt: z.iso.datetime(), id: AttachmentIdSchema };
+
+/** A picture added to an item after capture; a drawing is one whose marks have no picture under them. */
+export const AttachedImageSchema = z.object({
+  ...AttachmentBase,
+  ...PictureFields,
+  kind: z.literal("image"),
+  /** Shown in tooltips, used as the file name when dragged out and in plain-text copies. No extension. */
+  name: z.string().min(1).max(ATTACHMENT_NAME_MAX),
+});
+
+export type AttachedImage = z.output<typeof AttachedImageSchema>;
+
+export const AttachedFileSchema = z.object({
+  ...AttachmentBase,
+  file: StoredFileSchema,
+  kind: z.literal("file"),
+});
+
+export type AttachedFile = z.output<typeof AttachedFileSchema>;
+
+export const AttachmentSchema = z.discriminatedUnion("kind", [
+  AttachedImageSchema,
+  AttachedFileSchema,
+]);
+
+export type Attachment = z.output<typeof AttachmentSchema>;
+
+const uniqueIds = (list: readonly { readonly id: string }[]): boolean =>
+  new Set(list.map((entry) => entry.id)).size === list.length;
+
+export const AttachmentsSchema = z
+  .array(AttachmentSchema)
+  .max(ATTACHMENTS_MAX)
+  .refine(uniqueIds, "Attachment ids must differ.");
+
+/** What an attachment is called in tooltips, drags and plain-text copies. */
+export const attachmentName = (attachment: Attachment): string =>
+  attachment.kind === "file" ? attachment.file.name : attachment.name;
+
+/** What every item can hold besides its content: all optional, all empty by default. */
+const MetaFields = { ...MetaFieldsV3, attachments: AttachmentsSchema };
+
+export interface ItemMeta {
+  readonly description: string;
+  readonly due: string | null;
+  // Mutable like the schema's output, so an item can be built from it.
+  readonly steps: Step[];
+  readonly windows: WindowRef[];
+  readonly attachments: Attachment[];
+}
+
+export const NO_META: Readonly<ItemMeta> = {
+  attachments: [],
+  description: "",
+  due: null,
+  steps: [],
+  windows: [],
+};
 
 const FileFieldsV2 = {
   file: StoredFileSchema,
@@ -366,13 +429,39 @@ export const ShelfDocSchema = z
   .object({
     activeSectionId: SectionIdSchema,
     items: z.array(ItemSchema),
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
     sections: z.array(SectionSchema).min(1),
   })
   .refine(activeExists, "The active section must exist.")
   .refine(itemsBelong, "Every item must belong to a section.");
 
 export type ShelfDoc = z.output<typeof ShelfDocSchema>;
+
+/** The third format: everything but attachments. */
+const ShelfDocV3Schema = z
+  .object({
+    activeSectionId: SectionIdSchema,
+    items: z.array(
+      z.discriminatedUnion("kind", [
+        z.object({ ...ItemBase, ...MetaFieldsV3, ...TextFields }),
+        z.object({ ...ItemBase, ...MetaFieldsV3, ...ImageFields }),
+        z.object({
+          ...ItemBase,
+          ...MetaFieldsV3,
+          ...FileFieldsV2,
+          title: z.string().max(TITLE_MAX).nullable(),
+        }),
+      ])
+    ),
+    schemaVersion: z.literal(3),
+    sections: z.array(SectionSchema).min(1),
+  })
+  .refine(activeExists)
+  .refine(itemsBelong);
+
+type ShelfDocV3 = z.output<typeof ShelfDocV3Schema>;
+
+type ItemV3 = ShelfDocV3["items"][number];
 
 /** The second format: one pin per image, no titles or other metadata. */
 const ShelfDocV2Schema = z
@@ -426,30 +515,39 @@ const JsonTextSchema = z
     }
   });
 
+const NO_META_V3 = { description: "", due: null, steps: [], windows: [] };
+
 /** A version 2 item with empty metadata; an image's one pin becomes pin 1. */
-const upgradeItem = (item: ItemV2): ShelfItem => {
+const upgradeItemV2 = (item: ItemV2): ItemV3 => {
   if (item.kind === "image") {
     const { pin, ...rest } = item;
 
     return {
       ...rest,
-      ...NO_META,
+      ...NO_META_V3,
       pins: pin === null ? [] : [{ x: pin.x, y: pin.y }],
       title: null,
     };
   }
 
   if (item.kind === "file") {
-    return { ...item, ...NO_META, title: null };
+    return { ...item, ...NO_META_V3, title: null };
   }
 
-  return { ...item, ...NO_META };
+  return { ...item, ...NO_META_V3 };
 };
 
-const upgradeV2 = (doc: z.output<typeof ShelfDocV2Schema>): ShelfDoc => ({
+const upgradeV2 = (doc: z.output<typeof ShelfDocV2Schema>): ShelfDocV3 => ({
   ...doc,
-  items: doc.items.map(upgradeItem),
+  items: doc.items.map(upgradeItemV2),
   schemaVersion: 3,
+});
+
+/** Every version 3 item as it was, with no attachments. */
+const upgradeV3 = (doc: ShelfDocV3): ShelfDoc => ({
+  ...doc,
+  items: doc.items.map((item) => ({ ...item, attachments: [] })),
+  schemaVersion: 4,
 });
 
 /** Reads a stored shelf in any known format, upgrading older ones; null when it is neither. */
@@ -467,61 +565,75 @@ export const parseShelfDocument = (raw: string): ShelfDoc | null => {
     return current.data;
   }
 
+  const third = ShelfDocV3Schema.safeParse(data);
+
+  if (third.success) {
+    return upgradeV3(third.data);
+  }
+
   const second = ShelfDocV2Schema.safeParse(data);
 
   if (second.success) {
-    return upgradeV2(second.data);
+    return upgradeV3(upgradeV2(second.data));
   }
 
   const first = ShelfDocV1Schema.safeParse(data);
 
   return first.success
-    ? upgradeV2({
-        ...first.data,
-        items: first.data.items.map((item) => ({
-          ...item,
-          color: null,
-          context: null,
-        })),
-        schemaVersion: 2,
-      })
+    ? upgradeV3(
+        upgradeV2({
+          ...first.data,
+          items: first.data.items.map((item) => ({
+            ...item,
+            color: null,
+            context: null,
+          })),
+          schemaVersion: 2,
+        })
+      )
     : null;
+};
+
+/** A picture's file, then its marks' file and the picture under them, when kept. */
+const pictureFiles = ({ image, scene }: Picture): readonly string[] => {
+  if (scene === undefined) {
+    return [image.file];
+  }
+
+  return scene.base === null
+    ? [image.file, scene.file]
+    : [image.file, scene.file, scene.base.file];
 };
 
 const OWN_FILES: Readonly<
   Record<ShelfItem["kind"], (item: ShelfItem) => readonly string[]>
 > = {
   file: (item) => (item.kind === "file" ? [item.file.stored] : []),
-  image: (item) => {
-    if (item.kind !== "image") {
-      return [];
-    }
-
-    const { scene } = item;
-
-    if (scene === undefined) {
-      return [item.image.file];
-    }
-
-    return scene.base === null
-      ? [item.image.file, scene.file]
-      : [item.image.file, scene.file, scene.base.file];
-  },
+  image: (item) => (item.kind === "image" ? pictureFiles(item) : []),
   text: () => [],
 };
 
-/** Every stored file an item keeps next to the shelf: its image or file, and its windows' pictures. */
+const attachmentFiles = (attachment: Attachment): readonly string[] =>
+  attachment.kind === "file"
+    ? [attachment.file.stored]
+    : pictureFiles(attachment);
+
+/**
+ * Every stored file an item keeps next to the shelf: its image or file, its
+ * windows' pictures, and its attachments' pictures, marks and files.
+ */
 export const storedFilesOf = (item: ShelfItem): readonly string[] => [
   ...OWN_FILES[item.kind](item),
   ...item.windows.flatMap((window) =>
     window.thumb === null ? [] : [window.thumb.file]
   ),
+  ...item.attachments.flatMap(attachmentFiles),
 ];
 
 export const emptyShelf = (sectionId: SectionId): ShelfDoc => ({
   activeSectionId: sectionId,
   items: [],
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [{ id: sectionId, name: DEFAULT_SECTION_NAME }],
 });
 

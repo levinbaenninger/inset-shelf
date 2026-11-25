@@ -155,9 +155,10 @@ describe("migration to version 3", () => {
   it("turns one pin into pin 1, no pin into none, and keeps every field", () => {
     const doc = parseShelfDocument(JSON.stringify(secondFormat));
 
-    expect(doc?.schemaVersion).toBe(3);
+    expect(doc?.schemaVersion).toBe(4);
     expect(doc?.items).toMatchObject([
       {
+        attachments: [],
         color: "blue",
         description: "",
         due: null,
@@ -168,8 +169,13 @@ describe("migration to version 3", () => {
         title: null,
         windows: [],
       },
-      { done: true, pins: [] },
-      { file: { name: "notes.txt" }, note: "read later", title: null },
+      { attachments: [], done: true, pins: [] },
+      {
+        attachments: [],
+        file: { name: "notes.txt" },
+        note: "read later",
+        title: null,
+      },
     ]);
     expect(doc?.items[0]).not.toHaveProperty("pin");
     expect(ShelfDocSchema.safeParse(doc).success).toBeTruthy();

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 
+import v3 from "./fixtures/shelf-v3.json";
 import {
   applyOp,
   storedFilesOf,
@@ -10,6 +12,7 @@ import {
   itemTextWithLink,
   parseShelfDocument,
   emptyShelf,
+  ATTACHMENTS_MAX,
   ItemIdSchema,
   parseComposer,
   SectionIdSchema,
@@ -26,6 +29,7 @@ import type {
   ShelfOp,
   MainOp,
   Removed,
+  AttachedImageSchema,
 } from "./shelf";
 
 const uuid = (n: number) =>
@@ -42,6 +46,9 @@ const env = (): OpEnv => {
 };
 
 const INBOX = SectionIdSchema.parse(uuid(1));
+
+/** The ids in fixtures/shelf-v3.json. */
+const uuid8 = (n: number) => `8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d${n}`;
 
 interface Applied {
   readonly doc: ShelfDoc;
@@ -717,9 +724,10 @@ describe(parseShelfDocument, () => {
   it("upgrades the first format and keeps every item as it was", () => {
     const doc = parseShelfDocument(JSON.stringify(firstFormat));
 
-    expect(doc?.schemaVersion).toBe(3);
+    expect(doc?.schemaVersion).toBe(4);
     expect(doc?.items).toMatchObject([
       {
+        attachments: [],
         color: null,
         context: null,
         description: "",
@@ -730,6 +738,7 @@ describe(parseShelfDocument, () => {
         windows: [],
       },
       {
+        attachments: [],
         color: null,
         context: null,
         done: true,
@@ -746,7 +755,7 @@ describe(parseShelfDocument, () => {
 
     expect(parseShelfDocument(JSON.stringify(current))).toStrictEqual(current);
     expect(
-      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 4 }))
+      parseShelfDocument(JSON.stringify({ ...firstFormat, schemaVersion: 5 }))
     ).toBeNull();
     expect(parseShelfDocument("{ not a shelf")).toBeNull();
   });
@@ -765,6 +774,7 @@ describe(parseShelfDocument, () => {
       activeSectionId: uuid(1),
       items: [
         {
+          attachments: [],
           color: null,
           context: null,
           createdAt: "2026-10-22T17:40:00.000Z",
@@ -785,7 +795,7 @@ describe(parseShelfDocument, () => {
           ...fields,
         },
       ],
-      schemaVersion: 3,
+      schemaVersion: 4,
       sections: [{ id: uuid(1), name: "Inbox" }],
     });
 
@@ -989,5 +999,143 @@ describe(fitText, () => {
 
   it("cuts longer text to the limit, ending in an ellipsis", () => {
     expect(fitText("Quotes", 5)).toBe("Quot…");
+  });
+});
+
+const pictureAt = (n: number) => ({
+  file: `${uuid(n)}.png`,
+  heightPx: 600,
+  pixelsPerDip: 2,
+  widthPx: 960,
+});
+
+const attachedImage = (
+  n: number,
+  fields: Partial<z.input<typeof AttachedImageSchema>> = {}
+) => ({
+  addedAt: "2026-11-20T10:00:00.000Z",
+  id: uuid(n),
+  image: pictureAt(n + 1),
+  kind: "image",
+  name: "Screenshot 2026-11-20 at 10.00.00",
+  pins: [],
+  ...fields,
+});
+
+const attachedFile = (n: number, stored = `${uuid(n + 1)}.pdf`) => ({
+  addedAt: "2026-11-20T10:01:00.000Z",
+  file: { bytes: 2048, name: "Quote.pdf", stored },
+  id: uuid(n),
+  kind: "file",
+});
+
+const shelfWithAttachments = (attachments: readonly unknown[]) =>
+  JSON.stringify({
+    activeSectionId: uuid(1),
+    items: [
+      {
+        attachments,
+        color: null,
+        context: null,
+        createdAt: "2026-11-20T09:00:00.000Z",
+        description: "",
+        done: false,
+        due: null,
+        html: null,
+        id: uuid(20),
+        kind: "text",
+        links: [],
+        sectionId: uuid(1),
+        steps: [],
+        text: "Chairs",
+        via: "typed",
+        windows: [],
+      },
+    ],
+    schemaVersion: 4,
+    sections: [{ id: uuid(1), name: "Inbox" }],
+  });
+
+describe("attachments on an item (format 4)", () => {
+  /** A shelf as a version 3 build wrote it: every field spelled out, pretty-printed. */
+  const v3Text = `${JSON.stringify(v3, null, 2)}\n`;
+
+  it("reads a version 3 shelf as version 4, every item as it was with an empty attachment list", () => {
+    const doc = parseShelfDocument(v3Text);
+
+    expect(doc).toStrictEqual({
+      ...v3,
+      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      schemaVersion: 4,
+    });
+    expect(doc === null ? [] : doc.items.map(storedFilesOf)).toStrictEqual([
+      [`${uuid8(501)}.png`],
+      [`${uuid8(502)}.png`, `${uuid8(504)}.json`, `${uuid8(503)}.png`],
+      [`${uuid8(505)}.png`],
+      [`${uuid8(506)}.png`, `${uuid8(507)}.json`],
+      [`${uuid8(508)}.pdf`],
+      [],
+    ]);
+  });
+
+  it("reads what it saves back the same", () => {
+    const doc = parseShelfDocument(v3Text);
+
+    expect(parseShelfDocument(JSON.stringify(doc, null, 2))).toStrictEqual(doc);
+  });
+
+  it("keeps pictures, drawings and files attached to an item, and names every file they keep", () => {
+    const text = shelfWithAttachments([
+      attachedImage(30, {
+        pins: [{ label: "Too close", x: 10, y: 20 }],
+        scene: { base: pictureAt(32), file: `${uuid(33)}.json` },
+      }),
+      attachedImage(40, {
+        name: "Drawing",
+        scene: { base: null, file: `${uuid(42)}.json` },
+      }),
+      attachedFile(50),
+    ]);
+
+    const doc = parseShelfDocument(text);
+    const [item] = doc?.items ?? [];
+
+    expect(doc).toStrictEqual(JSON.parse(text));
+    expect(item === undefined ? [] : storedFilesOf(item)).toStrictEqual([
+      `${uuid(31)}.png`,
+      `${uuid(33)}.json`,
+      `${uuid(32)}.png`,
+      `${uuid(41)}.png`,
+      `${uuid(42)}.json`,
+      `${uuid(51)}.pdf`,
+    ]);
+  });
+
+  it(`holds at most ${ATTACHMENTS_MAX}, each id once, and only files the app named`, () => {
+    const full = Array.from({ length: ATTACHMENTS_MAX }, (_, at) =>
+      attachedFile(30 + at * 2)
+    );
+
+    expect(parseShelfDocument(shelfWithAttachments(full))).not.toBeNull();
+    expect(
+      parseShelfDocument(shelfWithAttachments([...full, attachedFile(80)]))
+    ).toBeNull();
+    expect(
+      parseShelfDocument(
+        shelfWithAttachments([attachedFile(30), attachedFile(30)])
+      )
+    ).toBeNull();
+    expect(
+      parseShelfDocument(
+        shelfWithAttachments([attachedFile(30, "../shelf.json")])
+      )
+    ).toBeNull();
+    expect(
+      parseShelfDocument(
+        shelfWithAttachments([
+          attachedImage(30, { image: { ...pictureAt(31), file: "a.png" } }),
+        ])
+      )
+    ).toBeNull();
   });
 });

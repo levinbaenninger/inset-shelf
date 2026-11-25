@@ -226,7 +226,13 @@ const OFFICE = uuid(1);
 const INBOX = uuid(2);
 const LATER = uuid(3);
 
-const META = { description: "", due: null, steps: [], windows: [] };
+const META = {
+  attachments: [],
+  description: "",
+  due: null,
+  steps: [],
+  windows: [],
+};
 
 const step = (n: number, text: string, done = false) => ({
   done,
@@ -363,7 +369,7 @@ const ITEMS = [
 const DOC = {
   activeSectionId: OFFICE,
   items: ITEMS,
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [
     { id: OFFICE, name: "Office move" },
     { id: INBOX, name: "Inbox" },
@@ -395,7 +401,7 @@ const shelfView = (doc: ShelfFixture = DOC) => ({
 const EMPTY_DOC = {
   activeSectionId: INBOX,
   items: [],
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [{ id: INBOX, name: "Inbox" }],
 };
 
@@ -712,7 +718,7 @@ const EXAMPLE_DOC = {
       }
     ),
   ],
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [{ id: INBOX, name: "Inbox" }],
 };
 
@@ -3252,7 +3258,7 @@ const STRESS_ITEMS = [
 const STRESS_DOC = {
   activeSectionId: STRESS_A,
   items: STRESS_ITEMS,
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [
     { id: STRESS_A, name: SECTION_PHRASE },
     { id: STRESS_B, name: SECTION_WORD },

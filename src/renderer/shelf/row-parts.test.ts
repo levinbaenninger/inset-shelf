@@ -8,6 +8,7 @@ const uuid = (n: number): string =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 const BASE = {
+  attachments: [],
   color: null,
   context: null,
   createdAt: "2026-11-05T10:00:00.000Z",
