@@ -29,12 +29,13 @@ export const noteFieldTakesKeyboard = (
   arrival: Arrival,
   place: KeyboardPlace
 ): boolean => {
-  if (place.editing) {
+  // An edit, details or a menu is under way wherever the keyboard is, the page itself included.
+  if (place.editing || place.inDetails || place.menuOpen) {
     return false;
   }
 
   if (place.on === "control") {
-    return arrival === "shown" && !place.inDetails && !place.menuOpen;
+    return arrival === "shown";
   }
 
   // A field being typed in, or a search with words, keeps the keyboard.

@@ -62,4 +62,18 @@ describe(noteFieldTakesKeyboard, () => {
     expect(focusFirst).toBeTruthy();
     expect(shownFirst).toBeTruthy();
   });
+
+  it("leaves an open menu or details alone even when the keyboard is on the page itself", () => {
+    for (const arrival of ["shown", "refocused"] as const) {
+      expect(
+        noteFieldTakesKeyboard(arrival, place({ menuOpen: true }))
+      ).toBeFalsy();
+      expect(
+        noteFieldTakesKeyboard(
+          arrival,
+          place({ inDetails: true, on: "emptySearch" })
+        )
+      ).toBeFalsy();
+    }
+  });
 });
