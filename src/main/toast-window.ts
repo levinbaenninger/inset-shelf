@@ -140,7 +140,8 @@ export const createToastWindow = (options: {
     listener(current);
     window.setBounds(bounds);
 
-    if (!window.isVisible()) {
+    // As before for notices; a showing why field is left alone, so it keeps the keyboard it holds or is taking.
+    if (view.kind !== "why" || !window.isVisible()) {
       window.showInactive();
     }
   };

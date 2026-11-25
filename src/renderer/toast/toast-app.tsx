@@ -10,11 +10,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { NoticeCorner, ToastView } from "@shared/contracts";
 import { WHY_MAX } from "@shared/pill";
 import type { WhyPhase } from "@shared/pill";
+import { shortcutLabels } from "@shared/shortcut";
 import { useEffect, useRef } from "react";
 
 import { NOTICE_CLASS, NOTICE_ICON_CLASS } from "@/components/ui/notice";
 import { cn } from "@/lib/utils";
 import { toastBridge } from "@/shared/bridge";
+import { isMac } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";
 
 const api = toastBridge();
@@ -106,7 +108,7 @@ const CaptureNotice = ({ view }: { readonly view: NoticeView }) => (
       onClick={() => {
         api.why(view.seq);
       }}
-      title="Say why this matters (⇧⇧ again)"
+      title={`Say why this matters (${shortcutLabels(isMac).doubleShift} again)`}
       type="button"
     >
       Why
