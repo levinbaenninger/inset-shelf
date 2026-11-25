@@ -4038,6 +4038,7 @@ const STRESS_SCENES: readonly Scene[] = (
       },
       check: openShareCheck(710, true, false),
       data: { view: stressView() },
+      height: 620,
       name: "stress-open-text",
       width: NARROWEST,
     },
@@ -4145,7 +4146,10 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 711);
       },
+      // 30 pins, 20 steps, 10 windows, a long title and caption: taller than the list at its floors, it keeps its Details line in view at the list's edge.
+      check: openShareCheck(711, false, false),
       data: { view: stressView(CROWDED_DOC) },
+      height: 620,
       name: "stress-open-crowded",
       width: NARROWEST,
     },
@@ -4518,9 +4522,10 @@ const STRESS_SCENES: readonly Scene[] = (
           return `opening the shelf again left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
         }
 
-        return await openShareCheck(710, false, false)(page);
+        return await openShareCheck(710, true, false)(page);
       },
       data: { view: stressView() },
+      height: 620,
       name: "stress-open-focus",
       width: NARROWEST,
     },
