@@ -1,0 +1,20 @@
+---
+title: Updates and versions
+description: The app updates itself from GitHub releases.
+---
+
+Every build of Inset Shelf is a versioned release on [GitHub](https://github.com/levinbaenninger/inset-shelf/releases), such as `v0.1.15`. The newest one is marked **Latest**, and the download links on this site always fetch it.
+
+## How the app updates
+
+The app checks the latest release when it starts and every four hours, and downloads a newer build in the background. When the download is ready, it says so once, and the menu bar icon's menu and the **Inset Shelf** menu offer **Restart to Update to v…**. If you don't restart, the update installs when you quit.
+
+The menu bar icon's menu always shows the running version and **Check for Updates…**.
+
+## On macOS
+
+Every build is signed with the same certificate, so an update keeps your permissions. A build that shows version 0.1.0 can't accept an update: install the current build by hand once, as in [Install](/docs/install), and grant the permissions again. After that it updates itself.
+
+## On Windows
+
+Only the installer (`.exe`) updates itself. The portable zip copies can't; to update one, download the new zip.

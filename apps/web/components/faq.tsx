@@ -4,7 +4,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { REPO_URL } from "@/lib/site";
 
 import { AppleGlyph, WindowsGlyph } from "./glyphs";
 import { Section } from "./section";
@@ -12,7 +11,7 @@ import { Section } from "./section";
 const QUESTIONS = [
   {
     q: "Does it run on Windows?",
-    a: "Yes, on Windows 11. The download page has the Windows installer beside the Mac builds for Apple silicon and Intel.",
+    a: "Yes, on Windows 11. Download the Windows installer here, beside the Mac builds for Apple silicon and Intel.",
   },
   {
     q: "Why is the download blocked at first?",
@@ -28,7 +27,7 @@ const QUESTIONS = [
   },
   {
     q: "Is Inset Shelf finished?",
-    a: "No. It is the third Inset prototype, built to test a running list beside your work.",
+    a: "No. It is a free test build that changes as people try it. If something breaks, report it on GitHub.",
   },
 ];
 
@@ -42,10 +41,10 @@ export const Faq = () => (
         <p className="text-lead text-muted-foreground mt-5 max-w-[36ch]">
           Everything else, from permissions to keys, is in the{" "}
           <a
-            href={`${REPO_URL}#readme`}
+            href="/docs"
             className="text-brand underline-offset-4 hover:underline"
           >
-            README
+            docs
           </a>
           .
         </p>

@@ -2,8 +2,6 @@
 
 import type { ReactNode } from "react";
 
-import { REPO_URL } from "@/lib/site";
-
 import { ShelfPanel, ShelfRow, TrafficLights } from "./app-ui";
 import type { ShelfItem } from "./app-ui";
 import { LogoLoop } from "./react-bits/LogoLoop";
@@ -226,7 +224,7 @@ export const Sources = () => (
     <SectionIntro
       id="sources-h"
       eyebrow="Source lines"
-      href={`${REPO_URL}#use-it`}
+      href="/docs/sources"
       title="Every item knows where it came from."
       lead="The line under each item names its app, window and page. Pages from these sites get their own name, and the address comes from your browser."
     />

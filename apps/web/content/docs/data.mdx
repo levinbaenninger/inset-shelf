@@ -1,0 +1,19 @@
+---
+title: Where your data lives
+description: Everything stays on your computer, in one folder.
+---
+
+The shelf is stored in one file, `shelf.json`, with images and files in an `attachments` folder and the settings in `settings.json` next to it:
+
+- macOS: `~/Library/Application Support/Inset Shelf`
+- Windows: `%APPDATA%\Inset Shelf`
+
+The app has no account and sends your items nowhere. It goes online to check for [updates](/docs/updates); see [Privacy](/privacy) for the details.
+
+## Saving
+
+Edits save as you type. The file is written to a temporary file first and then renamed into place. If the shelf can't be saved, a **Not saved to disk** notice says why in plain words, and each item that isn't on disk says **Not saved**, with **Retry** and **Discard changes**.
+
+## Deleting and undo
+
+Deleting an item doesn't ask: a notice with **Undo** appears, and `⌘Z` brings back the last deleted item.

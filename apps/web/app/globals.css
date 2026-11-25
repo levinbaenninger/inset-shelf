@@ -1,4 +1,7 @@
 @import "@inset/ui/globals.css";
+/* The docs' layout, on the page's own shadcn colours. */
+@import "fumadocs-ui/css/shadcn.css";
+@import "fumadocs-ui/css/preset.css";
 
 @theme inline {
   --font-sans: var(--font-geist-sans), system-ui, sans-serif;
@@ -154,4 +157,10 @@
   40% {
     transform: translateY(-5px) scale(1.02);
   }
+}
+
+/* The docs take Inset blue for links, the current page and the table of contents. */
+:root {
+  --color-fd-primary: var(--brand);
+  --color-fd-primary-foreground: #ffffff;
 }

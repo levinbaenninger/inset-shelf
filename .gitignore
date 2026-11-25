@@ -13,3 +13,6 @@ coverage/
 .wrangler/
 next-env.d.ts
 *.tsbuildinfo
+
+# Fumadocs MDX's generated files
+.source/

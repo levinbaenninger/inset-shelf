@@ -1,3 +1,4 @@
+import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 
 // A static export: `next build` writes the site to out/, which Cloudflare serves as static assets.
@@ -8,4 +9,4 @@ const config: NextConfig = {
   transpilePackages: ["@inset/ui"],
 };
 
-export default config;
+export default createMDX()(config);
