@@ -44,6 +44,8 @@ import { HintLayer } from "@/tutorial/hint-layer";
 import { Spotlight } from "@/tutorial/spotlight";
 import { useTutorial } from "@/tutorial/use-tutorial";
 
+import { noteFieldTakesKeyboard } from "./arrival";
+import type { Arrival, KeyboardPlace } from "./arrival";
 import { Banners, NotSavedBanner } from "./banners";
 import { Composer } from "./composer";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -1570,48 +1572,54 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     []
   );
 
-  // Set while the shelf is hidden, so the next focus knows it is a fresh opening, not a window closing over it.
-  const wasHidden = useRef(false);
-
-  // Coming forward, the shelf is ready for a note, unless something else is
-  // under way: a note or item being edited, details, or a search with words
-  // in it. Opened again after it was hidden, an item that kept the keyboard
-  // lets go of it too; a window closing over the open shelf (a drawing, the
-  // picker) leaves it where it was.
-  const onWindowFocus = useEffectEvent(() => {
-    const reopened = wasHidden.current;
+  // Coming forward, the shelf is ready for a note unless something else is
+  // under way (src/renderer/shelf/arrival.ts). Main says when it showed the
+  // shelf; a focus without that is a window closing over the open shelf.
+  const onArrival = useEffectEvent((arrival: Arrival) => {
     const active = document.activeElement;
 
-    wasHidden.current = false;
+    const on = (): KeyboardPlace["on"] => {
+      if (active === null || active === document.body) {
+        return "nothing";
+      }
 
-    const idle =
-      active === null ||
-      active === document.body ||
-      (active === searchRef.current && query === "") ||
-      (reopened && !inDetails && openMenu === null && !isTextField(active));
+      if (active === searchRef.current) {
+        return query === "" ? "emptySearch" : "search";
+      }
 
-    if (idle && editingId === null) {
+      return isTextField(active) ? "text" : "control";
+    };
+
+    if (
+      noteFieldTakesKeyboard(arrival, {
+        editing: editingId !== null,
+        inDetails,
+        menuOpen: openMenu !== null,
+        on: on(),
+      })
+    ) {
       composerRef.current?.focus();
     }
   });
 
   useEffect(() => {
-    const onVisibility = (): void => {
-      if (document.visibilityState === "hidden") {
-        wasHidden.current = true;
-      }
+    const onFocus = (): void => {
+      onArrival("refocused");
     };
 
-    window.addEventListener("focus", onWindowFocus);
-    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
 
     if (document.hasFocus()) {
-      onWindowFocus();
+      onFocus();
     }
 
+    const stopShown = api.on("shown", () => {
+      onArrival("shown");
+    });
+
     return () => {
-      window.removeEventListener("focus", onWindowFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      stopShown();
     };
   }, []);
 

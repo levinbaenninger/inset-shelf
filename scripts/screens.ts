@@ -3308,26 +3308,13 @@ const CROWDED_DOC = {
 const composerField = (page: Page) =>
   page.getByRole("textbox", { name: /^New note in/u });
 
-/** As Electron does when the shelf is hidden and shown again: the page goes hidden, then visible, then the window takes focus. */
+/** As main does when the shelf is hidden and shown again: the window loses focus, takes it back, and main says it showed the shelf. */
 const hideAndShow = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
-    let state = "visible";
-
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      get: () => state,
-    });
-    Object.defineProperty(document, "hidden", {
-      configurable: true,
-      get: () => state === "hidden",
-    });
     window.dispatchEvent(new Event("blur"));
-    state = "hidden";
-    document.dispatchEvent(new Event("visibilitychange"));
-    state = "visible";
-    document.dispatchEvent(new Event("visibilitychange"));
     window.dispatchEvent(new Event("focus"));
   });
+  await page.evaluate('globalThis.__emit("shown", null)');
   await page.waitForTimeout(150);
 };
 

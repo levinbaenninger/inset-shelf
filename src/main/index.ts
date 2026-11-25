@@ -2324,6 +2324,7 @@ const start = async (): Promise<void> => {
     toastServer.emit("view", view);
   });
   shelf.onShown((bounds) => {
+    shelfServer.emit("shown", null);
     toast.hide();
     e2eLog("shelfShown", { bounds });
     refreshTray();
