@@ -617,7 +617,7 @@ const WindowDescription = ({
       className={cn(
         line,
         // Focus tints the words as hover does; a ring would read as the field again.
-        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 self-start text-left break-words outline-none"
+        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 max-w-full self-start text-left break-words outline-none"
       )}
       onClick={edit}
       ref={shown}
@@ -668,8 +668,16 @@ const WindowRow = ({
           <WindowThumb className="h-9 w-14" window={window} />
         </button>
         <div className="flex min-w-0 flex-1 flex-col">
-          <p className="truncate text-sm leading-tight font-medium">{name}</p>
-          <p className="text-muted-foreground truncate text-xs">
+          <p
+            className="truncate text-sm leading-tight font-medium"
+            title={name}
+          >
+            {name}
+          </p>
+          <p
+            className="text-muted-foreground truncate text-xs"
+            title={windowPlace(window)}
+          >
             {windowPlace(window)}
           </p>
         </div>
@@ -813,7 +821,9 @@ const FileLine = ({ item }: { readonly item: FileItem }) => (
       icon={File01Icon}
       size={16}
     />
-    <span className="truncate">{item.file.name}</span>
+    <span className="truncate" title={item.file.name}>
+      {item.file.name}
+    </span>
   </p>
 );
 
