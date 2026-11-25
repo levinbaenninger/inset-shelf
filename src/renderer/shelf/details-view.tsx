@@ -295,7 +295,12 @@ const AutoText = ({
     value: text,
   };
 
-  return multiline ? <Textarea {...props} rows={rows} /> : <Input {...props} />;
+  // Read as text until typed in: no border, a quiet tint on hover and focus (src/renderer/components/ui/input.tsx).
+  return multiline ? (
+    <Textarea {...props} rows={rows} variant="quiet" />
+  ) : (
+    <Input {...props} variant="quiet" />
+  );
 };
 
 /**
