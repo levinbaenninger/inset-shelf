@@ -95,14 +95,14 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
       >
         <img
           alt="New screenshot"
-          className="h-full w-full object-cover transition duration-200 group-hover:blur-xs"
+          className="h-full w-full object-cover transition duration-200 group-hover:blur-xs group-has-[:focus-visible]:blur-xs"
           draggable={false}
           src={view.imageUrl}
         />
       </button>
-      {/* The actions show while the pointer is on the card; between them the picture still drags. */}
-      <div className="pointer-events-none absolute inset-0 bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
-      <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 [&_button]:pointer-events-auto">
+      {/* The actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
+      <div className="pointer-events-none absolute inset-0 bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100" />
+      <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 [&_button]:pointer-events-auto">
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
           <Button
             onClick={() => {
