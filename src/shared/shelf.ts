@@ -1781,6 +1781,15 @@ export const groupItems = (
 };
 
 /** The words an item stands for when it is copied as text. */
+/** What kind of picture an image item is, by how it came. */
+export const PICTURE_KIND: Readonly<Record<ImageItem["via"], string>> = {
+  area: "Screen area",
+  drawing: "Drawing",
+  paste: "Pasted image",
+  pin: "Pinned spot",
+  screenshot: "Screenshot",
+};
+
 export const itemText = (item: ShelfItem): string => {
   if (item.kind === "text") {
     return item.text;

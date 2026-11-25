@@ -3,7 +3,7 @@ import type {
   ScreenshotView,
   ShotSaveTo,
 } from "@shared/contracts";
-import { ATTACHMENTS_MAX, itemText } from "@shared/shelf";
+import { ATTACHMENTS_MAX, PICTURE_KIND } from "@shared/shelf";
 import type { AttachmentId, ItemId, ShelfItem } from "@shared/shelf";
 
 import { reportSaveError } from "./save-error";
@@ -85,10 +85,39 @@ type Placed =
       readonly retry?: false;
     };
 
+const twoDigits = (value: number): string => String(value).padStart(2, "0");
+
+/**
+ * What Add to “…” calls an item, so the user knows which one before the
+ * click: a text item's words; a picture's or file's title or note; else a
+ * file's name, or a picture's kind and the time it came ("Screenshot 14:02").
+ */
+export const cardLabel = (item: ShelfItem): string => {
+  if (item.kind === "text") {
+    return item.text;
+  }
+
+  const own = [item.title ?? "", item.note].find((each) => each.trim() !== "");
+
+  if (own !== undefined) {
+    return own;
+  }
+
+  if (item.kind === "file") {
+    return item.file.name;
+  }
+
+  const at = new Date(item.createdAt);
+
+  return `${PICTURE_KIND[item.via]} ${twoDigits(at.getHours())}:${twoDigits(at.getMinutes())}`;
+};
+
 const excerpt = (text: string): string => {
   const line = text.replaceAll(/\s+/gu, " ").trim();
 
-  return line.length > CARD_LABEL ? `${line.slice(0, CARD_LABEL - 1)}…` : line;
+  return line.length > CARD_LABEL
+    ? `${line.slice(0, CARD_LABEL - 1).trimEnd()}…`
+    : line;
 };
 
 /**
@@ -145,7 +174,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     return item === undefined || cardItem === null
       ? null
-      : { id: item.id, label: excerpt(itemText(item)) };
+      : { id: item.id, label: excerpt(cardLabel(item)) };
   };
 
   /** The card names the item that counts now, without moving it or keeping it longer. */

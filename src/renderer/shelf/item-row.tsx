@@ -18,7 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
-import { itemText } from "@shared/shelf";
+import { itemText, PICTURE_KIND } from "@shared/shelf";
 import type {
   FileItem,
   ImageItem,
@@ -478,17 +478,9 @@ const rowName = (item: ShelfItem): string =>
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
 
-const KIND_LABEL = {
-  area: "Screen area",
-  drawing: "Drawing",
-  paste: "Pasted image",
-  pin: "Pinned spot",
-  screenshot: "Screenshot",
-} as const;
-
 /** An image's main line: its title, else its note, else what kind of image it is. */
 const imageCaption = (item: ImageItem): string =>
-  item.title ?? (item.note === "" ? KIND_LABEL[item.via] : item.note);
+  item.title ?? (item.note === "" ? PICTURE_KIND[item.via] : item.note);
 
 const metaText = (item: ShelfItem): string => {
   const when = whenText(item.createdAt);
@@ -503,7 +495,7 @@ const metaText = (item: ShelfItem): string => {
 
   const where = item.source === null ? "" : ` · ${item.source}`;
 
-  return `${when} · ${KIND_LABEL[item.via]}${where}`;
+  return `${when} · ${PICTURE_KIND[item.via]}${where}`;
 };
 
 /**
@@ -705,7 +697,7 @@ const ImageBody = ({
           {/* A clamp has no effect on a button itself, only on a box inside it. */}
           {item.title === null ? (
             <span className="line-clamp-2 min-w-0">
-              {item.note === "" ? KIND_LABEL[item.via] : item.note}
+              {item.note === "" ? PICTURE_KIND[item.via] : item.note}
             </span>
           ) : (
             <span className="flex min-w-0 flex-col">

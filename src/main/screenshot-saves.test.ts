@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import { createCardClock } from "./card-clock";
 import {
   CARD_RETARGETED,
+  cardLabel,
   createShotSaves,
   ITEM_GONE,
   RECENT_ITEM_MS,
@@ -479,6 +480,44 @@ describe("Add to “…” on the screenshot card", () => {
       label: "Book the lift",
     });
     expect(card.view()?.save).toMatchObject({ state: "failed", to: null });
+  });
+});
+
+/** A screenshot item made at 13:02 UTC with this note and title. */
+const picture = (note: string, title: string | null = null) => ({
+  item: {
+    attachments: [],
+    color: null,
+    context: null,
+    createdAt: "2026-11-25T13:02:00.000Z",
+    description: "",
+    done: false,
+    due: null,
+    id: ItemIdSchema.parse(uuid(40)),
+    image: { file: "a.png", heightPx: 10, pixelsPerDip: 1, widthPx: 10 },
+    kind: "image" as const,
+    links: [],
+    note,
+    pins: [],
+    sectionId: SectionIdSchema.parse(uuid(1)),
+    source: null,
+    steps: [],
+    title,
+    via: "screenshot" as const,
+    windows: [],
+  },
+});
+
+describe(cardLabel, () => {
+  it("names a picture by its title, else its note, else its kind and time, never a bare Image", () => {
+    const at = new Date("2026-11-25T13:02:00.000Z");
+    const time = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+
+    expect(
+      [picture("", "Login error"), picture("the red banner"), picture("")].map(
+        ({ item }) => cardLabel(item)
+      )
+    ).toStrictEqual(["Login error", "the red banner", `Screenshot ${time}`]);
   });
 });
 
