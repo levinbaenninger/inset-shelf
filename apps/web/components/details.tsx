@@ -8,7 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { REPO_URL } from "@/lib/site";
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 import { CheckCircle, Icon, MenuCard, MenuItem, MenuSeparator } from "./app-ui";
 import { Section, SectionIntro, Tile } from "./section";
@@ -38,7 +38,7 @@ function Card({ className, children }: { className?: string; children: React.Rea
   return (
     <div
       className={cn(
-        "app-ui absolute top-8 left-1/2 w-[300px] -translate-x-1/2 rounded-xl bg-white p-3 shadow-card sm:top-10 sm:w-[320px]",
+        "app-ui light absolute top-8 left-1/2 w-[300px] -translate-x-1/2 rounded-xl bg-white p-3 shadow-card sm:top-10 sm:w-[320px]",
         className,
       )}
     >

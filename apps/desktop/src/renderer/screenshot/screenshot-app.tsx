@@ -5,17 +5,17 @@ import {
   PinIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type { ScreenshotView } from "@shared/contracts";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { screenshotBridge } from "@/shared/bridge";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { coach } from "@/tutorial/anchors";

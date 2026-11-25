@@ -1,5 +1,6 @@
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@inset/ui/lib/utils";
 import { parseComposer, TEXT_MAX } from "@shared/shelf";
 import { useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
@@ -9,7 +10,6 @@ import {
   InputGroupAddon,
   InputGroupButton,
 } from "@/components/ui/input-group";
-import { cn } from "@/lib/utils";
 import { coach } from "@/tutorial/anchors";
 
 import { MarkdownField } from "./markdown-field";

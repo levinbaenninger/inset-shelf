@@ -4,10 +4,10 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@inset/ui/lib/utils";
 import type { NoticeCorner, ToastView } from "@shared/contracts";
 
 import { NOTICE_CLASS, NOTICE_ICON_CLASS } from "@/components/ui/notice";
-import { cn } from "@/lib/utils";
 import { toastBridge } from "@/shared/bridge";
 import { usePushedView } from "@/shared/use-pushed-view";
 

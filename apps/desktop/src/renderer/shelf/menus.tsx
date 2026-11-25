@@ -25,6 +25,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@inset/ui/lib/utils";
 import { COLOR_HEX } from "@shared/colors";
 import {
   COLOR_NAMES,
@@ -55,7 +56,6 @@ import {
   DropdownMenuSwatchItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 import { isMac } from "@/shared/platform";
 
 type ColorsEntry = Extract<MenuEntry, { readonly kind: "colors" }>;

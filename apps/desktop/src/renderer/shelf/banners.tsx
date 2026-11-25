@@ -1,8 +1,7 @@
 import { Alert02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
 import type { NotSavedItem, ShelfStatus } from "@shared/contracts";
-
-import { Button } from "@/components/ui/button";
 
 export interface BannersProps {
   readonly status: ShelfStatus;

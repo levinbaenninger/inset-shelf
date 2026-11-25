@@ -1,3 +1,5 @@
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type {
   HandOffChoice,
   OnboardingStep,
@@ -7,8 +9,6 @@ import type {
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { isMac } from "@/shared/platform";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
 

@@ -4,13 +4,14 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type { PickerView, WindowCandidate } from "@shared/contracts";
 import { keyText } from "@shared/shortcut";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyContent,
@@ -20,7 +21,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Kbd } from "@/components/ui/kbd";
-import { cn } from "@/lib/utils";
 import { pickerBridge } from "@/shared/bridge";
 import { useLocalKeys } from "@/shared/keys";
 import { isMac } from "@/shared/platform";

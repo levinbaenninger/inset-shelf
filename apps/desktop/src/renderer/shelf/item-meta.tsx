@@ -6,6 +6,7 @@ import {
   Location01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@inset/ui/lib/utils";
 import {
   dateText,
   DUE_CHOICE_LABEL,
@@ -47,7 +48,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 

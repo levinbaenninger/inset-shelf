@@ -2,7 +2,7 @@ import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 export function Section({ className, ...props }: ComponentProps<"section">) {
   return <section className={cn("gutter py-20 md:py-28", className)} {...props} />;

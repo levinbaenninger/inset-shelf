@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 // The Shelf mark, the app's icon (scripts/generate-icons.ts), beside the name.
 export function Logo({ className }: { className?: string }) {

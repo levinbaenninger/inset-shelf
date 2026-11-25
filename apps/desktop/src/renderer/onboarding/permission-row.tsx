@@ -1,13 +1,12 @@
 import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type {
   DragTileView,
   PermissionRowState,
   PermissionRowView,
 } from "@shared/onboarding";
-
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 /** The row's one control: Allow, Waiting… (pulsing), Allowed (green), or Reopen to finish. */
 export const PermissionControl = ({

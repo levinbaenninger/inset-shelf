@@ -1,3 +1,4 @@
+import { Button } from "@inset/ui/components/button";
 import { quitTitle } from "@shared/contracts";
 import type { QuitAnswer, QuitPrompt } from "@shared/contracts";
 import { useRef, useState } from "react";
@@ -10,7 +11,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 
 /**
  * A quit held because the disk doesn't hold every change. Return retries

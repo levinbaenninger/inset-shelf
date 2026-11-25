@@ -58,7 +58,7 @@ const SECTIONS: { name: string; current?: boolean; items: ShelfItem[] }[] = [
 
 function BrowserWindow() {
   return (
-    <div className="app-ui absolute top-0 left-0 h-[640px] w-[900px] overflow-hidden rounded-xl bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.2),0_30px_70px_-20px_rgb(0_40_80/0.3),0_10px_24px_-12px_rgb(0_0_0/0.12)]">
+    <div className="app-ui light absolute top-0 left-0 h-[640px] w-[900px] overflow-hidden rounded-xl bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.2),0_30px_70px_-20px_rgb(0_40_80/0.3),0_10px_24px_-12px_rgb(0_0_0/0.12)]">
       <div className="flex h-[52px] items-center gap-4 border-b border-black/8 bg-[#f6f6f6] px-4 text-[#7b7b80]">
         <TrafficLights />
         <Icon icon={SidebarLeftIcon} size={17} className="ml-2" />

@@ -4,7 +4,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 import { SITE_URL } from "@/lib/site";
 
 import "./globals.css";

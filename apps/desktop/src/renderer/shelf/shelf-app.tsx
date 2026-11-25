@@ -1,5 +1,7 @@
 import { Cancel01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type {
   ActionResult,
   DetailField,
@@ -25,7 +27,6 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ComponentProps, PointerEvent } from "react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import {
   Tooltip,
@@ -33,7 +34,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { onMenusOpen } from "@/lib/menu-keys";
-import { cn } from "@/lib/utils";
 import { filePath, shelfBridge } from "@/shared/bridge";
 import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";

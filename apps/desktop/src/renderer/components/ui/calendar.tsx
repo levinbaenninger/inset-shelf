@@ -6,6 +6,7 @@ import {
   ArrowRight01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button, buttonVariants } from "@inset/ui/components/button";
 import { cn } from "cn";
 import * as React from "react";
 import {
@@ -14,8 +15,6 @@ import {
   type DayButton,
   type Locale,
 } from "react-day-picker";
-
-import { Button, buttonVariants } from "@/components/ui/button";
 
 /** shadcn's Calendar on react-day-picker v9; today wears the Shelf's Due-today tint. */
 function Calendar({

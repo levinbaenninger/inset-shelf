@@ -1,11 +1,10 @@
+import { cn } from "@inset/ui/lib/utils";
 import { createContext, use, useMemo } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-
-import { cn } from "@/lib/utils";
 
 /** GitHub's Markdown (lists, tasks, tables, strikethrough), with a line break wherever one was typed. */
 const PLUGINS = [remarkGfm, remarkBreaks];

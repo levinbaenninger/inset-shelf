@@ -1,8 +1,9 @@
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type { SettingsView } from "@shared/settings";
 import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -12,7 +13,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
 import { settingsBridge } from "@/shared/bridge";
 import { isMac, isWindows } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";

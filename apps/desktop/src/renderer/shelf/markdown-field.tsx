@@ -1,3 +1,4 @@
+import { cn } from "@inset/ui/lib/utils";
 import { Strike } from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
@@ -6,8 +7,6 @@ import type { Editor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
-
-import { cn } from "@/lib/utils";
 
 /** The editor that has the keyboard, so the menu bar's Undo and Redo reach its own history. */
 let focusedEditor: Editor | null = null;

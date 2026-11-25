@@ -1,3 +1,4 @@
+import { cn } from "@inset/ui/lib/utils";
 import {
   DIGIT_STROKE,
   digitStrokes,
@@ -9,8 +10,6 @@ import {
   pinPath,
 } from "@shared/pin-shape";
 import type { CSSProperties } from "react";
-
-import { cn } from "@/lib/utils";
 
 const PATH = pinPath();
 

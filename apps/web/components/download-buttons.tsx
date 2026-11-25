@@ -1,6 +1,6 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@inset/ui/components/button";
 import { FIRST_OPEN, RELEASE_URL } from "@/lib/site";
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 import { AppleGlyph, WindowsGlyph } from "./glyphs";
 

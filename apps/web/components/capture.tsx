@@ -13,7 +13,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 
 import { REPO_URL } from "@/lib/site";
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 import {
   CheckCircle,
@@ -47,7 +47,7 @@ function KeyCap({ className }: { className?: string }) {
 function SelectedText() {
   return (
     <>
-      <div className="app-ui absolute top-6 left-5 w-[290px] rounded-xl bg-white p-4 shadow-card sm:top-8 sm:left-8 sm:w-[330px]">
+      <div className="app-ui light absolute top-6 left-5 w-[290px] rounded-xl bg-white p-4 shadow-card sm:top-8 sm:left-8 sm:w-[330px]">
         <SourceLine service="claude" label="Claude · Upload test retries" />
         <p className="mt-3 text-[13px] leading-[1.6]">
           Retries make a flaky test pass, so the failure stays out of sight.{" "}
@@ -110,7 +110,7 @@ const TOOLS: IconSvgElement[] = [
 
 function Drawing() {
   return (
-    <div className="app-ui absolute top-6 left-1/2 w-[392px] -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-card">
+    <div className="app-ui light absolute top-6 left-1/2 w-[392px] -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-card">
       <p className="border-b py-2.5 text-center text-[13px] font-medium">Annotate</p>
       <div className="relative mx-3 mt-3 flex h-[178px] items-center justify-center border bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)]">
         <div className="relative grid w-[176px] gap-1.5 rounded-lg bg-white p-3.5 text-[9px] text-neutral-500 shadow-[0_6px_18px_rgb(15_40_80/0.12)]">

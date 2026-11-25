@@ -1,9 +1,9 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
 import { shortcutSheet } from "@shared/shortcuts";
 import { Dialog } from "radix-ui";
 
-import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { isMac } from "@/shared/platform";
 

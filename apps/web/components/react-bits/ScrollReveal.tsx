@@ -13,7 +13,7 @@ import React, {
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 gsap.registerPlugin(ScrollTrigger);
 

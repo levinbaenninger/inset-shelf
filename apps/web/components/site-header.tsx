@@ -4,10 +4,10 @@ import { Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@inset/ui/components/button";
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { NAV_LINKS, RELEASE_URL, REPO_URL } from "@/lib/site";
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 import { DownloadButtons } from "./download-buttons";
 import { Logo } from "./logo";

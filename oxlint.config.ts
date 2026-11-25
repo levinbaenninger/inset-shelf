@@ -12,6 +12,7 @@ export default defineConfig({
   ignorePatterns: [
     ...core.ignorePatterns,
     "apps/desktop/src/renderer/components/ui/**",
+    "packages/ui/src/components/**",
     "apps/web/**",
   ],
   jsPlugins: shadcn.jsPlugins,

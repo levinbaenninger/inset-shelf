@@ -1,9 +1,8 @@
 import { Alert02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@inset/ui/lib/utils";
 import { Toaster as Sonner } from "sonner";
 import type { ToasterProps } from "sonner";
-
-import { cn } from "@/lib/utils";
 
 import { NOTICE_CLASS, NOTICE_ICON_CLASS } from "./notice";
 

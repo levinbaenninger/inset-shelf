@@ -6,6 +6,8 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import {
   DUE_FILTER_LABEL,
   DUE_FILTERS,
@@ -16,7 +18,6 @@ import type { DueFilter } from "@shared/due";
 import { keyText } from "@shared/shortcut";
 import type { RefObject } from "react";
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,7 +38,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { isMac } from "@/shared/platform";
 
 const DUE_WORD = /(?:^|\s)due:\S*/gu;

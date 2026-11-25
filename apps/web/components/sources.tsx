@@ -100,7 +100,7 @@ function Pointer({ className }: { className: string }) {
 
 function MiniWindow({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="app-ui absolute top-[142px] left-1/2 w-[290px] -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-card">
+    <div className="app-ui light absolute top-[142px] left-1/2 w-[290px] -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-card">
       <div className="flex h-9 items-center gap-3 border-b bg-[#f6f6f6] px-3">
         <TrafficLights className="[&>i]:size-2.5 gap-1.5" />
         <span className="flex h-6 min-w-0 flex-1 items-center justify-center truncate rounded-md bg-black/[0.05] px-2 text-[11px] text-[#3c3c43]">

@@ -24,6 +24,9 @@ const buttonVariants = cva(
         /** White on a picture, whatever the theme: the screenshot card's controls. */
         overlay:
           "bg-white text-neutral-900 shadow-md hover:bg-neutral-100 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100",
+        /** Translucent white over a coloured surface, beside a default button: the web page's sky frames and tiles. */
+        light:
+          "text-foreground bg-white/80 shadow-[0_1px_2px_rgb(0_0_0/0.05)] ring-1 ring-black/8 backdrop-blur-sm hover:bg-white",
       },
       size: {
         default:
@@ -40,6 +43,8 @@ const buttonVariants = cva(
         /** Fully rounded, for buttons set on a picture. */
         pill: "h-8 gap-1.5 rounded-full px-4",
         "icon-round": "size-8 rounded-full",
+        /** A large call to action: the web page's downloads. */
+        cta: "h-11 gap-2 rounded-[10px] px-5 text-[15px] tracking-[-0.01em] [&_svg:not([class*='size-'])]:size-[18px]",
       },
     },
     defaultVariants: {

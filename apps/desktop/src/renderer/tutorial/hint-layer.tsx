@@ -1,7 +1,6 @@
+import { Button } from "@inset/ui/components/button";
 import type { ShownHint, TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useRef, useState } from "react";
-
-import { Button } from "@/components/ui/button";
 
 import { anchorPresent, findAnchor, somethingOpen } from "./anchors";
 import { CoachBubble } from "./bubble";

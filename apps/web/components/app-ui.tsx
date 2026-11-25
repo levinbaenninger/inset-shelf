@@ -22,9 +22,9 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
-// Drawn parts of the app, with the renderer's own class names (src/renderer/shelf), inside `.app-ui`.
+// Drawn parts of the app, with the renderer's own class names (apps/desktop/src/renderer/shelf), inside `.app-ui.light`.
 
 export type Service = "github" | "claude" | "chatgpt" | "figma" | "link";
 
@@ -258,7 +258,7 @@ export function ShelfPanel({ className, children, ...props }: ComponentProps<"di
   return (
     <div
       className={cn(
-        "app-ui flex flex-col overflow-hidden rounded-xl bg-material shadow-[0_0_0_0.5px_rgb(0_0_0/0.18),0_24px_60px_-12px_rgb(0_0_0/0.28),0_8px_20px_-8px_rgb(0_0_0/0.12)]",
+        "app-ui light flex flex-col overflow-hidden rounded-xl bg-material shadow-[0_0_0_0.5px_rgb(0_0_0/0.18),0_24px_60px_-12px_rgb(0_0_0/0.28),0_8px_20px_-8px_rgb(0_0_0/0.12)]",
         className,
       )}
       {...props}
@@ -273,7 +273,7 @@ export function MenuCard({ className, children }: { className?: string; children
   return (
     <div
       className={cn(
-        "app-ui min-w-48 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10",
+        "app-ui light min-w-48 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10",
         className,
       )}
     >
@@ -372,7 +372,7 @@ export function ScreenshotCard({
   return (
     <div
       className={cn(
-        "app-ui w-[280px] overflow-hidden rounded-2xl bg-muted shadow-[0_18px_40px_-12px_rgb(0_0_0/0.3)] ring-1 ring-foreground/10 ring-inset",
+        "app-ui light w-[280px] overflow-hidden rounded-2xl bg-muted shadow-[0_18px_40px_-12px_rgb(0_0_0/0.3)] ring-1 ring-foreground/10 ring-inset",
         className,
       )}
     >

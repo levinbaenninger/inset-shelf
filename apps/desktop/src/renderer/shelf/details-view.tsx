@@ -15,6 +15,8 @@ import {
   TextIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button, buttonVariants } from "@inset/ui/components/button";
+import { cn } from "@inset/ui/lib/utils";
 import type { DetailField, ShelfView } from "@shared/contracts";
 import { dateText, dueChipText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
@@ -39,7 +41,6 @@ import { keyText } from "@shared/shortcut";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -55,7 +56,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";

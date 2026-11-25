@@ -1,7 +1,6 @@
+import { Button } from "@inset/ui/components/button";
 import type { SpotlightStep, TutorialView } from "@shared/tutorial";
 import { useEffect, useId, useRef, useState } from "react";
-
-import { Button } from "@/components/ui/button";
 
 import { anchorPresent, findAnchor } from "./anchors";
 import { CoachBubble, useBoxOf } from "./bubble";

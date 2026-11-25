@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import type { ComponentProps } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@inset/ui/lib/utils";
 
 // WebGL loads after the page; the CSS sky under it is the whole picture without script, WebGL or motion.
 const Grainient = dynamic(() => import("./react-bits/Grainient"), { ssr: false });
