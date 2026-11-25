@@ -1,7 +1,7 @@
 import { Alert02Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { NotSavedItem, ShelfStatus } from "@shared/contracts";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ const BANNER_LINES = 4;
 
 const Banner = ({
   actions,
+  focused = false,
   text,
   title,
   tone,
@@ -42,45 +43,63 @@ const Banner = ({
   readonly text: string;
   readonly tone: Tone;
   readonly actions: readonly BannerAction[];
-}) => (
-  <div
-    className={cn(
-      "mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs",
-      TONE[tone]
-    )}
-    role={tone === "error" ? "alert" : "status"}
-  >
-    <p className="text-sm font-medium">{title}</p>
-    {/* Four lines at most, so a long reason never pushes the list away; the rest opens in place, by keyboard too. */}
-    <Clamp
+  /** Opened from the keyboard: its title takes focus, so the next Tab reaches Show full message. */
+  readonly focused?: boolean;
+}) => {
+  const heading = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (focused) {
+      heading.current?.focus();
+    }
+  }, [focused]);
+
+  return (
+    <div
       className={cn(
-        "break-words",
-        tone === "notice" && "text-muted-foreground"
+        "mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs",
+        TONE[tone]
       )}
-      less="Show less"
-      lines={BANNER_LINES}
-      more="Show full message"
+      role={tone === "error" ? "alert" : "status"}
     >
-      {text}
-    </Clamp>
-    {actions.length === 0 ? null : (
-      <div className="mt-1 flex flex-wrap gap-1.5">
-        {actions.map((action) => (
-          <Button
-            key={action.label}
-            onClick={() => {
-              action.run();
-            }}
-            size="xs"
-            variant={action.destructive === true ? "destructive" : "outline"}
-          >
-            {action.label}
-          </Button>
-        ))}
-      </div>
-    )}
-  </div>
-);
+      <p
+        className="focus-visible:ring-ring/50 -mx-1 rounded-sm px-1 text-sm font-medium outline-none focus-visible:ring-3"
+        ref={heading}
+        tabIndex={focused ? -1 : undefined}
+      >
+        {title}
+      </p>
+      {/* Four lines at most, so a long reason never pushes the list away; the rest opens in place, by keyboard too. */}
+      <Clamp
+        className={cn(
+          "break-words",
+          tone === "notice" && "text-muted-foreground"
+        )}
+        less="Show less"
+        lines={BANNER_LINES}
+        more="Show full message"
+      >
+        {text}
+      </Clamp>
+      {actions.length === 0 ? null : (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {actions.map((action) => (
+            <Button
+              key={action.label}
+              onClick={() => {
+                action.run();
+              }}
+              size="xs"
+              variant={action.destructive === true ? "destructive" : "outline"}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /** How much of an item's words a row's Retry or Discard names. */
 const NAME_MAX = 60;
@@ -171,6 +190,16 @@ interface BannerEntry {
   readonly actions: readonly BannerAction[];
 }
 
+/** Which banner takes the open slot first: anything about unsaved data, then a failed capture, then a missing permission. */
+const SEVERITY: Readonly<Record<BannerEntry["id"], number>> = {
+  keys: 0,
+  problem: 1,
+  save: 2,
+};
+
+/** A banner as last seen: a new text is news, as a new banner is. */
+const signature = (entry: BannerEntry): string => `${entry.id}\n${entry.text}`;
+
 /** What needs the user, oldest kind first: a missing permission, a failed save, a failed capture. */
 const entriesOf = ({
   onDismissProblem,
@@ -215,69 +244,124 @@ const entriesOf = ({
       ]),
 ];
 
-/** A banner folded to its title, one line; a click opens it. */
-const FoldedBanner = ({
-  entry,
+/** The banners not open, as one line: how many, and their titles; a click opens them all. */
+const MoreBanners = ({
+  entries,
   onOpen,
 }: {
-  readonly entry: BannerEntry;
+  readonly entries: readonly BannerEntry[];
   readonly onOpen: () => void;
 }) => (
   <button
     aria-expanded={false}
     className={cn(
-      "focus-visible:ring-ring/50 mx-3 mb-1.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs font-medium outline-none focus-visible:ring-3",
-      TONE[entry.tone]
+      "focus-visible:ring-ring/50 mx-3 mb-1.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs outline-none focus-visible:ring-3",
+      TONE[entries.some((entry) => entry.tone === "error") ? "error" : "notice"]
     )}
     onClick={onOpen}
     type="button"
   >
-    <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+    <span className="shrink-0 font-medium">{entries.length} more</span>
+    <span
+      className="min-w-0 flex-1 truncate opacity-80"
+      title={entries.map((entry) => entry.title).join(", ")}
+    >
+      {entries.map((entry) => entry.title).join(", ")}
+    </span>
     <HugeiconsIcon className="size-3.5 shrink-0" icon={ArrowDown01Icon} />
   </button>
 );
 
-/**
- * One banner per thing that needs the user. With more than one, only the
- * newest shows open; the others fold to one line each, and a click opens
- * one instead.
- */
-export const Banners = (props: BannersProps) => {
-  const entries = entriesOf(props);
-  const ids = entries.map((entry) => entry.id);
-  const [seen, setSeen] = useState(ids);
-  const [open, setOpen] = useState(ids.at(-1) ?? null);
+/** The banner that takes the open slot: the most severe, and of those the newest news. */
+const openFirst = (
+  entries: readonly BannerEntry[],
+  news: readonly string[]
+): BannerEntry["id"] | null => {
+  let best: BannerEntry | null = null;
 
-  // A banner that wasn't there before is the newest: it opens.
-  if (ids.join(",") !== seen.join(",")) {
-    const arrived = ids.findLast((id) => !seen.includes(id));
+  for (const entry of entries) {
+    const newer =
+      best !== null &&
+      news.indexOf(signature(entry)) > news.indexOf(signature(best));
 
-    setSeen(ids);
-
-    if (arrived !== undefined) {
-      setOpen(arrived);
+    if (
+      best === null ||
+      SEVERITY[entry.id] > SEVERITY[best.id] ||
+      (SEVERITY[entry.id] === SEVERITY[best.id] && newer)
+    ) {
+      best = entry;
     }
   }
 
-  const shown = open !== null && ids.includes(open) ? open : ids.at(-1);
+  return best?.id ?? null;
+};
 
-  return entries.map((entry) =>
-    entry.id === shown ? (
+/**
+ * One banner per thing that needs the user. With more than one, the most
+ * severe shows open (unsaved data first), and of equals the newest; the
+ * others share one line that opens them all. A banner whose words change
+ * counts as new.
+ */
+export const Banners = (props: BannersProps) => {
+  const entries = entriesOf(props);
+  const signatures = entries.map(signature);
+  // Signatures in the order they first showed: later is newer.
+  const [news, setNews] = useState(signatures);
+  const [all, setAll] = useState<"folded" | "open" | "opened-by-key">("folded");
+
+  // Something new arrived: the open slot is decided again, and the others fold.
+  if (signatures.some((each) => !news.includes(each))) {
+    setNews([
+      ...news.filter((each) => signatures.includes(each)),
+      ...signatures.filter((each) => !news.includes(each)),
+    ]);
+    setAll("folded");
+  }
+
+  const shown = openFirst(entries, news);
+  const folded = entries.filter((entry) => entry.id !== shown);
+
+  if (all !== "folded" || folded.length === 0) {
+    return entries.map((entry) => (
       <Banner
         actions={entry.actions}
-        key={entry.id}
+        focused={
+          all === "opened-by-key" && entry.id === openFirst(folded, news)
+        }
+        // New words make it a new banner: it shows them fresh, folded to its first lines.
+        key={signature(entry)}
         text={entry.text}
         title={entry.title}
         tone={entry.tone}
       />
-    ) : (
-      <FoldedBanner
-        entry={entry}
-        key={entry.id}
+    ));
+  }
+
+  return (
+    <>
+      {entries
+        .filter((entry) => entry.id === shown)
+        .map((entry) => (
+          <Banner
+            actions={entry.actions}
+            // New words make it a new banner: it shows them fresh, folded to its first lines.
+            key={signature(entry)}
+            text={entry.text}
+            title={entry.title}
+            tone={entry.tone}
+          />
+        ))}
+      <MoreBanners
+        entries={folded}
         onOpen={() => {
-          setOpen(entry.id);
+          // A click from the keyboard (Enter, Space) has no pointer: focus goes to the first banner it opened.
+          setAll(
+            document.activeElement?.matches(":focus-visible") === true
+              ? "opened-by-key"
+              : "open"
+          );
         }}
       />
-    )
+    </>
   );
 };
