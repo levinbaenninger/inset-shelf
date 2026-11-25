@@ -1,0 +1,45 @@
+"use client";
+
+import { cn } from "@inset/ui/lib/utils";
+import dynamic from "next/dynamic";
+import type { ComponentProps } from "react";
+
+// WebGL loads after the page; the CSS sky under it is the whole picture without script, WebGL or motion.
+const Grainient = dynamic(async () => await import("./react-bits/Grainient"), {
+  ssr: false,
+});
+
+const SKY = ["#9ad6f5", "#cdeefc", "#f3fbff", "#b2e1f8", "#dff4fd"];
+
+export const SkyFrame = ({
+  className,
+  children,
+  ...props
+}: ComponentProps<"div">) => (
+  <div
+    className={cn(
+      "relative isolate overflow-hidden rounded-[24px] bg-[radial-gradient(45%_35%_at_85%_12%,#f4fbff_0%,transparent_70%),radial-gradient(60%_50%_at_15%_85%,#fff_0%,transparent_70%),radial-gradient(50%_45%_at_90%_70%,#f2fbff_0%,transparent_70%),linear-gradient(180deg,var(--color-sky)_0%,var(--color-sky-light)_100%)] sm:rounded-[28px]",
+      className
+    )}
+    {...props}
+  >
+    <Grainient
+      aria-hidden="true"
+      className="!absolute inset-0 -z-10 opacity-90"
+      colors={SKY}
+      angle={160}
+      bands={2}
+      speed={0.25}
+      flow={0.5}
+      softness={1}
+      silk={0.6}
+      grainAmount={0.03}
+      grainAnimated={false}
+      interactive={false}
+      clickSwirl={false}
+      intro={false}
+      dpr={1}
+    />
+    {children}
+  </div>
+);

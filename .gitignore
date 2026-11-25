@@ -3,6 +3,16 @@ out/
 dist/
 release/
 coverage/
+.vitest/
 *.log
 .DS_Store
 .env*
+
+# The web app's build output
+.next/
+.wrangler/
+next-env.d.ts
+*.tsbuildinfo
+
+# Fumadocs MDX's generated files
+.source/

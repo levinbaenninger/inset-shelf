@@ -8,13 +8,13 @@ It is the third Inset prototype. [Inset Context Pin](https://github.com/levinbae
 
 ## Install a test build
 
-Install once, then the app updates itself. Download a build from the [Releases page](https://github.com/levinbaenninger/inset-shelf/releases). The **Preview build** release holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
+Install once, then the app updates itself. Download a build from the [latest release](https://github.com/levinbaenninger/inset-shelf/releases/latest). Every push to `main` publishes a new release, so the latest one holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
 
 The builds are not signed with a developer certificate, so each system warns once, at the first install.
 
 ### macOS
 
-1. Download `inset-shelf-<version>-mac-arm64.dmg` for Apple silicon, or `-mac-x64.dmg` for an Intel Mac.
+1. Download `Inset-Shelf-mac-arm64.dmg` for Apple silicon, or `Inset-Shelf-mac-x64.dmg` for an Intel Mac.
 2. Open the disk image and drag **Inset Shelf** to **Applications**.
 3. Open the app. macOS blocks it the first time. Open **System Settings > Privacy & Security** and click **Open Anyway**. If you prefer the terminal, run `xattr -dr com.apple.quarantine "/Applications/Inset Shelf.app"` and open the app again.
 4. The first time it opens, a small setup window asks for the permissions. It has three pages: **Welcome**, **Allow access** and **Done**. Every page after Welcome has **Back**, `→` and `←` move between them, and **Not now** skips one. The app works without the permissions you skip.
@@ -31,7 +31,7 @@ The app has a Dock icon, a menu bar and the Shelf mark (a rounded frame with a l
 
 ### Updates
 
-The app checks the **Preview build** release when it starts and every four hours, and downloads a newer build in the background. When the download is ready, it says so once, and the menu bar icon's menu and the **Inset Shelf** menu offer **Restart to Update to v…**. If you don't restart, the update installs when you quit. The menu bar icon's menu always shows the running version and **Check for Updates…**.
+The app checks the latest release when it starts and every four hours, and downloads a newer build in the background. When the download is ready, it says so once, and the menu bar icon's menu and the **Inset Shelf** menu offer **Restart to Update to v…**. If you don't restart, the update installs when you quit. The menu bar icon's menu always shows the running version and **Check for Updates…**.
 
 On macOS every build is signed with the same self-signed certificate, so the update keeps your permissions and macOS checks that the new build comes from the same signer. A build that shows version 0.1.0 has an ad-hoc signature that can't accept a signed update. Install the current build by hand once, as above, and grant the permissions again. After that it updates itself.
 
@@ -39,7 +39,7 @@ On Windows only the installer (`.exe`) updates itself. The portable `.zip` copie
 
 ### Windows
 
-1. Download `inset-shelf-<version>-win-x64.exe` for the installer, or `-win-x64.zip` to run it without installing. Use `-win-arm64.zip` on an Arm device.
+1. Download `Inset-Shelf-win-x64.exe` for the installer, or `inset-shelf-<version>-win-x64.zip` to run it without installing. Use `inset-shelf-<version>-win-arm64.zip` on an Arm device.
 2. If SmartScreen shows **Windows protected your PC**, click **More info**, then **Run anyway**.
 3. Look for the Shelf mark (a rounded frame with a list in its open corner) in the notification area of the taskbar. Windows may put it behind the **^** (Show hidden icons) arrow; drag it onto the taskbar to keep it in view. Click it to show or hide the shelf, and right-click it for its menu. Starting the app again from Start shows the shelf.
 
@@ -109,31 +109,40 @@ The app teaches itself in the shelf, on macOS and Windows:
 
 ## Develop
 
-You need Node 24 and pnpm 12. On a machine managed by Vite+, use its `node` and `pnpm`.
+The repository is one pnpm workspace, run with [Vite+](https://viteplus.dev) (`vp`), which also provides Node 24 and pnpm 12:
+
+- `apps/desktop`: the Electron app (`@inset/desktop`).
+- `apps/web`: the landing page (`@inset/web`).
+- `packages/ui`: the shadcn button, `cn` and the Inset theme both apps import (`@inset/ui`).
 
 ```sh
-pnpm install
-pnpm dev
+vp install
+cd apps/desktop
+vp run dev
 ```
+
+From the repository root:
 
 | Command | What it does |
 | --- | --- |
-| `pnpm check` | Runs Ultracite: Oxlint with type-aware rules and the React, TanStack, Vitest, shadcn and anti-slop presets, plus an Oxfmt format check. |
-| `pnpm typecheck` | Type-checks the main, preload and renderer code in strict mode. |
-| `pnpm test` | Runs the Vitest suite. |
-| `pnpm build` | Builds the app into `out/` with electron-vite. |
-| `pnpm fix` | Formats the code and applies safe lint fixes. |
-| `pnpm screens` | Builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. Writes PNGs to `release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name. |
+| `vp check` | Checks formatting with Oxfmt and lints with Oxlint: type-aware rules and Ultracite's React, TanStack, Vitest, shadcn and anti-slop presets, set in `vite.config.ts`. |
+| `vp check --fix` | Formats the code and applies safe lint fixes. |
+| `vp run typecheck` | Type-checks every package in strict mode. |
+| `vp test` | Runs the Vitest suite. |
+| `vp run build` | Builds the app into `apps/desktop/out/` with electron-vite and the page into `apps/web/out/`. |
 
-To build installers on your machine, run `pnpm package:mac` on macOS or `pnpm package:win` on Windows. The files land in `release/`.
+In `apps/desktop`, `vp run screens` builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. It writes PNGs to `apps/desktop/release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name.
+
+To build installers on your machine, run `vp run package:mac` on macOS or `vp run package:win` on Windows in `apps/desktop`. The files land in `apps/desktop/release/`.
 
 ### Verify on the real macOS desktop
 
-`scripts/e2e/verify-macos.ts` drives the real app from outside with real Shift taps, clicks and drags, and with the real clipboard. It opens its own small text app as "the app in front" and sends keys only while that app is in front.
+`apps/desktop/scripts/e2e/verify-macos.ts` drives the real app from outside with real Shift taps, clicks and drags, and with the real clipboard. It opens its own small text app as "the app in front" and sends keys only while that app is in front.
 
 ```sh
+cd apps/desktop
 node scripts/e2e/verify-macos.ts dev       # builds, then tests out/ with Electron
-pnpm package:dir && node scripts/e2e/verify-macos.ts packaged
+vp run package:dir && node scripts/e2e/verify-macos.ts packaged
 ```
 
 The script takes over the mouse and keyboard for about three minutes and overwrites the clipboard. At the end it puts back plain text it found there, but not images or files. The terminal needs **Accessibility** access, Xcode command line tools must be installed for `swiftc`, and the app under test needs **Screen & System Audio Recording** access. It writes every result and the event log to a temporary folder and prints the path.
@@ -142,8 +151,10 @@ The script takes over the mouse and keyboard for about three minutes and overwri
 
 `.github/workflows/release.yml` publishes builds to GitHub Releases.
 
-A push to `main` updates the **Preview build** prerelease in place, and installed apps update from it. Each preview build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `package.json`, the last number from the workflow's run number, so every build is newer than the one before. The new files are uploaded first, then `latest-mac.yml` and `latest.yml`, which tell the apps what is new. The update files the previous `latest*.yml` named stay for one more build, so an app that read it just before the switch can still download them. Older files are removed.
+A push to `main` publishes a release named after its version, for example `v0.1.17`, and marks it **Latest**. Each build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `apps/desktop/package.json`, the last number from the workflow's run number, so every build is newer than the one before. The release stays a draft until every file is uploaded, so `/releases/latest` never points at a release with files missing. Installed apps read `latest-mac.yml` and `latest.yml` from `/releases/latest/download`. CI rewrites the files they name into full links to their own release, so a feed an app has read stays valid after a newer release replaces it. Each release also carries the installers as `Inset-Shelf-mac-arm64.dmg`, `Inset-Shelf-mac-x64.dmg` and `Inset-Shelf-win-x64.exe`, which `/releases/latest/download/<name>` always serves from the newest release.
 
-To cut a versioned release, set `version` in `package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release. Raising the minor or major number also moves the preview builds that follow to `0.2.<run number>`.
+Apps installed from a build before these releases still check the `preview` release, now titled **Legacy update feed**. Each push to `main` uploads the same `latest*.yml` there, so those apps update to the newest release and read the new feed from then on. The update files that the previous `latest*.yml` there named by bare name stay for one more build, so an app that read it just before the switch can still download them. Everything else there is removed.
 
-The macOS job signs with the shared certificate from the `MAC_SIGNING_P12_BASE64` and `MAC_SIGNING_P12_PASSWORD` secrets, through `scripts/import-signing-key.sh` and the `scripts/sign-mac.ts` hook, and fails without them. The CI workflow has no secrets and signs ad hoc. A local `pnpm package:mac` signs with the certificate when its keychain (`~/Library/Keychains/inset-signing.keychain-db`) is on the machine, and ad hoc otherwise.
+To cut a versioned release, set `version` in `apps/desktop/package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release, which never becomes **Latest**, because `main` already built that commit as a higher `0.2.<run number>`. Raising the minor or major number also moves the `main` builds that follow to `0.2.<run number>`.
+
+The macOS job signs with the shared certificate from the `MAC_SIGNING_P12_BASE64` and `MAC_SIGNING_P12_PASSWORD` secrets, through `apps/desktop/scripts/import-signing-key.sh` and the `apps/desktop/scripts/sign-mac.ts` hook, and fails without them. The CI workflow has no secrets and signs ad hoc. A local `vp run package:mac` signs with the certificate when its keychain (`~/Library/Keychains/inset-signing.keychain-db`) is on the machine, and ad hoc otherwise.
