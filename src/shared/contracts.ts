@@ -89,6 +89,19 @@ export interface ShelfView {
   } | null;
   /** An item can be restored with undoRemove. */
   readonly canUndo: boolean;
+  /** Recall: the open items from the window the shelf opened beside; absent or null when there are none. */
+  readonly here?: ShelfHere | null;
+}
+
+/** The open items from the window the shelf opened beside (src/shared/recall.ts). */
+export interface ShelfHere {
+  readonly ids: readonly ItemId[];
+  /** The window's place in a few words: "GitHub · acme/app #12". */
+  readonly label: string;
+  /** Changes with every opening. */
+  readonly seq: number;
+  /** Opened from the recall pill: the list starts filtered to these items. */
+  readonly filter: boolean;
 }
 
 /** The fields the field shortcuts (⌘D, ⌘⇧D, ⌘⇧S) open in details. */

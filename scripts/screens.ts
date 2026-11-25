@@ -4194,7 +4194,8 @@ const DRAWING_STRESS_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map((scene) => stress({ ...scene, ...DRAWING_MIN, page: "drawing" }));
 
-// Pill scenes: the notice window's say-why and recall states (src/shared/pill.ts), at its sizes in src/main/toast-window.ts.
+// Pill scenes: the notice window's say-why and recall states (src/shared/pill.ts), at its sizes in src/main/toast-window.ts,
+// and the shelf's from:here filter and chip (src/renderer/shelf/from-here.tsx).
 
 /** The why field's window: 320 wide. */
 const WHY_WIDTH = 320;
@@ -4242,6 +4243,36 @@ const recallChecks = async (page: Page): Promise<string | null> => {
   ])
     ? null
     : `a click must open the shelf and × dismiss: ${JSON.stringify(sent)}`;
+};
+
+/** The shelf opened beside the pull request item 14 came from; item 16 too when `both`. */
+const hereView = (
+  filter: boolean,
+  label = "GitHub · inset/shelf #482",
+  both = false
+) => ({
+  ...shelfView(),
+  here: {
+    filter,
+    ids: both ? [uuid(14), uuid(16)] : [uuid(14)],
+    label,
+    seq: 1,
+  },
+});
+
+const SEARCH_FIELD = "Search the shelf";
+
+/** The search, and the items the list shows. */
+const listed = async (page: Page) => {
+  const query = await page
+    .getByRole("textbox", { name: SEARCH_FIELD })
+    .inputValue();
+
+  const ids = await page
+    .locator("[data-item-id]")
+    .evaluateAll((rows) => rows.map((row) => row.dataset.itemId));
+
+  return { ids, query };
 };
 
 const whyView = (phase: "taking" | "typing" | "saved") => ({
@@ -4360,6 +4391,77 @@ const PILL_SCENES: readonly Scene[] = (
       data: { view: recallView(12, `Safari · ${LONG_TITLE}`) },
       keepPointer: true,
       name: "pill-recall-long-place",
+    },
+    {
+      check: async (page) => {
+        const shown = await listed(page);
+        const sections = await page.getByText("Inbox", { exact: true }).count();
+
+        return shown.query === "from:here" &&
+          isDeepStrictEqual(shown.ids, [uuid(14)]) &&
+          sections === 0
+          ? null
+          : `opened from the recall pill, the list must show only the item from here, without empty sections: ${JSON.stringify({ ...shown, sections })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here",
+      page: "shelf",
+    },
+    {
+      check: async (page) => {
+        const before = await listed(page);
+
+        await page
+          .getByRole("button", { name: "Show the 2 items from here" })
+          .click();
+
+        const after = await listed(page);
+
+        return before.ids.length > 2 &&
+          after.query === "from:here" &&
+          isDeepStrictEqual(after.ids, [uuid(14), uuid(16)])
+          ? null
+          : `the chip must filter the whole list to the items from here: ${JSON.stringify({ after, before })}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-chip",
+      page: "shelf",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: "Clear Search" }).click();
+      },
+      check: async (page) => {
+        const shown = await listed(page);
+
+        const chip = await page
+          .getByRole("button", { name: "Show the item from here" })
+          .count();
+
+        return shown.query === "" && shown.ids.length > 1 && chip === 1
+          ? null
+          : `clearing the search must bring every item back, and the chip: ${JSON.stringify({ ...shown, chip })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here-cleared",
+      page: "shelf",
+    },
+    {
+      data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
+      name: "shelf-from-here-chip-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: SEARCH_FIELD })
+          .fill(`from:here ${LONG_WORD}`);
+      },
+      data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
+      name: "shelf-from-here-no-matches-narrow",
+      page: "shelf",
+      width: NARROWEST,
     },
     {
       // The why field couldn't get the keyboard: the shelf opens at the item's description instead.
