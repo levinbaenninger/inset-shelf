@@ -38,7 +38,7 @@ function Card({ className, children }: { className?: string; children: React.Rea
   return (
     <div
       className={cn(
-        "app-ui absolute top-8 left-1/2 w-[256px] -translate-x-1/2 rounded-xl bg-white p-3 shadow-card",
+        "app-ui absolute top-8 left-1/2 w-[300px] -translate-x-1/2 rounded-xl bg-white p-3 shadow-card sm:top-10 sm:w-[320px]",
         className,
       )}
     >
@@ -90,7 +90,7 @@ function Steps() {
 
 function Due() {
   return (
-    <MenuCard className="absolute top-8 left-1/2 w-[256px] -translate-x-1/2">
+    <MenuCard className="absolute top-8 left-1/2 w-[280px] -translate-x-1/2 sm:top-10">
       <div className="flex items-center justify-between px-2 pt-1.5 pb-1 text-xs text-muted-foreground">
         Due
         <span className="rounded-md bg-muted px-1.5 py-0.5 tracking-wide">⇧⌘D</span>
@@ -116,7 +116,7 @@ function Windows() {
         Linked windows
         <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-foreground">Reopen all</span>
       </p>
-      <ul className="grid gap-2.5 rounded-lg border bg-muted/60 p-2.5">
+      <ul className="grid grid-cols-[minmax(0,1fr)] gap-2.5 rounded-lg border bg-muted/60 p-2.5">
         {WINDOWS.map((window) => (
           <li key={window.title} className="flex items-center gap-2.5">
             <span className="relative h-8 w-12 shrink-0 overflow-hidden rounded-[5px] border bg-white">
@@ -139,7 +139,7 @@ function Windows() {
 function CopyDetails() {
   return (
     <>
-      <MenuCard className="absolute top-8 left-1/2 z-10 w-[236px] -translate-x-[58%]">
+      <MenuCard className="absolute top-8 left-1/2 z-10 w-[236px] -translate-x-[70%] sm:top-10">
         <MenuItem icon={Copy01Icon} keys="⌘C">
           Copy
         </MenuItem>
@@ -148,7 +148,7 @@ function CopyDetails() {
         </MenuItem>
         <MenuItem icon={Link01Icon}>Copy with Link</MenuItem>
       </MenuCard>
-      <pre className="absolute top-[124px] left-1/2 w-[256px] -translate-x-[42%] rounded-xl bg-white p-3.5 font-mono text-[11px] leading-[1.65] whitespace-pre-wrap text-neutral-700 shadow-card">
+      <pre className="absolute top-[128px] left-1/2 w-[300px] -translate-x-[36%] sm:top-[132px] rounded-xl bg-white p-3.5 font-mono text-[11px] leading-[1.65] whitespace-pre-wrap text-neutral-700 shadow-card">
         {`Rieder's quote breaks the furniture cap
 https://rieder-moebel.ch/quote
 
@@ -170,32 +170,32 @@ export function Details() {
         title="Next steps and due dates, when you want them."
         lead="Any item can hold a description, a checklist, a due date and linked windows. None of it is asked for when you capture."
       />
-      <div className="mt-14 grid gap-4 md:mt-16 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-14 grid gap-4 md:mt-16 md:grid-cols-2">
         <Tile
           title="Next steps"
           line="A checklist under the item, with its progress on the source line."
-          stageClassName="sm:h-[300px]"
+          stageClassName="sm:h-[290px]"
         >
           <Steps />
         </Tile>
         <Tile
           title="Due dates"
           line="Today, tomorrow, this weekend or a date you pick. Overdue items turn red."
-          stageClassName="sm:h-[300px]"
+          stageClassName="sm:h-[290px]"
         >
           <Due />
         </Tile>
         <Tile
           title="Linked windows"
           line="Pick open windows in order, and Reopen all brings the whole set back."
-          stageClassName="sm:h-[300px]"
+          stageClassName="sm:h-[290px]"
         >
           <Windows />
         </Tile>
         <Tile
           title="Copy with Details"
           line="Pastes the item as Markdown, with its steps, due date and linked windows."
-          stageClassName="sm:h-[300px]"
+          stageClassName="sm:h-[290px]"
         >
           <CopyDetails />
         </Tile>

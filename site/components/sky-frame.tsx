@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 // WebGL loads after the page; the CSS sky under it is the whole picture without script, WebGL or motion.
 const Grainient = dynamic(() => import("./react-bits/Grainient"), { ssr: false });
 
-const SKY = ["#a9dcf6", "#d3effc", "#f4fbff", "#bfe6f9", "#e3f5fe"];
+const SKY = ["#9ad6f5", "#cdeefc", "#f3fbff", "#b2e1f8", "#dff4fd"];
 
 export function SkyFrame({ className, children, ...props }: ComponentProps<"div">) {
   return (

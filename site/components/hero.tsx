@@ -14,7 +14,7 @@ export function Hero() {
   return (
     <section aria-labelledby="hero-h" className="px-3 pt-3 sm:px-4 sm:pt-4">
       <SkyFrame>
-        <div className="flex flex-col items-center px-5 pt-32 text-center sm:pt-36 lg:pt-40">
+        <div className="flex flex-col items-center px-5 pt-28 text-center sm:pt-32 lg:pt-36">
           <a
             href={RELEASE_URL}
             className="group inline-flex h-7 items-center gap-1 rounded-full bg-white/55 px-3 text-[13px] font-medium text-foreground/80 ring-1 ring-black/8 backdrop-blur-sm transition-colors hover:bg-white/80 hover:text-foreground"
@@ -39,7 +39,7 @@ export function Hero() {
         <div
           role="img"
           aria-label={SCENE_LABEL}
-          className="mt-14 flex h-[524px] justify-end overflow-hidden pr-3 sm:mt-16 sm:h-[499px] sm:pr-6 lg:h-[537px] lg:justify-center lg:pr-0 xl:h-[624px]"
+          className="mt-12 flex h-[524px] justify-end overflow-hidden pr-3 sm:mt-14 sm:h-[499px] sm:pr-6 lg:h-[537px] lg:justify-center lg:pr-0 xl:h-[624px]"
         >
           <HeroScene />
         </div>

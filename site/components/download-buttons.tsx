@@ -22,7 +22,7 @@ export function DownloadButtons({ className }: { className?: string }) {
           </a>
         </Button>
       </div>
-      <p className="max-w-[44ch] text-center text-[13px] leading-5 text-foreground/60">
+      <p className="max-w-[44ch] text-center text-[13px] md:max-w-none leading-5 text-foreground/60">
         {FIRST_OPEN}
       </p>
     </div>

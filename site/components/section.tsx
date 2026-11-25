@@ -61,12 +61,15 @@ export function Tile({
   children,
   className,
   stageClassName,
+  shrinkOnPhone = false,
 }: {
   title: string;
   line: string;
   children: ReactNode;
   className?: string;
   stageClassName?: string;
+  /** Draws the stage at 85% on a phone, for app parts wider than the tile there. */
+  shrinkOnPhone?: boolean;
 }) {
   return (
     <article className={cn("flex flex-col overflow-hidden rounded-[24px] bg-tile", className)}>
@@ -74,7 +77,15 @@ export function Tile({
         aria-hidden="true"
         className={cn("relative h-[300px] overflow-hidden sm:h-[320px]", stageClassName)}
       >
-        {children}
+        <div
+          className={cn(
+            "absolute inset-0",
+            shrinkOnPhone &&
+              "max-sm:h-[117.65%] max-sm:w-[117.65%] max-sm:origin-top-left max-sm:scale-85",
+          )}
+        >
+          {children}
+        </div>
       </div>
       <div className="px-6 pt-2 pb-7 sm:px-8 sm:pb-8">
         <h3 className="text-[19px] leading-snug font-medium tracking-[-0.022em]">{title}</h3>

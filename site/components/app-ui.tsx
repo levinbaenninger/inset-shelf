@@ -46,7 +46,8 @@ const BADGE_TONE: Record<Tone, string> = {
 
 export type ShelfItem = {
   text: string;
-  source?: { service: Service; label: string };
+  /** `active`: under the pointer, as the source line looks on hover. */
+  source?: { service: Service; label: string; active?: boolean };
   due?: { label: string; tone: Tone };
   steps?: string;
   windows?: number;
@@ -135,15 +136,21 @@ export function Badge({
 export function SourceLine({
   service,
   label,
+  active = false,
   className,
 }: {
   service: Service;
   label: string;
+  active?: boolean;
   className?: string;
 }) {
   return (
     <span
-      className={cn("flex min-w-0 items-center gap-1 text-xs text-muted-foreground", className)}
+      className={cn(
+        "flex min-w-0 items-center gap-1 text-xs",
+        active ? "text-foreground" : "text-muted-foreground",
+        className,
+      )}
     >
       <Icon icon={SERVICE_ICON[service]} size={12} />
       <span className="truncate">{label}</span>

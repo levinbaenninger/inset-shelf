@@ -11,4 +11,4 @@ pnpm preview   # serves out/ with wrangler, as Cloudflare will
 
 Cloudflare serves `out/` as Workers static assets (`wrangler.jsonc`, no Worker script). Workers Builds: root directory `site`, build command `pnpm install && pnpm build`, deploy command `pnpm exec wrangler deploy`.
 
-The screenshots in `public/img` are shots of the real renderer (`pnpm screens` at the repository root), set on the brand's light blue.
+The app windows on the page are drawn in HTML with the renderer's own classes and light theme (`components/app-ui.tsx`); compare them with `pnpm screens` at the repository root. `components/react-bits/` holds the free [React Bits](https://reactbits.dev) components the page uses (Grainient, ScrollReveal, LogoLoop), installed from its shadcn registry.

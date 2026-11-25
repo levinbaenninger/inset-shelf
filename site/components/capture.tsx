@@ -59,7 +59,7 @@ function SelectedText() {
         <KeyCap className="motion-safe:animate-[press_2.4s_ease-in-out_infinite]" />
         <KeyCap className="motion-safe:animate-[press_2.4s_ease-in-out_0.3s_infinite]" />
       </div>
-      <ShelfPanel className="absolute top-[168px] left-10 w-[300px] sm:top-[124px] sm:right-8 sm:left-auto">
+      <ShelfPanel className="absolute top-[168px] left-10 w-[300px] sm:top-[164px] sm:right-8 sm:left-auto">
         <div className="px-2 pb-2">
           <SectionHeader name="Upload bug" current />
           <ul>
@@ -81,23 +81,18 @@ function SelectedText() {
 function Screenshot() {
   return (
     <>
-      <ScreenshotCard hover className="absolute top-16 left-5 h-[184px] sm:left-10" />
-      <ShelfPanel className="absolute top-8 left-[312px] w-[360px] mask-r-from-20% mask-r-to-50% sm:left-[332px]">
+      <ScreenshotCard hover className="absolute top-16 left-5 h-[184px] sm:left-6" />
+      <ShelfPanel className="absolute top-8 left-[312px] w-[360px] sm:left-[318px]">
         <div className="px-2 pb-2">
           <SectionHeader name="Sign-in redesign" current />
-          <ul className="flex flex-col gap-2">
-            {[0, 1].map((index) => (
-              <li
-                key={index}
-                className="flex items-start gap-3 rounded-lg border border-foreground/10 bg-background/60 px-3 py-2.5"
-              >
-                <CheckCircle className="mt-0.5" />
-                <span className="h-[72px] w-[120px] shrink-0 overflow-hidden rounded-md border">
-                  <SignInShot className="h-[144px] w-[240px] [zoom:0.5]" />
-                </span>
-                <span className="text-sm font-medium">Login screen</span>
-              </li>
-            ))}
+          <ul>
+            <li className="flex items-start gap-3 rounded-lg border border-primary bg-background/60 px-3 py-2.5">
+              <CheckCircle className="mt-0.5" />
+              <span className="h-[72px] w-[120px] shrink-0 overflow-hidden rounded-md border">
+                <SignInShot className="h-[144px] w-[240px] [zoom:0.5]" />
+              </span>
+              <span className="text-sm font-medium">Screenshot</span>
+            </li>
           </ul>
         </div>
       </ShelfPanel>
@@ -163,7 +158,7 @@ function Drawing() {
 function FileDrop() {
   return (
     <>
-      <ShelfPanel className="absolute top-14 left-[148px] w-[360px] ring-2 ring-pin ring-inset sm:top-[68px] sm:right-10 sm:left-auto">
+      <ShelfPanel className="absolute top-14 left-[84px] w-[316px] ring-2 ring-pin ring-inset sm:top-[68px] sm:right-10 sm:left-auto sm:w-[360px]">
         <div className="px-2 pb-2">
           <SectionHeader name="Office move" current />
           <ul className="flex flex-col gap-2">
@@ -179,7 +174,7 @@ function FileDrop() {
           </ul>
         </div>
       </ShelfPanel>
-      <div className="absolute top-[150px] left-[96px] flex flex-col items-center gap-1.5 sm:top-[118px] sm:right-[368px] sm:left-auto motion-safe:animate-[drift_3.2s_ease-in-out_infinite]">
+      <div className="absolute top-[150px] left-[40px] flex flex-col items-center gap-1.5 sm:top-[92px] sm:right-[396px] sm:left-auto motion-safe:animate-[drift_3.2s_ease-in-out_infinite]">
         <span className="relative flex h-[68px] w-[54px] items-end justify-center rounded-[5px] bg-white pb-2 shadow-[0_0_0_1px_rgb(0_0_0/0.08),0_10px_24px_-8px_rgb(0_0_0/0.3)]">
           <span className="absolute top-0 right-0 size-3.5 rounded-bl-[4px] bg-neutral-200" />
           <span className="rounded-[3px] bg-[#e5372b] px-1 py-0.5 font-mono text-[9px] font-semibold text-white">
@@ -209,6 +204,7 @@ export function Capture() {
       />
       <div className="mt-14 grid gap-4 md:mt-16 lg:grid-cols-12">
         <Tile
+          shrinkOnPhone
           className="lg:col-span-7"
           title="Selected text, with Shift twice"
           line="Select text in any app and tap Shift twice. The shelf saves it with its app, window and page, and puts your clipboard back."
@@ -216,6 +212,7 @@ export function Capture() {
           <SelectedText />
         </Tile>
         <Tile
+          shrinkOnPhone
           className="lg:col-span-5"
           title="Screenshots, as you take them"
           line="Take a screenshot as usual and a card appears beside the shelf. Copy it, or add it."
@@ -223,6 +220,7 @@ export function Capture() {
           <Screenshot />
         </Tile>
         <Tile
+          shrinkOnPhone
           className="lg:col-span-5"
           title="Sketches and numbered pins"
           line="Draw on any image, or drop numbered pins on what needs fixing. Label each pin in the details."
@@ -230,6 +228,7 @@ export function Capture() {
           <Drawing />
         </Tile>
         <Tile
+          shrinkOnPhone
           className="lg:col-span-7"
           title="Files, dropped or pasted"
           line="Drop files on the shelf or paste an image. Drag them out again into any app."
