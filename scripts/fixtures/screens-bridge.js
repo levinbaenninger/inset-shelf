@@ -331,6 +331,11 @@ if (page === "drawing") {
           call: "save",
         });
 
+        // `saveFails`: main refuses every save with this message.
+        if (data.saveFails !== undefined) {
+          return Promise.resolve({ message: data.saveFails, ok: false });
+        }
+
         if (data.holdSave !== true) {
           return ok();
         }
@@ -346,6 +351,38 @@ if (page === "drawing") {
       setDirty: (dirty) => {
         globalThis.__dirty.push(dirty);
       },
+    },
+    nothing
+  );
+}
+
+if (page === "toast") {
+  globalThis.insetToast = withFallback(
+    {
+      getView: resolved(data.view),
+      hover: nothing,
+      on,
+      open: logged("open", nothing),
+    },
+    nothing
+  );
+}
+
+if (page === "screenshot") {
+  globalThis.insetScreenshot = withFallback(
+    {
+      addToShelf: logged("addToShelf", nothing),
+      annotate: logged("annotate", nothing),
+      copy: logged("copy", nothing),
+      dismiss: logged("dismiss", nothing),
+      getTutorial: resolved(data.tutorial),
+      getView: resolved(data.view),
+      hold: logged("hold", nothing),
+      hover: nothing,
+      on,
+      saveToDownloads: logged("saveToDownloads", nothing),
+      startDrag: logged("startDrag", nothing),
+      tutorial: logged("tutorial", nothing),
     },
     nothing
   );

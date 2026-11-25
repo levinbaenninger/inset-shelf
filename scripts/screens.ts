@@ -1,14 +1,18 @@
 /**
- * Screenshots the shelf, the window-link picker, the drawing window and the
- * first-run onboarding of the
+ * Screenshots the shelf, the window-link picker, the drawing window, the
+ * first-run onboarding, the capture notice and the screenshot card of the
  * built renderer in their main states, light and dark, without Electron. Each
  * page runs in Playwright's Chromium with a fake preload bridge
  * (scripts/fixtures/screens-bridge.js) that answers from the sample data
  * below. The shelf is shot at 360×620 with an item that has every field
- * filled in, and the run fails a scene where anything overflows.
+ * filled in, and the run fails a scene where anything overflows. The
+ * stress- scenes push the longest labels the data allows through the shelf,
+ * the notice, the card and the drawing window at their smallest sizes
+ * (scripts/fixtures/screens-layout.js says what counts as broken).
  *
  *   pnpm screens            (builds first)
  *   node scripts/screens.ts [output folder]
+ *   SCREENS=stress- node scripts/screens.ts   (only the scenes named so)
  *
  * The default output folder is release/screens.
  */
@@ -880,7 +884,13 @@ const pulseRespectsMotion = async (page: Page): Promise<string | null> => {
 
 // Scenes
 
-type PageName = "shelf" | "picker" | "drawing" | "onboarding";
+type PageName =
+  | "shelf"
+  | "picker"
+  | "drawing"
+  | "onboarding"
+  | "toast"
+  | "screenshot";
 
 interface Scene {
   readonly name: string;
@@ -889,6 +899,8 @@ interface Scene {
   readonly platforms?: readonly Platform[];
   /** The window's width, where it differs from the page's usual size: the shelf's narrowest is 300. */
   readonly width?: number;
+  /** The window's height, where it differs from the page's usual size. */
+  readonly height?: number;
   /** Fails the scene when anything in the list or details overflows or wraps badly. */
   readonly layoutCheck?: boolean;
   readonly act?: (page: Page) => Promise<void>;
@@ -3085,6 +3097,732 @@ const clickElsewhereCheck = async (page: Page): Promise<string | null> => {
     ? null
     : `a click on search with B's menu open left focus on “${String(searching)}”`;
 };
+
+// Stress scenes: the longest labels the data allows (src/shared/shelf.ts), German-length words and every badge at once, at the shelf's narrowest width (src/main/shelf-window.ts MIN_WIDTH), in the shelf, the capture notice and the screenshot card.
+
+const NARROWEST = 300;
+
+const LONG_WORD =
+  "Donaudampfschifffahrtsgesellschaftskapitänsmützenabteilungsleiterstellvertreterin";
+
+const LONG_TITLE =
+  "Bildschirmaufnahme und Systemaudio für die Quartalsübersicht aufnehmen, die Zwischenablage wiederherstellen und danach die Ergebnisse an das gesamte Projektteam schicken";
+
+const LONG_URL =
+  "https://intranet.rieder-moebel.ch/projekte/2026/bueroumzug/dritter-stock/angebote/2026-114-bueromoebel-lieferung-und-montage?ansicht=vollstaendig&sprache=de&version=12";
+
+const LONG_PAGE =
+  "Angebot 2026-114: Büromöbel, Lieferung und Montage für den dritten Stock – Zwischenablage wiederhergestellt";
+
+const LONG_APP = "Bildschirmaufnahme und Systemaudio";
+
+const LONG_WINDOW =
+  "Projektplanung_Büroumzug_Final_v12_überarbeitet_Zwischenablage_wiederhergestellt.numbers";
+
+const LONG_FILE =
+  "Bildschirmaufnahme_und_Systemaudio_2026-11-25_um_14.32.07_Quartalsübersicht_final_überarbeitet.pdf";
+
+const LONG_STEP =
+  "Zwischenablage wiederhergestellt, danach die Bildschirmaufnahme und Systemaudio mit dem Projektteam abstimmen: Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz";
+
+const LONG_PIN =
+  "Die Fehlermeldung „Zwischenablage wiederhergestellt“ überdeckt den Anmeldeknopf auf kleinen Bildschirmen";
+
+const LONG_DESCRIPTION = `Die Bildschirmaufnahme und Systemaudio fehlen in der Quartalsübersicht. ${LONG_WORD} hat die Zwischenablage wiederhergestellt, siehe ${LONG_URL}`;
+
+/** At SECTION_NAME_MAX (60) or just under it. */
+const SECTION_PHRASE = "Bildschirmaufnahme und Systemaudio – Quartalsübersicht";
+
+const SECTION_WORD =
+  "Donaudampfschifffahrtsgesellschaftskapitänsmützenabteilung";
+
+const STRESS_A = uuid(701);
+const STRESS_B = uuid(702);
+const STRESS_C = uuid(703);
+const STRESS_D = uuid(704);
+
+const longWindow = (index: number, description = "") => ({
+  ...windowRef(index, description),
+  app: LONG_APP,
+  appPath: `/Applications/${LONG_APP}.app`,
+  id: uuid(750 + index),
+  title: LONG_WINDOW,
+});
+
+const LONG_STEPS = [
+  step(71, LONG_STEP, true),
+  step(72, LONG_WORD),
+  step(73, "Book the lift for the delivery day"),
+];
+
+/** A text item with every badge: overdue since last year, steps, linked windows, a long page as its source. */
+const STRESS_TEXT = {
+  ...base(710, 50, STRESS_A),
+  color: "purple",
+  context: { app: "Safari", appLink: null, title: LONG_PAGE, url: LONG_URL },
+  description: LONG_DESCRIPTION,
+  due: isoDay(-400),
+  html: null,
+  kind: "text",
+  links: [{ text: LONG_PAGE, url: LONG_URL }],
+  steps: LONG_STEPS,
+  text: LONG_TITLE,
+  via: "selection",
+  windows: [longWindow(0, LONG_DESCRIPTION), longWindow(1), longWindow(2)],
+};
+
+/** An image with every badge, pins with long labels and a long title. */
+const STRESS_IMAGE = {
+  ...base(711, 45, STRESS_A),
+  description: LONG_DESCRIPTION,
+  due: isoDay(-400),
+  image: LOGIN,
+  kind: "image",
+  note: LONG_TITLE,
+  pins: [
+    { label: LONG_PIN, x: 760, y: 380 },
+    { label: LONG_WORD, x: 820, y: 780 },
+    { x: 1210, y: 900 },
+  ],
+  source: LONG_APP,
+  steps: LONG_STEPS,
+  title: `Anmeldeseite: ${LONG_PIN}`,
+  via: "screenshot",
+  windows: [longWindow(3, LONG_DESCRIPTION), longWindow(4)],
+};
+
+/** A file without a title or a source, so its badges share the file name's line. */
+const STRESS_FILE = {
+  ...base(712, 40, STRESS_A),
+  due: isoDay(-400),
+  file: { bytes: 2_480_000_000, name: LONG_FILE, stored: `${uuid(713)}.pdf` },
+  kind: "file",
+  note: LONG_DESCRIPTION,
+  title: null,
+  windows: [longWindow(0), longWindow(1)],
+};
+
+const STRESS_ITEMS = [
+  STRESS_TEXT,
+  STRESS_IMAGE,
+  STRESS_FILE,
+  {
+    ...base(714, 35, STRESS_A),
+    file: { bytes: 18_000, name: LONG_FILE, stored: `${uuid(715)}.pdf` },
+    kind: "file",
+    note: "",
+    title: LONG_TITLE,
+    windows: [],
+  },
+  {
+    ...base(716, 30, STRESS_A),
+    context: {
+      app: LONG_APP,
+      appLink: null,
+      title: LONG_WINDOW,
+      url: null,
+    },
+    html: null,
+    kind: "text",
+    links: [],
+    text: LONG_WORD,
+    via: "selection",
+  },
+  {
+    ...base(717, 25, STRESS_A),
+    context: { app: "Safari", appLink: null, title: null, url: LONG_URL },
+    done: true,
+    html: null,
+    kind: "text",
+    links: [],
+    text: `Zwischenablage wiederhergestellt: ${LONG_URL}`,
+    via: "selection",
+  },
+  {
+    ...base(718, 20, STRESS_B),
+    due: isoDay(0),
+    html: null,
+    kind: "text",
+    links: [],
+    text: `**${LONG_WORD}** und ${LONG_WORD}`,
+    via: "typed",
+  },
+];
+
+const STRESS_DOC = {
+  activeSectionId: STRESS_A,
+  items: STRESS_ITEMS,
+  schemaVersion: 3,
+  sections: [
+    { id: STRESS_A, name: SECTION_PHRASE },
+    { id: STRESS_B, name: SECTION_WORD },
+    { id: STRESS_C, name: "Zwischenablage wiederhergestellt" },
+    { id: STRESS_D, name: "Inbox" },
+  ],
+};
+
+const STRESS_STATUS = {
+  ...STATUS,
+  keys: "missing",
+  problem: `Bildschirmaufnahme und Systemaudio konnten nicht gestartet werden, weil ${LONG_APP} die Aufnahme blockiert. ${LONG_WORD}.`,
+  saveError: `Die Zwischenablage wurde wiederhergestellt, aber die Ablage konnte nicht gespeichert werden: ${LONG_URL}`,
+};
+
+const stressView = (
+  doc: typeof STRESS_DOC | typeof EMPTY_DOC = STRESS_DOC,
+  status: typeof STRESS_STATUS | typeof STATUS = STATUS
+) => ({
+  ...shelfView(),
+  doc,
+  status,
+});
+
+const composerField = (page: Page) =>
+  page.getByRole("textbox", { name: /^New note in/u });
+
+/** As Electron does when the shelf is hidden and shown again: the page goes hidden, then visible, then the window takes focus. */
+const hideAndShow = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    let state = "visible";
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => state,
+    });
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => state === "hidden",
+    });
+    window.dispatchEvent(new Event("blur"));
+    state = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  await page.waitForTimeout(150);
+};
+
+/** A window closing over the open shelf (drawing, picker) gives it the keyboard back: focus without a hide. */
+const refocus = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  await page.waitForTimeout(150);
+};
+
+const FocusOwnerSchema = z.object({
+  composer: z.boolean(),
+  item: z.string().nullable(),
+});
+
+const focusOwner = async (page: Page) =>
+  FocusOwnerSchema.parse(
+    await page.evaluate(() => {
+      const active = document.activeElement;
+
+      return {
+        composer:
+          active?.getAttribute("aria-label")?.startsWith("New note in") ===
+          true,
+        item:
+          active?.closest<HTMLElement>("[data-item-id]")?.dataset.itemId ??
+          null,
+      };
+    })
+  );
+
+const focusRowOf = async (page: Page, n: number): Promise<void> => {
+  await select(page, n);
+  await item(page, n).locator("[data-row-keys]").first().focus();
+};
+
+const OpacitySchema = z.object({ label: z.string(), opacity: z.number() });
+
+/** The focused control and its least opaque ancestor: a control that takes focus unseen fails. */
+const focusedOpacity = async (page: Page) =>
+  OpacitySchema.parse(
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      let opacity = 1;
+
+      for (
+        let element = active;
+        element !== null;
+        element = element.parentElement
+      ) {
+        opacity = Math.min(opacity, Number(getComputedStyle(element).opacity));
+      }
+
+      return {
+        label:
+          active?.getAttribute("aria-label") ??
+          active?.textContent?.trim() ??
+          "",
+        opacity,
+      };
+    })
+  );
+
+const SCREENSHOT_VIEW = {
+  heightPx: LOGIN.heightPx,
+  imageUrl: `/.fixtures/${LOGIN.file}`,
+  seq: 1,
+  widthPx: LOGIN.widthPx,
+};
+
+/** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
+type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
+  readonly page?: PageName;
+};
+
+const stress = (scene: StressScene): Scene => ({
+  layoutCheck: true,
+  page: "shelf",
+  ...scene,
+});
+
+const STRESS_SCENES: readonly Scene[] = (
+  [
+    {
+      data: { view: stressView() },
+      name: "stress-list",
+      width: NARROWEST,
+    },
+    {
+      data: { view: stressView() },
+      name: "stress-list-wide",
+    },
+    {
+      act: async (page) => {
+        await page
+          .locator(".shelf-list")
+          .first()
+          .evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+          });
+      },
+      data: { view: stressView() },
+      name: "stress-list-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 710);
+      },
+      data: { view: stressView() },
+      name: "stress-open-text",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 710);
+        await item(page, 710).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-open-text-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 711);
+        await item(page, 711).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-open-image",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 712);
+        await item(page, 712).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-open-file",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+      },
+      data: { view: stressView() },
+      name: "stress-details-text",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+        await page.locator("[data-details]").evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-details-text-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 711);
+      },
+      data: { view: stressView() },
+      name: "stress-details-image",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 711);
+        await page.locator("[data-details]").evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-details-image-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 712);
+      },
+      data: { view: stressView() },
+      name: "stress-details-file",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+        await page.getByRole("button", { name: /Change Due$/u }).click();
+        await page.getByRole("menu").waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-due-picker",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 710);
+      },
+      data: { view: stressView() },
+      name: "stress-item-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 710);
+        await page.getByRole("menuitem", { name: /^Move to/u }).click();
+        await page.getByRole("menuitem", { name: SECTION_WORD }).waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-move-to",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("button", { name: SECTION_PHRASE, exact: true })
+          .click({ button: "right" });
+        await page.getByRole("menu").waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-section-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("button", { name: "More", exact: true })
+          .first()
+          .click();
+        await page.getByRole("menu").waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-shelf-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: "Search the shelf" })
+          .fill(`${LONG_WORD} Zwischenablage wiederhergestellt`);
+      },
+      data: { view: stressView() },
+      name: "stress-search-long",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: "Filter by Due" }).click();
+        await page.getByRole("menuitem", { name: /^Overdue/u }).waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-search-filter",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: "Search the shelf" })
+          .fill("Zwischenablage due:");
+      },
+      data: { view: stressView() },
+      name: "stress-search-due-typing",
+      width: NARROWEST,
+    },
+    {
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners",
+      width: NARROWEST,
+    },
+    {
+      data: {
+        view: {
+          ...stressView(STRESS_DOC, {
+            ...STATUS,
+            saveError: STRESS_STATUS.saveError,
+          }),
+          notSaved: [
+            { id: uuid(710), undo: "discard" },
+            { id: uuid(712), undo: "delete" },
+          ],
+        },
+      },
+      name: "stress-not-saved",
+      width: NARROWEST,
+    },
+    {
+      data: { view: shelfView(EMPTY_DOC) },
+      name: "stress-empty",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await composerField(page).click();
+        await page.keyboard.type(
+          "# Bildschirmaufnahme und Systemaudio – Jahresübersicht"
+        );
+      },
+      data: { view: stressView() },
+      keepPointer: true,
+      name: "stress-composer-section",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await composerField(page).click();
+        await page.keyboard.type(`${LONG_WORD}${LONG_WORD} ${LONG_URL}`);
+      },
+      data: { view: stressView() },
+      keepPointer: true,
+      name: "stress-composer-long",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page.evaluate(
+          `globalThis.__emit("notice", ${JSON.stringify({
+            message: `Zwischenablage wiederhergestellt, aber ${LONG_WORD} konnte nicht kopiert werden.`,
+            tone: "failed",
+          })})`
+        );
+        await page.locator("[data-sonner-toast]").first().waitFor();
+        await page.waitForTimeout(500);
+      },
+      data: { view: stressView() },
+      name: "stress-shelf-notice",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await focusRowOf(page, 710);
+        await hideAndShow(page);
+      },
+      check: async (page) => {
+        const owner = await focusOwner(page);
+
+        return owner.composer
+          ? null
+          : `opening the shelf again left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
+      },
+      data: { view: stressView() },
+      name: "stress-open-focus",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await focusRowOf(page, 710);
+        await refocus(page);
+      },
+      check: async (page) => {
+        const owner = await focusOwner(page);
+
+        return owner.item === uuid(710)
+          ? null
+          : `a window closing over the shelf moved the keyboard off the item it was on (${owner.composer ? "to the note field" : (owner.item ?? "nowhere")})`;
+      },
+      data: { view: stressView() },
+      name: "stress-refocus-keeps-row",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+        await hideAndShow(page);
+      },
+      check: async (page) =>
+        (await page.locator("[data-details]").count()) === 1
+          ? null
+          : "opening the shelf again closed the details that were open",
+      data: { view: stressView() },
+      name: "stress-open-keeps-details",
+      width: NARROWEST,
+    },
+    {
+      data: {
+        view: {
+          corner: "bottom-right",
+          seq: 1,
+          title: `Saved to ${SECTION_PHRASE}`,
+          tone: "done",
+        },
+      },
+      name: "stress-notice-done",
+      page: "toast",
+    },
+    {
+      data: {
+        view: {
+          corner: "top-left",
+          seq: 1,
+          title: `Zwischenablage wiederhergestellt, aber die Bildschirmaufnahme und Systemaudio konnten nicht gespeichert werden, weil ${LONG_WORD} den Datenträger blockiert.`,
+          tone: "failed",
+        },
+      },
+      height: 72,
+      name: "stress-notice-failed",
+      page: "toast",
+      width: 360,
+    },
+    {
+      data: { view: SCREENSHOT_VIEW },
+      name: "stress-screenshot-card",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.mouse.move(140, 90);
+        await page.waitForTimeout(300);
+      },
+      data: { view: SCREENSHOT_VIEW },
+      keepPointer: true,
+      name: "stress-screenshot-hover",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Tab");
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const { label, opacity } = await focusedOpacity(page);
+
+        return opacity > 0.5
+          ? null
+          : `Tab put the keyboard on “${label}”, which can’t be seen (opacity ${opacity})`;
+      },
+      data: { view: SCREENSHOT_VIEW },
+      // The pointer stays off the card, so only the keyboard shows its actions.
+      keepPointer: true,
+      name: "stress-screenshot-focus",
+      page: "screenshot",
+    },
+  ] satisfies readonly StressScene[]
+).map(stress);
+
+/** The drawing window at its smallest (src/shared/geometry.ts VIEWER_MIN). */
+const DRAWING_MIN = { height: 360, width: 600 } as const;
+
+/** Thirty pins across the sign-in screen, every one labelled at PIN_LABEL_MAX length or with one long word. */
+const MANY_PINS = Array.from({ length: 30 }, (_, index) => ({
+  label: index % 2 === 0 ? LONG_PIN : LONG_WORD,
+  x: 200 + ((index * 157) % 1500),
+  y: 150 + ((index * 97) % 900),
+}));
+
+const DRAWING_STRESS_SCENES: readonly Scene[] = (
+  [
+    {
+      data: { view: BLANK_DRAWING },
+      name: "stress-drawing-blank",
+    },
+    {
+      data: { view: drawingView(MANY_PINS, false) },
+      name: "stress-drawing-pins",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("p");
+        await page.keyboard.press("2");
+      },
+      data: { view: drawingView(MANY_PINS, true) },
+      name: "stress-drawing-pin-selected",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Text" }).click();
+        await page
+          .locator("canvas")
+          .first()
+          .click({ position: { x: 120, y: 120 } });
+        await page
+          .getByRole("textbox", { exact: true, name: "Text" })
+          .fill(`${LONG_WORD} ${LONG_STEP}`);
+      },
+      data: { view: BLANK_DRAWING },
+      keepPointer: true,
+      name: "stress-drawing-text",
+    },
+    {
+      act: async (page) => {
+        await drawStroke(page, 160);
+        await page.getByRole("button", { exact: true, name: "Save" }).click();
+        await page.getByRole("alert").waitFor();
+      },
+      data: {
+        saveFails: `Die Zeichnung konnte nicht gespeichert werden, weil der Datenträger voll ist: ${LONG_WORD}. Zwischenablage wiederhergestellt.`,
+        view: BLANK_DRAWING,
+      },
+      name: "stress-drawing-save-failed",
+    },
+    {
+      act: async (page) => {
+        await drawStroke(page, 160);
+        await page.evaluate('globalThis.__emit("openRefused", null)');
+      },
+      data: { view: drawingView(MANY_PINS, true) },
+      name: "stress-drawing-refused",
+    },
+    {
+      act: async (page) => {
+        await drawStroke(page, 160);
+        await page.evaluate('globalThis.__emit("confirmClose", "earlier")');
+        await page.getByRole("alertdialog").waitFor();
+      },
+      data: { view: drawingView(MANY_PINS, false) },
+      name: "stress-drawing-unsaved",
+    },
+    {
+      data: { view: { ...drawingView(MANY_PINS, true), quitting: true } },
+      name: "stress-drawing-locked",
+    },
+  ] satisfies readonly StressScene[]
+).map((scene) => stress({ ...scene, ...DRAWING_MIN, page: "drawing" }));
 
 const SCENES: readonly Scene[] = [
   {
@@ -5853,13 +6591,19 @@ const SCENES: readonly Scene[] = [
     name: "drawing-lock-lifts-mid-stroke",
     page: "drawing",
   },
+  ...STRESS_SCENES,
+  ...DRAWING_STRESS_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   drawing: { height: 720, width: 1040 },
   onboarding: { height: 640, width: 460 },
   picker: { height: 520, width: 600 },
+  // src/main/screenshot-window.ts: 280 wide, as tall as the picture's shape allows within 180–260.
+  screenshot: { height: 180, width: 280 },
   shelf: { height: 620, width: 360 },
+  // src/main/toast-window.ts: a done notice's window; a failed one is 360×72.
+  toast: { height: 44, width: 260 },
 };
 
 /** The macOS sidebar material, which Chrome cannot draw, as a flat stand-in. */
@@ -5997,6 +6741,28 @@ const cutBadges = async (page: Page): Promise<readonly string[]> =>
     })
   );
 
+/** The pages whose every label must truncate, wrap or show whole: the shelf, the capture notice, the screenshot card and the drawing window. */
+const STRICT_PAGES: ReadonlySet<PageName> = new Set([
+  "drawing",
+  "shelf",
+  "toast",
+  "screenshot",
+]);
+
+const LAYOUT = path.join(ROOT, "scripts", "fixtures", "screens-layout.js");
+
+const ProblemsSchema = z.array(z.string());
+
+/**
+ * What breaks at the edges, anywhere on the page, menus and notices
+ * included (scripts/fixtures/screens-layout.js): a box past the window's
+ * sides, a menu entry outside its menu, words cut off sideways without an
+ * ellipsis, an ellipsis with no title that holds the whole text, and two
+ * controls that partly cover each other.
+ */
+const strictProblems = async (page: Page): Promise<readonly string[]> =>
+  ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));
+
 const shoot = async (
   browser: Browser,
   origin: string,
@@ -6005,7 +6771,7 @@ const shoot = async (
   theme: Theme
 ): Promise<string> => {
   const size = {
-    ...SIZES[scene.page],
+    height: scene.height ?? SIZES[scene.page].height,
     width: scene.width ?? SIZES[scene.page].width,
   };
 
@@ -6032,6 +6798,11 @@ const shoot = async (
     `globalThis.__screens = ${JSON.stringify({ data: scene.data, page: scene.page })};`
   );
   await page.addInitScript({ path: BRIDGE });
+
+  if (STRICT_PAGES.has(scene.page)) {
+    await page.addInitScript({ path: LAYOUT });
+  }
+
   await page.goto(`${origin}/${scene.page}.html`);
 
   if (platform === "macos") {
@@ -6065,19 +6836,25 @@ const shoot = async (
 
   const problems =
     scene.layoutCheck === true
-      ? [...(await layoutProblems(page)), ...(await cutBadges(page))]
+      ? [
+          ...(await layoutProblems(page)),
+          ...(await cutBadges(page)),
+          ...(STRICT_PAGES.has(scene.page) ? await strictProblems(page) : []),
+        ]
       : [];
 
   const failed = scene.check === undefined ? null : await scene.check(page);
 
   await context.close();
 
-  if (problems.length > 0) {
-    throw new Error(`layout: ${problems.join("; ")}`);
-  }
+  // Both, when both fail: a layout problem must not hide what the scene itself checks.
+  const reasons = [
+    ...(problems.length > 0 ? [`layout: ${problems.join("; ")}`] : []),
+    ...(failed === null ? [] : [`check: ${failed}`]),
+  ];
 
-  if (failed !== null) {
-    throw new Error(`check: ${failed}`);
+  if (reasons.length > 0) {
+    throw new Error(reasons.join(" | "));
   }
 
   return path.relative(OUT, file);
