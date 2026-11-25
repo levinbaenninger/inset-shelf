@@ -3269,13 +3269,37 @@ const STRESS_STATUS = {
 };
 
 const stressView = (
-  doc: typeof STRESS_DOC | typeof EMPTY_DOC = STRESS_DOC,
+  doc: typeof STRESS_DOC | typeof EMPTY_DOC | typeof CROWDED_DOC = STRESS_DOC,
   status: typeof STRESS_STATUS | typeof STATUS = STATUS
 ) => ({
   ...shelfView(),
   doc,
   status,
 });
+
+/** Thirty pins across the sign-in screen, every one labelled at PIN_LABEL_MAX length or with one long word. */
+const MANY_PINS = Array.from({ length: 30 }, (_, index) => ({
+  label: index % 2 === 0 ? LONG_PIN : LONG_WORD,
+  x: 200 + ((index * 157) % 1500),
+  y: 150 + ((index * 97) % 900),
+}));
+
+/** The image with thirty labelled pins, twenty steps and ten linked windows: lists an open row and details must hold. */
+const CROWDED_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...STRESS_IMAGE,
+      pins: MANY_PINS,
+      steps: Array.from({ length: 20 }, (_, index) =>
+        step(80 + index, index % 3 === 0 ? LONG_STEP : `Step ${index + 1}`)
+      ),
+      windows: Array.from({ length: 10 }, (_, index) =>
+        longWindow(index % 5, index === 0 ? LONG_DESCRIPTION : "")
+      ).map((window, index) => ({ ...window, id: uuid(760 + index) })),
+    },
+  ],
+};
 
 const composerField = (page: Page) =>
   page.getByRole("textbox", { name: /^New note in/u });
@@ -3492,6 +3516,27 @@ const STRESS_SCENES: readonly Scene[] = (
       },
       data: { view: stressView() },
       name: "stress-details-file",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 711);
+      },
+      data: { view: stressView(CROWDED_DOC) },
+      name: "stress-open-crowded",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 711);
+        await page
+          .getByRole("region", { exact: true, name: "Pins" })
+          .evaluate((element) => {
+            element.scrollIntoView({ block: "start" });
+          });
+      },
+      data: { view: stressView(CROWDED_DOC) },
+      name: "stress-details-crowded",
       width: NARROWEST,
     },
     {
@@ -3747,13 +3792,6 @@ const STRESS_SCENES: readonly Scene[] = (
 
 /** The drawing window at its smallest (src/shared/geometry.ts VIEWER_MIN). */
 const DRAWING_MIN = { height: 360, width: 600 } as const;
-
-/** Thirty pins across the sign-in screen, every one labelled at PIN_LABEL_MAX length or with one long word. */
-const MANY_PINS = Array.from({ length: 30 }, (_, index) => ({
-  label: index % 2 === 0 ? LONG_PIN : LONG_WORD,
-  x: 200 + ((index * 157) % 1500),
-  y: 150 + ((index * 97) % 900),
-}));
 
 const DRAWING_STRESS_SCENES: readonly Scene[] = (
   [
