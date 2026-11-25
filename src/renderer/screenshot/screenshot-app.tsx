@@ -106,19 +106,18 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
       <div className="absolute inset-x-12 bottom-2.5 z-10 flex flex-col items-center gap-1.5">
         {failure === null ? null : (
           <p
-            className="max-w-full rounded-md bg-black/70 px-2 py-1 text-center text-[11px] leading-snug wrap-break-word text-white"
+            className="max-w-full rounded-md bg-black/70 px-2 py-1 text-center text-xs leading-snug wrap-break-word text-white"
             role="alert"
           >
             {failure}
           </p>
         )}
         <Button
-          className="rounded-full px-2.5"
           onClick={() => {
             setFailure(null);
             api.addToShelf(seq);
           }}
-          size="xs"
+          size="pill-xs"
           variant="overlay"
         >
           {failure === null ? "Add to Shelf" : "Retry"}
@@ -221,7 +220,8 @@ const useHoverReport = (): void => {
     // Only focus the keyboard moved, as the actions show for it: a clicked button keeps focus after the pointer leaves.
     const focusIn = (event: FocusEvent): void => {
       keyboard =
-        event.target instanceof Element && event.target.matches(":focus-visible");
+        event.target instanceof Element &&
+        event.target.matches(":focus-visible");
       report();
     };
 

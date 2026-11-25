@@ -39,6 +39,8 @@ const buttonVariants = cva(
         "icon-lg": "size-9",
         /** Fully rounded, for buttons set on a picture. */
         pill: "h-8 gap-1.5 rounded-full px-4",
+        /** A small pill: the screenshot card's action that shows before hover. */
+        "pill-xs": "h-6 gap-1 rounded-full px-2.5 text-xs",
         "icon-round": "size-8 rounded-full",
       },
     },

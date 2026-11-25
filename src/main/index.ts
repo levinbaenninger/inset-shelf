@@ -1794,6 +1794,9 @@ const start = async (): Promise<void> => {
     drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
+  // Set once the screenshot card's IPC server exists.
+  let reportAddFailed: (seq: number, message: string) => void = ignore;
+
   /** The card's screenshot, when it is still the newest; null for an older card's request. */
   const currentShot = (seq: number) =>
     shot !== null && shot.seq === seq ? shot : null;
@@ -1858,7 +1861,7 @@ const start = async (): Promise<void> => {
       // A card its time put away meanwhile can't say it: the notice does.
       if (screenshotCard.isVisible()) {
         screenshotCard.hold();
-        screenshotServer.emit("addFailed", { message: written.message, seq });
+        reportAddFailed(seq, written.message);
       } else {
         notify(written.message, "failed");
       }
@@ -2008,6 +2011,10 @@ const start = async (): Promise<void> => {
       target: () => screenshotCard.webContents,
     }
   );
+
+  reportAddFailed = (seq, message) => {
+    screenshotServer.emit("addFailed", { message, seq });
+  };
 
   screenshotCard.onView((view) => {
     screenshotServer.emit("view", view);

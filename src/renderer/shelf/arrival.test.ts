@@ -13,39 +13,39 @@ const place = (patch: Partial<KeyboardPlace>): KeyboardPlace => ({
 
 describe(noteFieldTakesKeyboard, () => {
   it("puts the caret in the note field when nothing has the keyboard, however the shelf came forward", () => {
-    expect(noteFieldTakesKeyboard("shown", place({}))).toBe(true);
-    expect(noteFieldTakesKeyboard("refocused", place({}))).toBe(true);
+    expect(noteFieldTakesKeyboard("shown", place({}))).toBeTruthy();
+    expect(noteFieldTakesKeyboard("refocused", place({}))).toBeTruthy();
     expect(
       noteFieldTakesKeyboard("refocused", place({ on: "emptySearch" }))
-    ).toBe(true);
+    ).toBeTruthy();
   });
 
   it("takes the keyboard off an item when the shelf is shown again", () => {
-    expect(noteFieldTakesKeyboard("shown", place({ on: "control" }))).toBe(
-      true
-    );
+    expect(
+      noteFieldTakesKeyboard("shown", place({ on: "control" }))
+    ).toBeTruthy();
   });
 
   it("leaves the keyboard on an item when a window closes over the open shelf", () => {
     expect(
       noteFieldTakesKeyboard("refocused", place({ on: "control" }))
-    ).toBe(false);
+    ).toBeFalsy();
   });
 
   it("leaves what is under way alone: an edit, details, a menu, a search with words, a field", () => {
     expect(
       noteFieldTakesKeyboard("shown", place({ editing: true, on: "control" }))
-    ).toBe(false);
+    ).toBeFalsy();
     expect(
       noteFieldTakesKeyboard("shown", place({ inDetails: true, on: "control" }))
-    ).toBe(false);
+    ).toBeFalsy();
     expect(
       noteFieldTakesKeyboard("shown", place({ menuOpen: true, on: "control" }))
-    ).toBe(false);
-    expect(noteFieldTakesKeyboard("shown", place({ on: "search" }))).toBe(
-      false
-    );
-    expect(noteFieldTakesKeyboard("shown", place({ on: "text" }))).toBe(false);
+    ).toBeFalsy();
+    expect(
+      noteFieldTakesKeyboard("shown", place({ on: "search" }))
+    ).toBeFalsy();
+    expect(noteFieldTakesKeyboard("shown", place({ on: "text" }))).toBeFalsy();
   });
 
   it("lands the same whichever of the focus and the shown message comes first", () => {
@@ -59,7 +59,7 @@ describe(noteFieldTakesKeyboard, () => {
       noteFieldTakesKeyboard("shown", place({ on: "control" })) &&
       !noteFieldTakesKeyboard("refocused", place({ on: "text" }));
 
-    expect(focusFirst).toBe(true);
-    expect(shownFirst).toBe(true);
+    expect(focusFirst).toBeTruthy();
+    expect(shownFirst).toBeTruthy();
   });
 });

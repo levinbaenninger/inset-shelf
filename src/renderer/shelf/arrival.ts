@@ -33,18 +33,10 @@ export const noteFieldTakesKeyboard = (
     return false;
   }
 
-  switch (place.on) {
-    case "nothing":
-    case "emptySearch": {
-      return true;
-    }
-
-    case "control": {
-      return arrival === "shown" && !place.inDetails && !place.menuOpen;
-    }
-
-    default: {
-      return false;
-    }
+  if (place.on === "control") {
+    return arrival === "shown" && !place.inDetails && !place.menuOpen;
   }
+
+  // A field being typed in, or a search with words, keeps the keyboard.
+  return place.on === "nothing" || place.on === "emptySearch";
 };

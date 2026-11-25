@@ -3890,13 +3890,16 @@ const STRESS_SCENES: readonly Scene[] = (
       },
       check: async (page) => {
         const alert = page.getByRole("alert");
-        const shown = await alert.innerText();
+        const shown = (await alert.textContent()) ?? "";
 
         const whole = await alert.evaluate((element) => {
-          const text = element.querySelector("[aria-expanded]")?.previousElementSibling;
+          const text =
+            element.querySelector("[aria-expanded]")?.previousElementSibling;
 
-          return text instanceof HTMLElement &&
-            text.scrollHeight <= text.clientHeight + 1;
+          return (
+            text instanceof HTMLElement &&
+            text.scrollHeight <= text.clientHeight + 1
+          );
         });
 
         return shown.includes(STRESS_STATUS.saveError) && whole

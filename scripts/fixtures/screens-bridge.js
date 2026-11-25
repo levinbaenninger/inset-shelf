@@ -380,8 +380,8 @@ if (page === "screenshot") {
       getTutorial: resolved(data.tutorial),
       getView: resolved(data.view),
       hold: logged("hold", nothing),
-      hover: (on) => {
-        globalThis.__hover.push(on);
+      hover: (held) => {
+        globalThis.__hover.push(held);
       },
       on,
       saveToDownloads: logged("saveToDownloads", nothing),

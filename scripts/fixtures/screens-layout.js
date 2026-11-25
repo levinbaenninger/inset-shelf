@@ -252,7 +252,8 @@ const overlaps = (elements) => {
   );
 };
 
-const FIELDS = "input:not([type=checkbox], [type=radio], [type=range]), textarea";
+const FIELDS =
+  "input:not([type=checkbox], [type=radio], [type=range]), textarea";
 
 /** A field the keyboard isn't in that hides part of its words sideways: they are cut mid-glyph. */
 const cutFields = (elements) =>
@@ -299,8 +300,8 @@ const contentWidth = (element) => {
 
   return (
     element.clientWidth -
-    Number.parseFloat(style.paddingLeft) -
-    Number.parseFloat(style.paddingRight)
+    Number(style.paddingLeft.replace("px", "")) -
+    Number(style.paddingRight.replace("px", ""))
   );
 };
 
@@ -329,7 +330,7 @@ const narrowColumns = (elements) => {
   }
 
   for (const field of elements.filter((element) => element.matches(FIELDS))) {
-    const text = field.value || field.placeholder;
+    const text = field.value === "" ? field.placeholder : field.value;
 
     if (text.trim().length > COLUMN_CH) {
       columns.set(field, text);
