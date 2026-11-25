@@ -28,6 +28,10 @@ const unseen = (element) =>
 
 const clips = (element) => getComputedStyle(element).overflowX !== "visible";
 
+/** Cuts what runs past its top or bottom, as a clamp that clips only downwards does. */
+const clipsDown = (element) =>
+  getComputedStyle(element).overflowY !== "visible";
+
 const windowWidth = () => document.documentElement.clientWidth;
 
 /**
@@ -43,16 +47,16 @@ const inSight = (element, box) => {
     parent !== null && parent !== document.body;
     parent = parent.parentElement
   ) {
-    if (clips(parent)) {
-      const outer = parent.getBoundingClientRect();
+    const outer = parent.getBoundingClientRect();
 
+    if (clipsDown(parent)) {
       top = Math.max(top, outer.top);
       bottom = Math.min(bottom, outer.bottom);
+    }
 
-      if (outer.width < windowWidth() - 1) {
-        left = Math.max(left, outer.left);
-        right = Math.min(right, outer.right);
-      }
+    if (clips(parent) && outer.width < windowWidth() - 1) {
+      left = Math.max(left, outer.left);
+      right = Math.min(right, outer.right);
     }
   }
 
