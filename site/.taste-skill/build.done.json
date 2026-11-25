@@ -1,0 +1,11 @@
+{
+ "page": "out/index.html",
+ "url": null,
+ "root": "out",
+ "kind": "software",
+ "category": "capture shelf for text, screenshots and notes",
+ "primary": "Download for Mac",
+ "rounds": 3,
+ "start": "2026-11-25T08:55:53.799Z",
+ "by": "gate.mjs --start"
+}

@@ -1,0 +1,6 @@
+# The landing page installs on its own, apart from the app at the repository root.
+packages: []
+allowBuilds:
+  # wrangler's bundler and its local runtime: both install scripts only pick a prebuilt binary.
+  esbuild: true
+  workerd: true
