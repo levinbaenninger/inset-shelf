@@ -32,7 +32,7 @@ import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
 import { useContext, useEffect, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,13 +42,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  Clamp,
-  lineHeight,
-  tooltipText,
-  Truncated,
-  useCut,
-} from "@/shared/clamp";
+import { tooltipText, Truncated, useCut } from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -66,21 +60,21 @@ import { MarkdownField } from "./markdown-field";
 import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
+import { moreText } from "./open-row";
 import {
+  budgetOf,
   contextMenuAt,
   DONE,
   EDITING,
-  fitOpenRow,
-  OPEN_SHARE,
-  OpenLines,
-  ROW_CAPS,
+  OpenRow,
   WORDS,
 } from "./row-look";
-import type { MeasuredPart, RowLines } from "./row-look";
-import { filledSteps, moreText, rowParts } from "./row-parts";
+import { filledSteps, ROW_WINDOWS, rowParts } from "./row-parts";
 import type { RowExtras } from "./row-parts";
+import { RowText } from "./row-text";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
+import { useOpenRow } from "./use-open-row";
 import { isTextField } from "./use-shelf-keys";
 
 /**
@@ -587,9 +581,12 @@ const Picture = ({
   onDragImage,
   onOpen,
   onSelect,
+  tallest = 0,
 }: {
   readonly item: ImageItem;
   readonly compact: boolean;
+  /** Open, as tall as the row's budget lets it (open-row.ts): the first part to give way. */
+  readonly tallest?: number;
 } & Pick<
   RowHandlers,
   "onContextMenu" | "onDragImage" | "onOpen" | "onSelect"
@@ -604,6 +601,7 @@ const Picture = ({
     )}
     draggable
     data-row-keys
+    data-row-part={compact ? undefined : "picture"}
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDoubleClick={onOpen}
@@ -620,11 +618,12 @@ const Picture = ({
       alt={imageCaption(item)}
       className={cn(
         "block h-auto",
-        compact ? "w-full" : "max-h-48 w-auto max-w-full"
+        compact ? "w-full" : "max-h-(--picture) w-auto max-w-full"
       )}
       draggable={false}
       height={item.image.heightPx}
       src={insetUrl.attachment(item.image.file)}
+      style={compact ? undefined : { "--picture": `${tallest}px` }}
       width={item.image.widthPx}
     />
     {item.pins.map((pin, index) => (
@@ -670,7 +669,7 @@ const ImageBody = ({
   | "onSelect"
   | "onStopEditing"
 >) => {
-  const titleLines = useContext(OpenLines).title;
+  const budget = budgetOf(useContext(OpenRow));
 
   if (!selected && !editing) {
     return (
@@ -719,23 +718,22 @@ const ImageBody = ({
       <Picture
         compact={false}
         item={item}
+        tallest={budget.picture}
         onContextMenu={onContextMenu}
         onDragImage={onDragImage}
         onOpen={onOpen}
         onSelect={onSelect}
       />
       {item.title === null ? null : (
-        <Clamp
+        <RowText
           className={cn(
             "text-sm leading-snug font-medium break-words",
             item.done && "text-muted-foreground line-through"
           )}
-          lines={titleLines}
-          rowPart="title"
-          what="the title"
+          part="title"
         >
           {item.title}
-        </Clamp>
+        </RowText>
       )}
       <Note
         editing={editing}
@@ -762,8 +760,6 @@ const FileTitle = ({
   readonly item: FileItem;
   readonly selected: boolean;
 } & Pick<RowHandlers, "onContextMenu" | "onSelect">) => {
-  const titleLines = useContext(OpenLines).title;
-
   const title = (
     <button
       className={cn(
@@ -782,14 +778,9 @@ const FileTitle = ({
   );
 
   return selected ? (
-    <Clamp
-      className="text-sm leading-snug"
-      lines={titleLines}
-      rowPart="title"
-      what="the title"
-    >
+    <RowText className="text-sm leading-snug" part="title">
       {title}
-    </Clamp>
+    </RowText>
   ) : (
     title
   );
@@ -883,7 +874,6 @@ const TextBody = ({
   | "onStopEditing"
 >) => {
   const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
-  const openLines = useContext(OpenLines);
 
   if (editing) {
     return (
@@ -903,12 +893,7 @@ const TextBody = ({
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
         // Ten lines at most until Show more, fewer when the rest of the row needs the room, so one item never fills the shelf; an edit shows all of it.
-        <Clamp
-          className={WORDS}
-          lines={openLines.words}
-          rowPart="words"
-          what="the text"
-        >
+        <RowText className={WORDS} part="words">
           {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
           {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
           <div
@@ -931,7 +916,7 @@ const TextBody = ({
               text={item.text}
             />
           </div>
-        </Clamp>
+        </RowText>
       ) : (
         <button
           className={cn(
@@ -980,9 +965,9 @@ const SourceRow = ({
 
 /**
  * What an open row shows besides its words, each only once it is set: pin
- * labels, the description (three lines), checkable steps and the linked
- * windows, each list cut short (row-parts.ts) with one line that says how
- * much more details hold and opens them.
+ * labels, the description, checkable steps and the linked windows, each as
+ * much as the row's budget gives it (open-row.ts), with one line that says
+ * how much more details hold and opens them.
  */
 const Expansion = ({
   extras,
@@ -997,51 +982,63 @@ const Expansion = ({
   readonly onReopenWindow: (window: WindowRef) => void;
   readonly onShowDetails: () => void;
 }) => {
-  const openLines = useContext(OpenLines);
+  const budget = budgetOf(useContext(OpenRow));
 
   if (
     !extras.description &&
-    extras.steps === null &&
-    extras.windows === null &&
-    extras.pinLegend === null
+    extras.steps === 0 &&
+    extras.windows === 0 &&
+    extras.pinLegend === 0
   ) {
     return null;
   }
 
-  const more = moreText(extras);
+  const pins = Math.min(extras.pinLegend, budget.pins);
+  const steps = Math.min(extras.steps, budget.steps);
+
+  const more = moreText({
+    pins: extras.pinLegend - pins,
+    steps: extras.steps - steps,
+    windows: budget.windows ? 0 : extras.windows,
+  });
 
   return (
     <div className="flex flex-col gap-2 pt-0.5">
-      {extras.pinLegend === null || item.kind !== "image" ? null : (
-        <PinLegend pins={item.pins} shown={extras.pinLegend.shown} />
+      {extras.pinLegend === 0 || item.kind !== "image" ? null : (
+        <div data-row-part="pins">
+          <PinLegend pins={item.pins} shown={pins} />
+        </div>
       )}
       {extras.description ? (
-        <Clamp
+        <RowText
           className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
-          lines={openLines.description}
-          rowPart="description"
-          what="the description"
+          part="description"
         >
           {item.description.trim()}
-        </Clamp>
+        </RowText>
       ) : null}
-      {extras.steps === null ? null : (
-        <StepChecklist
-          onToggle={onToggleStep}
-          steps={filledSteps(item.steps).slice(0, extras.steps.shown)}
-        />
+      {extras.steps === 0 ? null : (
+        <div data-row-part="steps">
+          <StepChecklist
+            onToggle={onToggleStep}
+            steps={filledSteps(item.steps).slice(0, steps)}
+          />
+        </div>
       )}
-      {extras.windows === null ? null : (
-        <WindowStrip
-          more={extras.windows.more}
-          onMore={onShowDetails}
-          onReopen={onReopenWindow}
-          windows={item.windows.slice(0, extras.windows.shown)}
-        />
+      {extras.windows === 0 || !budget.windows ? null : (
+        <div data-row-part="windows">
+          <WindowStrip
+            more={Math.max(0, extras.windows - ROW_WINDOWS)}
+            onMore={onShowDetails}
+            onReopen={onReopenWindow}
+            windows={item.windows.slice(0, ROW_WINDOWS)}
+          />
+        </div>
       )}
       {more === null ? null : (
         <Button
           className="-ml-2 max-w-full self-start"
+          data-row-part="more-line"
           onClick={onShowDetails}
           size="xs"
           variant="quiet"
@@ -1110,9 +1107,12 @@ const MoreButton = ({
 
 /** The open row's foot: when and how it was captured, and Details (→). */
 const OpenFooter = ({
+  badges,
   item,
   onShowDetails,
 }: {
+  /** An open row without a source carries its badges here, saving it a line. */
+  readonly badges: readonly ReactNode[];
   readonly item: ShelfItem;
   readonly onShowDetails: () => void;
 }) => (
@@ -1122,6 +1122,9 @@ const OpenFooter = ({
       className="text-muted-foreground min-w-0 flex-1 text-xs"
       text={metaText(item)}
     />
+    {badges.length === 0 ? null : (
+      <div className="flex shrink-0 items-center gap-1">{badges}</div>
+    )}
     <Button
       aria-label="Show details"
       className="-mr-2.75 shrink-0"
@@ -1143,93 +1146,25 @@ const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
   open: "bg-pin/10 ring-pin ring-2 ring-inset",
 };
 
-/** Show more and the gap above it, until one is there to measure. */
-const SHOW_MORE = 22;
-
 /**
- * How many lines each giving part of an open row shows (row-look.ts
- * fitOpenRow): the caps, shortened while the row would take more than
- * OPEN_SHARE of the list. Each part is measured whole (its scrollHeight)
- * and the rest of the row as what is left, so the answer doesn't depend on
- * the caps it set. A part the user opened with Show more counts as the rest.
+ * Which line carries a row's badges: a file's name without a source, else
+ * the source line; open and without a source, the Details line, which saves
+ * the open row a line.
  */
-const useOpenLines = (
-  row: RefObject<HTMLElement | null>,
-  open: boolean
-): RowLines => {
-  const [lines, setLines] = useState<RowLines>(ROW_CAPS);
+const placeBadges = (
+  parts: ReturnType<typeof rowParts>,
+  item: ShelfItem,
+  open: boolean,
+  badges: readonly ReactNode[]
+) => {
+  const foot = parts.badgesOn === "source" && open && item.context === null;
+  const on = foot ? "foot" : parts.badgesOn;
 
-  useEffect(() => {
-    const element = row.current;
-    const list = element?.closest<HTMLElement>(".shelf-list") ?? null;
-
-    const fit = (): void => {
-      if (element === null || list === null) {
-        return;
-      }
-
-      let fixed = element.getBoundingClientRect().height;
-      let button = SHOW_MORE;
-      const parts: MeasuredPart[] = [];
-
-      for (const box of element.querySelectorAll<HTMLElement>(
-        "[data-row-part]"
-      )) {
-        const part = box.dataset.rowPart;
-        const toggle = box.nextElementSibling;
-        const shown = box.getBoundingClientRect();
-        const opened = toggle?.getAttribute("aria-expanded") === "true";
-
-        if (
-          (part === "words" || part === "description" || part === "title") &&
-          !opened
-        ) {
-          const below =
-            toggle instanceof HTMLElement &&
-            toggle.hasAttribute("aria-expanded")
-              ? toggle.getBoundingClientRect().bottom - shown.bottom
-              : 0;
-
-          button = below > 0 ? below : button;
-          fixed -= shown.height + below;
-          parts.push({
-            line: lineHeight(box),
-            lines: Math.round(box.scrollHeight / lineHeight(box)),
-            part,
-          });
-        }
-      }
-
-      const next = fitOpenRow(
-        parts,
-        fixed,
-        OPEN_SHARE * list.clientHeight,
-        button
-      );
-
-      setLines((now) =>
-        now.words === next.words &&
-        now.title === next.title &&
-        now.description === next.description
-          ? now
-          : next
-      );
-    };
-
-    const observer = new ResizeObserver(fit);
-
-    if (open && element !== null && list !== null) {
-      observer.observe(element);
-      observer.observe(list);
-      fit();
-    }
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [row, open]);
-
-  return open ? lines : ROW_CAPS;
+  return {
+    file: on === "file" ? badges : [],
+    foot: on === "foot" ? badges : [],
+    source: on === "source" ? badges : [],
+  };
 };
 
 export const ItemRow = (props: ItemRowProps) => {
@@ -1237,10 +1172,11 @@ export const ItemRow = (props: ItemRowProps) => {
   const parts = rowParts(item, selected);
   const badges = badgeNodes(parts.badges, props.now);
   const rowRef = useRef<HTMLLIElement>(null);
-  const openLines = useOpenLines(rowRef, selected && !editing);
+  const openRow = useOpenRow(rowRef, selected && !editing, item);
+  const placed = placeBadges(parts, item, selected, badges);
 
   return (
-    <OpenLines value={openLines}>
+    <OpenRow value={openRow}>
       <li
         aria-current={selected ? "true" : undefined}
         className={cn(
@@ -1333,7 +1269,7 @@ export const ItemRow = (props: ItemRowProps) => {
           ) : null}
           {item.kind === "file" ? (
             <FileBody
-              badges={parts.badgesOn === "file" ? badges : []}
+              badges={placed.file}
               editing={editing}
               item={item}
               onContextMenu={props.onContextMenu}
@@ -1363,7 +1299,7 @@ export const ItemRow = (props: ItemRowProps) => {
             />
           )}
           <SourceRow
-            badges={parts.badgesOn === "source" ? badges : []}
+            badges={placed.source}
             context={item.context}
             onOpenLink={() => {
               props.onOpenLink();
@@ -1378,7 +1314,11 @@ export const ItemRow = (props: ItemRowProps) => {
             />
           )}
           {selected ? (
-            <OpenFooter item={item} onShowDetails={props.onShowDetails} />
+            <OpenFooter
+              badges={placed.foot}
+              item={item}
+              onShowDetails={props.onShowDetails}
+            />
           ) : null}
         </div>
         <MoreButton
@@ -1387,6 +1327,6 @@ export const ItemRow = (props: ItemRowProps) => {
           shown={selected || copied}
         />
       </li>
-    </OpenLines>
+    </OpenRow>
   );
 };

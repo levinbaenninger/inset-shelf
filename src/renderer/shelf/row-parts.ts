@@ -13,13 +13,14 @@ export interface RowList {
   readonly more: number;
 }
 
-/** What an open row lists under its words, each only once it is set; null where there is nothing. */
+/** What an open row lists under its words, each only once it is set: how many of each, 0 for none. How many show is the row's budget (open-row.ts). */
 export interface RowExtras {
   /** The labelled pins. */
-  readonly pinLegend: RowList | null;
+  readonly pinLegend: number;
   readonly description: boolean;
-  readonly steps: RowList | null;
-  readonly windows: RowList | null;
+  /** Steps that hold words. */
+  readonly steps: number;
+  readonly windows: number;
   readonly links: boolean;
 }
 
@@ -41,12 +42,8 @@ export interface RowParts {
 
 const MAX_BADGES = 3;
 
-/**
- * How much of each list an open row shows, so one item never fills the
- * shelf; details show all of it. The windows are one row of small pictures,
- * which says "+N" itself.
- */
-const ROW_LIST_MAX = { pins: 3, steps: 5, windows: 3 } as const;
+/** How many linked windows the open row's strip shows; it says "+N" for the rest itself. */
+export const ROW_WINDOWS = 3;
 
 /** How many attachments a row shows as tiles; the rest are a "+N" that opens details. */
 export const ROW_STRIP_MAX = 3;
@@ -98,9 +95,9 @@ const badgesOf = (item: ShelfItem, open: boolean): readonly RowBadge[] => {
 const extrasOf = (item: ShelfItem): RowExtras => ({
   description: item.description.trim() !== "",
   links: item.kind === "text" && item.links.length > 0,
-  pinLegend: rowList(labelledPins(item), ROW_LIST_MAX.pins),
-  steps: rowList(filledSteps(item.steps).length, ROW_LIST_MAX.steps),
-  windows: rowList(item.windows.length, ROW_LIST_MAX.windows),
+  pinLegend: labelledPins(item),
+  steps: filledSteps(item.steps).length,
+  windows: item.windows.length,
 });
 
 export const rowParts = (item: ShelfItem, open: boolean): RowParts => ({
@@ -109,19 +106,3 @@ export const rowParts = (item: ShelfItem, open: boolean): RowParts => ({
   extras: open ? extrasOf(item) : null,
   strip: rowList(item.attachments.length, ROW_STRIP_MAX),
 });
-
-const MORE_NAMES = [
-  { key: "pinLegend", many: "pins", one: "pin" },
-  { key: "steps", many: "steps", one: "step" },
-] as const;
-
-/** What only details show of an open row's pins and steps, in one line: "27 more pins · 15 more steps", or null. */
-export const moreText = (extras: RowExtras): string | null => {
-  const parts = MORE_NAMES.flatMap(({ key, many, one }) => {
-    const more = extras[key]?.more ?? 0;
-
-    return more === 0 ? [] : [`${more} more ${more === 1 ? one : many}`];
-  });
-
-  return parts.length === 0 ? null : parts.join(" · ");
-};

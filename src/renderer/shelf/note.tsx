@@ -1,15 +1,15 @@
 import type { FileItem, ImageItem } from "@shared/shelf";
 import { TEXT_MAX } from "@shared/shelf";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { Clamp } from "@/shared/clamp";
 
 import { useCaretStart } from "./edit-start";
 import type { RowHandlers } from "./item-row";
-import { contextMenuAt, DONE, OpenLines } from "./row-look";
+import { contextMenuAt, DONE } from "./row-look";
+import { RowText } from "./row-text";
 
 /** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
 const noteLook = (item: ImageItem | FileItem): string =>
@@ -118,8 +118,6 @@ const NoteText = ({
   readonly selected: boolean;
   readonly onEditAt: (offset: number | null) => void;
 } & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) => {
-  const openLines = useContext(OpenLines);
-
   if (item.note === "") {
     return null;
   }
@@ -151,14 +149,9 @@ const NoteText = ({
   );
 
   return selected ? (
-    <Clamp
-      className={noteLook(item)}
-      lines={openLines.words}
-      rowPart="words"
-      what="the note"
-    >
+    <RowText className={noteLook(item)} part="words">
       {note}
-    </Clamp>
+    </RowText>
   ) : (
     note
   );

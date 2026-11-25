@@ -188,7 +188,11 @@ export const StepChecklist = ({
 }) => (
   <ul aria-label="Next steps" className="flex flex-col">
     {filledSteps(steps).map((step) => (
-      <li className="flex min-h-6 items-start gap-2 py-0.5" key={step.id}>
+      <li
+        className="flex min-h-6 items-start gap-2 py-0.5"
+        data-step-id={step.id}
+        key={step.id}
+      >
         <Checkbox
           aria-label={
             step.done ? `Not done: ${step.text}` : `Done: ${step.text}`

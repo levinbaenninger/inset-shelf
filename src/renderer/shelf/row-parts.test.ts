@@ -2,7 +2,7 @@ import { FileItemSchema, ImageItemSchema, TextItemSchema } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { moreText, rowParts } from "./row-parts";
+import { rowParts } from "./row-parts";
 
 const uuid = (n: number): string =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -144,9 +144,9 @@ describe(rowParts, () => {
     expect(parts.extras).toStrictEqual({
       description: true,
       links: false,
-      pinLegend: null,
-      steps: { more: 0, shown: 2 },
-      windows: { more: 0, shown: 2 },
+      pinLegend: 0,
+      steps: 2,
+      windows: 2,
     });
   });
 
@@ -159,9 +159,9 @@ describe(rowParts, () => {
     expect(parts.extras).toStrictEqual({
       description: false,
       links: false,
-      pinLegend: null,
-      steps: null,
-      windows: null,
+      pinLegend: 0,
+      steps: 0,
+      windows: 0,
     });
     expect(parts.badges).toStrictEqual([{ count: 1, kind: "pins" }]);
   });
@@ -187,7 +187,7 @@ describe(rowParts, () => {
     ).toBe("source");
   });
 
-  it("cuts an open row's long lists short and says how much more details hold", () => {
+  it("counts what an open row lists, for its budget to cut short", () => {
     const crowded = image({
       pins: Array.from({ length: 30 }, (_, n) => ({
         label: `Pin ${n}`,
@@ -198,17 +198,10 @@ describe(rowParts, () => {
       windows: [1, 2, 3, 4, 5].map(windowRef),
     });
 
-    const { extras } = rowParts(crowded, true);
-
-    expect(extras?.pinLegend).toStrictEqual({ more: 27, shown: 3 });
-    expect(extras?.steps).toStrictEqual({ more: 1, shown: 5 });
-    // The windows' own row says "+2", so the line leaves them out.
-    expect(extras?.windows).toStrictEqual({ more: 2, shown: 3 });
-    expect(extras === null ? null : moreText(extras)).toBe(
-      "27 more pins · 1 more step"
-    );
-    const plain = rowParts(text(FULL), true).extras;
-
-    expect(plain === null ? null : moreText(plain)).toBeNull();
+    expect(rowParts(crowded, true).extras).toMatchObject({
+      pinLegend: 30,
+      steps: 6,
+      windows: 5,
+    });
   });
 });

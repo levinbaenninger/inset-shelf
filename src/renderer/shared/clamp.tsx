@@ -131,7 +131,10 @@ const HIDDEN_BY_CLAMP = "data-clamp-hid";
  * shown can't be focused until Show more opens it, so Show more comes
  * before it. Everything goes back once the words show whole.
  */
-const hideCutControls = (element: HTMLElement, clipped: boolean): void => {
+export const hideCutControls = (
+  element: HTMLElement,
+  clipped: boolean
+): void => {
   const { bottom } = element.getBoundingClientRect();
 
   for (const control of element.querySelectorAll<HTMLElement>(FOCUSABLE)) {
@@ -157,6 +160,10 @@ const hideCutControls = (element: HTMLElement, clipped: boolean): void => {
   }
 };
 
+/** Words cut to `--lines` lines, the last one fading: only the lines below are cut, so a space hanging past a line's end isn't. */
+export const CUT_LINES =
+  "max-h-[calc(var(--lines)*1lh)] overflow-y-clip [mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]";
+
 /**
  * Words cut to `lines` lines, the last one fading, with a quiet button
  * under them that shows the rest in place; no ellipsis, so a sentence's
@@ -171,7 +178,6 @@ export const Clamp = ({
   less = "Show less",
   lines,
   more = "Show more",
-  rowPart,
   what,
 }: {
   readonly children: ReactNode;
@@ -180,8 +186,6 @@ export const Clamp = ({
   readonly className?: string;
   readonly more?: string;
   readonly less?: string;
-  /** A part of an open row that gives way when the row would take too much of the list (item-row.tsx). */
-  readonly rowPart?: string;
   readonly what?: string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -204,13 +208,7 @@ export const Clamp = ({
   return (
     <>
       <div
-        className={cn(
-          className,
-          // Only the lines below are cut: a space that hangs past a line's end isn't.
-          cut &&
-            "max-h-[calc(var(--lines)*1lh)] overflow-y-clip [mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]"
-        )}
-        data-row-part={rowPart}
+        className={cn(className, cut && CUT_LINES)}
         ref={ref}
         style={{ "--lines": lines }}
       >
