@@ -1,7 +1,7 @@
 import AppKit
 
 // A plain text window that stands in for "the app in front" during the desktop test.
-//   source "<text>" [all|none]   selects all of the text, or nothing
+//   source "<text>" [all|none] [title] [fullscreen]   selects all of the text, or nothing
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
@@ -20,11 +20,17 @@ app.mainMenu = mainMenu
 let args = CommandLine.arguments
 let text = args.count > 1 ? args[1] : "Source text"
 let selectAll = !(args.count > 2 && args[2] == "none")
+let title = args.count > 3 ? args[3] : "Source"
+let fullScreen = args.count > 4 && args[4] == "fullscreen"
 
+// Full screen needs a window that can resize; the other runs keep the fixed window they always had.
 let window = NSWindow(
   contentRect: NSRect(x: 200, y: 200, width: 1200, height: 700),
-  styleMask: [.titled], backing: .buffered, defer: false)
-window.title = "Source"
+  styleMask: fullScreen ? [.titled, .resizable] : [.titled], backing: .buffered, defer: false)
+window.title = title
+if fullScreen {
+  window.collectionBehavior = [.fullScreenPrimary]
+}
 let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 1200, height: 700))
 view.string = text
 view.font = NSFont.systemFont(ofSize: 18)
@@ -33,4 +39,7 @@ window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(view)
 view.setSelectedRange(NSRange(location: 0, length: selectAll ? (text as NSString).length : 0))
 app.activate(ignoringOtherApps: true)
+if fullScreen {
+  window.toggleFullScreen(nil)
+}
 app.run()
