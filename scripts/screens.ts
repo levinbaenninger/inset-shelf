@@ -5334,16 +5334,34 @@ const PILL_SCENES: readonly Scene[] = (
       width: WHY_WIDTH,
     },
     {
+      // Typed into the field and sent with Return, as a user does; `whySaves` has main answer with the words on their way to the disk.
+      act: async (page) => {
+        await page.keyboard.type(WHY_WORDS);
+        await page.keyboard.press("Enter");
+        await page.getByText("Saving…").waitFor();
+      },
       check: async (page) => {
-        const shown = await page.getByText("Why saved").count();
+        if ((await page.getByText("Why saved").count()) > 0) {
+          return "Why saved must wait until the disk holds the words";
+        }
 
-        return shown === 0
+        if (!(await page.getByText(WHY_WORDS, { exact: true }).isVisible())) {
+          return "the pill must show the typed words beside Saving…";
+        }
+
+        // A key pressed now belongs to the app in front: nothing in the pill takes it.
+        await page.keyboard.type("z");
+
+        const sent = await callsTo(page, ["whyInput", "saveWhy"]);
+
+        return (await takesNoKey(page)) &&
+          sent.at(-1)?.call === "saveWhy" &&
+          sent.filter((each) => each.call === "saveWhy").length === 1
           ? null
-          : "Why saved must wait until the disk holds the words";
+          : `while the words are written the pill must take no key: ${JSON.stringify(sent.slice(-2))}`;
       },
-      data: {
-        view: { ...whyView("saved"), phase: "saving", text: WHY_WORDS },
-      },
+      data: { view: whyView("taking"), whySaves: true },
+      keepPointer: true,
       name: "pill-why-saving",
       width: WHY_WIDTH,
     },
@@ -5501,24 +5519,34 @@ const PILL_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
-      // With the filter on the chip stays, pressed, and a press on it takes the filter off again.
-      check: async (page) => {
+      // With the filter on the chip stays, pressed; Return on it takes the filter off again, which is what the picture shows.
+      act: async (page) => {
         const chip = page.getByRole("button", {
           name: "Show the item from here",
         });
 
-        if ((await chip.getAttribute("aria-pressed")) !== "true") {
+        const pressed = await chip.getAttribute("aria-pressed");
+
+        await page.evaluate(
+          `globalThis.__pressedBefore = ${JSON.stringify(pressed)}`
+        );
+        await chip.focus();
+        await page.keyboard.press("Enter");
+      },
+      check: async (page) => {
+        if ((await page.evaluate("globalThis.__pressedBefore")) !== "true") {
           return "with from:here on, the chip must stay, pressed";
         }
 
-        await chip.focus();
-        await page.keyboard.press("Enter");
-
         const shown = await listed(page);
 
-        return shown.query === "" && shown.ids.length > 1
+        const pressed = await page
+          .getByRole("button", { name: "Show the item from here" })
+          .getAttribute("aria-pressed");
+
+        return shown.query === "" && shown.ids.length > 1 && pressed === "false"
           ? null
-          : `Return on the pressed chip must take the filter off: ${JSON.stringify(shown)}`;
+          : `Return on the pressed chip must take the filter off and leave the chip, not pressed: ${JSON.stringify({ ...shown, pressed })}`;
       },
       data: { view: hereView(true) },
       keepPointer: true,

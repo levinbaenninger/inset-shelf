@@ -472,7 +472,17 @@ if (page === "toast") {
       // Say why: main answers a ready field by showing its caret.
       cancelWhy: logged("cancelWhy", nothing),
       dismiss: logged("dismiss", nothing),
-      saveWhy: logged("saveWhy", nothing),
+      // `whySaves`: main answers Return with the words on their way to the disk, as the pill's write state shows them.
+      saveWhy: logged("saveWhy", (sent) => {
+        if (data.whySaves === true) {
+          globalThis.__emit("view", {
+            ...data.view,
+            phase: "saving",
+            seq: sent.seq,
+            text: sent.text.trim(),
+          });
+        }
+      }),
       why: logged("why", nothing),
       whyInput: logged("whyInput", nothing),
       whyReady: logged("whyReady", (seq) => {
