@@ -1,11 +1,15 @@
 /**
- * How much typing a note costs on a full shelf: the time Chromium takes for
- * 40 characters typed into the composer, and how often the shelf measured
- * whether its words show cut (`hidesWords` in src/renderer/shared/clamp.tsx,
- * the renderer's only `querySelectorAll("*")`) while they were typed. Runs the
- * built renderer with the screens bridge, on a 200-item shelf and on an empty
- * one: the empty shelf is the floor, what Playwright and the composer cost
- * by themselves.
+ * What everyday keys cost on a full shelf, in three actions: 40 characters
+ * typed into the composer, 11 typed into the search field, and ↓ pressed ten
+ * times to move the selection down the list. For each it reports the time
+ * Chromium takes, how many item rows React rendered per key (a row whose
+ * `<li data-item-id>` got new props in a commit, counted through React's
+ * DevTools hook, so the app carries no counter), and how often the shelf
+ * measured whether its words show cut (`hidesWords` in
+ * src/renderer/shared/clamp.tsx, the renderer's only `querySelectorAll("*")`).
+ * Runs the built renderer with the screens bridge, on a 200-item shelf and on
+ * an empty one: the empty shelf is the floor, what Playwright and the
+ * composer cost by themselves.
  *
  *   pnpm build && node scripts/measure-typing.ts [runs]
  */
@@ -24,6 +28,8 @@ const BRIDGE = path.join(ROOT, "scripts", "fixtures", "screens-bridge.js");
 
 const RUNS = Number(process.argv[2] ?? "7");
 const TYPED = "Ask the caretaker for the keys on Friday";
+const SEARCHED = "Protokoll 1";
+const MOVES = 10;
 
 const uuid = (n: number): string =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -91,6 +97,43 @@ const COUNT_MEASURES = `(() => {
   };
 })();`;
 
+/**
+ * Counts item rows rendered: after each commit, walks the parts of the tree
+ * React worked on (a fiber whose child is still its old one was skipped) and
+ * counts the rows (their <li data-item-id>) whose props are new.
+ */
+const COUNT_ROWS = `(() => {
+  globalThis.__rows = 0;
+  const isRow = (fiber) =>
+    fiber.tag === 5 &&
+    fiber.memoizedProps !== null &&
+    typeof fiber.memoizedProps["data-item-id"] === "string";
+  const visit = (fiber) => {
+    const before = fiber.alternate;
+    if (isRow(fiber) && (before === null || before.memoizedProps !== fiber.memoizedProps)) {
+      globalThis.__rows += 1;
+    }
+    if (before !== null && before.child === fiber.child) {
+      return;
+    }
+    for (let child = fiber.child; child !== null; child = child.sibling) {
+      visit(child);
+    }
+  };
+  globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    checkDCE: () => {},
+    inject: () => 1,
+    isDisabled: false,
+    onCommitFiberRoot: (_id, root) => {
+      visit(root.current);
+    },
+    onCommitFiberUnmount: () => {},
+    onPostCommitFiberRoot: () => {},
+    renderers: new Map(),
+    supportsFiber: true,
+  };
+})();`;
+
 const TYPES = new Map([
   [".css", "text/css"],
   [".html", "text/html"],
@@ -125,9 +168,28 @@ const serve = async () => {
   return { origin: `http://127.0.0.1:${port}`, server };
 };
 
-const RunSchema = z.object({ measures: z.number(), ms: z.number() });
+const RunSchema = z.object({
+  measures: z.number(),
+  ms: z.number(),
+  rows: z.number(),
+});
 
-const once40 = async (browser: Browser, origin: string, count: number) => {
+type Run = z.infer<typeof RunSchema>;
+
+type Action = "compose" | "search" | "move";
+
+const KEYS: Readonly<Record<Action, number>> = {
+  compose: TYPED.length,
+  move: MOVES,
+  search: SEARCHED.length,
+};
+
+const measure = async (
+  browser: Browser,
+  origin: string,
+  count: number,
+  action: Action
+): Promise<Run> => {
   const context = await browser.newContext({
     deviceScaleFactor: 2,
     viewport: { height: 620, width: 360 },
@@ -138,22 +200,37 @@ const once40 = async (browser: Browser, origin: string, count: number) => {
   await page.addInitScript(
     `globalThis.__screens = ${JSON.stringify({ data: { view: view(count) }, page: "shelf" })};`
   );
+  await page.addInitScript(COUNT_ROWS);
   await page.addInitScript({ path: BRIDGE });
   await page.addInitScript(COUNT_MEASURES);
   await page.goto(`${origin}/shelf.html`);
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
 
-  const field = page.getByRole("textbox", { name: /^New note in/u });
+  if (action === "compose") {
+    await page.getByRole("textbox", { name: /^New note in/u }).click();
+  } else if (action === "search") {
+    await page.getByRole("textbox", { name: "Search the shelf" }).click();
+  } else if (count > 0) {
+    // A click on the first row selects it and leaves the keys to the list.
+    await page.locator("li[data-item-id]").first().click();
+  }
 
-  await field.click();
   await page.waitForTimeout(300);
-  await page.evaluate("globalThis.__measures = 0");
+  await page.evaluate("globalThis.__measures = 0; globalThis.__rows = 0");
 
   const started = await page.evaluate("performance.now()");
 
   // One key at a time, each waiting for the page to take it, as a person types.
-  await page.keyboard.type(TYPED);
+  if (action === "move") {
+    for (let key = 0; key < MOVES; key += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one key at a time, as a person presses them.
+      await page.keyboard.press("ArrowDown");
+    }
+  } else {
+    await page.keyboard.type(action === "compose" ? TYPED : SEARCHED);
+  }
+
   // Whatever React still has to do for the last key.
   await page.evaluate(
     "new Promise((done) => requestAnimationFrame(() => setTimeout(done)))"
@@ -161,7 +238,7 @@ const once40 = async (browser: Browser, origin: string, count: number) => {
 
   const run = RunSchema.parse(
     await page.evaluate(
-      `({ measures: globalThis.__measures, ms: performance.now() - ${String(started)} })`
+      `({ measures: globalThis.__measures, ms: performance.now() - ${String(started)}, rows: globalThis.__rows })`
     )
   );
 
@@ -184,21 +261,31 @@ const median = (values: readonly number[]): number => {
   );
 };
 
+const LABEL: Readonly<Record<Action, string>> = {
+  compose: `${TYPED.length} characters typed in the composer`,
+  move: `${MOVES} presses of ↓`,
+  search: `${SEARCHED.length} characters typed in search`,
+};
+
 const main = async (): Promise<void> => {
   const browser = await chromium.launch();
   const { origin, server } = await serve();
 
-  for (const count of [200, 0]) {
-    const runs = [];
+  for (const action of ["compose", "search", "move"] as const) {
+    for (const count of [200, 0]) {
+      const runs: Run[] = [];
 
-    for (let run = 0; run < RUNS; run += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one run at a time, so they don't share the machine.
-      runs.push(await once40(browser, origin, count));
+      for (let run = 0; run < RUNS; run += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time, so they don't share the machine.
+        runs.push(await measure(browser, origin, count, action));
+      }
+
+      const rows = runs.map((each) => each.rows / KEYS[action]);
+
+      console.log(
+        `${count} items, ${RUNS} runs, ${LABEL[action]}: ${median(runs.map((each) => each.ms)).toFixed(0)} ms (median; ${runs.map((each) => each.ms.toFixed(0)).join(", ")}), ${median(rows).toFixed(1)} rows rendered per key (median; ${rows.map((each) => each.toFixed(1)).join(", ")}), hidesWords ${median(runs.map((each) => each.measures))} calls (median; ${runs.map((each) => each.measures).join(", ")})`
+      );
     }
-
-    console.log(
-      `${count} items, ${RUNS} runs: ${TYPED.length} characters in ${median(runs.map((each) => each.ms)).toFixed(0)} ms (median; ${runs.map((each) => each.ms.toFixed(0)).join(", ")}), hidesWords ${median(runs.map((each) => each.measures))} calls (median; ${runs.map((each) => each.measures).join(", ")})`
-    );
   }
 
   await browser.close();
