@@ -2,11 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* The app's shadcn tokens (src/renderer/styles.css, light theme): Inset blue is --primary, the one accent.
-   Brand rules: Inset design system (brand kit README; Inset_Design_System_Print_und_Praesentation.md). */
 @theme inline {
-  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --font-heading: var(--font-sans);
+  /* The app's own face, for the drawn app windows only. */
+  --font-app: var(--font-inter), system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -25,8 +26,15 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* the brand's light blue surface, behind product pictures only */
+  --color-tile: var(--tile);
+  --color-rail: var(--rail);
+  --color-brand: var(--brand);
   --color-sky: var(--sky);
+  --color-sky-light: var(--sky-light);
+  --color-pin: var(--pin);
+  --color-pin-ink: var(--pin-ink);
+  --color-material: var(--material);
+  --color-selection: var(--selection);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -35,80 +43,83 @@
 }
 
 :root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f2;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f4f4f2;
+  --muted-foreground: #6b6b6b;
+  --accent: #f4f4f2;
+  --accent-foreground: #0a0a0a;
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: #e7e7e4;
+  --input: #e7e7e4;
+  --ring: #0069a8;
+  --radius: 0.625rem;
+  --tile: #f4f4f2;
+  --rail: #e9e9e6;
+  --brand: #0069a8;
+  --sky: #c9ecfb;
+  --sky-light: #e8f6fd;
+  --pin: oklch(0.588 0.158 241.966);
+  --pin-ink: oklch(0.5 0.134 242.749);
+  --material: #ececee;
+  --selection: #b3d7ff;
+}
+
+/* The app's light theme (src/renderer/styles.css), so the drawn windows use the renderer's own class names. */
+.app-ui {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.5 0.134 242.749);
   --primary-foreground: oklch(0.977 0.013 236.62);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.97 0 0);
-  /* the app's oklch(0.556 0 0) one step darker, so labels keep 4.5:1 on the muted surface */
-  --muted-foreground: oklch(0.52 0 0);
+  --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.5 0.134 242.749);
-  --radius: 0.625rem;
-  --sky: #f0f9ff;
+  font-family: var(--font-app);
+  color: var(--foreground);
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* The page's type scale and motion, on top of the app's tokens. */
 @theme {
-  --text-h1: clamp(40px, 3.048vw + 28.11px, 72px);
-  --text-h1--line-height: 1.02;
-  --text-h1--letter-spacing: -0.045em;
-  --text-h2: clamp(30px, 1.67vw + 23.5px, 48px);
-  --text-h2--line-height: 1.1;
-  --text-h2--letter-spacing: -0.035em;
-  --text-lead: clamp(18px, 0.28vw + 16.9px, 20px);
-  --text-lead--line-height: 1.5;
-  --text-label: 13px;
-  --text-label--line-height: 1.3;
-
-  --animate-rise: rise 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translateY(12px);
-    }
-  }
+  --text-display: clamp(2.5rem, 1.45rem + 3.5vw, 4.25rem);
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.042em;
+  --text-display--font-weight: 500;
+  --text-title: clamp(2rem, 1.4rem + 2vw, 3rem);
+  --text-title--line-height: 1.08;
+  --text-title--letter-spacing: -0.035em;
+  --text-title--font-weight: 500;
+  --shadow-card:
+    0 0 0 1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.04), 0 14px 32px -14px rgb(0 0 0 / 0.18);
+  --text-lead: 1.125rem;
+  --text-lead--line-height: 1.55;
+  --text-lead--letter-spacing: -0.011em;
 }
 
-/* The page's one content column: 1280px at most, 80px gutters from 1024px, 48px on a tablet, 24px on a phone. */
-@utility wrap {
+/* The content column between the page's two guide rails. */
+@utility rails {
   margin-inline: auto;
-  width: min(100% - 48px, 1280px);
-  @media (width >= 40rem) {
-    width: min(100% - 96px, 1280px);
-  }
-  @media (width >= 64rem) {
-    width: min(100% - 160px, 1280px);
-  }
+  width: 100%;
+  max-width: 1200px;
 }
 
-/* A link's underline draws in from the left on hover. */
-@utility link-draw {
-  position: relative;
-  &::after {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    bottom: -2px;
-    height: 1px;
-    background: currentColor;
-    transform: scaleX(0);
-    transform-origin: left;
-    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  &:hover::after,
-  &:focus-visible::after {
-    transform: scaleX(1);
+@utility gutter {
+  padding-inline: 20px;
+  @media (width >= 48rem) {
+    padding-inline: 40px;
   }
 }
 
@@ -122,15 +133,21 @@
   }
   html {
     @apply bg-background font-sans text-foreground;
-    scroll-padding-top: 0;
+    scroll-padding-top: 72px;
+    overflow-x: clip;
   }
   body {
+    overflow-x: clip;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   h1,
   h2,
   h3 {
     text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
   }
   @media (prefers-reduced-motion: reduce) {
     *,
@@ -138,6 +155,30 @@
     *::after {
       animation: none !important;
       transition: none !important;
+      scroll-behavior: auto !important;
     }
+  }
+}
+
+/* Two taps of Shift, then a pause. */
+@keyframes press {
+  0%,
+  14%,
+  100% {
+    transform: translateY(0);
+  }
+  7% {
+    transform: translateY(3px);
+  }
+}
+
+/* A dragged file, hovering over the shelf. */
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(12px, -6px);
   }
 }

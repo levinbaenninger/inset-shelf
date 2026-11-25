@@ -1,12 +1,15 @@
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site";
 
 import "./globals.css";
 
-// Inter is the brand's one face (Inset design system, section 3).
+// The app's own face, for the drawn app windows; the page itself is set in Geist.
 const inter = localFont({
   src: "./fonts/InterVariable.woff2",
   variable: "--font-inter",
@@ -40,7 +43,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={cn(GeistSans.variable, GeistMono.variable, inter.variable)}>
       <body>{children}</body>
     </html>
   );

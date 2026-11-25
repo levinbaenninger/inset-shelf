@@ -1,23 +1,32 @@
-import { CaptureChapters } from "@/components/capture-chapters";
-import { Claim } from "@/components/claim";
+import { Capture } from "@/components/capture";
+import { Closing } from "@/components/closing";
 import { Details } from "@/components/details";
+import { Faq } from "@/components/faq";
 import { Hero } from "@/components/hero";
-import { Questions } from "@/components/questions";
+import { Divider } from "@/components/section";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Sources } from "@/components/sources";
+import { Statement } from "@/components/statement";
 
 export default function Home() {
   return (
     <>
       <SiteHeader />
-      <main id="top">
+      <main id="main">
         <Hero />
-        <Claim />
-        <CaptureChapters />
-        <Sources />
-        <Details />
-        <Questions />
+        <div className="rails border-rail md:border-x">
+          <Capture />
+          <Divider />
+          <Statement />
+          <Divider />
+          <Sources />
+          <Divider />
+          <Details />
+          <Divider />
+          <Faq />
+        </div>
+        <Closing />
       </main>
       <SiteFooter />
     </>
