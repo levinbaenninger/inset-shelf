@@ -18,4 +18,4 @@ Cloudflare serves `out/` as Workers static assets (`wrangler.jsonc`, no Worker s
 - Deploy command: `npx wrangler deploy`
 - Build watch paths, if set: `apps/web/**`, `packages/ui/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`
 
-The app windows on the page are drawn in HTML with the renderer's own classes and light theme (`components/app-ui.tsx`); compare them with `vp run screens` in `apps/desktop`. `components/react-bits/` holds the free [React Bits](https://reactbits.dev) components the page uses (Grainient, ScrollReveal, LogoLoop), installed from its shadcn registry.
+The app windows on the page are drawn in HTML with the renderer's own classes and light theme (`components/app-ui.tsx`); compare them with `vp run screens` in `apps/desktop`. `components/react-bits/` holds the free [React Bits](https://reactbits.dev) components the page uses (Grainient, ScrollReveal, LogoLoop), installed from its shadcn registry. Their license is in `components/react-bits/LICENSE.txt`, and the site serves it at `/third-party-notices.txt`.
