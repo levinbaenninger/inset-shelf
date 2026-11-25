@@ -3642,7 +3642,8 @@ const SCREENSHOT_VIEW = {
   widthPx: LOGIN.widthPx,
 };
 
-const CARD_FAILURE = `Die Bildschirmaufnahme konnte nicht gespeichert werden: ${LONG_WORD}. Der Datenträger ist voll.`;
+/** Main's reason a card's save failed: a sentence of its own, here a long one. */
+const CARD_FAILURE = `Der Datenträger „${LONG_WORD}“ ist voll.`;
 
 /** The card as main shows it once a save failed. */
 const failedCard = (
@@ -4797,6 +4798,15 @@ const STRESS_SCENES: readonly Scene[] = (
     },
     {
       act: async (page) => {
+        await page.evaluate(() => {
+          const add = document.querySelector(
+            "button[aria-label='Add to Shelf']"
+          );
+
+          Object.assign(globalThis, {
+            __atRest: add?.getBoundingClientRect().left ?? -1,
+          });
+        });
         await page.mouse.move(140, 90);
         await page.waitForTimeout(300);
       },
@@ -4809,8 +4819,21 @@ const STRESS_SCENES: readonly Scene[] = (
           page.getByRole("button", { exact: true, name: "Copy" })
         );
 
-        if (tall(add) !== tall(copy) || Math.abs(add.top - copy.top) > 0.5) {
-          return "Copy isn't beside Add to Shelf at the same size";
+        const atRest = z
+          .number()
+          .parse(await page.evaluate("globalThis.__atRest"));
+
+        // Copy shows in a slot kept for it: Add to Shelf stays under the pointer.
+        if (Math.abs(add.left - atRest) > 0.5) {
+          return `Add to Shelf moved from ${atRest} to ${add.left} when Copy showed`;
+        }
+
+        // Add to Shelf leads: Copy beside it, no larger.
+        if (
+          tall(copy) > tall(add) ||
+          Math.abs(middle(add) - middle(copy)) > 0.5
+        ) {
+          return "Copy isn't beside Add to Shelf, or is larger";
         }
 
         if (copy.left < add.right) {
@@ -4854,11 +4877,26 @@ const STRESS_SCENES: readonly Scene[] = (
           return `the keyboard left Saving… for “${label}”`;
         }
 
-        return (await page
-          .getByRole("img", { name: "New screenshot" })
-          .isVisible())
+        if (
+          !(await page.getByRole("img", { name: "New screenshot" }).isVisible())
+        ) {
+          return "the picture went while it saves";
+        }
+
+        // Saving… takes the place of Add to Shelf at its size.
+        const savingBox = await boxOf(saving);
+
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(SCREENSHOT_VIEW)})`
+        );
+
+        const idle = await boxOf(
+          page.getByRole("button", { exact: true, name: "Add to Shelf" })
+        );
+
+        return isDeepStrictEqual(savingBox, idle)
           ? null
-          : "the picture went while it saves";
+          : `Saving… is not the size of Add to Shelf: ${JSON.stringify({ idle, savingBox })}`;
       },
       data: {
         view: { ...SCREENSHOT_VIEW, save: { state: "saving", to: "shelf" } },
@@ -5702,7 +5740,7 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
 };
 
 /** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
-const CARD_LABEL = `${LONG_TITLE.slice(0, 39)}…`;
+const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
 
 const ATTACHMENT_SCENES: readonly Scene[] = (
   [
@@ -6278,6 +6316,33 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           return "Add to “…” covers a corner button";
         }
 
+        const shelfBox = await boxOf(
+          page.getByRole("button", { exact: true, name: "Add to Shelf" })
+        );
+
+        const itemBox = await boxOf(add);
+
+        const copyBox = await boxOf(
+          page.getByRole("button", { exact: true, name: "Copy" })
+        );
+
+        // Add to Shelf leads: Add to “…” is a quieter line under it, no taller, and never past the row of Add to Shelf and Copy's slot.
+        if (
+          itemBox.top < shelfBox.bottom ||
+          itemBox.left < shelfBox.left - 0.5 ||
+          itemBox.right > copyBox.right + 0.5 ||
+          tall(itemBox) >= tall(shelfBox)
+        ) {
+          return `Add to “…” must sit under Add to Shelf, smaller: ${JSON.stringify({ itemBox, shelfBox })}`;
+        }
+
+        // The name is cut inside the quotes: the closing one shows.
+        const closing = await boxOf(add.getByText("”", { exact: true }));
+
+        if (closing.right > itemBox.right || closing.left < itemBox.left) {
+          return "the closing quote of Add to “…” is cut off";
+        }
+
         // The press carries the item the button named, so main can refuse it once the card names another.
         return sent.some(
           (each) =>
@@ -6297,9 +6362,25 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       page: "screenshot",
     },
     {
+      // On hover Copy shows in its kept slot; Add to Shelf and Add to “…” stay where they were.
+      act: async (page) => {
+        await page.mouse.move(140, 60);
+        await page.waitForTimeout(300);
+      },
+      data: {
+        view: {
+          ...SCREENSHOT_VIEW,
+          target: { id: uuid(12), label: CARD_LABEL },
+        },
+      },
+      keepPointer: true,
+      name: "screenshot-card-attach-hover",
+      page: "screenshot",
+    },
+    {
       check: async (page) => {
         const problem = await failedCardCheck([
-          "Retry",
+          `Retry adding to “${CARD_LABEL}”`,
           "Add to Shelf",
           "Copy",
           "Save to Downloads",
@@ -6310,7 +6391,13 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           return problem;
         }
 
-        await page.getByRole("button", { name: "Retry" }).click();
+        const retry = page.getByRole("button", { name: /^Retry adding to “/u });
+
+        if ((await retry.count()) !== 1) {
+          return "a failed Add to “…” must read Retry adding to “…”";
+        }
+
+        await retry.click();
 
         const sent = await calls(page);
 

@@ -8,7 +8,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ScreenshotView, ShotSaveTo } from "@shared/contracts";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +17,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { screenshotBridge } from "@/shared/bridge";
-import { tooltipText, Truncated } from "@/shared/clamp";
+import { tooltipText } from "@/shared/clamp";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
@@ -76,20 +75,78 @@ const CornerButton = ({
 const REVEAL =
   "opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-data-[failed]:opacity-100";
 
-/** A save button's label: Saving… while it writes, Retry once it failed. */
-const saveLabel = (
+/** Takes clicks only while it shows. */
+const REVEAL_CLICKS =
+  "group-hover:pointer-events-auto group-has-[:focus-visible]:pointer-events-auto group-data-[failed]:pointer-events-auto";
+
+/** Every label a button can read, drawn in one place so its size never changes; only `shown` can be seen. */
+const Steady = ({
+  labels,
+  shown,
+}: {
+  readonly labels: readonly string[];
+  readonly shown: string;
+}) => (
+  <span className="grid">
+    {labels.map((label) => (
+      <span
+        className={cn(
+          "col-start-1 row-start-1",
+          label !== shown && "invisible"
+        )}
+        key={label}
+      >
+        {label}
+      </span>
+    ))}
+  </span>
+);
+
+/** What a save button reads: its label, Saving… while it writes, Retry once it failed. */
+const saveState = (
   save: ScreenshotView["save"],
-  to: ShotSaveTo,
-  label: ReactNode
-): ReactNode => {
-  if (save.state === "idle" || save.to !== to) {
-    return label;
-  }
+  to: ShotSaveTo
+): "idle" | "saving" | "failed" =>
+  save.state === "idle" || save.to !== to ? "idle" : save.state;
 
-  return save.state === "saving" ? "Saving…" : "Retry";
-};
+const SHELF_LABEL = {
+  failed: "Retry",
+  idle: "Add to Shelf",
+  saving: "Saving…",
+} as const;
 
-/** Why the save failed, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
+const SHELF_LABELS = Object.values(SHELF_LABEL);
+
+/** What Add to “…” reads before the item's name. */
+const ITEM_LEAD = { failed: "Retry adding to", idle: "Add to" } as const;
+
+/** “Name”, cut inside the quotes so the closing one always shows; `stacked` puts the name on a line of its own under the lead. */
+const Quoted = ({
+  lead,
+  name,
+  stacked = false,
+}: {
+  readonly lead: string;
+  readonly name: string;
+  readonly stacked?: boolean;
+}) => (
+  <span
+    className={cn("flex min-w-0", stacked && "flex-col items-center")}
+    title={tooltipText(`${lead} “${name}”`)}
+  >
+    <span className="shrink-0">{lead}</span>
+    <span className={cn("flex max-w-full min-w-0", !stacked && "ml-1")}>
+      <span className="shrink-0">“</span>
+      <span className="min-w-0 truncate">{name}</span>
+      <span className="shrink-0">”</span>
+    </span>
+  </span>
+);
+
+/** Shown after the reason a save failed: what it means for the screenshot. */
+const NOT_KEPT = "The screenshot isn’t saved yet.";
+
+/** Why the save failed, reason first, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
 const FailureBar = ({ message }: { readonly message: string }) => (
   <div className="shrink-0 bg-black/80 px-3 py-1.5 text-white">
     <p
@@ -98,9 +155,10 @@ const FailureBar = ({ message }: { readonly message: string }) => (
       // The keyboard reaches the whole message: on focus it unclamps and scrolls.
       // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a clamped message the keyboard must be able to read whole.
       tabIndex={0}
-      title={tooltipText(message)}
+      title={tooltipText(`${message} ${NOT_KEPT}`)}
     >
-      {message}
+      <span className="font-semibold">{message}</span>{" "}
+      <span className="text-white/75">{NOT_KEPT}</span>
     </p>
   </div>
 );
@@ -117,6 +175,8 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { save, seq, target } = view;
   const [held, setHeld] = useState(false);
   const saving = save.state === "saving";
+  const shelfLabel = SHELF_LABEL[saveState(save, "shelf")];
+  const itemState = saveState(save, "item");
 
   return (
     <main
@@ -125,54 +185,67 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
       {...coach("screenshot-card")}
     >
       <div className="relative min-h-0 flex-1">
-        {/* First in the page, so Tab lands on Add to Shelf first; drawn above the picture and its dimming. */}
-        <div className="absolute inset-x-12 bottom-3.5 z-10 flex flex-col-reverse items-center gap-1.5">
-          <div className="flex items-center gap-1.5">
+        {/*
+          First in the page, so Tab lands on Add to Shelf first, then Copy, then Add to “…”; drawn above the picture and its dimming.
+          Copy's slot is kept while it is hidden, so Add to Shelf never moves when it shows; Add to “…” sits under Add to Shelf, never wider.
+        */}
+        <div className="absolute inset-x-12 bottom-3 z-10 flex justify-center">
+          <div className="grid grid-cols-[auto_auto] items-center gap-x-1.5 gap-y-1.5">
             <Button
               aria-disabled={saving ? true : undefined}
+              aria-label={shelfLabel}
               onClick={() => {
                 if (!saving) {
                   api.addToShelf(seq);
                 }
               }}
-              size="pill-xs"
+              size="pill-sm"
               variant="overlay"
             >
-              {saveLabel(save, "shelf", "Add to Shelf")}
+              <Steady labels={SHELF_LABELS} shown={shelfLabel} />
             </Button>
-            <Button
-              className="hidden group-hover:inline-flex group-has-[:focus-visible]:inline-flex group-data-[failed]:inline-flex"
-              onClick={() => {
-                api.copy(seq);
-              }}
-              size="pill-xs"
-              variant="overlay"
+            <span
+              className={cn("pointer-events-none flex", REVEAL, REVEAL_CLICKS)}
             >
-              Copy
-            </Button>
-          </div>
-          {target === null ? null : (
-            <Button
-              aria-disabled={saving ? true : undefined}
-              className="max-w-full"
-              onClick={() => {
-                if (!saving) {
-                  api.addToItem({ id: target.id, seq });
+              <Button
+                onClick={() => {
+                  api.copy(seq);
+                }}
+                size="pill-xs"
+                variant="overlay"
+              >
+                Copy
+              </Button>
+            </span>
+            {target === null ? null : (
+              <Button
+                aria-disabled={saving ? true : undefined}
+                aria-label={
+                  itemState === "saving"
+                    ? "Saving…"
+                    : `${ITEM_LEAD[itemState]} “${target.label}”`
                 }
-              }}
-              size="pill-xs"
-              variant="overlay"
-            >
-              {saveLabel(
-                save,
-                "item",
-                <Truncated
-                  className="min-w-0"
-                  text={`Add to “${target.label}”`}
-                />
-              )}
-            </Button>
-          )}
+                className="col-span-2 w-0 min-w-full"
+                onClick={() => {
+                  if (!saving) {
+                    api.addToItem({ id: target.id, seq });
+                  }
+                }}
+                size={itemState === "failed" ? "pill-xs-2" : "pill-xs"}
+                variant="overlay-quiet"
+              >
+                {itemState === "saving" ? (
+                  "Saving…"
+                ) : (
+                  <Quoted
+                    lead={ITEM_LEAD[itemState]}
+                    name={target.label}
+                    stacked={itemState === "failed"}
+                  />
+                )}
+              </Button>
+            )}
+          </div>
         </div>
         <button
           aria-label="Drag the screenshot into another app"

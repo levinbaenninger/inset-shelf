@@ -24,6 +24,9 @@ const buttonVariants = cva(
         /** White on a picture, whatever the theme: the screenshot card's controls. Focus draws a dark ring inside a white one, which shows on light and dark pictures alike. */
         overlay:
           "bg-white text-neutral-900 shadow-md hover:bg-neutral-100 focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100",
+        /** The screenshot card's secondary line: dark glass with a light rim, quieter than the white pill, readable on light and dark pictures. */
+        "overlay-quiet":
+          "bg-black/55 text-white ring-1 ring-white/30 backdrop-blur-sm hover:bg-black/70 focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900",
       },
       size: {
         default:
@@ -39,8 +42,13 @@ const buttonVariants = cva(
         "icon-lg": "size-9",
         /** Fully rounded, for buttons set on a picture. */
         pill: "h-8 gap-1.5 rounded-full px-4",
-        /** A small pill: the screenshot card's action that shows before hover. */
+        /** The screenshot card's main action, a step larger than its others. */
+        "pill-sm":
+          "h-7 gap-1 rounded-full px-3.5 text-[0.8125rem] font-semibold",
+        /** A small pill: the screenshot card's other actions. */
         "pill-xs": "h-6 gap-1 rounded-full px-2.5 text-xs",
+        /** pill-xs on two lines: a failed Add to “…” says what Retry goes to under it. */
+        "pill-xs-2": "gap-0 rounded-2xl px-2.5 py-1 text-xs",
         "icon-round": "size-8 rounded-full",
       },
     },
