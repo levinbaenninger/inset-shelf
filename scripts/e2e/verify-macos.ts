@@ -312,6 +312,15 @@ const trayItem = (item: string): void => {
     ) {
       throw error;
     }
+
+    // The shortcut hides only a shelf with the keyboard: the first press on an unfocused one focuses it.
+    if (!visible) {
+      execFileSync("sleep", ["0.6"]);
+
+      if (shelfOnScreen()) {
+        guardedKeys(toggleKeys, ["source", processName]);
+      }
+    }
   }
 };
 
