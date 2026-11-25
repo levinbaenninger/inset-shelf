@@ -1,7 +1,7 @@
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
-import { RELEASE_URL } from "@/lib/site";
+import { RELEASES_URL } from "@/lib/site";
 
 import { DownloadButtons } from "./download-buttons";
 import { HeroScene } from "./hero-scene";
@@ -15,7 +15,7 @@ export const Hero = () => (
     <SkyFrame>
       <div className="flex flex-col items-center px-5 pt-28 text-center sm:pt-32 lg:pt-36">
         <a
-          href={RELEASE_URL}
+          href={RELEASES_URL}
           className="group text-foreground/80 hover:text-foreground inline-flex h-7 items-center gap-1 rounded-full bg-white/55 px-3 text-[13px] font-medium ring-1 ring-black/8 backdrop-blur-sm transition-colors hover:bg-white/80"
         >
           Free test build for macOS and Windows

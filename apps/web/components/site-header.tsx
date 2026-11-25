@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu01Icon } from "@hugeicons/core-free-icons";
+import { GithubIcon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
@@ -13,7 +13,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { NAV_LINKS, RELEASE_URL, REPO_URL } from "@/lib/site";
+import { DOWNLOADS, NAV_LINKS, REPO_URL } from "@/lib/site";
+import { useBrowserValue } from "@/lib/use-browser-value";
 
 import { DownloadButtons } from "./download-buttons";
 import { Logo } from "./logo";
@@ -36,17 +37,30 @@ const useScrolled = () => {
   return scrolled;
 };
 
-// Clear over the hero's sky, then a white bar with a hairline once the page moves.
+// The header's one button fetches the build for the visitor's system: Windows when the browser says so, else the Mac.
+const useDownloadUrl = () =>
+  useBrowserValue(
+    () =>
+      /Win/u.test(navigator.userAgent) ? DOWNLOADS.windows : DOWNLOADS.mac,
+    DOWNLOADS.mac
+  );
+
+const LINK =
+  "text-foreground/75 hover:text-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/5";
+
+// Over the hero it sits inside the sky frame's rounded top, clear of its corners; once the page moves it becomes a
+// white bar with a hairline at the top of the window.
 export const SiteHeader = () => {
   const scrolled = useScrolled();
+  const download = useDownloadUrl();
 
   return (
     <header
       className={cn(
-        "fixed inset-x-0 top-0 z-30 border-b transition-[background-color,border-color] duration-200",
+        "fixed inset-x-0 top-0 z-30 border-b transition-[background-color,border-color,padding] duration-200",
         scrolled
           ? "border-border bg-white/85 backdrop-blur-md"
-          : "border-transparent"
+          : "border-transparent pt-3 sm:pt-4"
       )}
     >
       <a
@@ -57,23 +71,20 @@ export const SiteHeader = () => {
       </a>
       <div
         className={cn(
-          "rails relative flex items-center gap-2 px-7 transition-[height] duration-200 md:px-8 xl:px-2",
-          scrolled ? "h-16" : "h-[76px] sm:h-20"
+          "rails relative flex items-center gap-1 px-7 transition-[height] duration-200 sm:px-10 xl:px-6",
+          scrolled ? "h-16" : "h-[72px] sm:h-20"
         )}
       >
         <Logo />
 
         <nav
           aria-label="Main"
-          className="absolute left-1/2 hidden -translate-x-1/2 md:block"
+          className="absolute left-1/2 hidden -translate-x-1/2 lg:block"
         >
           <ul className="flex gap-1">
             {NAV_LINKS.map((link) => (
               <li key={link.href}>
-                <a
-                  href={link.href}
-                  className="text-foreground/75 hover:text-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/5"
-                >
+                <a href={link.href} className={LINK}>
                   {link.label}
                 </a>
               </li>
@@ -83,15 +94,22 @@ export const SiteHeader = () => {
 
         <a
           href={REPO_URL}
-          className="text-foreground/75 hover:text-foreground ml-auto hidden rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/5 sm:block"
+          aria-label="Inset Shelf on GitHub"
+          title="Inset Shelf on GitHub"
+          className="text-foreground/75 hover:text-foreground ml-auto hidden size-9 items-center justify-center rounded-md transition-colors hover:bg-black/5 sm:flex"
         >
-          GitHub
+          <HugeiconsIcon
+            icon={GithubIcon}
+            size={20}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
         </a>
         <Button
           asChild
-          className="hidden h-9 rounded-[9px] px-4 sm:inline-flex"
+          className="ml-2 hidden h-9 rounded-[9px] px-4 sm:inline-flex"
         >
-          <a href={RELEASE_URL}>Download</a>
+          <a href={download}>Download</a>
         </Button>
 
         <Sheet>
@@ -99,7 +117,7 @@ export const SiteHeader = () => {
             <Button
               variant="light"
               size="icon"
-              className="ml-auto size-10 rounded-[10px] sm:ml-0 md:hidden"
+              className="ml-auto size-10 rounded-[10px] sm:ml-2 lg:hidden"
               aria-label="Open menu"
             >
               <HugeiconsIcon icon={Menu01Icon} className="size-5" />

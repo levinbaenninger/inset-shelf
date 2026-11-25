@@ -1,4 +1,10 @@
-import { NAV_LINKS, RELEASE_URL, REPO_URL } from "@/lib/site";
+import {
+  DOWNLOADS,
+  ISSUES_URL,
+  NAV_LINKS,
+  RELEASES_URL,
+  REPO_URL,
+} from "@/lib/site";
 
 import { Logo } from "./logo";
 
@@ -7,30 +13,31 @@ const COLUMNS = [
   {
     title: "Download",
     links: [
-      { href: RELEASE_URL, label: "macOS" },
-      { href: RELEASE_URL, label: "Windows 11" },
-      { href: `${REPO_URL}/releases`, label: "All releases" },
+      { href: DOWNLOADS.mac, label: "macOS, Apple silicon" },
+      { href: DOWNLOADS.macIntel, label: "macOS, Intel" },
+      { href: DOWNLOADS.windows, label: "Windows 11" },
+      { href: RELEASES_URL, label: "All releases" },
     ],
   },
   {
     title: "Project",
     links: [
       { href: REPO_URL, label: "Source on GitHub" },
-      {
-        href: `${REPO_URL}/blob/main/IMPLEMENTATION_REPORT.md`,
-        label: "Implementation report",
-      },
-      {
-        href: "https://github.com/levinbaenninger/inset-pin",
-        label: "Inset Context Pin",
-      },
+      { href: ISSUES_URL, label: "Report an issue" },
+    ],
+  },
+  {
+    title: "Legal",
+    links: [
+      { href: "/imprint", label: "Imprint" },
+      { href: "/privacy", label: "Privacy" },
     ],
   },
 ];
 
 export const SiteFooter = () => (
   <footer className="rails gutter pt-20 pb-10 md:pt-24">
-    <div className="grid gap-12 md:grid-cols-[1fr_auto] md:gap-8">
+    <div className="grid gap-12 lg:grid-cols-[1fr_auto] lg:gap-8">
       <div className="flex max-w-[34ch] flex-col items-start gap-4">
         <Logo />
         <p className="text-muted-foreground text-[15px]">
@@ -38,7 +45,7 @@ export const SiteFooter = () => (
           work in.
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 md:gap-x-20">
+      <div className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-4 md:gap-x-16">
         {COLUMNS.map((column) => (
           <div key={column.title}>
             <h2 className="text-sm font-medium">{column.title}</h2>
