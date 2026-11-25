@@ -2853,9 +2853,14 @@ const calendarKeysCheck = async (page: Page): Promise<string | null> => {
   }
 
   // A click on text that takes no keyboard (empty space, in effect) closes the calendar and,
-  // as nothing took the keyboard, gives it back to Due.
+  // as nothing took the keyboard, gives it back to Due. The item's own words edit on a click,
+  // so the footer that says when it was added is that text.
   await openCalendar(page, /^Due Today/u);
-  await page.getByText("Book the movers for Monday").first().click();
+  await page
+    .locator("[data-details]")
+    .getByText(/^Added /u)
+    .first()
+    .click();
   await calendar(page).waitFor({ state: "detached" });
   await page.waitForTimeout(150);
 
