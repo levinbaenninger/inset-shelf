@@ -1,6 +1,7 @@
 import {
   AppWindowIcon,
   ArrowDown01Icon,
+  ArrowUpRight01Icon,
   Calendar03Icon,
   Cancel01Icon,
   ChatGptIcon,
@@ -22,7 +23,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { IconSvgElement } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 
 // Drawn parts of the app, with the renderer's own class names (apps/desktop/src/renderer/shelf), inside `.app-ui.light`.
 
@@ -133,11 +134,14 @@ export const SourceLine = ({
   service,
   label,
   active = false,
+  opens = false,
   className,
 }: {
   service: Service;
   label: string;
   active?: boolean;
+  /** Ends in the arrow the line shows under the pointer, where a click opens the page. */
+  opens?: boolean;
   className?: string;
 }) => (
   <span
@@ -149,16 +153,22 @@ export const SourceLine = ({
   >
     <Icon icon={SERVICE_ICON[service]} size={12} />
     <span className="truncate">{label}</span>
+    {opens && <Icon icon={ArrowUpRight01Icon} size={12} />}
   </span>
 );
 
 export const ShelfRow = ({
   item,
+  onToggle,
   className,
 }: {
   item: ShelfItem;
+  /** Makes the circle a real checkbox, and the source line answer the pointer as the app's does. */
+  onToggle?: () => void;
   className?: string;
 }) => {
+  const live = onToggle !== undefined;
+
   const hasMeta =
     item.source !== undefined ||
     item.file !== undefined ||
@@ -171,14 +181,29 @@ export const ShelfRow = ({
       className={cn(
         "bg-background/60 relative flex items-start gap-3 rounded-lg border px-3 py-2.5",
         item.selected === true ? "border-primary" : "border-foreground/10",
+        live && "group transition-colors",
+        live && item.selected !== true && "hover:border-foreground/20",
         className
       )}
     >
-      <CheckCircle checked={item.done} className="mt-0.5" />
+      {live ? (
+        <label className="has-focus-visible:ring-ring/50 relative mt-0.5 flex shrink-0 cursor-pointer rounded-full has-focus-visible:ring-3">
+          <input
+            type="checkbox"
+            checked={item.done === true}
+            onChange={onToggle}
+            aria-label={`Check off: ${item.text}`}
+            className="sr-only"
+          />
+          <CheckCircle checked={item.done} />
+        </label>
+      ) : (
+        <CheckCircle checked={item.done} className="mt-0.5" />
+      )}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <p
           className={cn(
-            "line-clamp-2 text-sm leading-5",
+            "line-clamp-2 text-sm leading-5 transition-colors",
             item.file !== undefined && "font-medium",
             item.done === true && "text-muted-foreground line-through"
           )}
@@ -189,7 +214,15 @@ export const ShelfRow = ({
           <div className="flex min-w-0 items-center gap-2">
             {item.file === undefined ? (
               item.source !== undefined && (
-                <SourceLine {...item.source} className="flex-1" />
+                <SourceLine
+                  {...item.source}
+                  className={cn(
+                    "flex-1",
+                    live &&
+                      "group-hover:text-foreground transition-colors [&>svg:last-child]:opacity-0 group-hover:[&>svg:last-child]:opacity-100"
+                  )}
+                  opens={live}
+                />
               )
             ) : (
               <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
@@ -310,37 +343,62 @@ export const MenuItem = ({
   keys,
   tone,
   active,
+  pressed,
+  onSelect,
 }: {
   icon?: IconSvgElement;
   children: ReactNode;
-  keys?: string;
+  keys?: ReactNode;
   tone?: "destructive";
   active?: boolean;
-}) => (
-  <div
-    className={cn(
-      "flex items-center gap-2 rounded-md px-2 py-1.25 text-sm",
-      active === true && "bg-accent",
-      tone === "destructive" && "text-destructive"
-    )}
-  >
-    {icon && (
-      <Icon
-        icon={icon}
-        size={16}
-        className={
-          tone === "destructive" ? "text-destructive" : "text-muted-foreground"
-        }
-      />
-    )}
-    <span className="flex-1 truncate">{children}</span>
-    {keys !== undefined && (
-      <span className="text-muted-foreground ml-auto pl-4 text-xs tracking-wide">
-        {keys}
-      </span>
-    )}
-  </div>
-);
+  /** Makes the entry a button. */
+  onSelect?: () => void;
+  /** For a choice among entries: whether this one is chosen. */
+  pressed?: boolean;
+}) => {
+  const className = cn(
+    "flex w-full items-center gap-2 rounded-md px-2 py-1.25 text-left text-sm",
+    active === true && "bg-accent",
+    tone === "destructive" && "text-destructive",
+    onSelect !== undefined &&
+      "hover:bg-accent focus-visible:ring-ring/50 outline-none focus-visible:ring-3 focus-visible:outline-none"
+  );
+
+  const content = (
+    <>
+      {icon && (
+        <Icon
+          icon={icon}
+          size={16}
+          className={
+            tone === "destructive"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }
+        />
+      )}
+      <span className="flex-1 truncate">{children}</span>
+      {keys !== undefined && (
+        <span className="text-muted-foreground ml-auto pl-4 text-xs tracking-wide">
+          {keys}
+        </span>
+      )}
+    </>
+  );
+
+  return onSelect === undefined ? (
+    <div className={className}>{content}</div>
+  ) : (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onSelect}
+      className={className}
+    >
+      {content}
+    </button>
+  );
+};
 
 export const MenuSeparator = () => (
   <div className="bg-border -mx-1 my-1 h-px" />
@@ -425,20 +483,29 @@ export const ScreenshotCard = ({
 // The numbered map pin, with the drawing window's own outline (apps/desktop/src/shared/pin-shape.ts).
 const PIN_PATH = "M 0 0 L 6.306 -8.077 A 8 8 0 1 0 -6.306 -8.077 Z";
 
-const PIN_DIGITS: Record<1 | 2 | 3, string> = {
+export type PinNumber = 1 | 2 | 3 | 4 | 5 | 6;
+
+// digitStrokes(n) from pin-shape.ts, worked out once.
+const PIN_DIGITS: Record<PinNumber, string> = {
   1: "-1.32,-14.96 0.44,-16.5 0.44,-9.5",
   2: "-2.024,-14.82 -1.232,-16.15 0.088,-16.5 1.408,-15.94 2.024,-14.4 1.496,-12.86 -2.2,-9.5 2.2,-9.5",
   3: "-2.024,-15.8 -0.44,-16.5 1.32,-16.08 1.936,-14.75 1.232,-13.42 -0.352,-13 1.32,-12.58 2.112,-11.18 1.496,-9.85 -0.264,-9.5 -2.024,-10.2",
+  4: "1.232,-9.5 1.232,-16.5 -2.2,-11.74 2.2,-11.74",
+  5: "1.848,-16.5 -1.496,-16.5 -1.848,-13.28 -0.176,-13.84 1.496,-13.21 2.2,-11.46 1.584,-9.99 -0.176,-9.5 -2.024,-10.2",
+  6: "1.54,-16.08 0.22,-16.5 -1.1,-15.66 -1.936,-13.56 -2.024,-11.46 -1.32,-9.85 0,-9.5 1.408,-10.06 2.112,-11.74 1.496,-13.28 0.088,-13.77 -1.232,-13.21 -1.98,-12.16",
 };
 
 export const PinMark = ({
   number,
   className,
+  style,
 }: {
-  number: 1 | 2 | 3;
+  number: PinNumber;
   className?: string;
+  style?: CSSProperties;
 }) => (
   <svg
+    style={style}
     viewBox="-10.5 -23.5 21 26"
     width={21}
     height={26}

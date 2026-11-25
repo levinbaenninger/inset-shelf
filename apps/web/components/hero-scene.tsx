@@ -7,58 +7,17 @@ import {
   SquareLock02Icon,
 } from "@hugeicons/core-free-icons";
 
-import {
-  Icon,
-  ScreenshotCard,
-  SectionHeader,
-  ShelfComposer,
-  ShelfPanel,
-  ShelfRow,
-  ShelfSearch,
-  TrafficLights,
-} from "./app-ui";
-import type { ShelfItem } from "./app-ui";
+import { Icon, ScreenshotCard, TrafficLights } from "./app-ui";
+import { DemoShelf } from "./hero-demo";
 
 const SELECTION =
   "The second upload overwrites the first file before the save is done.";
 
-const SECTIONS: { name: string; current?: boolean; items: ShelfItem[] }[] = [
-  {
-    name: "Upload bug",
-    current: true,
-    items: [
-      {
-        text: SELECTION,
-        source: { service: "github", label: "GitHub · inset/shelf #482" },
-        steps: "0/3",
-        selected: true,
-      },
-      {
-        text: "Ask why the retry flag hides the failure",
-        source: { service: "claude", label: "Claude · Upload test retries" },
-        due: { label: "Today", tone: "today" },
-      },
-      {
-        text: "Prompt: write a test that finishes two uploads in the same second",
-        source: { service: "chatgpt", label: "ChatGPT · Flaky upload test" },
-      },
-    ],
-  },
-  {
-    name: "Sign-in redesign",
-    items: [
-      {
-        text: "Login screen: three things to fix before the demo",
-        source: { service: "figma", label: "Figma · Sign-in flow" },
-        due: { label: "Tomorrow", tone: "plain" },
-        steps: "1/3",
-      },
-    ],
-  },
-];
-
 const BrowserWindow = () => (
-  <div className="app-ui light absolute top-0 left-0 h-[640px] w-[900px] overflow-hidden rounded-xl bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.2),0_30px_70px_-20px_rgb(0_40_80/0.3),0_10px_24px_-12px_rgb(0_0_0/0.12)]">
+  <div
+    aria-hidden="true"
+    className="app-ui light absolute top-0 left-0 h-[640px] w-[900px] overflow-hidden rounded-xl bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.2),0_30px_70px_-20px_rgb(0_40_80/0.3),0_10px_24px_-12px_rgb(0_0_0/0.12)]"
+  >
     <div className="flex h-[52px] items-center gap-4 border-b border-black/8 bg-[#f6f6f6] px-4 text-[#7b7b80]">
       <TrafficLights />
       <Icon icon={SidebarLeftIcon} size={17} className="ml-2" />
@@ -81,6 +40,7 @@ const BrowserWindow = () => (
         <img
           src="/icons/github.svg"
           alt=""
+          loading="lazy"
           width={24}
           height={24}
           className="size-6"
@@ -197,26 +157,13 @@ const BrowserWindow = () => (
 );
 
 // A GitHub issue with one sentence selected, and the shelf open over the browser's right edge with that
-// sentence saved: true app scale (the shelf is 360 points wide), zoomed down on smaller screens.
+// sentence saved: true app scale (the shelf is 360 points wide), zoomed down on smaller screens. Only the shelf is live.
 export const HeroScene = () => (
   <div className="relative h-[640px] w-[1120px] shrink-0 [zoom:0.84] sm:[zoom:0.8] lg:[zoom:0.86] xl:[zoom:1]">
     <BrowserWindow />
-    <ScreenshotCard className="absolute top-[426px] left-[468px] hidden h-[184px] sm:block" />
-    <ShelfPanel className="absolute top-[30px] right-0 h-[580px] w-[360px]">
-      <ShelfSearch />
-      <div className="flex min-h-0 flex-1 flex-col px-2">
-        {SECTIONS.map((section) => (
-          <div key={section.name}>
-            <SectionHeader name={section.name} current={section.current} />
-            <ul className="flex flex-col gap-2 pb-2">
-              {section.items.map((item) => (
-                <ShelfRow key={item.text} item={item} />
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-      <ShelfComposer />
-    </ShelfPanel>
+    <div aria-hidden="true">
+      <ScreenshotCard className="absolute top-[426px] left-[468px] hidden h-[184px] sm:block" />
+    </div>
+    <DemoShelf className="absolute top-[30px] right-0 h-[580px] w-[360px]" />
   </div>
 );

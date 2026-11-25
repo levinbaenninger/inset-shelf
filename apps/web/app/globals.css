@@ -140,3 +140,18 @@
     transform: translate(12px, -6px);
   }
 }
+
+/* A new capture lighting up as it lands on the shelf. */
+@keyframes flash {
+  0%,
+  35% {
+    background-color: color-mix(in oklab, var(--color-pin) 16%, transparent);
+  }
+}
+
+/* A linked window coming back to the front. */
+@keyframes lift {
+  40% {
+    transform: translateY(-5px) scale(1.02);
+  }
+}

@@ -1,23 +1,7 @@
-import {
-  ArrowMoveUpRightIcon,
-  CircleIcon,
-  Cursor01Icon,
-  Location01Icon,
-  RedoIcon,
-  SquareIcon,
-  TextFontIcon,
-  Tick02Icon,
-  UndoIcon,
-} from "@hugeicons/core-free-icons";
-import type { IconSvgElement } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
-
-import { REPO_URL } from "@/lib/site";
 
 import {
   CheckCircle,
-  Icon,
-  PinMark,
   ScreenshotCard,
   SectionHeader,
   ShelfPanel,
@@ -25,6 +9,7 @@ import {
   SignInShot,
   SourceLine,
 } from "./app-ui";
+import { DrawingTile } from "./drawing-tile";
 import { Section, SectionIntro, Tile } from "./section";
 
 const QUOTE =
@@ -100,63 +85,6 @@ const Screenshot = () => (
   </>
 );
 
-const TOOLS: IconSvgElement[] = [
-  Cursor01Icon,
-  SquareIcon,
-  CircleIcon,
-  ArrowMoveUpRightIcon,
-  TextFontIcon,
-];
-
-const Drawing = () => (
-  <div className="app-ui light shadow-card absolute top-6 left-1/2 w-[392px] -translate-x-1/2 overflow-hidden rounded-xl bg-white">
-    <p className="border-b py-2.5 text-center text-[13px] font-medium">
-      Annotate
-    </p>
-    <div className="relative mx-3 mt-3 flex h-[178px] items-center justify-center border bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)]">
-      <div className="relative grid w-[176px] gap-1.5 rounded-lg bg-white p-3.5 text-[9px] text-neutral-500 shadow-[0_6px_18px_rgb(15_40_80/0.12)]">
-        <b className="text-[13px] leading-none font-bold text-neutral-900">
-          Sign in
-        </b>
-        <span className="mt-1">Email</span>
-        <span className="h-[18px] w-[96px] rounded border border-neutral-200" />
-        <span className="text-[9px] text-red-600">Something went wrong</span>
-        <span className="mt-1 flex h-[20px] items-center justify-center rounded bg-[#1f6feb] text-[9px] font-medium text-white">
-          Sign in
-        </span>
-        <PinMark number={1} className="absolute top-[12px] left-[64px]" />
-        <PinMark number={2} className="absolute top-[96px] left-[44px]" />
-        <PinMark number={3} className="absolute top-[118px] left-[140px]" />
-      </div>
-    </div>
-    <div className="flex justify-center py-3">
-      <div className="bg-background flex items-center gap-1 rounded-xl border px-1.5 py-1 shadow-sm">
-        {TOOLS.map((tool, index) => (
-          <span key={index} className="flex size-7 items-center justify-center">
-            <Icon icon={tool} size={15} />
-          </span>
-        ))}
-        <span className="bg-accent flex size-7 items-center justify-center rounded-md">
-          <Icon icon={Location01Icon} size={15} />
-        </span>
-        <span className="bg-border mx-1 h-5 w-px" />
-        <span className="size-4 rounded-full bg-neutral-900" />
-        <span className="mx-1 size-4 rounded-full bg-red-600 ring-2 ring-neutral-300 ring-offset-1" />
-        <span className="bg-pin size-4 rounded-full" />
-        <span className="bg-border mx-1 h-5 w-px" />
-        {[UndoIcon, RedoIcon].map((tool, index) => (
-          <span key={index} className="flex size-7 items-center justify-center">
-            <Icon icon={tool} size={15} />
-          </span>
-        ))}
-        <span className="bg-primary/50 flex size-7 items-center justify-center rounded-md text-white">
-          <Icon icon={Tick02Icon} size={15} />
-        </span>
-      </div>
-    </div>
-  </div>
-);
-
 const FileDrop = () => (
   <>
     <ShelfPanel className="ring-pin absolute top-14 left-[84px] w-[316px] ring-2 ring-inset sm:top-[68px] sm:right-10 sm:left-auto sm:w-[360px]">
@@ -201,7 +129,7 @@ export const Capture = () => (
     <SectionIntro
       id="capture-h"
       eyebrow="How capture works"
-      href={`${REPO_URL}#use-it`}
+      href="/docs/capture"
       title="Anything you find goes on the shelf."
       lead="Selected text, a screenshot, a sketch with pins or a file. Each one takes a single step, and none of it asks you to fill anything in."
     />
@@ -224,11 +152,12 @@ export const Capture = () => (
       </Tile>
       <Tile
         shrinkOnPhone
+        interactive
         className="lg:col-span-5"
         title="Sketches and numbered pins"
         line="Draw on any image, or drop numbered pins on what needs fixing. Label each pin in the details."
       >
-        <Drawing />
+        <DrawingTile />
       </Tile>
       <Tile
         shrinkOnPhone

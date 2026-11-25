@@ -66,6 +66,7 @@ export const Tile = ({
   className,
   stageClassName,
   shrinkOnPhone = false,
+  interactive = false,
 }: {
   title: string;
   line: string;
@@ -74,6 +75,8 @@ export const Tile = ({
   stageClassName?: string;
   /** Draws the stage at 85% on a phone, for app parts wider than the tile there. */
   shrinkOnPhone?: boolean;
+  /** The stage holds working controls, so assistive tech can reach it. */
+  interactive?: boolean;
 }) => (
   <article
     className={cn(
@@ -82,7 +85,7 @@ export const Tile = ({
     )}
   >
     <div
-      aria-hidden="true"
+      aria-hidden={interactive ? undefined : true}
       className={cn(
         "relative h-[300px] overflow-hidden sm:h-[320px]",
         stageClassName
