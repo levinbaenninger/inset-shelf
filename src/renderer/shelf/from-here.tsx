@@ -1,4 +1,4 @@
-import { Location01Icon } from "@hugeicons/core-free-icons";
+import { AppWindowMacIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ShelfHere } from "@shared/contracts";
 import { FROM_HERE, parseSearch } from "@shared/due";
@@ -19,6 +19,19 @@ export const withFromHere = (query: string): string => {
 
   return words === "" ? FROM_HERE : `${words} ${FROM_HERE}`;
 };
+
+/** The search with `from:here` taken out. */
+export const withoutFromHere = (query: string): string =>
+  query
+    .split(/\s+/u)
+    .filter((word) => word !== "" && word !== FROM_HERE)
+    .join(" ");
+
+/** "2 open items from GitHub · inset/shelf #482", for the chip's and the menu's tooltip. */
+export const hereText = (here: ShelfHere): string =>
+  tooltipText(
+    `${here.ids.length === 1 ? "1 open item" : `${here.ids.length} open items`} from ${here.label}`
+  );
 
 /**
  * Recall in the list. `from:here` in the search keeps only the open items
@@ -46,9 +59,11 @@ export const useFromHere = (
 
 /**
  * In the search field, when the shelf opened beside a window open items came
- * from: a mark and the count, which put `from:here` into the search. Its
- * words are in its tooltip, so the field keeps room to type at the shelf's
- * narrowest. Open decision 3; main leaves `here` out to drop it.
+ * from: "2 from here" ("Here · 2" at the shelf's narrowest), with a window
+ * mark, not a pin's. It puts `from:here` into the search and stays, pressed
+ * and down to its mark and count, while the filter is on; a click or Return
+ * on it again takes the filter off.
+ * Open decision 3; main leaves `here` out to drop it.
  */
 export const FromHereChip = ({
   here,
@@ -59,31 +74,36 @@ export const FromHereChip = ({
   readonly query: string;
   readonly onChange: (query: string) => void;
 }) => {
-  if (
-    here === null ||
-    here === undefined ||
-    here.ids.length === 0 ||
-    parseSearch(query).here
-  ) {
+  if (here === null || here === undefined || here.ids.length === 0) {
     return null;
   }
 
   const count = here.ids.length;
+  const on = parseSearch(query).here;
 
   return (
     <InputGroupButton
       aria-label={`Show the ${count === 1 ? "item" : `${count} items`} from here`}
+      aria-pressed={on}
       className="shrink-0"
       onClick={() => {
-        onChange(withFromHere(query));
+        onChange(on ? withoutFromHere(query) : withFromHere(query));
       }}
       size="xs"
-      title={tooltipText(
-        `${count === 1 ? "1 open item" : `${count} open items`} from ${here.label}`
-      )}
+      title={hereText(here)}
+      // Pressed while the filter is on, as a toggle is.
+      variant={on ? "secondary" : "ghost"}
     >
-      <HugeiconsIcon icon={Location01Icon} />
-      {count}
+      <HugeiconsIcon icon={AppWindowMacIcon} />
+      {/* On, the field's `from:here` says it in words, so the chip leaves the field its room. */}
+      {on ? (
+        count
+      ) : (
+        <>
+          <span className="max-[340px]:hidden">{count} from here</span>
+          <span className="hidden max-[340px]:inline">Here · {count}</span>
+        </>
+      )}
     </InputGroupButton>
   );
 };

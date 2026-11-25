@@ -4229,7 +4229,7 @@ const STRESS_SCENES: readonly Scene[] = (
     },
     {
       act: async (page) => {
-        await page.getByRole("button", { name: "Filter by Due" }).click();
+        await page.getByRole("button", { exact: true, name: "Filter" }).click();
         await page.getByRole("menuitem", { name: /^Overdue/u }).waitFor();
       },
       data: { view: stressView() },
@@ -5146,7 +5146,7 @@ const recallChecks = async (page: Page): Promise<string | null> => {
     return "the recall pill must not offer Why";
   }
 
-  await page.getByRole("button", { name: /from here/u }).click();
+  await page.getByRole("button", { name: /^\d+ items? from /u }).click();
   await page
     .getByRole("button", { name: "Don’t show for this place again" })
     .click();
@@ -5344,7 +5344,20 @@ const PILL_SCENES: readonly Scene[] = (
     },
     {
       act: async (page) => {
-        await page.getByRole("button", { name: /from here/u }).hover();
+        await page
+          .getByRole("button", { name: /^12 items from Safari/u })
+          .hover();
+      },
+      check: async (page) => {
+        const named = await page
+          .getByRole("button", { name: /^12 items from Safari/u })
+          .getAttribute("title");
+
+        return named?.startsWith(
+          `12 items from Safari · ${LONG_TITLE.slice(0, 20)}`
+        ) === true && named.length <= 300
+          ? null
+          : `the recall pill must name its place: ${String(named)}`;
       },
       data: { view: recallView(12, `Safari · ${LONG_TITLE}`) },
       keepPointer: true,
@@ -5405,10 +5418,71 @@ const PILL_SCENES: readonly Scene[] = (
       page: "shelf",
     },
     {
+      check: async (page) => {
+        const placeholder = await page
+          .getByRole("textbox", { name: SEARCH_FIELD })
+          .getAttribute("placeholder");
+
+        const short = await page
+          .getByText("Here · 2", { exact: true })
+          .isVisible();
+
+        const long = await page
+          .getByText("2 from here", { exact: true })
+          .isVisible();
+
+        return placeholder === "Search" && short && !long
+          ? null
+          : `at 300 the chip reads “Here · 2” and the field “Search”: ${JSON.stringify({ long, placeholder, short })}`;
+      },
       data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
       name: "shelf-from-here-chip-narrow",
       page: "shelf",
       width: NARROWEST,
+    },
+    {
+      // With the filter on the chip stays, pressed, and a press on it takes the filter off again.
+      check: async (page) => {
+        const chip = page.getByRole("button", {
+          name: "Show the item from here",
+        });
+
+        if ((await chip.getAttribute("aria-pressed")) !== "true") {
+          return "with from:here on, the chip must stay, pressed";
+        }
+
+        await chip.focus();
+        await page.keyboard.press("Enter");
+
+        const shown = await listed(page);
+
+        return shown.query === "" && shown.ids.length > 1
+          ? null
+          : `Return on the pressed chip must take the filter off: ${JSON.stringify(shown)}`;
+      },
+      data: { view: hereView(true) },
+      keepPointer: true,
+      name: "shelf-from-here-chip-off",
+      page: "shelf",
+    },
+    {
+      // The filter menu offers the items from here beside the due filters.
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Filter" }).click();
+      },
+      check: async (page) => {
+        await page.getByRole("menuitem", { name: /From this window/u }).click();
+
+        const shown = await listed(page);
+
+        return shown.query === "from:here" &&
+          isDeepStrictEqual(shown.ids, [uuid(14), uuid(16)])
+          ? null
+          : `From this window must filter to the items from here: ${JSON.stringify(shown)}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-menu",
+      page: "shelf",
     },
     {
       act: async (page) => {
@@ -7360,7 +7434,7 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
-      await page.getByRole("button", { name: "Filter by Due" }).click();
+      await page.getByRole("button", { exact: true, name: "Filter" }).click();
       await page.getByRole("menuitem", { name: /^Overdue/u }).waitFor();
     },
     data: { view: shelfView() },
