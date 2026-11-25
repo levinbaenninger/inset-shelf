@@ -957,6 +957,59 @@ const checkFailedWrite = async (): Promise<void> => {
   );
 };
 
+// The screenshot card's save path (src/main/screenshot-saves.ts), on a disk that refuses the first write.
+
+/** A screenshot of a corner of the screen, to the clipboard: the card shows it. */
+const takeScreenshot = (): void => {
+  execFileSync("screencapture", ["-c", "-x", "-R0,0,320,200"]);
+};
+
+/**
+ * Run with `INSET_FAIL_NEXT_WRITE=1`: Add to Shelf on the card reads
+ * Saving…, the failed write keeps the card with Retry and Copy in view,
+ * Retry adds the screenshot once, and the card goes.
+ */
+const checkScreenshotCard = async (): Promise<void> => {
+  const mark = events().length;
+  const before = items().length;
+
+  takeScreenshot();
+  record(
+    "a screenshot shows its card",
+    (await waitFor("screenshotShown", mark)) !== undefined
+  );
+  enableWebAccessibility();
+
+  if (!(await clickElement("AXButton", "Add to Shelf"))) {
+    record("the card offers Add to Shelf", false);
+
+    return;
+  }
+
+  record("a failed save offers Retry on the card", await windowShows("Retry"));
+  record(
+    "the failed card keeps Copy and Save to Downloads in view",
+    (await windowShows("Copy")) && (await windowShows("Save to Downloads"))
+  );
+  // The card stays past its usual 12 seconds while it holds a failed save.
+  await delay(13_000);
+  record("the failed card outlasts its time", await windowShows("Retry", 2));
+
+  const retried = events().length;
+
+  await clickElement("AXButton", "Retry");
+
+  const added = await waitFor("itemAdded", retried);
+
+  await delay(1500);
+  record(
+    "Retry adds the screenshot once",
+    items().length === before + 1,
+    `${items().length - before} added${added === undefined ? ", no itemAdded event" : ""}`
+  );
+  record("the card goes once it is saved", !windowText().includes("Retry"));
+};
+
 // Say why (src/shared/pill.ts): a second Double Shift opens a field in the capture notice; Return saves it.
 
 /** What the source app's text view holds now. */
@@ -1381,7 +1434,8 @@ const main = async (): Promise<void> => {
   }
 
   const clipboardBefore = pbpaste();
-  let app = launch();
+  // The card's trial starts on a disk that refuses the first write.
+  let app = launch(only === "card" ? { INSET_FAIL_NEXT_WRITE: "1" } : {});
 
   try {
     await checkLaunch();
@@ -1393,6 +1447,8 @@ const main = async (): Promise<void> => {
       await checkSayWhy();
     } else if (only === "recall") {
       app = await checkRecall(app);
+    } else if (only === "card") {
+      await checkScreenshotCard();
     } else {
       await checkShelfStaysInFront();
       await checkComposer();
