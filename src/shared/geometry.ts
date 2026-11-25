@@ -173,6 +173,36 @@ export const noticeBesidePointer = (
   );
 };
 
+/**
+ * A notice inside a window's bottom-right corner, kept inside the work area;
+ * the work area's own corner when there is no window. The recall pill sits
+ * there: it is unasked, so it stays away from the pointer and the next click.
+ */
+export const noticeInWindowCorner = (
+  target: Rect<"screen"> | null,
+  notice: Size<"screen">,
+  workArea: Rect<"screen">
+): Rect<"screen"> => {
+  const corner = target ?? workArea;
+  const right = workArea.x + workArea.width - notice.width;
+  const bottom = workArea.y + workArea.height - notice.height;
+
+  return rect(
+    clamp(
+      corner.x + corner.width - NOTICE_GAP_DIP - notice.width,
+      workArea.x,
+      right
+    ),
+    clamp(
+      corner.y + corner.height - NOTICE_GAP_DIP - notice.height,
+      workArea.y,
+      bottom
+    ),
+    notice.width,
+    notice.height
+  );
+};
+
 /** A window's corner, named as the notice window names where it draws. */
 export type Corner = `${"top" | "bottom"}-${"left" | "right"}`;
 

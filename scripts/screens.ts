@@ -4208,19 +4208,48 @@ const pillNotice = (title: string) => ({
   why: true,
 });
 
-const whyView = (phase: "taking" | "typing" | "saved") => ({
-  corner: "top-left",
-  kind: "why",
-  phase,
-  seq: 2,
-});
-
 /** The calls named so, with what each was sent. */
 const callsTo = async (page: Page, names: readonly string[]) => {
   const sent = await calls(page);
 
   return sent.filter((each) => names.includes(each.call));
 };
+
+const recallView = (count: number, label: string) => ({
+  corner: "bottom-right",
+  count,
+  kind: "recall",
+  label,
+  seq: 3,
+});
+
+/** The recall pill is not the capture notice: no Why, a close button instead. */
+const recallChecks = async (page: Page): Promise<string | null> => {
+  if ((await page.getByRole("button", { name: /^Why/u }).count()) > 0) {
+    return "the recall pill must not offer Why";
+  }
+
+  await page.getByRole("button", { name: /from here/u }).click();
+  await page
+    .getByRole("button", { name: "Don’t show for this place again" })
+    .click();
+
+  const sent = await callsTo(page, ["open", "dismiss"]);
+
+  return isDeepStrictEqual(sent, [
+    { arg: 3, call: "open" },
+    { arg: 3, call: "dismiss" },
+  ])
+    ? null
+    : `a click must open the shelf and × dismiss: ${JSON.stringify(sent)}`;
+};
+
+const whyView = (phase: "taking" | "typing" | "saved") => ({
+  corner: "top-left",
+  kind: "why",
+  phase,
+  seq: 2,
+});
 
 const WHY_LONG = `Weil die ${LONG_WORD} das Protokoll der Quartalsübersicht vor Freitag braucht`;
 
@@ -4310,6 +4339,27 @@ const PILL_SCENES: readonly Scene[] = (
       data: { view: whyView("saved") },
       name: "pill-why-saved",
       width: WHY_WIDTH,
+    },
+    {
+      check: recallChecks,
+      data: { view: recallView(3, "GitHub · acme/app #12") },
+      name: "pill-recall",
+    },
+    {
+      data: { view: recallView(1, "Notes · Standup") },
+      name: "pill-recall-one",
+    },
+    {
+      data: { view: recallView(128, `Code · ${LONG_WORD}`) },
+      name: "pill-recall-many",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: /from here/u }).hover();
+      },
+      data: { view: recallView(12, `Safari · ${LONG_TITLE}`) },
+      keepPointer: true,
+      name: "pill-recall-long-place",
     },
     {
       // The why field couldn't get the keyboard: the shelf opens at the item's description instead.

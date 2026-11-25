@@ -1,6 +1,7 @@
 import type { NoticeCorner } from "@shared/contracts";
 import {
   noticeBesidePointer,
+  noticeInWindowCorner,
   pt,
   rect,
   resizeAtCorner,
@@ -16,6 +17,7 @@ import type {
   PillView,
   WhyOffer,
 } from "@shared/pill";
+import type { PlaceKey } from "@shared/recall";
 import type { ItemId } from "@shared/shelf";
 import { BrowserWindow, screen } from "electron";
 import type { WebContents } from "electron";
@@ -30,7 +32,9 @@ const sizeOf = (view: PillBody): Size<"screen"> => {
     return size(320, 44);
   }
 
-  return view.tone === "failed" ? size(360, 72) : size(260, 44);
+  return view.kind === "notice" && view.tone === "failed"
+    ? size(360, 72)
+    : size(260, 44);
 };
 
 export interface ToastWindow {
@@ -71,6 +75,13 @@ export const createToastWindow = (options: {
   ) => void;
   /** Return in the why field, or a click away from it: the item's description gets the words. */
   readonly saveWhy: (item: ItemId, text: string) => void;
+  /** A click on the recall pill: the shelf opens filtered to the items from here. */
+  readonly openRecall: (place: PlaceKey, ids: readonly ItemId[]) => void;
+  /** The recall pill went: clicked, closed or left alone. */
+  readonly recallEnded: (
+    place: PlaceKey,
+    how: "opened" | "dismissed" | "ignored"
+  ) => void;
 }): ToastWindow => {
   let state: PillState = INITIAL_PILL;
   let current: PillView | null = null;
@@ -147,6 +158,28 @@ export const createToastWindow = (options: {
     draw(view, bounds, cornerNear(pointer, bounds));
   };
 
+  /** Inside a window's bottom-right corner, or the screen's under the pointer without one. */
+  const showInWindow = (
+    view: PillBody,
+    target: Rect<"screen"> | null
+  ): void => {
+    const cursor = screen.getCursorScreenPoint();
+
+    const near =
+      target === null
+        ? pt<"screen">(cursor.x, cursor.y)
+        : pt<"screen">(
+            target.x + target.width / 2,
+            target.y + target.height / 2
+          );
+
+    draw(
+      view,
+      noticeInWindowCorner(target, sizeOf(view), workAreaAt(near)),
+      "bottom-right"
+    );
+  };
+
   /** Where the pill already is, grown or shrunk around the corner it is drawn in. */
   const showInPlace = (view: PillBody): void => {
     if (current === null) {
@@ -173,7 +206,9 @@ export const createToastWindow = (options: {
   const run = (effect: PillEffect): void => {
     switch (effect.type) {
       case "show": {
-        if (effect.at === "pointer") {
+        if (effect.at === "window") {
+          showInWindow(effect.view, effect.window);
+        } else if (effect.at === "pointer") {
           showBesidePointer(effect.view);
         } else {
           showInPlace(effect.view);
@@ -243,6 +278,16 @@ export const createToastWindow = (options: {
         }
 
         options.openShelf(effect.item, effect.field);
+        break;
+      }
+
+      case "openRecall": {
+        options.openRecall(effect.place, effect.ids);
+        break;
+      }
+
+      case "recallEnded": {
+        options.recallEnded(effect.place, effect.how);
         break;
       }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { rect } from "./geometry";
 import {
   AFTER_HOVER_MS,
   holdsKeys,
@@ -7,6 +8,7 @@ import {
   INITIAL_PILL,
   NOTICE_MS,
   offerOf,
+  RECALL_MS,
   SAVED_MS,
   secondTap,
   stepPill,
@@ -14,6 +16,7 @@ import {
   withWhy,
 } from "./pill";
 import type { PillEffect, PillEvent, PillState } from "./pill";
+import { placeOf } from "./recall";
 import { ItemIdSchema } from "./shelf";
 
 const ITEM = ItemIdSchema.parse("00000000-0000-4000-8000-000000000001");
@@ -412,6 +415,107 @@ describe("the why field", () => {
   });
 });
 
+const PLACE = placeOf({
+  app: "Safari",
+  title: null,
+  url: "https://github.com/acme/app/pull/12",
+});
+
+if (PLACE === null) {
+  throw new Error("a pull request is a place");
+}
+
+const FRONT = rect<"screen">(100, 100, 800, 600);
+
+const RECALLED: PillEvent = {
+  ids: [ITEM],
+  label: "GitHub · acme/app #12",
+  place: PLACE,
+  type: "recalled",
+  window: FRONT,
+};
+
+describe("the recall pill", () => {
+  it("shows in the front window's corner, without the keyboard, for a while", () => {
+    const { effects } = run([RECALLED]);
+
+    expect(effects).toStrictEqual([
+      { take: false, type: "clicks" },
+      {
+        at: "window",
+        type: "show",
+        view: {
+          count: 1,
+          kind: "recall",
+          label: "GitHub · acme/app #12",
+          seq: 1,
+        },
+        window: FRONT,
+      },
+      { ms: RECALL_MS, seq: 1, type: "timer" },
+    ]);
+    expect(types(effects)).not.toContain("takeKeys");
+  });
+
+  it("never replaces a capture notice or the why field", () => {
+    expect(run([CAPTURED, RECALLED]).state.shown.kind).toBe("notice");
+    expect(run([...OPEN_FIELD, RECALLED]).state.shown.kind).toBe("why");
+  });
+
+  it("gives way to a capture, which counts as ignored", () => {
+    const { effects, state } = run([RECALLED, CAPTURED]);
+
+    expect(effects.slice(3)[0]).toStrictEqual({
+      how: "ignored",
+      place: PLACE,
+      type: "recallEnded",
+    });
+    expect(state.shown.kind).toBe("notice");
+  });
+
+  it.each([
+    ["a key down", { type: "keyDown" }, "ignored"],
+    ["its time running out", { seq: 1, type: "timeout" }, "ignored"],
+    ["the shelf showing", { type: "shelfShown" }, "ignored"],
+    ["its close button", { seq: 1, type: "dismissed" }, "dismissed"],
+  ] as const)("hides on %s, which ends it as %s", (_, event, how) => {
+    const { effects, state } = run([RECALLED, event]);
+
+    expect(effects.slice(3)).toStrictEqual([
+      { type: "hide" },
+      { type: "stopTimer" },
+      { how, place: PLACE, type: "recallEnded" },
+    ]);
+    expect(state.shown.kind).toBe("hidden");
+  });
+
+  it("opens the shelf filtered to its items on a click", () => {
+    const { effects } = run([RECALLED, { seq: 1, type: "opened" }]);
+
+    expect(effects.slice(3)).toStrictEqual([
+      { type: "hide" },
+      { type: "stopTimer" },
+      { how: "opened", place: PLACE, type: "recallEnded" },
+      { ids: [ITEM], place: PLACE, type: "openRecall" },
+    ]);
+  });
+
+  it("stays while the pointer is on it", () => {
+    const { effects } = run([RECALLED, { on: true, type: "hover" }]);
+
+    expect(effects.slice(3)).toStrictEqual([
+      { type: "stopTimer" },
+      { take: true, type: "clicks" },
+    ]);
+  });
+
+  it("ignores keys while a capture notice shows", () => {
+    expect(run([CAPTURED, { type: "keyDown" }]).state.shown.kind).toBe(
+      "notice"
+    );
+  });
+});
+
 /** Every event, aimed at the pill showing now. */
 const ALPHABET = (state: PillState): readonly PillEvent[] => [
   CAPTURED,
@@ -427,6 +531,9 @@ const ALPHABET = (state: PillState): readonly PillEvent[] => [
   { seq: state.seq, type: "whyCancelled" },
   { type: "blurred" },
   { type: "shelfShown" },
+  RECALLED,
+  { seq: state.seq, type: "dismissed" },
+  { type: "keyDown" },
 ];
 
 describe("the keyboard", () => {

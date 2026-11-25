@@ -365,6 +365,7 @@ if (page === "toast") {
       open: logged("open", nothing),
       // Say why: main answers a ready field by showing its caret.
       cancelWhy: logged("cancelWhy", nothing),
+      dismiss: logged("dismiss", nothing),
       saveWhy: logged("saveWhy", nothing),
       why: logged("why", nothing),
       whyInput: logged("whyInput", nothing),

@@ -1,4 +1,6 @@
 import type { NoticeCorner, NoticeTone } from "./contracts";
+import type { Rect } from "./geometry";
+import type { PlaceKey } from "./recall";
 import type { ItemId } from "./shelf";
 
 /**
@@ -41,6 +43,16 @@ export const BLUR_SAVES = true;
  */
 export const SECOND_TAP_SAYS_WHY = true;
 
+/** How long the recall pill stays, unless the pointer holds it. */
+export const RECALL_MS = 4000;
+
+/**
+ * Open decision 6: the recall pill sits inside the front window's
+ * bottom-right corner, away from the next click. "pointer" puts it beside
+ * the pointer, as the capture notice.
+ */
+export const RECALL_AT: "window" | "pointer" = "window";
+
 export type WhyPhase = "taking" | "typing" | "saved";
 
 /** What the pill shows, without where: the runner adds the corner it drew it in. */
@@ -58,6 +70,14 @@ export type PillBody =
       readonly seq: number;
       /** "typing" once the page has the keyboard, "saved" for the short confirmation. */
       readonly phase: WhyPhase;
+    }
+  | {
+      readonly kind: "recall";
+      readonly seq: number;
+      /** Open items from the window in front. */
+      readonly count: number;
+      /** The window's place in a few words: "GitHub · acme/app #12". */
+      readonly label: string;
     };
 
 export type PillView = PillBody & {
@@ -95,6 +115,13 @@ export type Shown =
       readonly text: string;
       /** A notice that arrived while the field had the keyboard, shown after it. */
       readonly waiting: Notice | null;
+    }
+  | {
+      readonly kind: "recall";
+      readonly place: PlaceKey;
+      readonly ids: readonly ItemId[];
+      readonly label: string;
+      readonly hovered: boolean;
     };
 
 export interface PillState {
@@ -137,7 +164,20 @@ export type PillEvent =
   | { readonly type: "whyCancelled"; readonly seq: number }
   /** The pill's window lost the keyboard: a click elsewhere, or another app. */
   | { readonly type: "blurred" }
-  | { readonly type: "shelfShown" };
+  | { readonly type: "shelfShown" }
+  /** Open items came from the window in front, which was away long enough (src/shared/recall.ts). */
+  | {
+      readonly type: "recalled";
+      readonly place: PlaceKey;
+      readonly ids: readonly ItemId[];
+      readonly label: string;
+      /** The front window, whose corner the pill sits in; null when it can't be read. */
+      readonly window: Rect<"screen"> | null;
+    }
+  /** The recall pill's close button. */
+  | { readonly type: "dismissed"; readonly seq: number }
+  /** Any key, from the system-wide hook: the user is typing. */
+  | { readonly type: "keyDown" };
 
 export type PillEffect =
   /** Shows the view beside the pointer, or where the pill already is, at its new size. */
@@ -145,6 +185,13 @@ export type PillEffect =
       readonly type: "show";
       readonly view: PillBody;
       readonly at: "pointer" | "same";
+    }
+  /** Shows the view inside a window's bottom-right corner, or the screen's without one. */
+  | {
+      readonly type: "show";
+      readonly view: PillBody;
+      readonly at: "window";
+      readonly window: Rect<"screen"> | null;
     }
   | { readonly type: "hide" }
   /** Replaces the one pending timer. */
@@ -162,6 +209,18 @@ export type PillEffect =
       readonly item: ItemId | null;
       /** The field to open in the item's details. */
       readonly field: "description" | null;
+    }
+  /** The shelf opens filtered to the items from here. */
+  | {
+      readonly type: "openRecall";
+      readonly place: PlaceKey;
+      readonly ids: readonly ItemId[];
+    }
+  /** The recall pill went, and how, for when to show the next one. */
+  | {
+      readonly type: "recallEnded";
+      readonly place: PlaceKey;
+      readonly how: "opened" | "dismissed" | "ignored";
     };
 
 export interface PillStep {
@@ -207,6 +266,59 @@ const hidden = (state: PillState): PillStep => ({
   effects: [{ type: "hide" }, { type: "stopTimer" }],
   state: { ...state, shown: { kind: "hidden" } },
 });
+
+/** Hides the recall pill and says how it went; anything else showing just hides. */
+const ended = (
+  state: PillState,
+  how: "opened" | "dismissed" | "ignored"
+): PillStep => {
+  const { shown } = state;
+  const closed = hidden(state);
+
+  return shown.kind === "recall"
+    ? {
+        effects: [
+          ...closed.effects,
+          { how, place: shown.place, type: "recallEnded" },
+        ],
+        state: closed.state,
+      }
+    : closed;
+};
+
+const showRecall = (
+  state: PillState,
+  event: Extract<PillEvent, { readonly type: "recalled" }>
+): PillStep => {
+  const seq = state.seq + 1;
+
+  const view: PillBody = {
+    count: event.ids.length,
+    kind: "recall",
+    label: event.label,
+    seq,
+  };
+
+  return {
+    effects: [
+      { take: false, type: "clicks" },
+      RECALL_AT === "window"
+        ? { at: "window", type: "show", view, window: event.window }
+        : { at: "pointer", type: "show", view },
+      { ms: RECALL_MS, seq, type: "timer" },
+    ],
+    state: {
+      seq,
+      shown: {
+        hovered: false,
+        ids: event.ids,
+        kind: "recall",
+        label: event.label,
+        place: event.place,
+      },
+    },
+  };
+};
 
 const showNotice = (state: PillState, notice: Notice): PillStep => {
   const seq = state.seq + 1;
@@ -331,7 +443,7 @@ const timedOut = (state: PillState): PillStep => {
   const { shown } = state;
 
   if (shown.kind !== "why") {
-    return shown.kind === "hidden" ? same(state) : hidden(state);
+    return shown.kind === "hidden" ? same(state) : ended(state, "ignored");
   }
 
   switch (shown.phase) {
@@ -380,14 +492,30 @@ const arrived = (state: PillState, notice: Notice): PillStep => {
     return same({ ...state, shown: { ...shown, waiting: notice } });
   }
 
-  return showNotice(state, notice);
+  const shownNotice = showNotice(state, notice);
+
+  // A recall pill gives way to what the user just did.
+  return shown.kind === "recall"
+    ? {
+        effects: [
+          { how: "ignored", place: shown.place, type: "recallEnded" },
+          ...shownNotice.effects,
+        ],
+        state: shownNotice.state,
+      }
+    : shownNotice;
 };
 
 /** The notice's timer, unless the pointer or a Double Shift's copy holds it. */
-const soon = (state: PillState): readonly PillEffect[] =>
-  state.shown.kind === "notice" && !state.shown.hovered && !state.shown.held
-    ? [{ ms: AFTER_HOVER_MS, seq: state.seq, type: "timer" }]
-    : [];
+const soon = (state: PillState): readonly PillEffect[] => {
+  const { shown } = state;
+
+  const free =
+    (shown.kind === "notice" && !shown.hovered && !shown.held) ||
+    (shown.kind === "recall" && !shown.hovered);
+
+  return free ? [{ ms: AFTER_HOVER_MS, seq: state.seq, type: "timer" }] : [];
+};
 
 /** One handler per event, each given only its own event. */
 type Handlers = { readonly [T in PillEvent["type"]]: Handler<T> };
@@ -425,7 +553,7 @@ const HANDLERS: Handlers = {
   hover: (state, event) => {
     const { shown } = state;
 
-    if (shown.kind !== "notice") {
+    if (shown.kind !== "notice" && shown.kind !== "recall") {
       return same(state);
     }
 
@@ -450,10 +578,35 @@ const HANDLERS: Handlers = {
       tone: event.tone,
     }),
 
+  dismissed: (state, event) =>
+    isCurrent(state, event.seq) && state.shown.kind === "recall"
+      ? ended(state, "dismissed")
+      : same(state),
+
+  // The user is typing: a recall pill steps aside.
+  keyDown: (state) =>
+    state.shown.kind === "recall" ? ended(state, "ignored") : same(state),
+
   opened: (state, event) => {
     const { shown } = state;
 
-    if (!isCurrent(state, event.seq) || shown.kind !== "notice") {
+    if (!isCurrent(state, event.seq)) {
+      return same(state);
+    }
+
+    if (shown.kind === "recall") {
+      const closed = ended(state, "opened");
+
+      return {
+        effects: [
+          ...closed.effects,
+          { ids: shown.ids, place: shown.place, type: "openRecall" },
+        ],
+        state: closed.state,
+      };
+    }
+
+    if (shown.kind !== "notice") {
       return same(state);
     }
 
@@ -479,8 +632,12 @@ const HANDLERS: Handlers = {
       );
     }
 
-    return shown.kind === "hidden" ? same(state) : hidden(state);
+    return shown.kind === "hidden" ? same(state) : ended(state, "ignored");
   },
+
+  // A recall pill never replaces a capture notice or the why field.
+  recalled: (state, event) =>
+    state.shown.kind === "hidden" ? showRecall(state, event) : same(state),
 
   timeout: (state, event) =>
     isCurrent(state, event.seq) ? timedOut(state) : same(state),

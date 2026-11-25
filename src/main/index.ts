@@ -652,7 +652,12 @@ const start = async (): Promise<void> => {
         }
       })();
     },
+    // Recall: wired to the watcher below, once it exists.
+    openRecall: () => {
+      void showShelf();
+    },
     preload: preloadPath("toast"),
+    recallEnded: ignore,
     // Say why: the words go after what the item's description already says.
     saveWhy: (item, text) => {
       const saved = controller.item(item);
@@ -2034,6 +2039,9 @@ const start = async (): Promise<void> => {
       },
       cancelWhy: (seq) => {
         toast.send({ seq, type: "whyCancelled" });
+      },
+      dismiss: (seq) => {
+        toast.send({ seq, type: "dismissed" });
       },
     },
     {

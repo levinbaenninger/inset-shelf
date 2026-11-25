@@ -1,6 +1,8 @@
 import {
   Alert02Icon,
   ArrowRight01Icon,
+  Cancel01Icon,
+  Location01Icon,
   TextAlignLeftIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -202,6 +204,55 @@ const WhyField = ({
   );
 };
 
+type RecallView = Extract<ToastView, { readonly kind: "recall" }>;
+
+/** "3 items from here": the open items from the window in front. */
+const fromHere = (count: number): string =>
+  count === 1 ? "1 item from here" : `${count} items from here`;
+
+/**
+ * The recall pill, in the front window's corner: unasked, so quieter than
+ * the capture notice (a muted mark, no zoom). Its words open the shelf
+ * filtered to those items; × keeps this place quiet from now on.
+ */
+const RecallPill = ({ view }: { readonly view: RecallView }) => (
+  <div
+    className={cn(
+      NOTICE_CLASS,
+      "animate-in fade-in-0 gap-0 p-0 font-medium duration-300"
+    )}
+    key={view.seq}
+    {...hover}
+  >
+    <button
+      className="hover:bg-accent flex min-w-0 flex-1 cursor-default items-center gap-2 rounded-l-2xl py-1.5 pr-2 pl-3 text-left"
+      onClick={() => {
+        api.open(view.seq);
+      }}
+      title={`${fromHere(view.count)}: ${view.label}\nClick to show them in the shelf`}
+      type="button"
+    >
+      <HugeiconsIcon
+        className={cn(NOTICE_ICON_CLASS, "text-muted-foreground")}
+        icon={Location01Icon}
+        size={14}
+      />
+      <span className="truncate">{fromHere(view.count)}</span>
+    </button>
+    <button
+      aria-label="Don’t show for this place again"
+      className="hover:bg-accent text-muted-foreground hover:text-foreground flex shrink-0 cursor-default items-center rounded-r-2xl py-1.5 pr-2.5 pl-1.5"
+      onClick={() => {
+        api.dismiss(view.seq);
+      }}
+      title="Don’t show for this place again"
+      type="button"
+    >
+      <HugeiconsIcon icon={Cancel01Icon} size={12} />
+    </button>
+  </div>
+);
+
 const WhySaved = () => (
   <output
     className={cn(
@@ -219,7 +270,8 @@ const WhySaved = () => (
  * shelf was hidden, or says a copy failed, without taking focus; a click on it
  * opens the shelf there. A capture's notice can become a one-line field for
  * why it matters, which then has the keyboard until Return, Esc or a click
- * elsewhere.
+ * elsewhere. The same window says, unasked, how many open items came from
+ * the window in front.
  */
 export const ToastApp = () => {
   const view = usePushedView(load, subscribe, null);
@@ -235,6 +287,10 @@ export const ToastApp = () => {
       ) : (
         <PlainNotice view={view} />
       );
+    }
+
+    if (view.kind === "recall") {
+      return <RecallPill view={view} />;
     }
 
     return view.phase === "saved" ? (

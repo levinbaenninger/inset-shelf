@@ -294,6 +294,8 @@ export const toastContract = defineContract({
     saveWhy: send(WhyTextSchema),
     /** Esc. */
     cancelWhy: send(Seq),
+    /** The recall pill's close button: this place stays quiet from now on. */
+    dismiss: send(Seq),
   },
   name: "toast",
 });
