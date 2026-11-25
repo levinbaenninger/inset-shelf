@@ -5,6 +5,7 @@ import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
 import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
 import type { OnboardingView } from "./onboarding";
+import { WHY_MAX } from "./pill";
 import type { PillView } from "./pill";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
@@ -266,6 +267,11 @@ export interface ScreenshotView {
 
 const Seq = z.number().int().min(0);
 
+const WhyTextSchema = z.object({
+  seq: Seq,
+  text: z.string().max(WHY_MAX),
+});
+
 export const toastContract = defineContract({
   events: { view: event<ToastView>() },
   global: "insetToast",
@@ -275,6 +281,17 @@ export const toastContract = defineContract({
     hover: send(z.boolean()),
     /** Opens the shelf at what the notice named; `seq` keeps a late click from reaching a newer notice. */
     open: send(Seq),
+    // Say why (src/shared/pill.ts): the capture notice turns into a one-line field.
+    /** The Why target: open the field. */
+    why: send(Seq),
+    /** The field has the keyboard; its caret shows from now on. */
+    whyReady: send(Seq),
+    /** The field's words, on every change, so main keeps them when the field closes another way. */
+    whyInput: send(WhyTextSchema),
+    /** Return. */
+    saveWhy: send(WhyTextSchema),
+    /** Esc. */
+    cancelWhy: send(Seq),
   },
   name: "toast",
 });

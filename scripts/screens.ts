@@ -4194,6 +4194,126 @@ const DRAWING_STRESS_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map((scene) => stress({ ...scene, ...DRAWING_MIN, page: "drawing" }));
 
+// Pill scenes: the notice window's say-why and recall states (src/shared/pill.ts), at its sizes in src/main/toast-window.ts.
+
+/** The why field's window: 320 wide. */
+const WHY_WIDTH = 320;
+
+const pillNotice = (title: string) => ({
+  corner: "bottom-right",
+  kind: "notice",
+  seq: 1,
+  title,
+  tone: "done",
+  why: true,
+});
+
+const whyView = (phase: "taking" | "typing" | "saved") => ({
+  corner: "top-left",
+  kind: "why",
+  phase,
+  seq: 2,
+});
+
+/** The calls named so, with what each was sent. */
+const callsTo = async (page: Page, names: readonly string[]) => {
+  const sent = await calls(page);
+
+  return sent.filter((each) => names.includes(each.call));
+};
+
+const WHY_LONG = `Weil die ${LONG_WORD} das Protokoll der Quartalsübersicht vor Freitag braucht`;
+
+const PILL_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) => {
+        await page.getByRole("button", { name: /Saved to Inbox/u }).click();
+        await page.getByRole("button", { name: /^Why/u }).click();
+
+        const sent = await callsTo(page, ["open", "why"]);
+
+        return isDeepStrictEqual(sent, [
+          { arg: 1, call: "open" },
+          { arg: 1, call: "why" },
+        ])
+          ? null
+          : `a click on the words must open the shelf and one on Why the field: ${JSON.stringify(sent)}`;
+      },
+      data: { view: pillNotice("Saved to Inbox") },
+      name: "pill-why-offer",
+    },
+    {
+      data: { view: pillNotice(`Saved to ${SECTION_PHRASE}`) },
+      name: "pill-why-offer-long-section",
+    },
+    {
+      data: { view: pillNotice(`Saved to ${SECTION_WORD}`) },
+      name: "pill-why-offer-long-word",
+    },
+    {
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: "Why this matters" });
+
+        const focusedField = await field.evaluate(
+          (element) => document.activeElement === element
+        );
+
+        if (!focusedField) {
+          return "the field must have the keyboard";
+        }
+
+        const ready = await callsTo(page, ["whyReady"]);
+
+        if (!isDeepStrictEqual(ready.at(0), { arg: 2, call: "whyReady" })) {
+          return `the page must say the field is ready: ${JSON.stringify(ready)}`;
+        }
+
+        await page.keyboard.type("because the API changes");
+        await page.keyboard.press("Enter");
+        await page.keyboard.press("Escape");
+
+        const sent = await callsTo(page, ["saveWhy", "cancelWhy"]);
+
+        return isDeepStrictEqual(sent, [
+          {
+            arg: { seq: 2, text: "because the API changes" },
+            call: "saveWhy",
+          },
+          { arg: 2, call: "cancelWhy" },
+        ])
+          ? null
+          : `Return must save the words and Esc cancel: ${JSON.stringify(sent)}`;
+      },
+      data: { view: whyView("taking") },
+      name: "pill-why-field",
+      width: WHY_WIDTH,
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.type(WHY_LONG);
+      },
+      check: async (page) => {
+        const typed = await callsTo(page, ["whyInput"]);
+
+        return typed.at(-1)?.arg !== undefined &&
+          isDeepStrictEqual(typed.at(-1)?.arg, { seq: 2, text: WHY_LONG })
+          ? null
+          : "every change must reach main, so a click away keeps the words";
+      },
+      data: { view: whyView("taking") },
+      keepPointer: true,
+      name: "pill-why-field-long-text",
+      width: WHY_WIDTH,
+    },
+    {
+      data: { view: whyView("saved") },
+      name: "pill-why-saved",
+      width: WHY_WIDTH,
+    },
+  ] satisfies readonly StressScene[]
+).map((scene) => stress({ page: "toast", ...scene }));
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -6963,6 +7083,7 @@ const SCENES: readonly Scene[] = [
   },
   ...STRESS_SCENES,
   ...DRAWING_STRESS_SCENES,
+  ...PILL_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {

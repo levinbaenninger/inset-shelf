@@ -1980,6 +1980,22 @@ const start = async (): Promise<void> => {
       open: (seq) => {
         toast.send({ seq, type: "opened" });
       },
+      // Say why: the field's events go to the pill's reducer as they are.
+      why: (seq) => {
+        toast.send({ seq, type: "whyAsked" });
+      },
+      whyReady: (seq) => {
+        toast.send({ seq, type: "whyReady" });
+      },
+      whyInput: ({ seq, text }) => {
+        toast.send({ seq, text, type: "whyInput" });
+      },
+      saveWhy: ({ seq, text }) => {
+        toast.send({ seq, text, type: "whySaved" });
+      },
+      cancelWhy: (seq) => {
+        toast.send({ seq, type: "whyCancelled" });
+      },
     },
     {
       appOrigin: appOrigin(),
