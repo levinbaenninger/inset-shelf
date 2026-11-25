@@ -511,7 +511,7 @@ const OWN_FILES: Readonly<
 };
 
 /** Every stored file an item keeps next to the shelf: its image or file, and its windows' pictures. */
-export const attachmentsOf = (item: ShelfItem): readonly string[] => [
+export const storedFilesOf = (item: ShelfItem): readonly string[] => [
   ...OWN_FILES[item.kind](item),
   ...item.windows.flatMap((window) =>
     window.thumb === null ? [] : [window.thumb.file]

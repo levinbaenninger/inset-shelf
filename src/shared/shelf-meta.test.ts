@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOp,
-  attachmentsOf,
+  storedFilesOf,
   detailLines,
   emptyShelf,
   groupItems,
@@ -321,7 +321,7 @@ describe("metadata operations", () => {
       throw new Error("missing item");
     }
 
-    expect(attachmentsOf(item)).toStrictEqual([IMAGE.file, `${uuid(33)}.png`]);
+    expect(storedFilesOf(item)).toStrictEqual([IMAGE.file, `${uuid(33)}.png`]);
 
     const replaced = applyOp(
       linked,
@@ -334,7 +334,7 @@ describe("metadata operations", () => {
       []
     );
 
-    expect(replaced.discarded.flatMap(attachmentsOf)).toStrictEqual([
+    expect(replaced.discarded.flatMap(storedFilesOf)).toStrictEqual([
       IMAGE.file,
     ]);
   });

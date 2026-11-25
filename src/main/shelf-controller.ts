@@ -1,5 +1,5 @@
 import type { NotSavedItem, ShelfStatus, ShelfView } from "@shared/contracts";
-import { applyOp, attachmentsOf, UNDO_MAX } from "@shared/shelf";
+import { applyOp, storedFilesOf, UNDO_MAX } from "@shared/shelf";
 import type {
   ItemId,
   MainOp,
@@ -289,12 +289,12 @@ export const createShelfController = (
         ...snapshot.items,
         ...doc.items,
         ...[...kept.values()].map((e) => e.item),
-      ].flatMap(attachmentsOf)
+      ].flatMap(storedFilesOf)
     );
 
     await Promise.all(
       deletable
-        .flatMap(attachmentsOf)
+        .flatMap(storedFilesOf)
         .filter((file) => !used.has(file))
         .map(deps.deleteAttachment)
     );

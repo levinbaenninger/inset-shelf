@@ -12,7 +12,7 @@ import {
 import path from "node:path";
 
 import {
-  attachmentsOf,
+  storedFilesOf,
   AttachmentFileSchema,
   emptyShelf,
   parseShelfDocument,
@@ -300,7 +300,7 @@ const collectGarbage = async (
     return;
   }
 
-  const used = new Set([...doc.items.flatMap(attachmentsOf), ...kept]);
+  const used = new Set([...doc.items.flatMap(storedFilesOf), ...kept]);
 
   const names = await fs.list(attachments);
 

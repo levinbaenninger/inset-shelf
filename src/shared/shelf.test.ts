@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOp,
-  attachmentsOf,
+  storedFilesOf,
   groupItems,
   itemsAsList,
   listHtmlWithImage,
@@ -398,7 +398,7 @@ describe(applyOp, () => {
 
     expect({
       bare: bare.doc.items[0],
-      discarded: bare.discarded.flatMap(attachmentsOf),
+      discarded: bare.discarded.flatMap(storedFilesOf),
       marked: marked.doc.items[0],
     }).toStrictEqual({
       bare: first,
@@ -805,7 +805,7 @@ describe(parseShelfDocument, () => {
       const [item] = read?.items ?? [];
 
       expect({
-        files: item === undefined ? [] : attachmentsOf(item),
+        files: item === undefined ? [] : storedFilesOf(item),
         read,
       }).toStrictEqual({
         files: [`${uuid(51)}.png`, `${uuid(52)}.json`, `${uuid(50)}.png`],
@@ -822,7 +822,7 @@ describe(parseShelfDocument, () => {
 
       const [item] = read?.items ?? [];
 
-      expect(item === undefined ? [] : attachmentsOf(item)).toStrictEqual([
+      expect(item === undefined ? [] : storedFilesOf(item)).toStrictEqual([
         `${uuid(50)}.png`,
         `${uuid(52)}.json`,
       ]);
