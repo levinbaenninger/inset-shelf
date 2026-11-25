@@ -4488,6 +4488,18 @@ const STRESS_SCENES: readonly Scene[] = (
       name: "stress-edit-in-place-note",
     },
     {
+      // An open file without a note, before any click: the quiet Add a note… shows where the note would be.
+      act: async (page) => {
+        await select(page, 714);
+      },
+      check: async (page) =>
+        (await page.getByRole("button", { name: "Add a note…" }).isVisible())
+          ? null
+          : "an open file without a note doesn't offer Add a note…",
+      data: { view: stressView() },
+      name: "stress-open-add-note-idle",
+    },
+    {
       // An open file without a note offers one; a click starts it.
       act: async (page) => {
         await select(page, 714);
