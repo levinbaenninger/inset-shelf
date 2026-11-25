@@ -50,6 +50,7 @@ import { coach } from "@/tutorial/anchors";
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
 import { whenText } from "./format";
+import { Clamp } from "./clamp";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
@@ -201,12 +202,15 @@ export const LinkList = ({
           icon={Link01Icon}
           size={12}
         />
-        <span className="min-w-[4ch] truncate">{link.text}</span>
-        {link.text === link.url ? null : (
-          <span className="text-muted-foreground min-w-0 shrink-[4] truncate">
-            {hostOf(link.url)}
-          </span>
-        )}
+        {/* The site goes under the words when both don't fit on one line, so it stays readable. */}
+        <span className="flex min-w-0 flex-wrap gap-x-1.5">
+          <span className="max-w-full truncate">{link.text}</span>
+          {link.text === link.url ? null : (
+            <span className="text-muted-foreground max-w-full truncate">
+              {hostOf(link.url)}
+            </span>
+          )}
+        </span>
       </button>
     ))}
   </div>
@@ -269,16 +273,20 @@ const hideWrapped = (line: HTMLElement): void => {
  * A line with its words on the left and the metadata badges right-aligned.
  * The words keep at least 14 characters; badges that don't fit wrap out of
  * sight, lowest priority first, so the line never grows. `reach` lets the
- * badges run on under the More button's column, below its button.
+ * badges run on under the More button's column, below its button. With
+ * `ownLine`, badges that would leave the words (an icon and a name) under
+ * 12 characters take a line of their own under them instead.
  */
 const BadgeLine = ({
   badges,
   children,
+  ownLine = false,
   reach,
 }: {
   readonly badges: readonly ReactNode[];
   readonly children: ReactNode;
   readonly reach: boolean;
+  readonly ownLine?: boolean;
 }) => {
   const words = children !== null && children !== undefined;
   const ref = useRef<HTMLDivElement>(null);
@@ -305,13 +313,28 @@ const BadgeLine = ({
   }
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-2", reach && "-mr-9")}>
-      {words ? <div className="flex min-w-0 flex-1">{children}</div> : null}
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-2",
+        reach && "-mr-9",
+        ownLine && "flex-wrap gap-y-1.5"
+      )}
+    >
+      {words ? (
+        <div
+          className={cn(
+            "flex min-w-0 flex-1",
+            ownLine && "min-w-[min(100%,calc(12ch+1.5rem))]"
+          )}
+        >
+          {children}
+        </div>
+      ) : null}
       <div
         className={cn(
           // Never narrower than its widest badge, the Due chip: the words give way first.
           "ml-auto flex h-5 min-w-min shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
-          words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
+          words && !ownLine ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
         )}
         data-badges
         ref={ref}
@@ -416,6 +439,13 @@ const metaText = (item: ShelfItem): string => {
 
 /** A row's words, read or edited: the same type either way, so starting an edit moves nothing. */
 const WORDS = "text-sm leading-snug break-words";
+
+/** How many lines of its words, caption or description an open row shows before Show more. */
+const OPEN_LINES = 10;
+
+const DESCRIPTION_LINES = 3;
+
+const TITLE_LINES = 3;
 
 const DONE = "text-muted-foreground line-through";
 
@@ -636,10 +666,15 @@ const NoteText = ({
   readonly selected: boolean;
   readonly onEditAt: (offset: number | null) => void;
 } & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) =>
-  item.note === "" ? null : (
+{
+  if (item.note === "") {
+    return null;
+  }
+
+  const note = (
     <button
       className={cn(
-        "focus-visible:ring-ring/50 rounded-sm text-left outline-none focus-visible:ring-3",
+        "focus-visible:ring-ring/50 w-full rounded-sm text-left outline-none focus-visible:ring-3",
         selected && "cursor-text",
         noteLook(item)
       )}
@@ -661,6 +696,15 @@ const NoteText = ({
       </span>
     </button>
   );
+
+  return selected ? (
+    <Clamp className={noteLook(item)} lines={OPEN_LINES}>
+      {note}
+    </Clamp>
+  ) : (
+    note
+  );
+};
 
 /** The note, read or typed in, in one place: a click on the open note edits it at that word. */
 const Note = ({
@@ -731,8 +775,9 @@ const Picture = ({
     aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
-      // At the narrowest shelf a third of the row, so the words beside it keep room to read.
-      compact ? "w-[clamp(4rem,32%,6rem)]" : "w-full"
+      // At the narrowest shelf a third of the row, so the words beside it keep room to read; open, as wide as the
+      // picture shows (12rem tall at most), so its pins stay on what they mark.
+      compact ? "w-[clamp(4rem,32%,6rem)]" : "w-fit max-w-full"
     )}
     draggable
     data-row-keys
@@ -750,7 +795,10 @@ const Picture = ({
   >
     <img
       alt={imageCaption(item)}
-      className="block h-auto w-full"
+      className={cn(
+        "block h-auto",
+        compact ? "w-full" : "max-h-48 w-auto max-w-full"
+      )}
       draggable={false}
       height={item.image.heightPx}
       src={insetUrl.attachment(item.image.file)}
@@ -851,14 +899,15 @@ const ImageBody = ({
         onSelect={onSelect}
       />
       {item.title === null ? null : (
-        <p
+        <Clamp
           className={cn(
             "text-sm leading-snug font-medium break-words",
             item.done && "text-muted-foreground line-through"
           )}
+          lines={TITLE_LINES}
         >
           {item.title}
-        </p>
+        </Clamp>
       )}
       <Note
         editing={editing}
@@ -872,6 +921,42 @@ const ImageBody = ({
         selected={selected}
       />
     </div>
+  );
+};
+
+/** A file's title: two lines on the closed row, three on the open one until Show more. */
+const FileTitle = ({
+  item,
+  onContextMenu,
+  onSelect,
+  selected,
+}: {
+  readonly item: FileItem;
+  readonly selected: boolean;
+} & Pick<RowHandlers, "onContextMenu" | "onSelect">) => {
+  const title = (
+    <button
+      className={cn(
+        "focus-visible:ring-ring/50 w-full rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
+        item.done && "text-muted-foreground line-through"
+      )}
+      data-row-keys
+      onClick={onSelect}
+      onContextMenu={contextMenuAt(onContextMenu)}
+      type="button"
+    >
+      <span className={cn("block", !selected && "line-clamp-2")}>
+        {item.title}
+      </span>
+    </button>
+  );
+
+  return selected ? (
+    <Clamp className="text-sm leading-snug" lines={TITLE_LINES}>
+      {title}
+    </Clamp>
+  ) : (
+    title
   );
 };
 
@@ -906,22 +991,14 @@ const FileBody = ({
 >) => (
   <div className="flex min-w-0 flex-col gap-2">
     {item.title === null ? null : (
-      <button
-        className={cn(
-          "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
-          item.done && "text-muted-foreground line-through"
-        )}
-        data-row-keys
-        onClick={onSelect}
-        onContextMenu={contextMenuAt(onContextMenu)}
-        type="button"
-      >
-        <span className={cn("block", !selected && "line-clamp-2")}>
-          {item.title}
-        </span>
-      </button>
+      <FileTitle
+        item={item}
+        onContextMenu={onContextMenu}
+        onSelect={onSelect}
+        selected={selected}
+      />
     )}
-    <BadgeLine badges={badges} reach={item.title !== null}>
+    <BadgeLine badges={badges} ownLine reach={item.title !== null}>
       <FileName
         item={item}
         onContextMenu={onContextMenu}
@@ -989,28 +1066,31 @@ const TextBody = ({
     <>
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Where focus comes back to from details: the row, whose keys are Return and Space.
-        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes.
-        <div
-          className="cursor-text rounded-sm outline-none"
-          data-row-keys
-          onClick={(event) => {
-            const point = editPoint(event);
+        // Ten lines at most until Show more, so one item never fills the shelf; an edit shows all of it.
+        <Clamp className={WORDS} lines={OPEN_LINES}>
+          {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
+          {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
+          <div
+            className="cursor-text rounded-sm outline-none"
+            data-row-keys
+            onClick={(event) => {
+              const point = editPoint(event);
 
-            if (point !== null) {
-              setCaretAt(point);
-              onEdit();
-            }
-          }}
-          tabIndex={-1}
-        >
-          <Markdown
-            className={words}
-            interactive
-            onOpenLink={onOpenLink}
-            text={item.text}
-          />
-        </div>
+              if (point !== null) {
+                setCaretAt(point);
+                onEdit();
+              }
+            }}
+            tabIndex={-1}
+          >
+            <Markdown
+              className={words}
+              interactive
+              onOpenLink={onOpenLink}
+              text={item.text}
+            />
+          </div>
+        </Clamp>
       ) : (
         <button
           className={cn(
@@ -1093,12 +1173,12 @@ const Expansion = ({
         <PinLegend pins={item.pins} shown={extras.pinLegend.shown} />
       )}
       {extras.description ? (
-        <p
-          className="text-muted-foreground line-clamp-3 text-sm leading-snug break-words whitespace-pre-line"
-          title={item.description.trim()}
+        <Clamp
+          className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
+          lines={DESCRIPTION_LINES}
         >
           {item.description.trim()}
-        </p>
+        </Clamp>
       ) : null}
       {extras.steps === null ? null : (
         <StepChecklist
@@ -1108,6 +1188,8 @@ const Expansion = ({
       )}
       {extras.windows === null ? null : (
         <WindowStrip
+          more={extras.windows.more}
+          onMore={onShowDetails}
           onReopen={onReopenWindow}
           windows={item.windows.slice(0, extras.windows.shown)}
         />

@@ -24,6 +24,7 @@ import { keyText } from "@shared/shortcut";
 import { useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -50,6 +51,7 @@ import { cn } from "@/lib/utils";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
+import { Truncated } from "./clamp";
 import { filledSteps } from "./row-parts";
 import type { RowBadge } from "./row-parts";
 
@@ -198,15 +200,14 @@ export const StepChecklist = ({
           }}
         />
         {/* Two lines in the row; details show the whole step. */}
-        <span
+        <Truncated
           className={cn(
-            "line-clamp-2 min-w-0 text-sm leading-snug break-words",
+            "min-w-0 text-sm leading-snug break-words",
             step.done && "text-muted-foreground line-through"
           )}
-          title={step.text}
-        >
-          {step.text}
-        </span>
+          lines={2}
+          text={step.text}
+        />
       </li>
     ))}
   </ul>
@@ -230,9 +231,7 @@ export const PinLegend = ({
       .map(({ label, number }) => (
         <li className="flex min-w-0 items-center gap-1.5 text-sm" key={number}>
           <PinGlyph height={15} number={number} />
-          <span className="min-w-0 truncate" title={label}>
-            {label}
-          </span>
+          <Truncated className="min-w-0" text={label} />
         </li>
       ))}
   </ol>
@@ -287,15 +286,23 @@ export const WindowThumb = ({
   </span>
 );
 
-/** The linked windows as a strip of small pictures; each reopens its window. */
+/**
+ * The linked windows as one row of small pictures, each reopening its
+ * window, and "+N" for the ones only details show.
+ */
 export const WindowStrip = ({
+  more,
+  onMore,
   onReopen,
   windows,
 }: {
   readonly windows: readonly WindowRef[];
   readonly onReopen: (window: WindowRef) => void;
+  /** How many more windows details show; "+N" opens them. */
+  readonly more: number;
+  readonly onMore: () => void;
 }) => (
-  <ul aria-label="Linked windows" className="flex flex-wrap gap-1.5">
+  <ul aria-label="Linked windows" className="flex items-center gap-1.5">
     {windows.map((window) => (
       <li key={window.id}>
         <Tooltip>
@@ -308,7 +315,7 @@ export const WindowStrip = ({
               }}
               type="button"
             >
-              <WindowThumb className="h-10 w-16" window={window} />
+              <WindowThumb className="h-8 w-12" window={window} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
@@ -317,6 +324,19 @@ export const WindowStrip = ({
         </Tooltip>
       </li>
     ))}
+    {more === 0 ? null : (
+      <li>
+        <Button
+          aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
+          className="h-8 px-1.5"
+          onClick={onMore}
+          size="xs"
+          variant="quiet"
+        >
+          +{more}
+        </Button>
+      </li>
+    )}
   </ul>
 );
 

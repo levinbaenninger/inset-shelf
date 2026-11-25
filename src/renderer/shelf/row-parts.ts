@@ -39,8 +39,12 @@ export interface RowParts {
 
 const MAX_BADGES = 3;
 
-/** How much of each list an open row shows, so one item never fills the shelf; details show all of it. */
-const ROW_LIST_MAX = { pins: 3, steps: 5, windows: 6 } as const;
+/**
+ * How much of each list an open row shows, so one item never fills the
+ * shelf; details show all of it. The windows are one row of small pictures,
+ * which says "+N" itself.
+ */
+const ROW_LIST_MAX = { pins: 3, steps: 5, windows: 3 } as const;
 
 const rowList = (count: number, max: number): RowList | null =>
   count === 0
@@ -50,6 +54,11 @@ const rowList = (count: number, max: number): RowList | null =>
 /** Steps that hold words; an empty one being typed doesn't count. */
 export const filledSteps = (steps: readonly Step[]): readonly Step[] =>
   steps.filter((step) => step.text.trim() !== "");
+
+const labelledPins = (item: ShelfItem): number =>
+  item.kind === "image"
+    ? item.pins.filter((pin) => pin.label !== undefined).length
+    : 0;
 
 const badgesOf = (item: ShelfItem, open: boolean): readonly RowBadge[] => {
   const steps = filledSteps(item.steps);
@@ -73,7 +82,8 @@ const badgesOf = (item: ShelfItem, open: boolean): readonly RowBadge[] => {
     badges.push({ count: item.windows.length, kind: "windows" });
   }
 
-  if (pins > 0) {
+  // An open row with labelled pins lists them, so it leaves out their count too.
+  if (pins > 0 && !(open && labelledPins(item) > 0)) {
     badges.push({ count: pins, kind: "pins" });
   }
 
@@ -83,12 +93,7 @@ const badgesOf = (item: ShelfItem, open: boolean): readonly RowBadge[] => {
 const extrasOf = (item: ShelfItem): RowExtras => ({
   description: item.description.trim() !== "",
   links: item.kind === "text" && item.links.length > 0,
-  pinLegend: rowList(
-    item.kind === "image"
-      ? item.pins.filter((pin) => pin.label !== undefined).length
-      : 0,
-    ROW_LIST_MAX.pins
-  ),
+  pinLegend: rowList(labelledPins(item), ROW_LIST_MAX.pins),
   steps: rowList(filledSteps(item.steps).length, ROW_LIST_MAX.steps),
   windows: rowList(item.windows.length, ROW_LIST_MAX.windows),
 });
@@ -102,10 +107,9 @@ export const rowParts = (item: ShelfItem, open: boolean): RowParts => ({
 const MORE_NAMES = [
   { key: "pinLegend", many: "pins", one: "pin" },
   { key: "steps", many: "steps", one: "step" },
-  { key: "windows", many: "windows", one: "window" },
 ] as const;
 
-/** What only details show of an open row's lists, in one line: "27 more pins · 15 more steps", or null. */
+/** What only details show of an open row's pins and steps, in one line: "27 more pins · 15 more steps", or null. */
 export const moreText = (extras: RowExtras): string | null => {
   const parts = MORE_NAMES.flatMap(({ key, many, one }) => {
     const more = extras[key]?.more ?? 0;
