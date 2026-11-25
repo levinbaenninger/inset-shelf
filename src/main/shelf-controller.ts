@@ -1,6 +1,7 @@
 import type { NotSavedItem, ShelfStatus, ShelfView } from "@shared/contracts";
 import { applyOp, storedFilesOf, UNDO_MAX } from "@shared/shelf";
 import type {
+  Attachment,
   ItemId,
   MainOp,
   OpEnv,
@@ -91,6 +92,7 @@ const TYPED: ReadonlySet<string> = new Set([
   "setSteps",
   "describeWindow",
   "setPins",
+  "setAttachmentPins",
 ]);
 
 const isEdit = (op: ShelfOp | MainOp): boolean => TYPED.has(op.type);
@@ -104,6 +106,16 @@ interface RemovedWindow {
 
 /** Windows removed in details that can still come back; their pictures stay until the shelf is next opened. */
 const REMOVED_WINDOWS_MAX = 20;
+
+/** An attachment taken off an item, kept so details can put it back with ⌘Z. */
+interface RemovedAttachment {
+  readonly itemId: ItemId;
+  readonly attachment: Attachment;
+  readonly index: number;
+}
+
+/** Attachments removed in details that can still come back; their files stay until the shelf is next opened. */
+const REMOVED_ATTACHMENTS_MAX = 20;
 
 const byId = (doc: ShelfDoc): ReadonlyMap<ItemId, ShelfItem> =>
   new Map(doc.items.map((item) => [item.id, item]));
@@ -139,6 +151,7 @@ export const createShelfController = (
   let cancelTimer: (() => void) | null = null;
   let toDelete: ShelfItem[] = [];
   let removedWindows: readonly RemovedWindow[] = [];
+  let removedAttachments: readonly RemovedAttachment[] = [];
   let inFlight: Promise<void> = Promise.resolve();
   // Counts the changes; `saved` is the last one the disk holds.
   let version = 0;
@@ -424,6 +437,54 @@ export const createShelfController = (
     };
   };
 
+  /** removeAttachment remembers the attachment; restoreAttachment puts it back where it was. */
+  const attachmentOp = (op: ShelfOp | MainOp): ShelfOp | MainOp | null => {
+    if (op.type === "removeAttachment") {
+      const item = doc.items.find((candidate) => candidate.id === op.id);
+
+      const index =
+        item?.attachments.findIndex(
+          (attachment) => attachment.id === op.attachmentId
+        ) ?? -1;
+
+      const attachment = item?.attachments[index];
+
+      if (attachment !== undefined) {
+        removedAttachments = [
+          ...removedAttachments,
+          { attachment, index, itemId: op.id },
+        ].slice(-REMOVED_ATTACHMENTS_MAX);
+      }
+
+      return op;
+    }
+
+    if (op.type !== "restoreAttachment") {
+      return op;
+    }
+
+    const removed = removedAttachments.find(
+      (candidate) =>
+        candidate.itemId === op.id &&
+        candidate.attachment.id === op.attachmentId
+    );
+
+    if (removed === undefined) {
+      return null;
+    }
+
+    removedAttachments = removedAttachments.filter(
+      (candidate) => candidate !== removed
+    );
+
+    return {
+      attachment: removed.attachment,
+      id: removed.itemId,
+      index: removed.index,
+      type: "insertAttachment",
+    };
+  };
+
   const persisted = async (rev: number): Promise<WriteResult> => {
     // A typed edit waiting for its pause, or a change a failed save left unwritten.
     if (saved < rev && !queued && (writing ?? 0) < rev) {
@@ -480,7 +541,8 @@ export const createShelfController = (
 
   return {
     apply: (requested) => {
-      const op = windowOp(requested);
+      const windowed = windowOp(requested);
+      const op = windowed === null ? null : attachmentOp(windowed);
 
       if (op === null) {
         return null;
@@ -566,6 +628,9 @@ export const createShelfController = (
       // A picture drawn in since goes once the disk no longer names it.
       toDelete = [...toDelete, now];
       removedWindows = removedWindows.filter(
+        (removed) => removed.itemId !== id
+      );
+      removedAttachments = removedAttachments.filter(
         (removed) => removed.itemId !== id
       );
 

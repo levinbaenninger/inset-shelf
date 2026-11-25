@@ -13,6 +13,8 @@ import {
   parseShelfDocument,
   emptyShelf,
   ATTACHMENTS_MAX,
+  AttachedImageSchema,
+  AttachmentSchema,
   ItemIdSchema,
   parseComposer,
   SectionIdSchema,
@@ -29,7 +31,6 @@ import type {
   ShelfOp,
   MainOp,
   Removed,
-  AttachedImageSchema,
 } from "./shelf";
 
 const uuid = (n: number) =>
@@ -46,6 +47,10 @@ const env = (): OpEnv => {
 };
 
 const INBOX = SectionIdSchema.parse(uuid(1));
+
+const never = (): never => {
+  throw new Error("missing");
+};
 
 /** The ids in fixtures/shelf-v3.json. */
 const uuid8 = (n: number) => `8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d${n}`;
@@ -1137,5 +1142,193 @@ describe("attachments on an item (format 4)", () => {
         ])
       )
     ).toBeNull();
+  });
+});
+
+const fileAt = (n: number) => AttachmentSchema.parse(attachedFile(n));
+const imageAt = (n: number) => AttachmentSchema.parse(attachedImage(n));
+
+const idsOf = (doc: ShelfDoc) =>
+  doc.items.flatMap((item) => item.attachments.map((a) => a.id));
+
+/** A shelf with one note holding these attachments, and that note's id. */
+const noteWith = (attachments: readonly ReturnType<typeof fileAt>[]) => {
+  const { doc } = apply(emptyShelf(INBOX), [
+    { text: "Chairs", type: "compose" },
+  ]);
+
+  const [note] = doc.items;
+
+  if (note === undefined) {
+    throw new Error("no note");
+  }
+
+  const attached = applyOp(
+    doc,
+    { attachments, id: note.id, type: "attach" },
+    env(),
+    []
+  ).doc;
+
+  return { doc: attached, id: note.id };
+};
+
+describe("attachment operations", () => {
+  it(`attaches in order, each id once, up to ${ATTACHMENTS_MAX}, and changes nothing when none fits`, () => {
+    const ten = Array.from({ length: 10 }, (_, at) => fileAt(30 + at * 2));
+    const { doc, id } = noteWith(ten);
+    const [a, b, c] = [fileAt(60), fileAt(62), fileAt(64)];
+
+    const full = applyOp(
+      doc,
+      { attachments: [a, a, ten[0] ?? a, b, c], id, type: "attach" },
+      env(),
+      []
+    ).doc;
+
+    const again = applyOp(
+      full,
+      { attachments: [fileAt(66)], id, type: "attach" },
+      env(),
+      []
+    );
+
+    expect(idsOf(full)).toStrictEqual([...ten, a, b].map((x) => x.id));
+    expect(ShelfDocSchema.safeParse(full).success).toBeTruthy();
+    expect(again.doc).toBe(full);
+  });
+
+  it("puts a removed attachment back where it was, once", () => {
+    const [a, b, c] = [fileAt(30), imageAt(32), fileAt(34)];
+    const { doc, id } = noteWith([a, b, c]);
+
+    const removed = applyOp(
+      doc,
+      { attachmentId: b.id, id, type: "removeAttachment" },
+      env(),
+      []
+    );
+
+    const back = applyOp(
+      removed.doc,
+      { attachment: b, id, index: 1, type: "insertAttachment" },
+      env(),
+      []
+    ).doc;
+
+    const twice = applyOp(
+      back,
+      { attachment: b, id, index: 0, type: "insertAttachment" },
+      env(),
+      []
+    );
+
+    expect({
+      back: idsOf(back),
+      discarded: removed.discarded,
+      removed: idsOf(removed.doc),
+      twice: twice.doc,
+    }).toStrictEqual({
+      back: [a.id, b.id, c.id],
+      discarded: [],
+      removed: [a.id, c.id],
+      twice: back,
+    });
+  });
+
+  it("brings a deleted item back with its attachments, and discards their files with it past the undo limit", () => {
+    const { doc, id } = noteWith([imageAt(30), fileAt(32)]);
+
+    const restored = apply(doc, [
+      { id, type: "remove" },
+      { type: "undoRemove" },
+    ]);
+
+    const pending: Removed[] = Array.from({ length: UNDO_MAX }, () => ({
+      index: 0,
+      item: doc.items[0] ?? never(),
+    }));
+
+    const notes = apply(doc, [{ text: "Other", type: "compose" }]).doc;
+    const other = notes.items[1]?.id ?? never();
+
+    const past = applyOp(notes, { id: other, type: "remove" }, env(), pending);
+
+    expect({
+      discarded: past.discarded.flatMap(storedFilesOf),
+      restored: restored.doc.items[0]?.attachments,
+    }).toStrictEqual({
+      discarded: [`${uuid(31)}.png`, `${uuid(33)}.pdf`],
+      restored: doc.items[0]?.attachments,
+    });
+    expect(idsOf(restored.doc)).toStrictEqual([uuid(30), uuid(32)]);
+  });
+
+  it("replaces an attached picture in place, keeping its name and pins, and lets the old files go", () => {
+    const pinned = AttachedImageSchema.parse(
+      attachedImage(30, {
+        pins: [{ label: "Here", x: 5, y: 5 }],
+        scene: { base: pictureAt(32), file: `${uuid(33)}.json` },
+      })
+    );
+
+    const { doc, id } = noteWith([pinned, fileAt(40)]);
+
+    const replaced = applyOp(
+      doc,
+      {
+        attachmentId: pinned.id,
+        id,
+        image: pictureAt(34),
+        type: "replaceAttachmentImage",
+      },
+      env(),
+      []
+    );
+
+    const kept = new Set(replaced.doc.items.flatMap(storedFilesOf));
+
+    expect({
+      attachment: replaced.doc.items[0]?.attachments[0],
+      goes: replaced.discarded
+        .flatMap(storedFilesOf)
+        .filter((file) => !kept.has(file)),
+    }).toStrictEqual({
+      attachment: {
+        addedAt: pinned.addedAt,
+        id: pinned.id,
+        image: pictureAt(34),
+        kind: "image",
+        name: pinned.name,
+        pins: [{ label: "Here", x: 5, y: 5 }],
+      },
+      goes: [`${uuid(31)}.png`, `${uuid(33)}.json`, `${uuid(32)}.png`],
+    });
+  });
+
+  it("keeps an attached picture's pins on it, clamped to its size, and leaves files alone", () => {
+    const picture = imageAt(30);
+    const file = fileAt(32);
+    const { doc, id } = noteWith([picture, file]);
+
+    const pinned = apply(doc, [
+      {
+        attachmentId: picture.id,
+        id,
+        pins: [{ label: "  Corner  ", x: 5000, y: -3 }],
+        type: "setAttachmentPins",
+      },
+      {
+        attachmentId: file.id,
+        id,
+        pins: [{ x: 1, y: 1 }],
+        type: "setAttachmentPins",
+      },
+    ]).doc;
+
+    expect(pinned.items[0]?.attachments).toStrictEqual([
+      { ...picture, pins: [{ label: "Corner", x: 959, y: 0 }] },
+      file,
+    ]);
   });
 });

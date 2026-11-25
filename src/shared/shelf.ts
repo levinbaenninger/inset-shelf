@@ -755,6 +755,24 @@ export const ShelfOpSchema = z.discriminatedUnion("type", [
     type: z.literal("restoreWindow"),
     windowId: WindowIdSchema,
   }),
+  z.object({
+    attachmentId: AttachmentIdSchema,
+    id: ItemIdSchema,
+    type: z.literal("removeAttachment"),
+  }),
+  /** Puts back an attachment removed from an item; main remembers it (shelf-controller.ts). */
+  z.object({
+    attachmentId: AttachmentIdSchema,
+    id: ItemIdSchema,
+    type: z.literal("restoreAttachment"),
+  }),
+  /** An attached picture's pins, kept on that picture; numbers follow the order. */
+  z.object({
+    attachmentId: AttachmentIdSchema,
+    id: ItemIdSchema,
+    pins: PinsSchema,
+    type: z.literal("setAttachmentPins"),
+  }),
 ]);
 
 export type ShelfOp = z.output<typeof ShelfOpSchema>;
@@ -803,6 +821,27 @@ export type MainOp =
       readonly id: ItemId;
       readonly window: WindowRef;
       readonly index: number;
+    }
+  /** Pictures and files added to an item, at the end of its list: ids it already has are skipped, and only what fits is taken. */
+  | {
+      readonly type: "attach";
+      readonly id: ItemId;
+      readonly attachments: readonly Attachment[];
+    }
+  /** A removed attachment back in its place (restoreAttachment, in the controller). */
+  | {
+      readonly type: "insertAttachment";
+      readonly id: ItemId;
+      readonly attachment: Attachment;
+      readonly index: number;
+    }
+  /** An annotated attached picture takes the place of the old one; the old files go once this is saved. */
+  | {
+      readonly type: "replaceAttachmentImage";
+      readonly id: ItemId;
+      readonly attachmentId: AttachmentId;
+      readonly image: ShelfImage;
+      readonly scene?: DrawingScene;
     };
 
 export interface OpEnv {
@@ -1344,6 +1383,182 @@ const applyMetaOp = (doc: ShelfDoc, op: MetaOp): OpResult => {
   }
 };
 
+type AttachmentOp = Extract<
+  ShelfOp | MainOp,
+  {
+    readonly type:
+      | "attach"
+      | "insertAttachment"
+      | "removeAttachment"
+      | "restoreAttachment"
+      | "replaceAttachmentImage"
+      | "setAttachmentPins";
+  }
+>;
+
+const ATTACHMENT_OPS: ReadonlySet<string> = new Set([
+  "attach",
+  "insertAttachment",
+  "removeAttachment",
+  "restoreAttachment",
+  "replaceAttachmentImage",
+  "setAttachmentPins",
+]);
+
+const isAttachmentOp = (op: ShelfOp | MainOp): op is AttachmentOp =>
+  ATTACHMENT_OPS.has(op.type);
+
+/** The item with its attachments changed; unchanged when the list comes back as it was. */
+const mapAttachments = (
+  doc: ShelfDoc,
+  id: ItemId,
+  update: (attachments: readonly Attachment[]) => readonly Attachment[]
+): OpResult => {
+  const item = doc.items.find((candidate) => candidate.id === id);
+  const attachments = item === undefined ? [] : update(item.attachments);
+
+  return item === undefined || attachments === item.attachments
+    ? unchanged(doc)
+    : changed(
+        mapItem(doc, id, () => ({ ...item, attachments: [...attachments] }))
+      );
+};
+
+/** New attachments at the end, in order, each id once, as many as fit. */
+const attach = (
+  attachments: readonly Attachment[],
+  adding: readonly Attachment[]
+): readonly Attachment[] => {
+  const known = new Set<string>(attachments.map((attachment) => attachment.id));
+
+  const fresh = adding.filter((attachment) => {
+    const isNew = !known.has(attachment.id);
+
+    known.add(attachment.id);
+
+    return isNew;
+  });
+
+  const fitting = fresh.slice(0, ATTACHMENTS_MAX - attachments.length);
+
+  return fitting.length === 0 ? attachments : [...attachments, ...fitting];
+};
+
+const insertAttachment = (
+  attachments: readonly Attachment[],
+  attachment: Attachment,
+  index: number
+): readonly Attachment[] =>
+  attachments.length >= ATTACHMENTS_MAX ||
+  attachments.some((other) => other.id === attachment.id)
+    ? attachments
+    : attachments.toSpliced(Math.min(index, attachments.length), 0, attachment);
+
+const removeAttachment = (
+  attachments: readonly Attachment[],
+  attachmentId: AttachmentId
+): readonly Attachment[] =>
+  attachments.some((attachment) => attachment.id === attachmentId)
+    ? attachments.filter((attachment) => attachment.id !== attachmentId)
+    : attachments;
+
+/** An attached picture's pins, clamped to it; files and unknown ids stay as they are. */
+const setAttachmentPins = (
+  attachments: readonly Attachment[],
+  attachmentId: AttachmentId,
+  pins: readonly Pin[]
+): readonly Attachment[] =>
+  attachments.some(
+    (attachment) =>
+      attachment.id === attachmentId && attachment.kind === "image"
+  )
+    ? attachments.map((attachment) =>
+        attachment.id === attachmentId && attachment.kind === "image"
+          ? { ...attachment, pins: clampPins(pins, attachment.image) }
+          : attachment
+      )
+    : attachments;
+
+/** The attachment keeps its id, name and pins; only its picture and the marks kept with it change. */
+const replaceAttachmentImage = (
+  doc: ShelfDoc,
+  op: Extract<MainOp, { readonly type: "replaceAttachmentImage" }>
+): OpResult => {
+  const item = doc.items.find((candidate) => candidate.id === op.id);
+
+  const old = item?.attachments.find(
+    (attachment) => attachment.id === op.attachmentId
+  );
+
+  if (
+    item === undefined ||
+    old?.kind !== "image" ||
+    old.image.file === op.image.file
+  ) {
+    return unchanged(doc);
+  }
+
+  // A picture with no marks kept has no scene at all.
+  const { scene: _kept, ...rest } = old;
+
+  const replaced: Attachment =
+    op.scene === undefined
+      ? { ...rest, image: op.image }
+      : { ...rest, image: op.image, scene: op.scene };
+
+  return {
+    ...mapAttachments(doc, op.id, (attachments) =>
+      attachments.map((attachment) =>
+        attachment.id === op.attachmentId ? replaced : attachment
+      )
+    ),
+    // Only files nothing names any more go: the old picture and marks.
+    discarded: [item],
+  };
+};
+
+/** Pictures and files attached to an item after capture. */
+const applyAttachmentOp = (doc: ShelfDoc, op: AttachmentOp): OpResult => {
+  switch (op.type) {
+    case "attach": {
+      return mapAttachments(doc, op.id, (attachments) =>
+        attach(attachments, op.attachments)
+      );
+    }
+
+    case "insertAttachment": {
+      return mapAttachments(doc, op.id, (attachments) =>
+        insertAttachment(attachments, op.attachment, op.index)
+      );
+    }
+
+    case "removeAttachment": {
+      return mapAttachments(doc, op.id, (attachments) =>
+        removeAttachment(attachments, op.attachmentId)
+      );
+    }
+
+    case "restoreAttachment": {
+      // The controller turns it into insertAttachment, since only main remembers removed attachments.
+      return unchanged(doc);
+    }
+
+    case "replaceAttachmentImage": {
+      return replaceAttachmentImage(doc, op);
+    }
+
+    case "setAttachmentPins": {
+      return mapAttachments(doc, op.id, (attachments) =>
+        setAttachmentPins(attachments, op.attachmentId, op.pins)
+      );
+    }
+
+    default: {
+      return unchanged(doc);
+    }
+  }
+};
+
 /**
  * Applies one operation. `pending` holds the deleted items that can still be
  * put back, oldest first; a delete past UNDO_MAX discards the oldest for good.
@@ -1360,6 +1575,10 @@ export const applyOp = (
 
   if (isMetaOp(op)) {
     return applyMetaOp(doc, op);
+  }
+
+  if (isAttachmentOp(op)) {
+    return applyAttachmentOp(doc, op);
   }
 
   switch (op.type) {
