@@ -121,7 +121,10 @@ export const Composer = ({
           {entry.kind === "section" ? (
             <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-56 min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
               <span className="shrink-0">↩</span>
-              <span className="truncate">
+              <span
+                className="truncate"
+                title={`${existing ? "Go to section" : "New section"} ‘${entry.name}’`}
+              >
                 {existing ? "Go to section" : "New section"} ‘{entry.name}’
               </span>
             </span>
