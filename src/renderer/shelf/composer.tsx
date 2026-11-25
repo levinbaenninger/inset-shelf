@@ -73,7 +73,8 @@ export const Composer = ({
       className={cn("px-2 pt-1 pb-2", hidden && "hidden")}
       {...coach("composer")}
     >
-      <InputGroup className="h-auto items-start">
+      {/* The field keeps at least half the width: a longer "# Name" chip wraps to its own line under it. */}
+      <InputGroup className="h-auto flex-wrap items-start [&>:has(>[data-slot=input-group-control])]:min-w-1/2">
         <InputGroupAddon align="inline-start-top">
           <AddMenu
             actions={addActions}
@@ -116,10 +117,14 @@ export const Composer = ({
           ref={field}
           value={text}
         />
-        {/* Inline at the field's end, so "# Name" reads as a command, not a heading. */}
-        <InputGroupAddon align="inline-end" aria-live="polite">
+        {/* At the field's end, so "# Name" reads as a command, not a heading. */}
+        <InputGroupAddon
+          align="inline-end"
+          aria-live="polite"
+          className="max-w-full min-w-0 pl-2"
+        >
           {entry.kind === "section" ? (
-            <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-56 min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
+            <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
               <span className="shrink-0">↩</span>
               <span
                 className="truncate"
