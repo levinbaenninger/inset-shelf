@@ -23,7 +23,7 @@ import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
 
-/** `reopen`, `say-why` or `recall` runs only that trial (README.md, Testing). */
+/** `reopen`, `say-why`, `say-why-failed` or `recall` runs only that trial (README.md, Testing). */
 const only = process.argv[3] ?? "";
 
 const packagedApp = path.join(
@@ -1162,6 +1162,78 @@ const sayWhyTrial = async (
     : "a key after Return reached the field";
 };
 
+/**
+ * Say why on a disk that refuses the why's write (INSET_FAIL_NEXT_WRITE=2:
+ * the capture's write lands, the why's fails): the field keeps the words and
+ * the keyboard and says why, no key reaches the source, and Return then
+ * writes them and gives the keyboard back.
+ */
+const checkSayWhyFailed = async (): Promise<void> => {
+  const text = "Why trial failing disk sentence";
+
+  if (!(await showSource(text, "all"))) {
+    record("say why on a failing disk", false, `front: ${frontmost()}`);
+
+    return;
+  }
+
+  const mark = events().length;
+
+  guardedKeys(() => {
+    input("double-shift");
+  });
+  await waitFor("itemAdded", mark);
+
+  const second = events().length;
+
+  guardedKeys(() => {
+    input("double-shift");
+  });
+  await waitFor("whyOpened", second, Date.now() + 3000);
+  guardedKeys(() => {
+    input("type", "because");
+    input("key", RETURN);
+  });
+
+  const refused = await waitFor("whyNotSaved", second, Date.now() + 5000);
+
+  guardedKeys(() => {
+    input("type", "x");
+  });
+  await delay(400);
+  record(
+    "say why: a failed write keeps the words and the keyboard, and says why",
+    refused !== undefined &&
+      sourceText() === text &&
+      itemWith(text)[0]?.description === "",
+    JSON.stringify({ refused: refused !== undefined, source: sourceText() })
+  );
+
+  // The x went into the field: take it out again, then Return writes the words.
+  guardedKeys(() => {
+    input("key", "51");
+    input("key", RETURN);
+  });
+
+  const saved = await waitFor("whySaved", second, Date.now() + 5000);
+
+  await delay(400);
+  guardedKeys(() => {
+    input("type", "y");
+  });
+  await delay(400);
+  record(
+    "say why: Return after a failed write saves the words and gives the keyboard back",
+    saved !== undefined &&
+      itemWith(text)[0]?.description === "because" &&
+      sourceText().includes("y"),
+    JSON.stringify({
+      description: itemWith(text)[0]?.description,
+      source: sourceText(),
+    })
+  );
+};
+
 const SAY_WHY_TRIALS = 20;
 
 const checkSayWhy = async (): Promise<void> => {
@@ -1450,6 +1522,15 @@ const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
   return next;
 };
 
+/** Trials that start on a disk refusing one write: the card's and the failed paste's the first, the why's the second (the capture's lands). */
+const failingWrite = (trial: string) => {
+  if (trial === "card" || trial === "added-failed") {
+    return { INSET_FAIL_NEXT_WRITE: "1" };
+  }
+
+  return trial === "say-why-failed" ? { INSET_FAIL_NEXT_WRITE: "2" } : {};
+};
+
 const main = async (): Promise<void> => {
   if (process.platform !== "darwin") {
     throw new Error("This test drives the macOS desktop.");
@@ -1492,11 +1573,7 @@ const main = async (): Promise<void> => {
   const clipboardBefore = pbpaste();
 
   // The card's trial and the failed paste start on a disk that refuses the first write.
-  let app = launch(
-    only === "card" || only === "added-failed"
-      ? { INSET_FAIL_NEXT_WRITE: "1" }
-      : {}
-  );
+  let app = launch(failingWrite(only));
 
   try {
     await checkLaunch();
@@ -1506,6 +1583,8 @@ const main = async (): Promise<void> => {
       await checkReopenCaret();
     } else if (only === "say-why") {
       await checkSayWhy();
+    } else if (only === "say-why-failed") {
+      await checkSayWhyFailed();
     } else if (only === "recall") {
       app = await checkRecall(app);
     } else if (only === "card") {
