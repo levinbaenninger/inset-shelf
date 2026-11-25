@@ -153,8 +153,8 @@ const NoteText = ({
   return selected ? (
     <Clamp
       className={noteLook(item)}
-      lines={openLines}
-      rowWords
+      lines={openLines.words}
+      rowPart="words"
       what="the note"
     >
       {note}

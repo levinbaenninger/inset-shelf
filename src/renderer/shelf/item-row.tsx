@@ -68,16 +68,15 @@ import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
 import {
   contextMenuAt,
-  DESCRIPTION_LINES,
   DONE,
   EDITING,
-  MIN_OPEN_LINES,
-  OPEN_LINES,
+  fitOpenRow,
   OPEN_SHARE,
   OpenLines,
-  TITLE_LINES,
+  ROW_CAPS,
   WORDS,
 } from "./row-look";
+import type { MeasuredPart, RowLines } from "./row-look";
 import { filledSteps, moreText, rowParts } from "./row-parts";
 import type { RowExtras } from "./row-parts";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
@@ -679,6 +678,8 @@ const ImageBody = ({
   | "onSelect"
   | "onStopEditing"
 >) => {
+  const titleLines = useContext(OpenLines).title;
+
   if (!selected && !editing) {
     return (
       <div className="flex gap-2.5">
@@ -737,7 +738,8 @@ const ImageBody = ({
             "text-sm leading-snug font-medium break-words",
             item.done && "text-muted-foreground line-through"
           )}
-          lines={TITLE_LINES}
+          lines={titleLines}
+          rowPart="title"
           what="the title"
         >
           {item.title}
@@ -768,6 +770,8 @@ const FileTitle = ({
   readonly item: FileItem;
   readonly selected: boolean;
 } & Pick<RowHandlers, "onContextMenu" | "onSelect">) => {
+  const titleLines = useContext(OpenLines).title;
+
   const title = (
     <button
       className={cn(
@@ -788,7 +792,8 @@ const FileTitle = ({
   return selected ? (
     <Clamp
       className="text-sm leading-snug"
-      lines={TITLE_LINES}
+      lines={titleLines}
+      rowPart="title"
       what="the title"
     >
       {title}
@@ -906,7 +911,12 @@ const TextBody = ({
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
         // Ten lines at most until Show more, fewer when the rest of the row needs the room, so one item never fills the shelf; an edit shows all of it.
-        <Clamp className={WORDS} lines={openLines} rowWords what="the text">
+        <Clamp
+          className={WORDS}
+          lines={openLines.words}
+          rowPart="words"
+          what="the text"
+        >
           {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
           {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
           <div
@@ -995,6 +1005,8 @@ const Expansion = ({
   readonly onReopenWindow: (window: WindowRef) => void;
   readonly onShowDetails: () => void;
 }) => {
+  const openLines = useContext(OpenLines);
+
   if (
     !extras.description &&
     extras.steps === null &&
@@ -1014,7 +1026,8 @@ const Expansion = ({
       {extras.description ? (
         <Clamp
           className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
-          lines={DESCRIPTION_LINES}
+          lines={openLines.description}
+          rowPart="description"
           what="the description"
         >
           {item.description.trim()}
@@ -1138,43 +1151,77 @@ const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
   open: "bg-pin/10 ring-pin ring-2 ring-inset",
 };
 
+/** Show more and the gap above it, until one is there to measure. */
+const SHOW_MORE = 22;
+
 /**
- * How many lines an open row's words or caption may show: OPEN_LINES, fewer
- * when its other parts already take most of OPEN_SHARE of the list's height,
- * never under MIN_OPEN_LINES. Measured on the open row alone, again as it or
- * the list changes size.
+ * How many lines each giving part of an open row shows (row-look.ts
+ * fitOpenRow): the caps, shortened while the row would take more than
+ * OPEN_SHARE of the list. Each part is measured whole (its scrollHeight)
+ * and the rest of the row as what is left, so the answer doesn't depend on
+ * the caps it set. A part the user opened with Show more counts as the rest.
  */
 const useOpenLines = (
   row: RefObject<HTMLElement | null>,
   open: boolean
-): number => {
-  const [lines, setLines] = useState(OPEN_LINES);
+): RowLines => {
+  const [lines, setLines] = useState<RowLines>(ROW_CAPS);
 
   useEffect(() => {
     const element = row.current;
     const list = element?.closest<HTMLElement>(".shelf-list") ?? null;
 
     const fit = (): void => {
-      const words = element?.querySelector<HTMLElement>("[data-row-words]");
-
-      if (
-        element === null ||
-        list === null ||
-        words === null ||
-        words === undefined
-      ) {
+      if (element === null || list === null) {
         return;
       }
 
-      const others =
-        element.getBoundingClientRect().height -
-        words.getBoundingClientRect().height;
+      let fixed = element.getBoundingClientRect().height;
+      let button = SHOW_MORE;
+      const parts: MeasuredPart[] = [];
 
-      const room = Math.floor(
-        (OPEN_SHARE * list.clientHeight - others) / lineHeight(words)
+      for (const box of element.querySelectorAll<HTMLElement>(
+        "[data-row-part]"
+      )) {
+        const part = box.dataset.rowPart;
+        const toggle = box.nextElementSibling;
+        const shown = box.getBoundingClientRect();
+        const opened = toggle?.getAttribute("aria-expanded") === "true";
+
+        if (
+          (part === "words" || part === "description" || part === "title") &&
+          !opened
+        ) {
+          const below =
+            toggle instanceof HTMLElement &&
+            toggle.hasAttribute("aria-expanded")
+              ? toggle.getBoundingClientRect().bottom - shown.bottom
+              : 0;
+
+          button = below > 0 ? below : button;
+          fixed -= shown.height + below;
+          parts.push({
+            line: lineHeight(box),
+            lines: Math.round(box.scrollHeight / lineHeight(box)),
+            part,
+          });
+        }
+      }
+
+      const next = fitOpenRow(
+        parts,
+        fixed,
+        OPEN_SHARE * list.clientHeight,
+        button
       );
 
-      setLines(Math.max(MIN_OPEN_LINES, Math.min(OPEN_LINES, room)));
+      setLines((now) =>
+        now.words === next.words &&
+        now.title === next.title &&
+        now.description === next.description
+          ? now
+          : next
+      );
     };
 
     const observer = new ResizeObserver(fit);
@@ -1190,7 +1237,7 @@ const useOpenLines = (
     };
   }, [row, open]);
 
-  return open ? lines : OPEN_LINES;
+  return open ? lines : ROW_CAPS;
 };
 
 export const ItemRow = (props: ItemRowProps) => {

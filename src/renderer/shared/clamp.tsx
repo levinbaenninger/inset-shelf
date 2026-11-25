@@ -171,7 +171,7 @@ export const Clamp = ({
   less = "Show less",
   lines,
   more = "Show more",
-  rowWords = false,
+  rowPart,
   what,
 }: {
   readonly children: ReactNode;
@@ -180,8 +180,8 @@ export const Clamp = ({
   readonly className?: string;
   readonly more?: string;
   readonly less?: string;
-  /** An open row's words or caption: the part that gives way when the row would take too much of the list (item-row.tsx). */
-  readonly rowWords?: boolean;
+  /** A part of an open row that gives way when the row would take too much of the list (item-row.tsx). */
+  readonly rowPart?: string;
   readonly what?: string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -210,7 +210,7 @@ export const Clamp = ({
           cut &&
             "max-h-[calc(var(--lines)*1lh)] overflow-y-clip [mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]"
         )}
-        data-row-words={rowWords ? "" : undefined}
+        data-row-part={rowPart}
         ref={ref}
         style={{ "--lines": lines }}
       >

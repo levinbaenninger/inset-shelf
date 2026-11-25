@@ -8,21 +8,90 @@ import type { MenuAnchor } from "./menus";
 /** A row's words, read or edited: the same type either way, so starting an edit moves nothing. */
 export const WORDS = "text-sm leading-snug break-words";
 
-/** How many lines of its words, caption or description an open row shows before Show more. */
+/** How many lines of its words or caption an open row shows before Show more. */
 export const OPEN_LINES = 10;
-
-/** An open row takes at most this share of the list's height: past it, its words or caption show fewer lines. */
-export const OPEN_SHARE = 0.6;
-
-/** The fewest lines an open row's words or caption show before Show more, however little room is left. */
-export const MIN_OPEN_LINES = 3;
-
-/** How many lines the open row's words or caption show now: OPEN_LINES, or fewer when the row's other parts take the room (item-row.tsx). */
-export const OpenLines = createContext(OPEN_LINES);
 
 export const DESCRIPTION_LINES = 3;
 
 export const TITLE_LINES = 3;
+
+/** An open row takes at most this share of the list's height: past it, its words, description and title show fewer lines. */
+export const OPEN_SHARE = 0.6;
+
+/** The parts of an open row that give way, in the order they do. */
+export type RowPart = "words" | "description" | "title";
+
+export type RowLines = Readonly<Record<RowPart, number>>;
+
+/** Each part's own cap, which the row never goes past. */
+export const ROW_CAPS: RowLines = {
+  description: DESCRIPTION_LINES,
+  title: TITLE_LINES,
+  words: OPEN_LINES,
+};
+
+/** The fewest lines each part shows before Show more, however little room is left. */
+const ROW_FLOORS: RowLines = { description: 1, title: 1, words: 3 };
+
+const GIVES_WAY: readonly RowPart[] = ["words", "description", "title"];
+
+/** One part as measured: how many lines its words take whole, and one line's height. */
+export interface MeasuredPart {
+  readonly part: RowPart;
+  readonly lines: number;
+  readonly line: number;
+}
+
+/** A part's height at `cap` lines: whole when at most one line would hide (Clamp), else `cap` lines and its Show more. */
+const partHeight = (
+  measured: MeasuredPart,
+  cap: number,
+  button: number
+): number =>
+  measured.lines <= cap + 1
+    ? measured.lines * measured.line
+    : cap * measured.line + button;
+
+/**
+ * How many lines each part of an open row shows so the row fits `budget`
+ * pixels: the words give way first (to 3), then the description and the
+ * title (to 1). `fixed` is the rest of the row, which never changes with
+ * these caps, so the answer doesn't feed back into what it is measured from.
+ */
+export const fitOpenRow = (
+  parts: readonly MeasuredPart[],
+  fixed: number,
+  budget: number,
+  button: number
+): RowLines => {
+  const caps: Record<RowPart, number> = { ...ROW_CAPS };
+
+  const total = (): number =>
+    fixed +
+    parts.reduce(
+      (sum, measured) =>
+        sum + partHeight(measured, caps[measured.part], button),
+      0
+    );
+
+  for (const part of GIVES_WAY) {
+    const lines = parts.find((each) => each.part === part)?.lines ?? 0;
+
+    // Only a part longer than its floor and one line can give any room.
+    while (
+      total() > budget &&
+      caps[part] > ROW_FLOORS[part] &&
+      lines > ROW_FLOORS[part] + 1
+    ) {
+      caps[part] -= 1;
+    }
+  }
+
+  return caps;
+};
+
+/** How many lines each part of the open row shows now (item-row.tsx). */
+export const OpenLines = createContext<RowLines>(ROW_CAPS);
 
 export const DONE = "text-muted-foreground line-through";
 
