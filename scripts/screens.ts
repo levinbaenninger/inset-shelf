@@ -4802,6 +4802,27 @@ const ATTACH_TWO = {
   via: "typed",
 };
 
+/** A screenshot attached with its pins, one labelled at length, and a file beside it. */
+const ATTACH_PINNED = {
+  ...base(907, 25),
+  attachments: [
+    {
+      ...attachedImage(50, `Checkout ${LONG_WORD}`),
+      pins: [
+        { label: "Total is CHF 260 over the cap", x: 300, y: 200 },
+        { label: `${LONG_WORD} ${LONG_WORD}`, x: 700, y: 420 },
+        { x: 900, y: 600 },
+      ],
+    },
+    attachedFile(51, "receipt.pdf"),
+  ],
+  html: null,
+  kind: "text",
+  links: [],
+  text: "The checkout total doesn't match the quote",
+  via: "typed",
+};
+
 const attachDoc = (items: readonly object[]) => ({
   ...DOC,
   items: [...items, ...ITEMS.filter((entry) => entry.id === uuid(12))],
@@ -4813,6 +4834,7 @@ const attachView = (items: readonly object[]) => ({
 });
 
 const ROW_ATTACH_VIEW = attachView([
+  ATTACH_PINNED,
   ATTACH_TEXT,
   ATTACH_TWO,
   ATTACH_MISSING,
@@ -5467,6 +5489,52 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       keepPointer: true,
       name: "screenshot-card-attach-focus",
       page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await details(page, 907);
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .focus();
+        await page.getByRole("region", { name: /^Pins on /u }).waitFor();
+      },
+      check: async (page) => {
+        const before = await callCount(page);
+        const field = page.getByRole("textbox", { name: "Label for pin 3" });
+
+        await field.click();
+        await field.fill("Discount code field");
+        await field.press("Enter");
+        await page.waitForTimeout(800);
+        await page.evaluate(`globalThis.__emit("command", { kind: "undo" })`);
+        await page.waitForTimeout(100);
+
+        const sent = await calls(page, before);
+
+        const pins = sent.flatMap((each) => {
+          const op = z
+            .looseObject({ attachmentId: z.string(), type: z.string() })
+            .safeParse(each.arg);
+
+          return op.success && op.data.type === "setAttachmentPins"
+            ? [op.data.attachmentId]
+            : [];
+        });
+
+        const others = sent.filter((each) =>
+          JSON.stringify(each.arg).includes('"setPins"')
+        );
+
+        return pins.length >= 2 &&
+          pins.every((id) => id === uuid(950)) &&
+          others.length === 0
+          ? null
+          : `a label on an attached picture, then ⌘Z, sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-pin-labels-narrow",
+      width: NARROWEST,
     },
   ] satisfies readonly StressScene[]
 ).map(stress);

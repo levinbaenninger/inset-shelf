@@ -257,10 +257,16 @@ const focusAfterRemoval = (tile: HTMLElement): void => {
  * which shows on hover or once the keyboard is on the tile, removes one.
  */
 export const AttachmentGrid = ({
+  active,
   attachments,
   handlers,
+  onPick,
 }: {
   readonly attachments: readonly Attachment[];
+  /** The picture whose pin labels show under the tiles, marked as picked. */
+  readonly active: Attachment["id"] | null;
+  /** A tile got the keyboard or a click. */
+  readonly onPick: (attachment: Attachment) => void;
   readonly handlers: AttachmentHandlers & {
     readonly remove: (attachment: Attachment) => void;
   };
@@ -281,6 +287,7 @@ export const AttachmentGrid = ({
             aria-label={label}
             className={cn(
               "focus-visible:ring-ring/50 block rounded-md outline-none focus-visible:ring-3",
+              attachment.id === active && "ring-primary ring-2",
               attachment.kind === "image"
                 ? "cursor-pointer hover:opacity-85"
                 : "cursor-grab active:cursor-grabbing"
@@ -293,6 +300,9 @@ export const AttachmentGrid = ({
               }
             }}
             onDragStart={dragOutOf(attachment, handlers)}
+            onFocus={() => {
+              onPick(attachment);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Backspace" || event.key === "Delete") {
                 focusAfterRemoval(event.currentTarget);

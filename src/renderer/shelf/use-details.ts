@@ -38,6 +38,39 @@ export interface Details {
   readonly forgetUndo: () => void;
 }
 
+/** Puts a pin's label back as it was, on the item's own picture or an attached one. */
+const undoPinLabel = (
+  apply: (op: ShelfOp) => void,
+  id: ItemId,
+  item: ShelfItem | undefined,
+  undo: Extract<DetailsUndo, { readonly kind: "pinLabel" }>
+): void => {
+  if (undo.attachmentId === null) {
+    if (item?.kind === "image") {
+      apply({
+        id,
+        pins: withPinLabel(item.pins, undo.index, undo.label),
+        type: "setPins",
+      });
+    }
+
+    return;
+  }
+
+  const attached = item?.attachments.find(
+    (attachment) => attachment.id === undo.attachmentId
+  );
+
+  if (attached?.kind === "image") {
+    apply({
+      attachmentId: attached.id,
+      id,
+      pins: withPinLabel(attached.pins, undo.index, undo.label),
+      type: "setAttachmentPins",
+    });
+  }
+};
+
 /** Level 2: which item's details show, the field asked for, and what ⌘Z can put back there. */
 export const useDetails = ({
   apply,
@@ -133,13 +166,7 @@ export const useDetails = ({
         apply({ id: itemId, steps: [...steps], type: "setSteps" });
         setStepsReset({ seq: nextSeq(), steps });
       } else if (last.kind === "pinLabel") {
-        if (current?.kind === "image") {
-          apply({
-            id: itemId,
-            pins: withPinLabel(current.pins, last.index, last.label),
-            type: "setPins",
-          });
-        }
+        undoPinLabel(apply, itemId, current, last);
       } else if (last.kind === "attachment") {
         apply({
           attachmentId: last.attachmentId,

@@ -29,9 +29,11 @@ import {
   withPinLabel,
 } from "@shared/shelf";
 import type {
+  AttachedImage,
   AttachmentId,
   FileItem,
   ImageItem,
+  Pin,
   ShelfItem,
   ShelfOp,
   Step,
@@ -89,6 +91,8 @@ export type DetailsUndo =
   | { readonly kind: "window"; readonly windowId: WindowRef["id"] }
   | {
       readonly kind: "pinLabel";
+      /** The attached picture whose pin it is; null for the item's own. */
+      readonly attachmentId: AttachmentId | null;
       readonly index: number;
       readonly label: string;
     }
@@ -179,8 +183,8 @@ const Field = ({
         icon={icon}
         size={13}
       />
-      <h3 className="text-muted-foreground flex-1 text-xs font-medium">
-        {label}
+      <h3 className="text-muted-foreground min-w-0 flex-1 text-xs font-medium">
+        <Truncated className="block" text={label} />
       </h3>
       {action}
     </div>
@@ -786,15 +790,19 @@ const WindowRow = ({
 
 /** The pins, right under the image they mark, each with an optional label: "1 · label". */
 const PinLabels = ({
-  item,
-  onApply,
+  label = "Pins",
+  onEdited,
   onOpenPins,
-  onUndoable,
+  onSave,
+  pins,
 }: {
-  readonly item: ImageItem;
-  readonly onApply: (op: ShelfOp) => void;
+  readonly pins: readonly Pin[];
+  /** The field's name: "Pins" for the item's own picture. */
+  readonly label?: string;
+  readonly onSave: (pins: Pin[]) => void;
+  /** A label typed in, with what it said before, for ⌘Z. */
+  readonly onEdited: (index: number, label: string) => void;
   readonly onOpenPins: () => void;
-  readonly onUndoable: (undo: DetailsUndo) => void;
 }) => (
   <Field
     action={
@@ -804,10 +812,10 @@ const PinLabels = ({
       </Button>
     }
     icon={Location01Icon}
-    label="Pins"
+    label={label}
   >
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
-      {item.pins.map((pin, index) => (
+      {pins.map((pin, index) => (
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
         // The pin sits beside a label's first line (h-8, a one-line field's height), however many lines it wraps to.
         <li
@@ -821,15 +829,11 @@ const PinLabels = ({
             label={`Label for pin ${index + 1}`}
             max={PIN_LABEL_MAX}
             multiline={false}
-            onEdited={(label) => {
-              onUndoable({ index, kind: "pinLabel", label });
+            onEdited={(before) => {
+              onEdited(index, before);
             }}
-            onSave={(label) => {
-              onApply({
-                id: item.id,
-                pins: withPinLabel(item.pins, index, label),
-                type: "setPins",
-              });
+            onSave={(text) => {
+              onSave(withPinLabel(pins, index, text));
             }}
             placeholder={`What pin ${index + 1} marks`}
             value={pin.label ?? ""}
@@ -839,6 +843,88 @@ const PinLabels = ({
     </ol>
   </Field>
 );
+
+/**
+ * The item's attachments, and under them the pin labels of the picture
+ * whose tile last had the keyboard or a click.
+ */
+const AttachmentsField = ({
+  attachments: handlers,
+  item,
+  onApply,
+  onUndoable,
+}: Pick<DetailsProps, "attachments" | "item" | "onApply" | "onUndoable">) => {
+  const [picked, setPicked] = useState<AttachmentId | null>(null);
+
+  const pinned = item.attachments.find(
+    (attachment): attachment is AttachedImage =>
+      attachment.id === picked &&
+      attachment.kind === "image" &&
+      attachment.pins.length > 0
+  );
+
+  if (item.attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      <Field
+        action={<AttachmentCount count={item.attachments.length} />}
+        icon={Attachment01Icon}
+        label="Attachments"
+      >
+        <AttachmentGrid
+          active={pinned?.id ?? null}
+          attachments={item.attachments}
+          handlers={{
+            ...handlers,
+            remove: (attachment) => {
+              onApply({
+                attachmentId: attachment.id,
+                id: item.id,
+                type: "removeAttachment",
+              });
+              onUndoable({
+                attachmentId: attachment.id,
+                kind: "attachment",
+                name: attachmentName(attachment),
+              });
+            },
+          }}
+          onPick={(attachment) => {
+            setPicked(attachment.id);
+          }}
+        />
+      </Field>
+      {pinned === undefined ? null : (
+        <PinLabels
+          label={`Pins on ${pinned.name}`}
+          onEdited={(index, label) => {
+            onUndoable({
+              attachmentId: pinned.id,
+              index,
+              kind: "pinLabel",
+              label,
+            });
+          }}
+          onOpenPins={() => {
+            handlers.open(pinned, true);
+          }}
+          onSave={(pins) => {
+            onApply({
+              attachmentId: pinned.id,
+              id: item.id,
+              pins,
+              type: "setAttachmentPins",
+            });
+          }}
+          pins={pinned.pins}
+        />
+      )}
+    </>
+  );
+};
 
 const FileLine = ({ item }: { readonly item: FileItem }) => (
   <p
@@ -985,10 +1071,19 @@ const Content = (props: ContentProps) => {
       </Field>
       {item.kind === "image" && item.pins.length > 0 ? (
         <PinLabels
-          item={item}
-          onApply={onApply}
+          onEdited={(index, label) => {
+            props.onUndoable({
+              attachmentId: null,
+              index,
+              kind: "pinLabel",
+              label,
+            });
+          }}
           onOpenPins={props.onOpenPins}
-          onUndoable={props.onUndoable}
+          onSave={(pins) => {
+            onApply({ id: item.id, pins, type: "setPins" });
+          }}
+          pins={item.pins}
         />
       ) : null}
     </div>
@@ -1470,32 +1565,12 @@ export const DetailsView = (props: DetailsProps) => {
           onStopEditing={props.onStopEditing}
           onUndoable={props.onUndoable}
         />
-        {item.attachments.length === 0 ? null : (
-          <Field
-            action={<AttachmentCount count={item.attachments.length} />}
-            icon={Attachment01Icon}
-            label="Attachments"
-          >
-            <AttachmentGrid
-              attachments={item.attachments}
-              handlers={{
-                ...props.attachments,
-                remove: (attachment) => {
-                  props.onApply({
-                    attachmentId: attachment.id,
-                    id: item.id,
-                    type: "removeAttachment",
-                  });
-                  props.onUndoable({
-                    attachmentId: attachment.id,
-                    kind: "attachment",
-                    name: attachmentName(attachment),
-                  });
-                },
-              }}
-            />
-          </Field>
-        )}
+        <AttachmentsField
+          attachments={props.attachments}
+          item={item}
+          onApply={props.onApply}
+          onUndoable={props.onUndoable}
+        />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
             <AutoText
