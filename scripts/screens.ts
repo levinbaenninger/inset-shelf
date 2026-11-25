@@ -3542,23 +3542,63 @@ const caretWord = async (page: Page): Promise<string> =>
     return text.slice(start, end);
   });
 
-/** Opens item `n`, notes where its words are, and clicks `word` in them to start editing there. */
+/**
+ * Notes where item `n`'s words are, and clicks `word` in them: once on the
+ * open item, or twice on the closed one, as a user starts editing there.
+ */
 const clickToEdit = async (
   page: Page,
   n: number,
-  word: string
+  word: string,
+  how: "open and click" | "double-click closed" = "open and click"
 ): Promise<void> => {
-  await select(page, n);
-  await page.waitForTimeout(200);
+  if (how === "open and click") {
+    await select(page, n);
+    await page.waitForTimeout(200);
+  }
 
   const start = EditStartSchema.parse(await wordsBox(page, uuid(n), word));
 
   await page.evaluate((box) => {
     Object.assign(globalThis, { __readBox: box });
   }, start.box);
-  await page.mouse.click(start.x, start.y);
+
+  await (how === "open and click"
+    ? page.mouse.click(start.x, start.y)
+    : page.mouse.dblclick(start.x, start.y));
   await page.waitForTimeout(300);
 };
+
+/** Whether the caret sits at the very end of the editor that has the keyboard. */
+const caretAtEnd = async (page: Page): Promise<boolean> =>
+  await page.evaluate(() => {
+    const editor = document.activeElement;
+    const selection = window.getSelection();
+
+    if (
+      editor?.getAttribute("aria-label") !== "Edit item" ||
+      selection === null
+    ) {
+      return false;
+    }
+
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let last: Node | null = null;
+
+    for (
+      let node = walker.nextNode();
+      node !== null;
+      node = walker.nextNode()
+    ) {
+      last = node;
+    }
+
+    return (
+      selection.isCollapsed &&
+      selection.anchorNode === last &&
+      selection.anchorOffset === (last?.textContent ?? "").length
+    );
+  });
 
 /** The words didn't move or change height by more than a pixel once editing started, and the caret is in `word`. */
 const editedInPlace = async (
@@ -3944,6 +3984,49 @@ const STRESS_SCENES: readonly Scene[] = (
       data: { view: stressView() },
       name: "stress-open-keeps-details",
       width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 720, "Monday", "double-click closed");
+      },
+      check: async (page) => await editedInPlace(page, 720, "Monday"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-double-click",
+    },
+    {
+      act: async (page) => {
+        await select(page, 721);
+        await page.getByRole("link", { name: "floor plan" }).click();
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const sent = await calls(page);
+        const opened = sent.some((call) => call.call === "openLink");
+
+        const editing = await page
+          .getByRole("textbox", { name: "Edit item" })
+          .count();
+
+        return opened && editing === 0
+          ? null
+          : `a click on a link in the open item ${opened ? "opened it" : "didn't open it"} and ${editing === 0 ? "started no edit" : "started an edit"}`;
+      },
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-link-opens",
+    },
+    {
+      act: async (page) => {
+        await focusRowOf(page, 721);
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(300);
+      },
+      check: async (page) =>
+        (await caretAtEnd(page))
+          ? null
+          : "Return on the open item didn't start an edit with the caret at the end",
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-return-end",
     },
     {
       act: async (page) => {
