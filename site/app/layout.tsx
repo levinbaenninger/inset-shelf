@@ -13,7 +13,7 @@ const inter = localFont({
   display: "swap",
 });
 
-const TITLE = "Inset: a capture shelf for Mac and Windows";
+const TITLE = "Inset Shelf: a capture shelf for Mac and Windows";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

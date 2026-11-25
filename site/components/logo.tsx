@@ -1,15 +1,18 @@
-// The Inset logo from the brand kit, unchanged (public/brand/inset-logo.svg).
+// The Shelf mark, the app's icon (scripts/generate-icons.ts), beside the name set in Inter.
 export function Logo({ className, lazy = false }: { className?: string; lazy?: boolean }) {
   return (
-    <a href="#top" className={className}>
-      <img
-        src="/brand/inset-logo.svg"
-        alt="Inset"
-        width={110}
-        height={40}
-        loading={lazy ? "lazy" : undefined}
-        className="h-9 w-auto sm:h-10"
-      />
+    <a href="/" className={className}>
+      <span className="flex items-center gap-2.5">
+        <img
+          src="/brand/shelf-mark.svg"
+          alt=""
+          width={32}
+          height={32}
+          loading={lazy ? "lazy" : undefined}
+          className="size-8 sm:size-9"
+        />
+        <span className="text-xl font-semibold tracking-tight sm:text-[22px]">Inset Shelf</span>
+      </span>
     </a>
   );
 }

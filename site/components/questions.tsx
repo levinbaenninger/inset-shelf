@@ -23,7 +23,7 @@ const QUESTIONS = [
     a: "On your computer, in one file called shelf.json, with images and files in a folder beside it.",
   },
   {
-    q: "Is Inset finished?",
+    q: "Is Inset Shelf finished?",
     a: "No. It is the third Inset prototype, from a school innovation project, built to test a running list beside your work.",
   },
 ];

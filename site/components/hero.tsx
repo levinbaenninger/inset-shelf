@@ -23,7 +23,7 @@ export function Hero() {
               A capture shelf beside your work
             </h1>
             <p className="enter max-w-[52ch] text-lead">
-              Tap Shift twice on selected text, or take a screenshot. Inset keeps it beside your
+              Tap Shift twice on selected text, or take a screenshot. Inset Shelf keeps it beside your
               work with the page it came from.
             </p>
             <div className="enter mt-2 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">

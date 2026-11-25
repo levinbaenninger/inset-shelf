@@ -34,7 +34,7 @@ export function SiteFooter() {
         <div className="grid gap-6 sm:gap-10">
           <div className="grid gap-4">
             <h2 id="close-h" className="text-h2 font-medium">
-              Try Inset on your Mac
+              Try Inset Shelf on your Mac
             </h2>
             <p className="max-w-[62ch] text-muted-foreground">
               Free and unsigned: on the first open, click Open Anyway in System Settings &gt;
@@ -70,7 +70,7 @@ export function SiteFooter() {
             ))}
           </div>
           <div className="flex flex-col justify-between gap-2 border-t pt-6 text-label text-muted-foreground sm:flex-row">
-            <span>© 2026 Inset, a school innovation project</span>
+            <span>© 2026 Inset Shelf, a school innovation project</span>
             <span>Product names and logos are trademarks of their owners</span>
           </div>
         </div>
