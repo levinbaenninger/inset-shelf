@@ -79,7 +79,7 @@ import {
   OpenRow,
   WORDS,
 } from "./row-look";
-import { filledSteps, ROW_WINDOWS, rowParts } from "./row-parts";
+import { checkedSteps, ROW_WINDOWS, rowParts, rowSteps } from "./row-parts";
 import type { RowExtras } from "./row-parts";
 import { RowText } from "./row-text";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
@@ -990,9 +990,12 @@ const Expansion = ({
   onReopenWindow,
   onShowDetails,
   onToggleStep,
+  steps: listed,
 }: {
   readonly extras: RowExtras;
   readonly item: ShelfItem;
+  /** The item's steps in the order the row lists them. */
+  readonly steps: readonly Step[];
   readonly onToggleStep: (step: Step) => void;
   readonly onReopenWindow: (window: WindowRef) => void;
   readonly onShowDetails: () => void;
@@ -1036,7 +1039,7 @@ const Expansion = ({
         <div data-row-part="steps">
           <StepChecklist
             onToggle={onToggleStep}
-            steps={filledSteps(item.steps).slice(0, steps)}
+            steps={listed.slice(0, steps)}
           />
         </div>
       )}
@@ -1182,12 +1185,30 @@ const placeBadges = (
   };
 };
 
+/**
+ * The steps in the order the open row lists them, fixed when it opens
+ * (row-parts.ts rowSteps): a step ticked there stays under the pointer.
+ */
+const useRowSteps = (
+  steps: readonly Step[],
+  open: boolean
+): readonly Step[] => {
+  const [opened, setOpened] = useState({ checked: checkedSteps(steps), open });
+
+  if (opened.open !== open) {
+    setOpened({ checked: checkedSteps(steps), open });
+  }
+
+  return rowSteps(steps, opened.checked);
+};
+
 const RowView = (props: RowViewProps) => {
   const { copied, editing, item, selected } = props;
   const parts = rowParts(item, selected);
   const badges = badgeNodes(parts.badges, props.now);
   const rowRef = useRef<HTMLLIElement>(null);
-  const openRow = useOpenRow(rowRef, selected && !editing, item);
+  const steps = useRowSteps(item.steps, selected);
+  const openRow = useOpenRow(rowRef, selected && !editing, item, steps);
   const placed = placeBadges(parts, item, selected, badges);
 
   return (
@@ -1311,6 +1332,7 @@ const RowView = (props: RowViewProps) => {
               onReopenWindow={props.onReopenWindow}
               onShowDetails={props.onShowDetails}
               onToggleStep={props.onToggleStep}
+              steps={steps}
             />
           )}
           <SourceRow

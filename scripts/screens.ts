@@ -3030,6 +3030,22 @@ const detailsButtonCheck = async (page: Page): Promise<string | null> => {
     : null;
 };
 
+/** The open row lists its steps still to do before the checked ones: item 10 holds both, and fewer fit than it has. */
+const openStepsFirst = async (page: Page): Promise<string | null> => {
+  const done = await item(page, 10)
+    .locator("[data-step-id] [role=checkbox]")
+    .evaluateAll((boxes) =>
+      boxes.map((box) => box.getAttribute("aria-checked") === "true")
+    );
+
+  const firstDone = done.indexOf(true);
+
+  return done.at(0) === false &&
+    (firstDone === -1 || !done.slice(firstDone).includes(false))
+    ? null
+    : `the open row must list open steps first (checked: ${JSON.stringify(done)})`;
+};
+
 /** Entries A and B alone, so the list keeps empty space below them, even with B open. */
 const SHORT_DOC = {
   ...DOC,
@@ -6631,7 +6647,8 @@ const SCENES: readonly Scene[] = [
     act: async (page) => {
       await select(page, 10);
     },
-    check: detailsButtonCheck,
+    check: async (page) =>
+      (await detailsButtonCheck(page)) ?? (await openStepsFirst(page)),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-full-item",

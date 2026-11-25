@@ -1,4 +1,4 @@
-import type { ShelfItem } from "@shared/shelf";
+import type { ShelfItem, Step } from "@shared/shelf";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { RefObject } from "react";
 
@@ -20,7 +20,6 @@ import type {
   TextPart,
 } from "./open-row";
 import type { OpenRowView } from "./row-look";
-import { filledSteps } from "./row-parts";
 
 // The open row's one measure (open-row.ts decides from it): what each part of the row takes, read from the page.
 
@@ -163,6 +162,7 @@ const measureRow = (
   row: HTMLElement,
   list: HTMLElement,
   item: ShelfItem,
+  steps: readonly Step[],
   seen: Seen
 ): RowMeasure => {
   if (seen.width !== row.clientWidth) {
@@ -185,8 +185,6 @@ const measureRow = (
   for (const part of row.querySelectorAll<HTMLElement>("[data-row-part]")) {
     readPart(part, read, seen);
   }
-
-  const steps = filledSteps(item.steps);
 
   const labelled =
     item.kind === "image"
@@ -239,13 +237,15 @@ const OPEN_FIT: Fit = { budget: ROW_CAPS, cut: [] };
 export const useOpenRow = (
   row: RefObject<HTMLElement | null>,
   open: boolean,
-  item: ShelfItem
+  item: ShelfItem,
+  /** The steps in the order the row lists them (row-parts.ts rowSteps). */
+  steps: readonly Step[]
 ): OpenRowView | null => {
   const [fit, setFit] = useState<Fit>(OPEN_FIT);
   const seen = useRef<Seen>({ steps: new Map(), width: 0, windows: null });
 
   const read = useEffectEvent((element: HTMLElement, list: HTMLElement) =>
-    measureRow(element, list, item, seen.current)
+    measureRow(element, list, item, steps, seen.current)
   );
 
   useEffect(() => {

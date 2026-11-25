@@ -2,7 +2,7 @@ import { FileItemSchema, ImageItemSchema, TextItemSchema } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { rowParts } from "./row-parts";
+import { checkedSteps, rowParts, rowSteps } from "./row-parts";
 
 const uuid = (n: number): string =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -203,5 +203,63 @@ describe(rowParts, () => {
       steps: 6,
       windows: 5,
     });
+  });
+});
+
+describe("the steps an open row lists", () => {
+  const STEPS = [
+    step(1, "Ask Marco", true),
+    step(2, "Read the draft", true),
+    step(3, "Book the room"),
+    step(4, "   "),
+    step(5, "Send the invite"),
+    step(6, "Print the agenda"),
+  ];
+
+  /** The words of the first `shown` steps a row lists that opened with `atOpen` and now holds `now`. */
+  const listed = (
+    shown: number,
+    atOpen: readonly ReturnType<typeof step>[] = STEPS,
+    now: readonly ReturnType<typeof step>[] = atOpen
+  ): readonly string[] =>
+    rowSteps(text({ steps: [...now] }).steps, checkedSteps(atOpen))
+      .slice(0, shown)
+      .map((each) => each.text);
+
+  it("shows the steps still to do before checked ones, however few fit", () => {
+    expect(listed(2)).toStrictEqual(["Book the room", "Send the invite"]);
+  });
+
+  it("keeps the stored order among open steps and among checked ones, and leaves out a step without words", () => {
+    expect(listed(9)).toStrictEqual([
+      "Book the room",
+      "Send the invite",
+      "Print the agenda",
+      "Ask Marco",
+      "Read the draft",
+    ]);
+  });
+
+  it("leaves a step ticked in the open row where it is, and puts it after the open ones the next time the row opens", () => {
+    const ticked = STEPS.map((each) =>
+      each.text === "Book the room" ? { ...each, done: true } : each
+    );
+
+    expect(listed(2, STEPS, ticked)).toStrictEqual([
+      "Book the room",
+      "Send the invite",
+    ]);
+    expect(listed(2, ticked)).toStrictEqual([
+      "Send the invite",
+      "Print the agenda",
+    ]);
+  });
+
+  it("counts every step with words, so the more line's count is what the list leaves out", () => {
+    const parts = rowParts(text({ steps: STEPS }), true);
+
+    expect(parts.extras?.steps).toBe(
+      rowSteps(STEPS, checkedSteps(STEPS)).length
+    );
   });
 });

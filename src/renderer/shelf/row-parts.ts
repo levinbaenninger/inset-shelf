@@ -57,6 +57,29 @@ const rowList = (count: number, max: number): RowList | null =>
 export const filledSteps = (steps: readonly Step[]): readonly Step[] =>
   steps.filter((step) => step.text.trim() !== "");
 
+/** The ids of the checked steps, as the open row takes them when it opens. */
+export const checkedSteps = (steps: readonly Step[]): ReadonlySet<string> =>
+  new Set(steps.flatMap((step) => (step.done ? [step.id] : [])));
+
+/**
+ * The steps an open row lists, first to last: those still to do when it
+ * opened, then those checked by then, each group in its stored order. How
+ * many show is the row's budget, so what it cuts is done work before open
+ * work. A step ticked in the open row stays where it is until the row opens
+ * again, so nothing moves under the pointer or the keyboard.
+ */
+export const rowSteps = (
+  steps: readonly Step[],
+  checkedAtOpen: ReadonlySet<string>
+): readonly Step[] => {
+  const filled = filledSteps(steps);
+
+  return [
+    ...filled.filter((step) => !checkedAtOpen.has(step.id)),
+    ...filled.filter((step) => checkedAtOpen.has(step.id)),
+  ];
+};
+
 const labelledPins = (item: ShelfItem): number =>
   item.kind === "image"
     ? item.pins.filter((pin) => pin.label !== undefined).length
