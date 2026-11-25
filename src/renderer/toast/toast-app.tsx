@@ -55,7 +55,7 @@ export const ToastApp = () => {
         onMouseLeave={() => {
           api.hover(false);
         }}
-        title="Open the shelf"
+        title={`${view.title}\nClick to open the shelf`}
         type="button"
       >
         <HugeiconsIcon
