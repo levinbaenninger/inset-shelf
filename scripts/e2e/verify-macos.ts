@@ -270,6 +270,29 @@ const showShelfFromTray = (): void => {
   }
 };
 
+/**
+ * Quits from the tray, else from the app's own menu: the tray's item isn't
+ * reachable when macOS hides it in a full menu bar. A quit that reaches
+ * neither stops the process, so no test instance is left running.
+ */
+const quitApp = (app: ChildProcess): void => {
+  try {
+    trayItem(quitLabel);
+
+    return;
+  } catch {
+    // The tray's menu bar isn't there: the app menu next.
+  }
+
+  try {
+    osa(
+      `tell application "System Events" to tell process "${processName}" to click menu item "${quitLabel}" of menu 1 of menu bar item 2 of menu bar 1`
+    );
+  } catch {
+    app.kill();
+  }
+};
+
 let source: ChildProcess | undefined;
 
 /** A just-launched app answers Cmd+C only once its text view has keyboard focus. */
@@ -957,7 +980,7 @@ const main = async (): Promise<void> => {
     }
   } finally {
     stopSource();
-    trayItem(quitLabel);
+    quitApp(app);
     await exited(app);
     pbcopy(clipboardBefore);
   }
