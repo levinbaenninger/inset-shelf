@@ -278,11 +278,36 @@ const windowShows = async (text: string, attempts = 10): Promise<boolean> => {
   return await windowShows(text, attempts - 1);
 };
 
+/** Keys go out only while the test's own source app, or the app under test, is in front. */
+const guardedKeys = (
+  send: () => void,
+  allowed: readonly string[] = ["source"]
+): boolean => {
+  const front = frontmost();
+
+  if (!allowed.includes(front)) {
+    console.log(`  skipped keys: ${front} is in front`);
+
+    return false;
+  }
+
+  send();
+
+  return true;
+};
+
+/** The global shortcut, as a keyboard sends it. */
+const toggleKeys = (): void => {
+  osa(
+    'tell application "System Events" to keystroke "s" using {control down, option down}'
+  );
+};
+
 /** The tray items that only show or hide the shelf, and the state each leaves. */
-const SHELF_TOGGLES: Readonly<Record<string, boolean>> = {
+const SHELF_TOGGLES = {
   "Hide Inset Shelf": false,
   "Show Inset Shelf": true,
-};
+} satisfies Readonly<Record<string, boolean>>;
 
 const shelfOnScreen = (): boolean =>
   windows().some(
@@ -300,7 +325,9 @@ const trayItem = (item: string): boolean => {
 
     return true;
   } catch (error) {
-    const visible = SHELF_TOGGLES[item];
+    const visible = Object.entries(SHELF_TOGGLES).find(
+      ([label]) => label === item
+    )?.[1];
 
     if (visible === undefined) {
       throw error;
@@ -337,6 +364,17 @@ const showShelfFromTray = (): void => {
 
   if (!open) {
     trayItem("Show Inset Shelf");
+  }
+};
+
+const hideShelf = async (): Promise<void> => {
+  if (
+    windows().some(
+      (window) => window.owner === processName && window.width >= 300
+    )
+  ) {
+    trayItem("Hide Inset Shelf");
+    await delay(800);
   }
 };
 
@@ -418,24 +456,6 @@ const showSource = async (
   input("click", String(Number(x) + 120), String(Number(y) + 12));
 
   return await sourceReady();
-};
-
-/** Keys go out only while the test's own source app, or the app under test, is in front. */
-const guardedKeys = (
-  send: () => void,
-  allowed: readonly string[] = ["source"]
-): boolean => {
-  const front = frontmost();
-
-  if (!allowed.includes(front)) {
-    console.log(`  skipped keys: ${front} is in front`);
-
-    return false;
-  }
-
-  send();
-
-  return true;
 };
 
 const typeIntoShelf = (text: string): boolean =>
@@ -661,13 +681,6 @@ const elementValue = (role: string, name: string): string =>
       try { return e.role() === ${JSON.stringify(role)} && (e.name() === ${JSON.stringify(name)} || e.description() === ${JSON.stringify(name)}); } catch { return false; }
     });
     hit ? String(hit.value() ?? "") : "";`);
-
-/** The global shortcut, as a keyboard sends it. */
-const toggleKeys = (): void => {
-  osa(
-    'tell application "System Events" to keystroke "s" using {control down, option down}'
-  );
-};
 
 /**
  * Hidden with the global shortcut while an item has the keyboard and shown
@@ -961,13 +974,15 @@ const checkRestart = async (app: ChildProcess): Promise<ChildProcess> => {
 
   const quit = await exited(app);
 
+  const trayNote = viaTray
+    ? ""
+    : "the tray is out of reach on this desktop; quit from the app menu";
+
   record(
     "tray Quit exits",
     viaTray && quit,
     quit
-      ? viaTray
-        ? ""
-        : "the tray is out of reach on this desktop; quit from the app menu"
+      ? trayNote
       : spawnSync("pgrep", ["-fl", "out/main/index.js|Inset Shelf.app"], {
           encoding: "utf-8",
         }).stdout.trim()
@@ -1086,6 +1101,7 @@ const clickInCard = async (name: string, attempts = 10): Promise<boolean> => {
   const card = windows().find(
     (window) => window.owner === processName && window.layer === 4
   );
+
   const found =
     card === undefined
       ? ""
@@ -1536,17 +1552,6 @@ const searchValue = (): string =>
     });
     hit ? String(hit.value()) : "";`);
 
-const hideShelf = async (): Promise<void> => {
-  if (
-    windows().some(
-      (window) => window.owner === processName && window.width >= 300
-    )
-  ) {
-    trayItem("Hide Inset Shelf");
-    await delay(800);
-  }
-};
-
 /** Front-window helper processes (get-windows) that start within `ms`. */
 const helpersWithin = async (ms: number): Promise<number> => {
   let seen = 0;
@@ -1752,9 +1757,12 @@ const main = async (): Promise<void> => {
     stopSource();
     quitApp(app);
     await exited(app);
+
     // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
     if (clipboardBefore === "") {
-      jxa('ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""');
+      jxa(
+        'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
+      );
     } else {
       pbcopy(clipboardBefore);
     }
