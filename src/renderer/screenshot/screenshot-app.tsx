@@ -70,19 +70,60 @@ const CornerButton = ({
   </div>
 );
 
+/** Why Add to Shelf didn't reach the disk, for this card; null until it fails. */
+const useAddFailure = (seq: number) => {
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(
+    () =>
+      api.on("addFailed", (failed) => {
+        if (failed.seq === seq) {
+          setFailure(failed.message);
+        }
+      }),
+    [seq]
+  );
+
+  return [failure, setFailure] as const;
+};
+
 /**
- * A screenshot card beside the shelf. On hover the picture dims behind its
- * actions. Dragging it into another app drops it as a file.
+ * A screenshot card beside the shelf. Add to Shelf shows at once and is the
+ * first key stop; on hover or keyboard focus the picture dims behind the
+ * other actions. Dragging it into another app drops it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { seq } = view;
   const [held, setHeld] = useState(false);
+  const [failure, setFailure] = useAddFailure(seq);
 
   return (
     <main
       className="group bg-muted ring-foreground/10 relative h-svh overflow-hidden rounded-2xl ring-1 ring-inset"
       {...coach("screenshot-card")}
     >
+      {/* First in the page, so Tab lands on it first; drawn above the picture and its dimming. */}
+      <div className="absolute inset-x-12 bottom-2.5 z-10 flex flex-col items-center gap-1.5">
+        {failure === null ? null : (
+          <p
+            className="max-w-full rounded-md bg-black/70 px-2 py-1 text-center text-[11px] leading-snug wrap-break-word text-white"
+            role="alert"
+          >
+            {failure}
+          </p>
+        )}
+        <Button
+          className="rounded-full px-2.5"
+          onClick={() => {
+            setFailure(null);
+            api.addToShelf(seq);
+          }}
+          size="xs"
+          variant="overlay"
+        >
+          {failure === null ? "Add to Shelf" : "Retry"}
+        </Button>
+      </div>
       <button
         aria-label="Drag the screenshot into another app"
         className="block h-full w-full cursor-grab active:cursor-grabbing"
@@ -100,7 +141,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
           src={view.imageUrl}
         />
       </button>
-      {/* The actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
+      {/* The other actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
       <div className="pointer-events-none absolute inset-0 bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100" />
       <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 [&_button]:pointer-events-auto">
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
@@ -112,15 +153,6 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             variant="overlay"
           >
             Copy
-          </Button>
-          <Button
-            onClick={() => {
-              api.addToShelf(seq);
-            }}
-            size="pill"
-            variant="overlay"
-          >
-            Add to Shelf
           </Button>
         </div>
         <CornerButton
@@ -162,25 +194,54 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
   );
 };
 
-/** While the pointer is on the card, main keeps it on screen. */
+/**
+ * While the pointer is on the card, or the keyboard is on one of its
+ * actions, main keeps it on screen; once both leave, its time runs again.
+ */
 const useHoverReport = (): void => {
   useEffect(() => {
     const page = document.documentElement;
+    let pointer = false;
+    let keyboard = false;
+
+    const report = (): void => {
+      api.hover(pointer || keyboard);
+    };
 
     const enter = (): void => {
-      api.hover(true);
+      pointer = true;
+      report();
     };
 
     const leave = (): void => {
-      api.hover(false);
+      pointer = false;
+      report();
+    };
+
+    // Only focus the keyboard moved, as the actions show for it: a clicked button keeps focus after the pointer leaves.
+    const focusIn = (event: FocusEvent): void => {
+      keyboard =
+        event.target instanceof Element && event.target.matches(":focus-visible");
+      report();
+    };
+
+    const focusOut = (event: FocusEvent): void => {
+      if (event.relatedTarget === null) {
+        keyboard = false;
+        report();
+      }
     };
 
     page.addEventListener("pointerenter", enter);
     page.addEventListener("pointerleave", leave);
+    page.addEventListener("focusin", focusIn);
+    page.addEventListener("focusout", focusOut);
 
     return () => {
       page.removeEventListener("pointerenter", enter);
       page.removeEventListener("pointerleave", leave);
+      page.removeEventListener("focusin", focusIn);
+      page.removeEventListener("focusout", focusOut);
     };
   }, []);
 };

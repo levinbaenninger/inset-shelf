@@ -4099,20 +4099,52 @@ const STRESS_SCENES: readonly Scene[] = (
     {
       act: async (page) => {
         await page.keyboard.press("Tab");
-        await page.keyboard.press("Tab");
         await page.waitForTimeout(300);
       },
       check: async (page) => {
         const { label, opacity } = await focusedOpacity(page);
 
-        return opacity > 0.5
+        const held = z
+          .array(z.boolean())
+          .parse(await page.evaluate("globalThis.__hover"))
+          .at(-1);
+
+        if (label !== "Add to Shelf") {
+          return `the first Tab put the keyboard on “${label}”, not on Add to Shelf`;
+        }
+
+        if (opacity <= 0.5) {
+          return `Tab put the keyboard on “${label}”, which can’t be seen (opacity ${opacity})`;
+        }
+
+        return held === true
           ? null
-          : `Tab put the keyboard on “${label}”, which can’t be seen (opacity ${opacity})`;
+          : "the keyboard on an action didn't keep the card on screen, as the pointer does";
       },
       data: { view: SCREENSHOT_VIEW },
       // The pointer stays off the card, so only the keyboard shows its actions.
       keepPointer: true,
       name: "stress-screenshot-focus",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: "Add to Shelf" }).click();
+        await page.evaluate(
+          `globalThis.__emit("addFailed", ${JSON.stringify({
+            message: `Die Bildschirmaufnahme konnte nicht gespeichert werden: ${LONG_WORD}. Der Datenträger ist voll.`,
+            seq: SCREENSHOT_VIEW.seq,
+          })})`
+        );
+        await page.getByRole("button", { name: "Retry" }).waitFor();
+      },
+      check: async (page) =>
+        (await page.getByRole("alert").isVisible()) &&
+        (await page.getByRole("img", { name: "New screenshot" }).isVisible())
+          ? null
+          : "a failed Add to Shelf didn't keep the picture and say why",
+      data: { view: SCREENSHOT_VIEW },
+      name: "stress-screenshot-add-failed",
       page: "screenshot",
     },
   ] satisfies readonly StressScene[]

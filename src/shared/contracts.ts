@@ -281,7 +281,12 @@ export const toastContract = defineContract({
 });
 
 export const screenshotContract = defineContract({
-  events: { view: event<ScreenshotView | null>(), ...tutorialEvents },
+  events: {
+    view: event<ScreenshotView | null>(),
+    /** Add to Shelf didn't reach the disk: the card stays, says why, and offers Retry. */
+    addFailed: event<{ readonly seq: number; readonly message: string }>(),
+    ...tutorialEvents,
+  },
   global: "insetScreenshot",
   methods: {
     ...tutorialMethods,
