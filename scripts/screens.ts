@@ -4102,6 +4102,37 @@ const STRESS_SCENES: readonly Scene[] = (
       name: "stress-edit-in-place-note",
     },
     {
+      // An open file without a note offers one; a click starts it.
+      act: async (page) => {
+        await select(page, 714);
+        await page.getByRole("button", { name: "Add a note…" }).click();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) =>
+        (await page.evaluate(
+          () => document.activeElement?.getAttribute("aria-label") ?? ""
+        )) === "Note for this file"
+          ? null
+          : "Add a note… didn't start the note",
+      data: { view: stressView() },
+      name: "stress-open-add-note",
+      width: NARROWEST,
+    },
+    {
+      // The empty section new items go to says so, once; the other empty ones are just their headings.
+      check: async (page) => {
+        const hints = await page
+          .getByText("New notes and captures land here")
+          .count();
+
+        return hints === 1
+          ? null
+          : `${hints} empty sections say new items land there; only the one they go to should`;
+      },
+      data: { view: stressView({ ...EDIT_DOC, activeSectionId: STRESS_D }) },
+      name: "stress-empty-target-section",
+    },
+    {
       // In details, one click on the words edits them there, as on the open row.
       act: async (page) => {
         await details(page, 720);

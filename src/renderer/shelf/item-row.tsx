@@ -727,6 +727,22 @@ const Note = ({
 >) => {
   const [caret, setCaret] = useCaretStart<number>(editing);
 
+  // An open picture or file without a note offers one, a click away.
+  if (!editing && selected && item.note === "") {
+    return (
+      <button
+        className="text-muted-foreground/70 hover:text-muted-foreground focus-visible:ring-ring/50 cursor-text self-start rounded-sm text-left text-sm leading-snug outline-none focus-visible:ring-3"
+        onClick={() => {
+          setCaret(null);
+          onEdit();
+        }}
+        type="button"
+      >
+        Add a note…
+      </button>
+    );
+  }
+
   return editing ? (
     <NoteField
       caret={caret}
