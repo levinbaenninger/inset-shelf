@@ -4916,6 +4916,29 @@ const dragFilesOver = async (page: Page, selector: string) =>
     }, selector)
   );
 
+/** Details' Add menu, opened once the last one has gone, and one of its entries chosen. */
+const chooseInAdd = async (page: Page, name: RegExp): Promise<void> => {
+  await page.getByRole("menu").waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Add a field" }).click();
+  await page.getByRole("menuitem", { name }).click();
+};
+
+/** A picture pasted with ⌘V while the keyboard is in an element, as the system's paste would bring it. */
+const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
+  await page.evaluate((target) => {
+    const clipboard = new DataTransfer();
+
+    clipboard.items.add(new File(["png"], "Pasted.png", { type: "image/png" }));
+    (document.querySelector(target) ?? document.body).dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboard,
+      })
+    );
+  }, selector);
+};
+
 const ATTACHMENT_SCENES: readonly Scene[] = (
   [
     {
@@ -5092,6 +5115,262 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-selection-reported",
+    },
+    {
+      act: async (page) => {
+        await details(page, 901);
+      },
+      check: async (page) => {
+        const tiles = await page.locator("[data-attachment-grid] > li").count();
+
+        const count = await page
+          .getByRole("region", { name: "Attachments" })
+          .getByText("12/12")
+          .isVisible();
+
+        await page.getByRole("button", { name: "Add a field" }).click();
+
+        const off = await page
+          .getByRole("menuitem", {
+            name: /Attach Files|Paste Image|New Drawing/u,
+          })
+          .evaluateAll(
+            (entries) =>
+              entries.filter(
+                (entry) => entry.getAttribute("aria-disabled") === "true"
+              ).length
+          );
+
+        const said = await page
+          .getByText(/12 attachments, the most an item holds/u)
+          .isVisible();
+
+        return tiles === 12 && count && off === 3 && said
+          ? null
+          : `details at the cap: ${tiles} tiles, 12/12 ${String(count)}, ${off} entries off, line ${String(said)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-12-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 901);
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByRole("menuitem", { name: /Link Window/u }).waitFor();
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-cap-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByRole("menuitem", { name: /Attach Files/u }).waitFor();
+      },
+      check: async (page) => {
+        const before = await callCount(page);
+
+        await page.getByRole("menuitem", { name: /Paste Image/u }).click();
+        await chooseInAdd(page, /Attach Files/u);
+        await chooseInAdd(page, /New Drawing/u);
+        await page.waitForTimeout(100);
+
+        const since = await calls(page, before);
+        const sent = since.map((each) => [each.call, each.arg]);
+
+        const want = [
+          ["pasteImageTo", { bytes: null, id: uuid(906) }],
+          ["pickFilesFor", uuid(906)],
+          ["newDrawingFor", uuid(906)],
+        ];
+
+        return want.every((entry) =>
+          sent.some((each) => JSON.stringify(each) === JSON.stringify(entry))
+        )
+          ? null
+          : `the Add entries sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-add-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 904);
+      },
+      check: async (page) => {
+        const labels = await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .evaluateAll((tiles) =>
+            tiles.map((tile) => tile.getAttribute("aria-label") ?? "")
+          );
+
+        return labels.length === 4 && labels[0]?.startsWith(LONG_NAME)
+          ? null
+          : `the tiles in details don't carry their whole names: ${labels.length}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-long-names-details",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 904);
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .focus();
+        await page.keyboard.press("Backspace");
+        await page.getByText(/Removed “/u).waitFor();
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-long-names-toast",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 905);
+      },
+      check: async (page) =>
+        (await page
+          .locator("[data-attachment-grid] [data-missing]")
+          .count()) === 1
+          ? null
+          : "a missing picture in details doesn't show as missing",
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-missing-picture-details",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+        // The keyboard on a tile shows its ×, as the pointer does.
+        await page.keyboard.press("Tab");
+
+        for (let tab = 0; tab < 8; tab += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one key after another.
+          const onTile = await page.evaluate(
+            "document.activeElement?.hasAttribute('data-tile') === true"
+          );
+
+          if (onTile === true) {
+            break;
+          }
+
+          // oxlint-disable-next-line no-await-in-loop -- one key after another.
+          await page.keyboard.press("Tab");
+        }
+      },
+      check: async (page) => {
+        const shown = await page
+          .getByRole("button", { name: "Remove Before" })
+          .evaluate(
+            (button) =>
+              Number(getComputedStyle(button.parentElement ?? button).opacity) >
+              0.9
+          );
+
+        return shown ? null : "the keyboard on a tile doesn't show its ×";
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      keepPointer: true,
+      name: "attach-details-tile-focus",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+      },
+      check: async (page) => {
+        const before = await callCount(page);
+
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .click();
+        await page.locator("[data-attachment-grid] [data-tile]").nth(1).click();
+
+        const sent = await calls(page, before);
+        const opened = sent.filter((each) => each.call === "openAttachment");
+
+        return opened.length === 1 &&
+          JSON.stringify(opened[0]?.arg) ===
+            JSON.stringify({
+              attachmentId: uuid(940),
+              id: uuid(906),
+              pinMode: false,
+            })
+          ? null
+          : `a click on the picture, then the file, sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-open",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+      },
+      check: async (page) => {
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .focus();
+        await page.keyboard.press("Backspace");
+        await page.waitForTimeout(100);
+
+        const tilesAfter = await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .count();
+
+        await page.evaluate(`globalThis.__emit("command", { kind: "undo" })`);
+        await page.waitForTimeout(100);
+
+        const ops = await applied(page);
+
+        const types = ops
+          .map((op) => op.type)
+          .filter((type) => type.endsWith("Attachment"));
+
+        const tilesBack = await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .count();
+
+        return JSON.stringify(types) ===
+          JSON.stringify(["removeAttachment", "restoreAttachment"]) &&
+          tilesAfter === 1 &&
+          tilesBack === 2
+          ? null
+          : `⌫ then ⌘Z on a tile: ${JSON.stringify(types)}, ${tilesAfter} then ${tilesBack} tiles`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-remove-undo",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+      },
+      check: async (page) => {
+        await pasteImageInto(page, "[data-details]");
+        await page.waitForTimeout(150);
+
+        const attached = await sentArgs(page, "pasteImageTo");
+
+        await page.getByRole("button", { name: "Back to the list" }).click();
+        await pasteImageInto(page, ".shelf-list");
+        await page.waitForTimeout(150);
+
+        const inList = await sentArgs(page, "pasteImageTo");
+        const added = await sentArgs(page, "pasteImage");
+
+        return attached.length === 1 &&
+          JSON.stringify(attached[0]).includes(uuid(906)) &&
+          inList.length === 1 &&
+          added.length === 1
+          ? null
+          : `⌘V attached ${attached.length} in details, then ${inList.length - attached.length} in the list, which added ${added.length}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-paste",
     },
   ] satisfies readonly StressScene[]
 ).map(stress);

@@ -32,7 +32,7 @@ export interface Details {
   /** A field shortcut while details are open. */
   readonly requestField: (field: DetailField) => void;
   readonly pushUndo: (undo: DetailsUndo) => void;
-  /** ⌘Z in details: the last removed step or window, or a pin's last label, comes back; false when there is none. */
+  /** ⌘Z in details: the last removed step, window or attachment, or a pin's last label, comes back; false when there is none. */
   readonly undo: () => boolean;
   /** Discard changes put the item back as saved: nothing removed before can come back. */
   readonly forgetUndo: () => void;
@@ -140,6 +140,12 @@ export const useDetails = ({
             type: "setPins",
           });
         }
+      } else if (last.kind === "attachment") {
+        apply({
+          attachmentId: last.attachmentId,
+          id: itemId,
+          type: "restoreAttachment",
+        });
       } else {
         apply({ id: itemId, type: "restoreWindow", windowId: last.windowId });
       }

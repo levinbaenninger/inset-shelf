@@ -323,6 +323,8 @@ if (page === "shelf") {
       newDrawingFor: logged("newDrawingFor", nothing),
       openAttachment: logged("openAttachment", nothing),
       pasteImageTo: logged("pasteImageTo", ok),
+      // A picture pasted in the list, as a new item.
+      pasteImage: logged("pasteImage", ok),
       pickFilesFor: logged("pickFilesFor", nothing),
       // A report, not an action: kept apart, so scenes that compare what the page asked for stay exact.
       selection: (id) => {

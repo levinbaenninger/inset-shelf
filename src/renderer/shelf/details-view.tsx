@@ -1,6 +1,7 @@
 import {
   AppWindowIcon,
   ArrowLeft01Icon,
+  Attachment01Icon,
   ArrowUpRight01Icon,
   Calendar03Icon,
   Cancel01Icon,
@@ -19,6 +20,7 @@ import type { DetailField, ShelfView } from "@shared/contracts";
 import { dateText, dueChipText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import {
+  attachmentName,
   DESCRIPTION_MAX,
   PIN_LABEL_MAX,
   STEP_TEXT_MAX,
@@ -27,6 +29,7 @@ import {
   withPinLabel,
 } from "@shared/shelf";
 import type {
+  AttachmentId,
   FileItem,
   ImageItem,
   ShelfItem,
@@ -60,6 +63,12 @@ import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import {
+  AttachmentCount,
+  AttachmentGrid,
+  AttachMenuItems,
+} from "./attachment-strip";
+import type { AttachmentAdders, AttachmentHandlers } from "./attachment-strip";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import {
   dueLabel,
@@ -82,6 +91,11 @@ export type DetailsUndo =
       readonly kind: "pinLabel";
       readonly index: number;
       readonly label: string;
+    }
+  | {
+      readonly kind: "attachment";
+      readonly attachmentId: AttachmentId;
+      readonly name: string;
     };
 
 /** A field to open, from the Add menu or a field shortcut; seq makes each request new. */
@@ -123,6 +137,7 @@ export interface DetailsProps {
   readonly banner: ReactNode;
   /** The last Discard changes: when it is this item's, every field shows what is saved again. */
   readonly discarded: ShelfView["discarded"];
+  readonly attachments: AttachmentHandlers & AttachmentAdders;
 }
 
 const newStep = (): Step => ({
@@ -1006,11 +1021,15 @@ const FIELDS: readonly DetailField[] = ["description", "steps", "due"];
  */
 const AddMenu = ({
   addable,
+  attachments,
   item,
   onAdd,
   onLinkWindow,
   onOpenPins,
-}: Pick<DetailsProps, "item" | "onLinkWindow" | "onOpenPins"> & {
+}: Pick<
+  DetailsProps,
+  "attachments" | "item" | "onLinkWindow" | "onOpenPins"
+> & {
   readonly addable: readonly DetailField[];
   readonly onAdd: (field: DetailField) => void;
 }) => {
@@ -1067,6 +1086,10 @@ const AddMenu = ({
               Add Pins…
             </DropdownMenuItem>
           ) : null}
+          <AttachMenuItems
+            adders={attachments}
+            count={item.attachments.length}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -1447,6 +1470,32 @@ export const DetailsView = (props: DetailsProps) => {
           onStopEditing={props.onStopEditing}
           onUndoable={props.onUndoable}
         />
+        {item.attachments.length === 0 ? null : (
+          <Field
+            action={<AttachmentCount count={item.attachments.length} />}
+            icon={Attachment01Icon}
+            label="Attachments"
+          >
+            <AttachmentGrid
+              attachments={item.attachments}
+              handlers={{
+                ...props.attachments,
+                remove: (attachment) => {
+                  props.onApply({
+                    attachmentId: attachment.id,
+                    id: item.id,
+                    type: "removeAttachment",
+                  });
+                  props.onUndoable({
+                    attachmentId: attachment.id,
+                    kind: "attachment",
+                    name: attachmentName(attachment),
+                  });
+                },
+              }}
+            />
+          </Field>
+        )}
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
             <AutoText
@@ -1512,6 +1561,7 @@ export const DetailsView = (props: DetailsProps) => {
         ) : null}
         <AddMenu
           addable={FIELDS.filter((field) => !shown[field])}
+          attachments={props.attachments}
           item={item}
           onAdd={open}
           onLinkWindow={props.onLinkWindow}

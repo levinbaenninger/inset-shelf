@@ -22,7 +22,7 @@ import type {
 import { keyText } from "@shared/shortcut";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ComponentProps, PointerEvent } from "react";
+import type { ComponentProps, PointerEvent, ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -46,11 +46,13 @@ import { useTutorial } from "@/tutorial/use-tutorial";
 
 import { noteFieldTakesKeyboard } from "./arrival";
 import type { Arrival, KeyboardPlace } from "./arrival";
+import type { AttachmentHandlers } from "./attachment-strip";
 import { Banners, NotSavedBanner } from "./banners";
 import { Composer } from "./composer";
 import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
 import { DetailsView } from "./details-view";
+import type { DetailsUndo } from "./details-view";
 import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
@@ -397,6 +399,18 @@ const selectionForMain = (
   return picked.length > 1 ? null : selectedId;
 };
 
+/** Files pasted with details open: attached to that item; says why when some or all can't be. */
+const attachPasted = async (
+  id: ItemId,
+  files: readonly File[]
+): Promise<void> => {
+  const result = await attachDataFiles(id, files);
+
+  if (result !== null && !result.ok) {
+    toast.error(result.message, { duration: NOTICE_MS });
+  }
+};
+
 const hasFiles = (event: DragEvent): boolean =>
   event.dataTransfer?.types.includes("Files") === true;
 
@@ -405,7 +419,11 @@ const hasFiles = (event: DragEvent): boolean =>
  * holds files. One of the shelf's own images or files dragged back in is not
  * added again (`ownDrag`).
  */
-const useFileDrops = (ownDrag: () => boolean): boolean => {
+const useFileDrops = (
+  ownDrag: () => boolean,
+  /** The item open in details: files pasted then attach to it. */
+  pasteTarget: () => ItemId | null
+): boolean => {
   const [over, setOver] = useState(false);
 
   const onDragOver = useEffectEvent((event: DragEvent) => {
@@ -438,10 +456,15 @@ const useFileDrops = (ownDrag: () => boolean): boolean => {
   const onPaste = useEffectEvent((event: ClipboardEvent) => {
     const files = [...(event.clipboardData?.files ?? [])];
 
-    if (files.length > 0) {
-      event.preventDefault();
-      void addDataFiles(files);
+    if (files.length === 0) {
+      return;
     }
+
+    event.preventDefault();
+
+    const target = pasteTarget();
+
+    void (target === null ? addDataFiles(files) : attachPasted(target, files));
   });
 
   useEffect(() => {
@@ -614,7 +637,7 @@ const ShelfToaster = ({ raised }: { readonly raised: boolean }) => {
 };
 
 /** A removal in details that Undo or ⌘Z puts back. */
-const undoableToast = (message: string, undo: () => boolean): void => {
+const undoableToast = (message: ReactNode, undo: () => boolean): void => {
   toast(message, {
     action: {
       label: "Undo",
@@ -626,6 +649,28 @@ const undoableToast = (message: string, undo: () => boolean): void => {
     duration: UNDO_VISIBLE_MS,
     id: "details-undo",
   });
+};
+
+/** What a removal in details says above its Undo. */
+const removedTitle = (
+  entry: Exclude<DetailsUndo, { readonly kind: "pinLabel" }>
+): ReactNode => {
+  if (entry.kind === "attachment") {
+    return (
+      <span className="line-clamp-2 wrap-anywhere">Removed “{entry.name}”</span>
+    );
+  }
+
+  return entry.kind === "step" ? "Step removed" : "Window removed";
+};
+
+/** Paste Image in details: the clipboard's picture, read by main, attached to the item; says why when there is none. */
+const pasteClipboardImage = async (id: ItemId): Promise<void> => {
+  const result = await api.pasteImageTo({ bytes: null, id });
+
+  if (!result.ok) {
+    toast.error(result.message, { duration: NOTICE_MS });
+  }
 };
 
 /** Opens a linked window again, or every window of the item when none is given. */
@@ -857,10 +902,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     ownDrag: drag.draggingOut,
   });
 
-  const dropping = useFileDrops(
-    () => drag.draggingOut() || attachDrop.draggingOut()
-  );
-
   const sectionName =
     doc.sections.find((section) => section.id === doc.activeSectionId)?.name ??
     "";
@@ -900,6 +941,23 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const examples = new Set<string>(tutorial.examples);
   const detailsItem = details.item;
   const inDetails = detailsItem !== undefined;
+
+  const dropping = useFileDrops(
+    () => drag.draggingOut() || attachDrop.draggingOut(),
+    () => details.item?.id ?? null
+  );
+
+  /** What a tile does, in a row or in details. */
+  const attachmentHandlers = (id: ItemId): AttachmentHandlers => ({
+    dragOut: (attachment) => {
+      flushEdits();
+      attachDrop.startDragOut();
+      api.startAttachmentDrag({ attachmentId: attachment.id, id });
+    },
+    open: (attachment, pins = false) => {
+      api.openAttachment({ attachmentId: attachment.id, id, pinMode: pins });
+    },
+  });
 
   const selection = selectionForMain(detailsItem?.id, picked, selectedId);
 
@@ -1839,6 +1897,18 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
               status={status}
             />
           }
+          attachments={{
+            ...attachmentHandlers(detailsItem.id),
+            attachFiles: () => {
+              api.pickFilesFor(detailsItem.id);
+            },
+            newDrawing: () => {
+              api.newDrawingFor(detailsItem.id);
+            },
+            pasteImage: () => {
+              void pasteClipboardImage(detailsItem.id);
+            },
+          }}
           discarded={view.discarded}
           editing={editingId === detailsItem.id}
           item={detailsItem}
@@ -1885,10 +1955,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
             // A label edit shows as it is typed; only removals need a toast to undo them.
             if (entry.kind !== "pinLabel") {
-              undoableToast(
-                entry.kind === "step" ? "Step removed" : "Window removed",
-                details.undo
-              );
+              undoableToast(removedTitle(entry), details.undo);
             }
           }}
           request={details.request}
@@ -2027,23 +2094,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                     {group.items.map((item) => (
                       <ItemRow
                         copied={copiedId === item.id}
-                        attachments={{
-                          dragOut: (attachment) => {
-                            flushEdits();
-                            attachDrop.startDragOut();
-                            api.startAttachmentDrag({
-                              attachmentId: attachment.id,
-                              id: item.id,
-                            });
-                          },
-                          open: (attachment, pins = false) => {
-                            api.openAttachment({
-                              attachmentId: attachment.id,
-                              id: item.id,
-                              pinMode: pins,
-                            });
-                          },
-                        }}
+                        attachments={attachmentHandlers(item.id)}
                         dragProps={drag.itemProps(item.id, itemText(item))}
                         dropProps={attachDrop.rowProps(item)}
                         dropLook={dropLook(attachDrop.target, item.id)}

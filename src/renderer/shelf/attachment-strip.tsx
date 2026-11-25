@@ -1,12 +1,24 @@
-import { File01Icon, ImageNotFound01Icon } from "@hugeicons/core-free-icons";
+import {
+  Attachment01Icon,
+  Cancel01Icon,
+  ClipboardIcon,
+  File01Icon,
+  ImageNotFound01Icon,
+  PaintBrush01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { insetUrl } from "@shared/inset-url";
-import { attachmentName } from "@shared/shelf";
+import { ATTACHMENTS_MAX, attachmentName } from "@shared/shelf";
 import type { AttachedImage, Attachment } from "@shared/shelf";
 import { useState } from "react";
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { tooltipText, Truncated } from "@/shared/clamp";
 
@@ -20,6 +32,13 @@ export interface AttachmentHandlers {
   readonly open: (attachment: AttachedImage, pins?: boolean) => void;
   /** A system drag of the one file: a picture with its pins drawn in, a file as itself. */
   readonly dragOut: (attachment: Attachment) => void;
+}
+
+/** Details' three ways to add one: from a file dialog, from the clipboard, as a new drawing. */
+export interface AttachmentAdders {
+  readonly attachFiles: () => void;
+  readonly pasteImage: () => void;
+  readonly newDrawing: () => void;
 }
 
 const FILE_SIZE = new Intl.NumberFormat(undefined, {
@@ -223,3 +242,139 @@ export const AttachmentStrip = ({
       )}
     </ul>
   );
+
+/** After ⌫ the keyboard goes to the next tile, or the one before when the last went. */
+const focusAfterRemoval = (tile: HTMLElement): void => {
+  const entry = tile.closest("li");
+  const next = entry?.nextElementSibling ?? entry?.previousElementSibling;
+
+  next?.querySelector<HTMLElement>("[data-tile]")?.focus();
+};
+
+/**
+ * Every attachment of an item, as larger tiles that wrap. A picture opens
+ * in the drawing window on a click; a file only drags out. ⌫ or the ×,
+ * which shows on hover or once the keyboard is on the tile, removes one.
+ */
+export const AttachmentGrid = ({
+  attachments,
+  handlers,
+}: {
+  readonly attachments: readonly Attachment[];
+  readonly handlers: AttachmentHandlers & {
+    readonly remove: (attachment: Attachment) => void;
+  };
+}) => (
+  <ul className="flex flex-wrap gap-1.5" data-attachment-grid>
+    {attachments.map((attachment) => {
+      const label = attachmentLabel(attachment);
+
+      const remove = (event: KeyboardEvent | MouseEvent): void => {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.remove(attachment);
+      };
+
+      return (
+        <li className="group/tile relative shrink-0" key={attachment.id}>
+          <button
+            aria-label={label}
+            className={cn(
+              "focus-visible:ring-ring/50 block rounded-md outline-none focus-visible:ring-3",
+              attachment.kind === "image"
+                ? "cursor-pointer hover:opacity-85"
+                : "cursor-grab active:cursor-grabbing"
+            )}
+            data-tile
+            draggable
+            onClick={() => {
+              if (attachment.kind === "image") {
+                handlers.open(attachment);
+              }
+            }}
+            onDragStart={dragOutOf(attachment, handlers)}
+            onKeyDown={(event) => {
+              if (event.key === "Backspace" || event.key === "Delete") {
+                focusAfterRemoval(event.currentTarget);
+                remove(event);
+              }
+            }}
+            title={tooltipText(
+              attachment.kind === "image" ? `${label}\nClick to open` : label
+            )}
+            type="button"
+          >
+            <AttachmentTile attachment={attachment} large />
+          </button>
+          <span className="absolute top-1 right-1 opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
+            <Button
+              aria-label={`Remove ${tooltipText(attachmentName(attachment))}`}
+              onClick={remove}
+              size="icon-xs"
+              variant="overlay"
+            >
+              <HugeiconsIcon icon={Cancel01Icon} />
+            </Button>
+          </span>
+        </li>
+      );
+    })}
+  </ul>
+);
+
+/** How many an item holds of the most it can: "3/12". */
+export const AttachmentCount = ({ count }: { readonly count: number }) => (
+  <span className="text-muted-foreground text-xs tabular-nums">
+    {count}/{ATTACHMENTS_MAX}
+  </span>
+);
+
+/** The Add menu's entries for attachments; at the cap they are off, under a line that says why. */
+export const AttachMenuItems = ({
+  adders,
+  count,
+}: {
+  readonly adders: AttachmentAdders;
+  readonly count: number;
+}) => {
+  const full = count >= ATTACHMENTS_MAX;
+
+  return (
+    <>
+      <DropdownMenuSeparator />
+      {full ? (
+        <DropdownMenuLabel>
+          {ATTACHMENTS_MAX} attachments, the most an item holds
+        </DropdownMenuLabel>
+      ) : null}
+      <DropdownMenuItem
+        disabled={full}
+        onSelect={() => {
+          adders.attachFiles();
+        }}
+      >
+        <HugeiconsIcon icon={Attachment01Icon} />
+        Attach Files…
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={full}
+        onSelect={() => {
+          adders.pasteImage();
+        }}
+        shortcut="CommandOrControl+V"
+      >
+        <HugeiconsIcon icon={ClipboardIcon} />
+        Paste Image
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={full}
+        onSelect={() => {
+          adders.newDrawing();
+        }}
+      >
+        <HugeiconsIcon icon={PaintBrush01Icon} />
+        New Drawing…
+      </DropdownMenuItem>
+    </>
+  );
+};
