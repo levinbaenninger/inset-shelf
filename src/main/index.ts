@@ -1908,8 +1908,13 @@ const start = async (): Promise<void> => {
         void (async () => {
           const id = await addShot(seq);
 
+          // Not saved: the card says why and offers Retry.
+          if (id === null) {
+            return;
+          }
+
           // An open drawing keeps its marks; the screenshot is only saved then.
-          if (id === null || drawing.isVisible()) {
+          if (drawing.isVisible()) {
             notify(`Added to ${activeSectionName()}`);
 
             return;
