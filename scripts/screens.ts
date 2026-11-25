@@ -6851,6 +6851,14 @@ const SCENES: readonly Scene[] = [
         state: "detached",
       });
       await page.keyboard.press(" ");
+      // The check off reaches main a moment after the key; a busy machine must not read the calls before it.
+      await page
+        .waitForFunction(
+          `globalThis.__calls.slice(${before}).some((each) => each.call === "apply")`,
+          null,
+          { timeout: 1000 }
+        )
+        .catch(() => null);
 
       const afterCalls = await calls(page, before);
       const after = afterCalls.filter((each) => each.call === "apply");
