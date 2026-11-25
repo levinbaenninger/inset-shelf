@@ -85,7 +85,8 @@ const Privacy = () => (
         shelf file is damaged, the app moves it aside as{" "}
         <code>shelf.unreadable-&lt;date&gt;.json</code> and starts a new one. If
         it can’t open or move the file at all, it leaves the file as it is and
-        saves nothing that session.
+        doesn’t save changes to the shelf that session, though files you drop
+        and images you paste can still be copied into <code>attachments</code>.
       </li>
       <li>
         On macOS they are in{" "}
