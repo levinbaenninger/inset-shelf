@@ -1,4 +1,4 @@
-import { hasDetails } from "./shelf";
+import { hasAttachments, hasDetails } from "./shelf";
 import type {
   ItemColor,
   ItemId,
@@ -284,7 +284,9 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
 
 /** ⌥⌘C in every Inset app; shown only where it copies more than Copy does. */
 const copyDetails = (item: ShelfItem): readonly MenuEntry[] =>
-  hasDetails(item) || (item.context?.url ?? null) !== null
+  hasDetails(item) ||
+  hasAttachments(item) ||
+  (item.context?.url ?? null) !== null
     ? [
         {
           accelerator: "Alt+CommandOrControl+C",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AttachmentIdSchema,
   applyOp,
   storedFilesOf,
   detailLines,
@@ -17,7 +18,13 @@ import {
   ShelfDocSchema,
   WindowIdSchema,
 } from "./shelf";
-import type { OpEnv, ShelfDoc, ShelfItem, WindowRef } from "./shelf";
+import type {
+  Attachment,
+  OpEnv,
+  ShelfDoc,
+  ShelfItem,
+  WindowRef,
+} from "./shelf";
 
 const uuid = (n: number) =>
   `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(n).padStart(2, "0")}`;
@@ -643,5 +650,92 @@ describe("the # section composer", () => {
       kind: "section",
       name: "Prompts",
     });
+  });
+});
+
+const screenshot: Attachment = {
+  addedAt: "2026-11-20T10:00:00.000Z",
+  id: AttachmentIdSchema.parse(uuid(90)),
+  image: { ...IMAGE, file: `${uuid(91)}.png` },
+  kind: "image",
+  name: "Screenshot 2026-11-20 at 10.00.00",
+  pins: [{ label: "Wrong total", x: 1, y: 1 }],
+};
+
+const quote: Attachment = {
+  addedAt: "2026-11-20T10:01:00.000Z",
+  file: { bytes: 2048, name: "Quote 2026-114.pdf", stored: `${uuid(93)}.pdf` },
+  id: AttachmentIdSchema.parse(uuid(92)),
+  kind: "file",
+};
+
+/** The sample shelf with a screenshot and a file attached to both items. */
+const withAttachments = (sample: Sample) => {
+  const attachments = [screenshot, quote];
+
+  let { doc } = sample;
+
+  for (const id of [sample.note.id, sample.image.id]) {
+    ({ doc } = applyOp(doc, { attachments, id, type: "attach" }, env(), []));
+  }
+
+  const [note, image] = doc.items;
+
+  if (note === undefined || image === undefined) {
+    throw new Error("missing items");
+  }
+
+  return { doc, image, note };
+};
+
+const timesIn = (text: string, part: string): number =>
+  text.split(part).length - 1;
+
+describe("attachments in search and copies", () => {
+  it("finds an item by an attachment's name and an attached picture's pin label", () => {
+    const { doc, note, image } = withAttachments(withItems());
+
+    const found = (query: string) =>
+      groupItems(doc, query, new Date(2026, 10, 20)).flatMap((group) =>
+        group.items.map((item) => item.id)
+      );
+
+    expect(found("2026-114.pdf")).toStrictEqual([note.id, image.id]);
+    expect(found("wrong total")).toStrictEqual([note.id, image.id]);
+  });
+
+  it("leaves Copy with Link as it was, and names each attachment once in Copy with Details and Copy as List", () => {
+    const sample = withItems();
+    const { note, image } = withAttachments(sample);
+    const details = itemDetailsText(note);
+    const list = itemsAsList([note, image]);
+
+    expect({
+      details,
+      link: itemTextWithLink(note),
+      list: list.text,
+    }).toStrictEqual({
+      details: [
+        "Chairs are over budget",
+        "https://example.com/quote",
+        "",
+        "From: Chrome · Quote",
+        "Attachments:",
+        "- Screenshot 2026-11-20 at 10.00.00",
+        "- Quote 2026-114.pdf",
+      ].join("\n"),
+      link: itemTextWithLink(sample.note),
+      list: [
+        "1. Chairs are over budget (https://example.com/quote)",
+        "   Attachments: Screenshot 2026-11-20 at 10.00.00, Quote 2026-114.pdf",
+        "2. Image",
+        "   Attachments: Screenshot 2026-11-20 at 10.00.00, Quote 2026-114.pdf",
+      ].join("\n"),
+    });
+    expect([
+      timesIn(details, "Quote 2026-114.pdf"),
+      timesIn(list.html, "Quote 2026-114.pdf"),
+    ]).toStrictEqual([1, 2]);
+    expect(hasDetails(note)).toBeFalsy();
   });
 });

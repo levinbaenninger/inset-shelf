@@ -1714,7 +1714,7 @@ const KIND_TEXT: Record<ShelfItem["kind"], (item: ShelfItem) => string> = {
   text: (item) => (item.kind === "text" ? item.text : ""),
 };
 
-/** Everything a search looks at: the item's words, its metadata, and where it and its windows came from. */
+/** Everything a search looks at: the item's words, its metadata, where it and its windows came from, and its attachments' names and pin labels. */
 const searchableText = (item: ShelfItem): string =>
   [
     KIND_TEXT[item.kind](item),
@@ -1729,6 +1729,12 @@ const searchableText = (item: ShelfItem): string =>
     item.context?.app ?? "",
     item.context?.title ?? "",
     item.context?.url ?? "",
+    ...item.attachments.flatMap((attachment) => [
+      attachmentName(attachment),
+      ...(attachment.kind === "image"
+        ? attachment.pins.map((pin) => pin.label ?? "")
+        : []),
+    ]),
   ].join(" ");
 
 /**
@@ -1799,6 +1805,13 @@ export const hasDetails = (item: ShelfItem): boolean =>
   item.windows.length > 0 ||
   titleOf(item) !== null ||
   (item.kind === "image" && item.pins.some((pin) => pin.label !== undefined));
+
+/** Whether pictures or files were attached to an item after capture. */
+export const hasAttachments = (item: ShelfItem): boolean =>
+  item.attachments.length > 0;
+
+const attachmentNames = (item: ShelfItem): readonly string[] =>
+  item.attachments.map(attachmentName);
 
 /** A linked window as one line: its title, then where it reopens. */
 const windowLine = (window: WindowRef): string => {
@@ -1877,18 +1890,31 @@ export const itemTextWithLink = (item: ShelfItem): string =>
     ? withDetails(withUrl(titled(item), item), detailLines(item))
     : withUrl(itemText(item), item);
 
-/** Copy with Details: the title, the words, the page, and every piece of metadata. */
+/** Copy with Details: the title, the words, the page, every piece of metadata, and the attachments by name. */
 export const itemDetailsText = (item: ShelfItem): string =>
-  withDetails(withUrl(titled(item), item), detailLines(item, true));
+  withDetails(withUrl(titled(item), item), [
+    ...detailLines(item, true),
+    ...(hasAttachments(item) ? ["Attachments:"] : []),
+    ...attachmentNames(item).map((name) => `- ${name}`),
+  ]);
 
-/** The words an item adds to a list: images only with a title, note or details, files with their name. */
+/** The words an item adds to a list: images only with a title, note, details or attachments, files with their name. */
 const listText = (item: ShelfItem): string | null => {
   const words = titled(item).trim();
 
-  return item.kind === "image" && !hasDetails(item) && item.note.trim() === ""
+  return item.kind === "image" &&
+    !hasDetails(item) &&
+    !hasAttachments(item) &&
+    item.note.trim() === ""
     ? null
     : words;
 };
+
+/** An item's attachments as one list line; empty when it has none. */
+const attachmentsLine = (item: ShelfItem): readonly string[] =>
+  hasAttachments(item)
+    ? [`Attachments: ${attachmentNames(item).join(", ")}`]
+    : [];
 
 const HTML_ESCAPES = {
   '"': "&quot;",
@@ -1925,7 +1951,13 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
 
     return text === null || text === ""
       ? []
-      : [{ details: detailLines(item), text, url: item.context?.url ?? null }];
+      : [
+          {
+            details: [...detailLines(item), ...attachmentsLine(item)],
+            text,
+            url: item.context?.url ?? null,
+          },
+        ];
   });
 
   const lines = entries.map(({ details, text, url }, index) => {
