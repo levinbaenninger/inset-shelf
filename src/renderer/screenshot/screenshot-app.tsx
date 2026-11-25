@@ -192,10 +192,18 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
           Copy's slot is kept while it is hidden, so Add to Shelf never moves when it shows; Add to “…” sits under Add to Shelf, never wider.
         */}
         <div className="absolute inset-x-12 bottom-3 z-10 flex justify-center">
-          <div className="grid grid-cols-[auto_auto] items-center gap-x-1.5 gap-y-1.5">
+          {/* With an item to name, Add to Shelf sits above the corners, centred, with Copy beside it; without, Copy's slot is kept in the row. */}
+          <div
+            className={cn(
+              "relative grid items-center gap-x-1.5 gap-y-1.5",
+              target === null ? "grid-cols-[auto_auto]" : "grid-cols-1"
+            )}
+          >
             <Button
               aria-disabled={saving ? true : undefined}
               aria-label={shelfLabel}
+              // Wide enough, with an item to name, that the line under it reads a name and is never wider.
+              className={cn(target !== null && "min-w-36")}
               onClick={() => {
                 if (!saving) {
                   api.addToShelf(seq);
@@ -207,7 +215,12 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
               <Steady labels={SHELF_LABELS} shown={shelfLabel} />
             </Button>
             <span
-              className={cn("pointer-events-none flex", REVEAL, REVEAL_CLICKS)}
+              className={cn(
+                "pointer-events-none flex",
+                target !== null && "absolute top-0 left-full ml-1.5",
+                REVEAL,
+                REVEAL_CLICKS
+              )}
             >
               <Button
                 onClick={() => {
@@ -227,7 +240,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
                     ? "Saving…"
                     : `${ITEM_LEAD[itemState]} “${target.label}”`
                 }
-                className="col-span-2 w-0 min-w-full"
+                className="w-0 min-w-full"
                 onClick={() => {
                   if (!saving) {
                     api.addToItem({ id: target.id, seq });

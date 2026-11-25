@@ -6401,15 +6401,11 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
 
         const itemBox = await boxOf(add);
 
-        const copyBox = await boxOf(
-          page.getByRole("button", { exact: true, name: "Copy" })
-        );
-
-        // Add to Shelf leads: Add to “…” is a quieter line under it, no taller, and never past the row of Add to Shelf and Copy's slot.
+        // Add to Shelf leads: Add to “…” is a quieter line under it, no taller and never wider.
         if (
           itemBox.top < shelfBox.bottom ||
           itemBox.left < shelfBox.left - 0.5 ||
-          itemBox.right > copyBox.right + 0.5 ||
+          itemBox.right > shelfBox.right + 0.5 ||
           tall(itemBox) >= tall(shelfBox)
         ) {
           return `Add to “…” must sit under Add to Shelf, smaller: ${JSON.stringify({ itemBox, shelfBox })}`;
