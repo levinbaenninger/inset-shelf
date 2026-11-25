@@ -141,7 +141,9 @@ const Due = () => {
                   ) : (
                     <Badge
                       icon={Calendar03Icon}
-                      tone={choice === "today" ? "today" : "plain"}
+                      tone={
+                        due.getTime() === today.getTime() ? "today" : "plain"
+                      }
                     >
                       {chipText(due, today)}
                     </Badge>
