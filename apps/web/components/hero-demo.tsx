@@ -342,6 +342,11 @@ export const DemoShelf = ({ className }: { className?: string }) => {
         onMouseLeave={() => {
           setHovered(null);
         }}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setHovered(null);
+          }
+        }}
       >
         {sections.map((section) => (
           // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- hover only moves the drawn dot.

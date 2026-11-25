@@ -12,12 +12,21 @@ const SMALL_LINK =
 export const DownloadButtons = ({ className }: { className?: string }) => (
   <div className={cn("flex flex-col items-center gap-4", className)}>
     <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-      <Button asChild size="cta">
-        <a href={DOWNLOADS.mac}>
-          <AppleGlyph className="-mt-0.5 size-[17px]" />
-          Download for macOS
+      <div className="flex flex-col gap-2.5">
+        <Button asChild size="cta">
+          <a href={DOWNLOADS.mac}>
+            <AppleGlyph className="-mt-0.5 size-[17px]" />
+            Download for macOS
+          </a>
+        </Button>
+        {/* Stacked on a phone, the Intel build sits right under the Mac button. */}
+        <a
+          href={DOWNLOADS.macIntel}
+          className={cn(SMALL_LINK, "self-center text-[13px] sm:hidden")}
+        >
+          Intel Mac?
         </a>
-      </Button>
+      </div>
       <Button asChild size="cta" variant="light">
         <a href={DOWNLOADS.windows}>
           <WindowsGlyph className="size-[14px]" />
@@ -26,11 +35,13 @@ export const DownloadButtons = ({ className }: { className?: string }) => (
       </Button>
     </div>
     <p className="text-foreground/60 max-w-[44ch] text-center text-[13px] leading-5 md:max-w-none">
-      <a href={DOWNLOADS.macIntel} className={SMALL_LINK}>
-        Intel Mac?
-      </a>
-      <span aria-hidden="true" className="mx-2">
-        ·
+      <span className="max-sm:hidden">
+        <a href={DOWNLOADS.macIntel} className={SMALL_LINK}>
+          Intel Mac?
+        </a>
+        <span aria-hidden="true" className="mx-2">
+          ·
+        </span>
       </span>
       <a href={RELEASES_URL} className={SMALL_LINK}>
         All releases

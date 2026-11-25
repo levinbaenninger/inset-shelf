@@ -219,7 +219,7 @@ export const ShelfRow = ({
                   className={cn(
                     "flex-1",
                     live &&
-                      "group-hover:text-foreground transition-colors [&>svg:last-child]:opacity-0 group-hover:[&>svg:last-child]:opacity-100"
+                      "group-hover:text-foreground group-focus-within:text-foreground transition-colors [&>svg:last-child]:opacity-0 group-focus-within:[&>svg:last-child]:opacity-100 group-hover:[&>svg:last-child]:opacity-100"
                   )}
                   opens={live}
                 />

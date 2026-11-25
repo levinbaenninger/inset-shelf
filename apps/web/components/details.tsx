@@ -257,7 +257,7 @@ const CopyDetails = () => {
 
   return (
     <>
-      <MenuCard className="absolute top-8 left-1/2 z-10 w-[236px] -translate-x-[70%] sm:top-10">
+      <MenuCard className="absolute top-8 left-1/2 z-10 w-[236px] -translate-x-[70%] max-lg:left-3 max-lg:translate-x-0 sm:top-10">
         <div aria-hidden="true">
           <MenuItem icon={Copy01Icon} keys="⌘C">
             Copy
@@ -281,7 +281,7 @@ const CopyDetails = () => {
           <MenuItem icon={Link01Icon}>Copy with Link</MenuItem>
         </div>
       </MenuCard>
-      <pre className="shadow-card absolute top-[128px] left-1/2 w-[300px] -translate-x-[36%] rounded-xl bg-white p-3.5 font-mono text-[11px] leading-[1.65] whitespace-pre-wrap text-neutral-700 sm:top-[132px]">
+      <pre className="shadow-card absolute top-[128px] left-1/2 w-[300px] -translate-x-[36%] rounded-xl bg-white p-3.5 font-mono text-[11px] leading-[1.65] whitespace-pre-wrap text-neutral-700 max-lg:right-3 max-lg:left-auto max-lg:w-[min(300px,calc(100%-24px))] max-lg:translate-x-0 sm:top-[132px]">
         {MARKDOWN}
       </pre>
     </>

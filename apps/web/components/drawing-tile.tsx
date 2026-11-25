@@ -13,7 +13,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 
 import { Icon, PinMark } from "./app-ui";
@@ -21,7 +21,7 @@ import type { PinNumber } from "./app-ui";
 
 interface Pin {
   number: PinNumber;
-  /** The tip, in the canvas's own pixels. */
+  /** The tip, in the screenshot's own pixels. */
   x: number;
   y: number;
 }
@@ -87,6 +87,7 @@ const ToolButton = ({
 export const DrawingTile = () => {
   const [pins, setPins] = useState<Pin[]>(START);
   const [tool, setTool] = useState<"select" | "pin">("select");
+  const shotRef = useRef<HTMLDivElement>(null);
   const next = NUMBERS[pins.length];
   const full = next === undefined || pins.length >= MAX_PINS;
 
@@ -95,10 +96,15 @@ export const DrawingTile = () => {
       return;
     }
 
-    const canvas = event.currentTarget;
-    const box = canvas.getBoundingClientRect();
-    // The tile draws its stage scaled down on a phone; the pins live in the canvas's own pixels.
-    const scale = box.width / canvas.offsetWidth;
+    const shot = shotRef.current;
+
+    if (shot === null) {
+      return;
+    }
+
+    const box = shot.getBoundingClientRect();
+    // The tile draws its stage scaled down on a phone; the pins live in the screenshot's own pixels.
+    const scale = box.width / shot.offsetWidth;
 
     const spot =
       event.detail === 0
@@ -113,7 +119,7 @@ export const DrawingTile = () => {
   };
 
   return (
-    <div className="app-ui light shadow-card absolute top-6 left-1/2 w-[392px] -translate-x-1/2 overflow-hidden rounded-xl bg-white">
+    <div className="app-ui light shadow-card absolute top-6 left-1/2 w-[min(392px,calc(100%-20px))] -translate-x-1/2 overflow-hidden rounded-xl bg-white">
       <p className="border-b py-2.5 text-center text-[13px] font-medium">
         Annotate
       </p>
@@ -128,13 +134,13 @@ export const DrawingTile = () => {
           aria-disabled={full}
           onClick={drop}
           className={cn(
-            "focus-visible:ring-ring/50 absolute inset-0 flex items-center justify-center bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)] outline-none focus-visible:ring-3 focus-visible:outline-none focus-visible:ring-inset",
+            "focus-visible:ring-ring/50 absolute inset-0 bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)] outline-none focus-visible:ring-3 focus-visible:outline-none focus-visible:ring-inset",
             full ? "cursor-not-allowed" : "cursor-crosshair"
           )}
         >
           <span
             aria-hidden="true"
-            className="grid w-[176px] gap-1.5 rounded-lg bg-white p-3.5 text-left text-[9px] text-neutral-500 shadow-[0_6px_18px_rgb(15_40_80/0.12)]"
+            className="absolute top-1/2 left-1/2 grid w-[176px] -translate-x-1/2 -translate-y-1/2 gap-1.5 rounded-lg bg-white p-3.5 text-left text-[9px] text-neutral-500 shadow-[0_6px_18px_rgb(15_40_80/0.12)]"
           >
             <b className="text-[13px] leading-none font-bold text-neutral-900">
               Sign in
@@ -149,19 +155,25 @@ export const DrawingTile = () => {
             </span>
           </span>
         </button>
-        {pins.map((pin) => (
-          <PinMark
-            key={pin.number}
-            number={pin.number}
-            className="pointer-events-none absolute top-[calc(var(--pin-y)-23.5px)] left-[calc(var(--pin-x)-10.5px)]"
-            style={{ "--pin-x": `${pin.x}px`, "--pin-y": `${pin.y}px` }}
-          />
-        ))}
+        {/* The screenshot's own frame, centred like the sign-in card, so pins stay on it at any window width. */}
+        <div
+          ref={shotRef}
+          className="pointer-events-none absolute inset-y-0 left-1/2 w-[366px] -translate-x-1/2"
+        >
+          {pins.map((pin) => (
+            <PinMark
+              key={pin.number}
+              number={pin.number}
+              className="pointer-events-none absolute top-[calc(var(--pin-y)-23.5px)] left-[calc(var(--pin-x)-10.5px)]"
+              style={{ "--pin-x": `${pin.x}px`, "--pin-y": `${pin.y}px` }}
+            />
+          ))}
+        </div>
         <p aria-live="polite" className="sr-only">
           {pins.length > START.length && `Pin ${pins.length} dropped`}
         </p>
       </div>
-      <div className="flex justify-center px-3 py-3">
+      <div className="flex justify-center px-2 py-3">
         <div className="bg-background flex items-center gap-0.5 rounded-xl border p-1 shadow-sm">
           <ToolButton
             label="Select"
