@@ -1080,6 +1080,35 @@ const takeScreenshot = (): void => {
   execFileSync("screencapture", ["-c", "-x", "-R0,0,320,200"]);
 };
 
+/** Clicks a button inside the screenshot card's window only, not a same-named one in the shelf. */
+const clickInCard = async (name: string, attempts = 10): Promise<boolean> => {
+  const card = windows().find(
+    (window) => window.owner === processName && window.layer === 4
+  );
+  const found =
+    card === undefined
+      ? ""
+      : jxa(`const card = Application("System Events").processes.byName(${JSON.stringify(processName)}).windows().find((w) => { const [x, y] = w.position(); return x === ${card.x} && y === ${card.y}; });
+    const hit = card ? card.entireContents().find((e) => { try { return e.role() === "AXButton" && (e.name() === ${JSON.stringify(name)} || e.description() === ${JSON.stringify(name)}); } catch { return false; } }) : undefined;
+    hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
+
+  if (found !== "") {
+    const [x = "0", y = "0"] = found.split(" ");
+
+    input("click", x, y);
+
+    return true;
+  }
+
+  if (attempts <= 1) {
+    return false;
+  }
+
+  await delay(500);
+
+  return await clickInCard(name, attempts - 1);
+};
+
 /**
  * Run with `INSET_FAIL_NEXT_WRITE=1`: Add to Shelf on the card reads
  * Saving…, the failed write keeps the card with Retry and Copy in view,
@@ -1113,7 +1142,12 @@ const checkScreenshotCard = async (): Promise<void> => {
 
   const retried = events().length;
 
-  await clickElement("AXButton", "Retry");
+  // The shelf's failed-write banner has a Retry too: only the card's is pressed here.
+  if (!(await clickInCard("Retry"))) {
+    record("the failed card's Retry can be pressed", false);
+
+    return;
+  }
 
   const added = await waitFor("itemAdded", retried);
 
