@@ -232,6 +232,12 @@ type RecallView = Extract<ToastView, { readonly kind: "recall" }>;
 const fromHere = (count: number): string =>
   count === 1 ? "1 item from here" : `${count} items from here`;
 
+/** "12 items from Figma – Login", at most a tooltip long. */
+const fromPlace = (view: RecallView): string =>
+  tooltipText(
+    `${view.count === 1 ? "1 item" : `${view.count} items`} from ${view.label}`
+  );
+
 /**
  * The recall pill, in the front window's corner: unasked, so quieter than
  * the capture notice (a muted mark, no zoom). Its words open the shelf
@@ -248,12 +254,12 @@ const RecallPill = ({ view }: { readonly view: RecallView }) => (
   >
     <button
       className="hover:bg-accent flex min-w-0 flex-1 cursor-default items-center gap-2 rounded-l-2xl py-1.5 pr-2 pl-3 text-left"
+      // Names the place, as the tooltip does: "12 items from Figma – Login".
+      aria-label={fromPlace(view)}
       onClick={() => {
         api.open(view.seq);
       }}
-      title={tooltipText(
-        `${fromHere(view.count)}: ${view.label}\nClick to show them in the shelf`
-      )}
+      title={fromPlace(view)}
       type="button"
     >
       <HugeiconsIcon
