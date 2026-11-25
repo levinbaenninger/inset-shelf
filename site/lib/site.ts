@@ -3,7 +3,10 @@ export const DOWNLOAD = {
   href: "https://github.com/levinbaenninger/inset-shelf/releases/tag/preview",
   label: "Download for Mac",
 };
-export const SOURCE = { href: "https://github.com/levinbaenninger/inset-shelf", label: "See the source" };
+export const SOURCE = {
+  href: "https://github.com/levinbaenninger/inset-shelf",
+  label: "See the source",
+};
 
 export const SITE_URL = "https://inset.levexis.workers.dev";
 

@@ -12,8 +12,17 @@ const SHELF_ITEMS = [
     source: "GitHub · inset/shelf #482",
     isNew: true,
   },
-  { text: "Ask why the retry flag hides the failure", icon: "claude", source: "Claude · Upload test retries", due: "Today" },
-  { text: "Login screen: three things to fix before the demo", icon: "figma", source: "Figma · Sign-in flow" },
+  {
+    text: "Ask why the retry flag hides the failure",
+    icon: "claude",
+    source: "Claude · Upload test retries",
+    due: "Today",
+  },
+  {
+    text: "Login screen: three things to fix before the demo",
+    icon: "figma",
+    source: "Figma · Sign-in flow",
+  },
   { text: "Book the movers for Monday", icon: "slack", source: "Slack · #office-move" },
 ];
 
@@ -36,13 +45,16 @@ function BrowserWindow() {
           inset / shelf · Issues
         </div>
         <p className="text-[19px] leading-[1.3] font-medium tracking-[-0.01em]">
-          The upload test fails one run in ten on CI <span className="font-normal text-muted-foreground">#482</span>
+          The upload test fails one run in ten on CI{" "}
+          <span className="font-normal text-muted-foreground">#482</span>
         </p>
         <span className="justify-self-start rounded-full border bg-muted px-2.5 py-0.5 text-xs font-medium">
           Open
         </span>
         <div className="overflow-hidden rounded-lg border">
-          <b className="block border-b bg-muted px-3 py-2 text-xs font-medium text-neutral-700">Comment</b>
+          <b className="block border-b bg-muted px-3 py-2 text-xs font-medium text-neutral-700">
+            Comment
+          </b>
           <p className="px-3 py-2.5 leading-[1.55]">
             It only fails when two uploads finish in the same second.{" "}
             <mark className="rounded-sm bg-[#b3d7ff] text-inherit">

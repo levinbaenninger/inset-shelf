@@ -24,7 +24,13 @@ const CARDS = [
 
 export function Details() {
   return (
-    <Section id="details" tone="surface" tabletScreens={2} phoneScreens={2} aria-labelledby="details-h">
+    <Section
+      id="details"
+      tone="surface"
+      tabletScreens={2}
+      phoneScreens={2}
+      aria-labelledby="details-h"
+    >
       <div className="wrap">
         <Heading id="details-h" className="max-w-[22ch]">
           Next steps and due dates, when needed.{" "}

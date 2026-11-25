@@ -16,13 +16,15 @@ export function Hero() {
       <div className="wrap flex min-h-0 flex-1 flex-col">
         <div className="hero-text flex min-h-0 flex-1 flex-col">
           <div className="mx-auto flex w-full max-w-[880px] flex-col items-center gap-4 text-center">
-            <p className="enter text-sm text-muted-foreground">Free test build for macOS and Windows 11</p>
+            <p className="enter text-sm text-muted-foreground">
+              Free test build for macOS and Windows 11
+            </p>
             <h1 id="hero-h" className="enter max-w-[16ch] text-h1 font-medium">
               A capture shelf beside your work
             </h1>
             <p className="enter max-w-[52ch] text-lead">
-              Tap Shift twice on selected text, or take a screenshot. Inset keeps it beside your work with the
-              page it came from.
+              Tap Shift twice on selected text, or take a screenshot. Inset keeps it beside your
+              work with the page it came from.
             </p>
             <div className="enter mt-2 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
               <DownloadButton arrow />

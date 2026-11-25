@@ -48,8 +48,8 @@ export function Claim() {
           <div className="relative grid gap-4 pt-10 sm:gap-6 sm:pt-14 lg:max-w-1/2 lg:pt-16">
             <Heading id="why-h">Saved notes lose where they came from.</Heading>
             <p className="max-w-[36ch] sm:text-lead">
-              A sentence pasted into a notes app no longer knows its chat, pull request or page. Inset keeps the
-              source with every item, and one click opens it again.
+              A sentence pasted into a notes app no longer knows its chat, pull request or page.
+              Inset keeps the source with every item, and one click opens it again.
             </p>
           </div>
           {/* the opening starts on the page's split line: six of twelve columns */}

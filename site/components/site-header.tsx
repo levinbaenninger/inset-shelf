@@ -91,7 +91,12 @@ export function SiteHeader() {
 
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon" className="ml-auto size-11 sm:ml-0 lg:hidden" aria-label="Menu">
+            <Button
+              variant="outline"
+              size="icon"
+              className="ml-auto size-11 sm:ml-0 lg:hidden"
+              aria-label="Menu"
+            >
               <HugeiconsIcon icon={Menu01Icon} />
             </Button>
           </SheetTrigger>
@@ -100,7 +105,10 @@ export function SiteHeader() {
             <nav aria-label="Menu" className="grid px-6 pt-16">
               {NAV_LINKS.map((link) => (
                 <SheetClose asChild key={link.href}>
-                  <a href={link.href} className="flex h-14 items-center border-b text-lg font-medium">
+                  <a
+                    href={link.href}
+                    className="flex h-14 items-center border-b text-lg font-medium"
+                  >
                     {link.label}
                   </a>
                 </SheetClose>

@@ -33,7 +33,9 @@ export function Sources() {
           <span className="text-muted-foreground">Click its source line to open it again.</span>
         </Heading>
         <div role="img" aria-label={LABEL} className="mt-8 grid gap-5 sm:mt-12">
-          <p className="text-label font-medium text-muted-foreground">Pages it names, and the browsers it reads them from</p>
+          <p className="text-label font-medium text-muted-foreground">
+            Pages it names, and the browsers it reads them from
+          </p>
           <ul className="grid grid-cols-4 gap-x-2 gap-y-4 sm:gap-x-6 sm:gap-y-16 lg:grid-cols-8 lg:gap-y-12">
             {SOURCES.map((source) => (
               <li key={source.name} className="grid justify-items-start gap-3">

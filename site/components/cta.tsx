@@ -5,7 +5,9 @@ import type { ComponentProps } from "react";
 import { Button } from "@/components/ui/button";
 import { DOWNLOAD } from "@/lib/site";
 
-type DownloadButtonProps = Omit<ComponentProps<typeof Button>, "asChild" | "children"> & { arrow?: boolean };
+type DownloadButtonProps = Omit<ComponentProps<typeof Button>, "asChild" | "children"> & {
+  arrow?: boolean;
+};
 
 // The page's one main action, worded the same wherever it appears.
 export function DownloadButton({ arrow = false, size = "cta", ...props }: DownloadButtonProps) {

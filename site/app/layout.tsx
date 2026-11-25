@@ -7,7 +7,11 @@ import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 // Inter is the brand's one face (Inset design system, section 3).
-const inter = localFont({ src: "./fonts/InterVariable.woff2", variable: "--font-inter", display: "swap" });
+const inter = localFont({
+  src: "./fonts/InterVariable.woff2",
+  variable: "--font-inter",
+  display: "swap",
+});
 
 const TITLE = "Inset: a capture shelf for Mac and Windows";
 
@@ -29,7 +33,12 @@ export const metadata: Metadata = {
   other: { "site-kind": "software", "page-type": "software" },
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#ffffff" };
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#ffffff",
+};
 
 // Set before the first paint, so the hero's entrance runs once and a page without script never waits for it.
 const ENTRANCE = "document.documentElement.classList.add('m-enter')";
