@@ -3833,6 +3833,21 @@ const MANY_WINDOWS_DOC = {
   ],
 };
 
+/** A long note whose only link is in its last line, well below the open row's cut. */
+const LINK_BELOW_DOC = {
+  ...NINE_DOC,
+  items: [
+    {
+      ...base(725, 5, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: `${"Die Bildschirmaufnahme und Systemaudio fehlen in der Quartalsübersicht, und die Zwischenablage wurde wiederhergestellt. ".repeat(4)}Siehe [das Protokoll](https://intranet.rieder-moebel.ch/protokoll).`,
+      via: "typed",
+    },
+  ],
+};
+
 const OpenShareSchema = z.object({
   after: z.boolean(),
   before: z.boolean(),
@@ -3842,14 +3857,20 @@ const OpenShareSchema = z.object({
   row: z.number(),
 });
 
-/** The open row takes at most about 60% of the list (a line of slack), its Details line in view and the rows around it showing. */
-const openShareCheck = (n: number, neighbours: boolean) =>
+/**
+ * The open row takes at most about 60% of the list (a line of slack), its
+ * Details line in view and the rows around it showing. `share: false` for a
+ * row whose fixed parts (picture, steps, windows) alone pass 60%: there its
+ * words, description and title are at their floors, and only Details and
+ * the next row are checked.
+ */
+const openShareCheck = (n: number, neighbours: boolean, share = true) =>
   async function check(page: Page): Promise<string | null> {
-    const share = OpenShareSchema.parse(
+    const measured = OpenShareSchema.parse(
       await page.evaluate((id) => {
         const list = document.querySelector(".shelf-list");
         const row = document.querySelector(`[data-item-id="${id}"]`);
-        const words = row?.querySelector("[data-row-words]");
+        const words = row?.querySelector("[data-row-part]");
 
         if (list === null || row === null) {
           return {
@@ -3880,8 +3901,11 @@ const openShareCheck = (n: number, neighbours: boolean) =>
         );
 
         return {
-          after: inView(row.nextElementSibling),
-          before: inView(row.previousElementSibling),
+          after:
+            row.nextElementSibling === null || inView(row.nextElementSibling),
+          before:
+            row.previousElementSibling === null ||
+            inView(row.previousElementSibling),
           details:
             detailsButton !== undefined &&
             detailsButton.getBoundingClientRect().bottom <= view.bottom,
@@ -3895,15 +3919,15 @@ const openShareCheck = (n: number, neighbours: boolean) =>
       }, uuid(n))
     );
 
-    if (share.row > 0.6 * share.list + share.line) {
-      return `the open row takes ${Math.round((100 * share.row) / share.list)}% of the list`;
+    if (share && measured.row > 0.6 * measured.list + measured.line) {
+      return `the open row takes ${Math.round((100 * measured.row) / measured.list)}% of the list`;
     }
 
-    if (!share.details) {
+    if (!measured.details) {
       return "the open row's Details line is out of view";
     }
 
-    return !neighbours || (share.before && share.after)
+    return !neighbours || (measured.before && measured.after)
       ? null
       : "the rows around the open one are out of view";
   };
@@ -3944,6 +3968,42 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // Show more comes before the link it hides; the link is reachable once it is open.
+      act: async (page) => {
+        await select(page, 725);
+      },
+      check: async (page) => {
+        const words = item(page, 725).locator("[data-row-keys]").first();
+
+        await words.focus();
+        await page.keyboard.press("Tab");
+
+        const first = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent ?? ''"
+        );
+
+        if (first !== "Show more of the text") {
+          return `the first Tab from the open row's words went to “${String(first)}”, not Show more`;
+        }
+
+        await page.keyboard.press("Enter");
+        await words.focus();
+        await page.keyboard.press("Tab");
+
+        const next = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        return next === "das Protokoll"
+          ? null
+          : `once open, Tab went to “${String(next)}”, not the link`;
+      },
+      data: { view: shelfView(LINK_BELOW_DOC) },
+      keepPointer: true,
+      name: "stress-open-link-below-cut",
+      width: NARROWEST,
+    },
+    {
       act: async (page) => {
         await select(page, 724);
       },
@@ -3975,6 +4035,7 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 710);
       },
+      check: openShareCheck(710, true, false),
       data: { view: stressView() },
       name: "stress-open-text",
       width: NARROWEST,
@@ -4362,9 +4423,11 @@ const STRESS_SCENES: readonly Scene[] = (
       check: async (page) => {
         const owner = await focusOwner(page);
 
-        return owner.composer
-          ? null
-          : `opening the shelf again left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
+        if (!owner.composer) {
+          return `opening the shelf again left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
+        }
+
+        return await openShareCheck(710, false, false)(page);
       },
       data: { view: stressView() },
       name: "stress-open-focus",
