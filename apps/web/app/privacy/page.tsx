@@ -82,8 +82,10 @@ const Privacy = () => (
         Next to it, <code>shelf.json.prev</code> keeps the shelf as it was
         before the last save, so an item you deleted stays there until the next
         save, and its images and files until the app starts after that. If the
-        app ever can’t read the shelf at launch, it keeps that file as{" "}
-        <code>shelf.unreadable-&lt;date&gt;.json</code> and starts a new one.
+        shelf file is damaged, the app moves it aside as{" "}
+        <code>shelf.unreadable-&lt;date&gt;.json</code> and starts a new one. If
+        it can’t open or move the file at all, it leaves the file as it is and
+        saves nothing that session.
       </li>
       <li>
         On macOS they are in{" "}
