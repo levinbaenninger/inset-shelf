@@ -4773,8 +4773,8 @@ const STRESS_SCENES: readonly Scene[] = (
           kind: "notice",
           seq: 1,
           title: `Saved to ${SECTION_PHRASE}`,
+          offer: null,
           tone: "done",
-          why: false,
         },
       },
       name: "stress-notice-done",
@@ -4787,8 +4787,8 @@ const STRESS_SCENES: readonly Scene[] = (
           kind: "notice",
           seq: 1,
           title: `Zwischenablage wiederhergestellt, aber die Bildschirmaufnahme und Systemaudio konnten nicht gespeichert werden, weil ${LONG_WORD} den Datenträger blockiert.`,
+          offer: null,
           tone: "failed",
-          why: false,
         },
       },
       height: 72,
@@ -5119,10 +5119,10 @@ const WHY_WIDTH = 320;
 const pillNotice = (title: string) => ({
   corner: "bottom-right",
   kind: "notice",
+  offer: "why",
   seq: 1,
   title,
   tone: "done",
-  why: true,
 });
 
 /** The calls named so, with what each was sent. */
@@ -5191,16 +5191,24 @@ const listed = async (page: Page) => {
   return { ids, query };
 };
 
-const whyView = (phase: "taking" | "typing" | "saving" | "saved") => ({
+const whyView = (phase: "taking" | "typing" | "saved") => ({
   corner: "top-left",
   kind: "why",
   phase,
   seq: 2,
 });
 
-/** What main says when the disk refuses a write. */
-const PILL_WRITE_FAILED =
-  "The shelf could not be saved to disk. The disk is full.";
+const WHY_WORDS = "because the API changes";
+
+/** What main says when the disk refuses a write (saveErrorText in src/main/save-error.ts). */
+const PILL_WRITE_FAILED = "The disk is full.";
+
+/** The page holds nothing a key could land in, as the pill's window holds no keyboard. */
+const takesNoKey = async (page: Page): Promise<boolean> =>
+  (await page.getByRole("textbox").count()) === 0 &&
+  (await page.evaluate(
+    "document.activeElement === document.body || document.activeElement === null"
+  )) === true;
 
 const WHY_LONG = `Weil die ${LONG_WORD} das Protokoll der Quartalsübersicht vor Freitag braucht`;
 
@@ -5287,9 +5295,6 @@ const PILL_SCENES: readonly Scene[] = (
       width: WHY_WIDTH,
     },
     {
-      act: async (page) => {
-        await page.keyboard.type("because the API changes");
-      },
       check: async (page) => {
         const shown = await page.getByText("Why saved").count();
 
@@ -5297,32 +5302,48 @@ const PILL_SCENES: readonly Scene[] = (
           ? null
           : "Why saved must wait until the disk holds the words";
       },
-      data: { view: whyView("saving") },
-      keepPointer: true,
+      data: {
+        view: { ...whyView("saved"), phase: "saving", text: WHY_WORDS },
+      },
       name: "pill-why-saving",
       width: WHY_WIDTH,
     },
     {
-      act: async (page) => {
-        await page.keyboard.type("because the API changes");
-      },
       check: async (page) => {
         const said = await page.getByRole("alert").textContent();
 
-        const kept = await page
-          .getByRole("textbox", { name: "Why this matters" })
-          .inputValue();
+        if (
+          said?.includes(PILL_WRITE_FAILED) !== true ||
+          !said.includes(WHY_WORDS)
+        ) {
+          return `a failed write must repeat the words and say why: ${JSON.stringify(said)}`;
+        }
 
-        return said?.includes(PILL_WRITE_FAILED) === true &&
-          kept === "because the API changes"
+        if (!(await takesNoKey(page))) {
+          return "words that couldn't be written must be offered without taking the keyboard";
+        }
+
+        await page.getByRole("button", { name: /^Try again/u }).click();
+
+        const sent = await callsTo(page, ["why", "saveWhy"]);
+
+        return isDeepStrictEqual(sent, [{ arg: 3, call: "why" }])
           ? null
-          : `a failed write must keep the words and say why: ${JSON.stringify({ kept, said })}`;
+          : `Try again must ask main for the same words again: ${JSON.stringify(sent)}`;
       },
-      data: { view: { ...whyView("typing"), problem: PILL_WRITE_FAILED } },
-      height: 88,
-      keepPointer: true,
+      data: {
+        view: {
+          corner: "top-left",
+          kind: "notice",
+          offer: "again",
+          seq: 3,
+          title: `${PILL_WRITE_FAILED} “${WHY_WORDS}” wasn’t saved.`,
+          tone: "failed",
+        },
+      },
+      height: 72,
       name: "pill-why-failed",
-      width: WHY_WIDTH,
+      width: 360,
     },
     {
       data: { view: whyView("saved") },

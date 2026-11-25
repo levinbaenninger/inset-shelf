@@ -13,10 +13,11 @@ import {
   secondTap,
   stepPill,
   TAKE_KEYS_MS,
+  UNSAVED_MS,
   WHY_GONE,
   withWhy,
 } from "./pill";
-import type { PillEffect, PillEvent, PillState } from "./pill";
+import type { PillEffect, PillEvent, PillState, WhyOutcome } from "./pill";
 import { placeOf } from "./recall";
 import { ItemIdSchema } from "./shelf";
 
@@ -61,7 +62,7 @@ describe("the capture notice", () => {
           seq: 1,
           title: "Saved to Inbox",
           tone: "done",
-          why: true,
+          offer: "why",
         },
       },
       { ms: NOTICE_MS, seq: 1, type: "timer" },
@@ -141,12 +142,14 @@ describe("the capture notice", () => {
       { title: "Couldn't copy", tone: "failed", type: "notified" },
     ]);
 
-    expect(effects[1]).toMatchObject({ view: { tone: "failed", why: false } });
+    expect(effects[1]).toMatchObject({
+      view: { offer: null, tone: "failed" },
+    });
   });
 });
 
 describe(secondTap, () => {
-  const offer = { item: ITEM, text: "the selection" };
+  const offer = { item: ITEM, text: "the selection", unsaved: null };
 
   it.each([
     ["the same text again", offer, "the selection", "why"],
@@ -180,18 +183,48 @@ const OPEN_FIELD: readonly PillEvent[] = [
   { seq: 2, type: "whyReady" },
 ];
 
+const RETURN: PillEvent = { seq: 2, text: "because", type: "whySaved" };
+
+/** How main's write of "because" ended. */
+const stored = (outcome: WhyOutcome, seq = 2): PillEvent => ({
+  outcome,
+  seq,
+  text: "because",
+  type: "whyStored",
+});
+
+/** Where a key pressed now lands: with whoever the effects so far left the keyboard. */
+const keysReach = (
+  effects: readonly PillEffect[]
+): "the why field" | "the app in front" => {
+  let reach: "the why field" | "the app in front" = "the app in front";
+
+  for (const effect of effects) {
+    if (effect.type === "takeKeys") {
+      reach = "the why field";
+    } else if (effect.type === "giveKeys") {
+      reach = "the app in front";
+    }
+  }
+
+  return reach;
+};
+
 describe("the why field", () => {
   it("is offered by a capture notice only", () => {
-    expect(run([CAPTURED]).effects[1]).toMatchObject({ view: { why: true } });
+    expect(run([CAPTURED]).effects[1]).toMatchObject({
+      view: { offer: "why" },
+    });
     expect(offerOf(run([CAPTURED]).state)).toStrictEqual({
       item: ITEM,
       seq: 1,
       text: "the selection",
+      unsaved: null,
     });
 
     const plain = run([{ title: "Copied", tone: "done", type: "notified" }]);
 
-    expect(plain.effects[1]).toMatchObject({ view: { why: false } });
+    expect(plain.effects[1]).toMatchObject({ view: { offer: null } });
     expect(offerOf(plain.state)).toBeNull();
     expect(
       run([{ seq: 1, type: "whyAsked" }], plain.state).effects
@@ -282,28 +315,43 @@ describe("the why field", () => {
     ]);
   });
 
-  it("writes trimmed words on Return, then gives the keyboard back first and says so briefly", () => {
-    const { effects, state } = run([
+  it("gives the keyboard back on Return, before the words are written: the next key reaches the app in front", () => {
+    const { effects, state } = run([...OPEN_FIELD, RETURN]);
+    const step = effects.slice(run(OPEN_FIELD).effects.length);
+
+    expect(keysReach(effects)).toBe("the app in front");
+    expect(holdsKeys(state)).toBeFalsy();
+    expect(step[0]).toStrictEqual({ type: "giveKeys" });
+    expect(step).toContainEqual({
+      at: "same",
+      type: "show",
+      view: { kind: "why", phase: "saving", seq: 2, text: "because" },
+    });
+    expect(step.at(-1)).toStrictEqual({
+      item: ITEM,
+      seq: 2,
+      text: "because",
+      type: "saveWhy",
+    });
+  });
+
+  it("writes the words trimmed", () => {
+    const { effects } = run([
       ...OPEN_FIELD,
       { seq: 2, text: "  because the API changes  ", type: "whySaved" },
-      {
-        outcome: { kind: "saved" },
-        seq: 2,
-        text: "because the API changes",
-        type: "whyStored",
-      },
     ]);
 
-    expect(effects.slice(-7)).toStrictEqual([
-      { type: "stopTimer" },
-      {
-        at: "same",
-        type: "show",
-        view: { kind: "why", phase: "saving", seq: 2 },
-      },
-      { item: ITEM, seq: 2, text: "because the API changes", type: "saveWhy" },
-      { type: "giveKeys" },
-      { take: false, type: "clicks" },
+    expect(effects.at(-1)).toMatchObject({ text: "because the API changes" });
+  });
+
+  it("says Why saved only once the disk holds the words, briefly, and never takes the keyboard for it", () => {
+    const saving = run([...OPEN_FIELD, RETURN]);
+
+    expect(JSON.stringify(saving.effects)).not.toContain('"saved"');
+
+    const { effects, state } = run([stored({ kind: "saved" })], saving.state);
+
+    expect(effects).toStrictEqual([
       {
         at: "same",
         type: "show",
@@ -311,107 +359,128 @@ describe("the why field", () => {
       },
       { ms: SAVED_MS, seq: 2, type: "timer" },
     ]);
-    expect(holdsKeys(state)).toBeFalsy();
     expect(types(run([{ seq: 2, type: "timeout" }], state).effects)).toContain(
       "hide"
     );
   });
 
-  it("says Why saved only once the disk holds the words, keeping the keyboard while they are written", () => {
-    const saving = run([
+  it("drops nothing typed after Return: the field takes no more words and no second Return", () => {
+    const saving = run([...OPEN_FIELD, RETURN]);
+
+    expect(
+      run(
+        [
+          { seq: 2, text: "because z", type: "whyInput" },
+          { seq: 2, text: "because z", type: "whySaved" },
+          { seq: 2, type: "whyCancelled" },
+        ],
+        saving.state
+      ).effects
+    ).toStrictEqual([]);
+  });
+
+  it("offers the words again, without the keyboard, when they couldn't be written", () => {
+    const { effects, state } = run([
       ...OPEN_FIELD,
-      { seq: 2, text: "because", type: "whySaved" },
+      RETURN,
+      stored({ kind: "failed", message: "The disk is full." }),
     ]);
 
-    expect(saving.effects.slice(-2)).toStrictEqual([
+    expect(keysReach(effects)).toBe("the app in front");
+    expect(types(effects).filter((type) => type === "takeKeys")).toHaveLength(
+      1
+    );
+    expect(effects.slice(-2)).toStrictEqual([
       {
         at: "same",
         type: "show",
-        view: { kind: "why", phase: "saving", seq: 2 },
-      },
-      { item: ITEM, seq: 2, text: "because", type: "saveWhy" },
-    ]);
-    expect(holdsKeys(saving.state)).toBeTruthy();
-
-    const stored = run(
-      [
-        {
-          outcome: { kind: "saved" },
-          seq: 2,
-          text: "because",
-          type: "whyStored",
+        view: {
+          kind: "notice",
+          offer: "again",
+          seq: 3,
+          title: "The disk is full. “because” wasn’t saved.",
+          tone: "failed",
         },
-      ],
-      saving.state
+      },
+      { ms: UNSAVED_MS, seq: 3, type: "timer" },
+    ]);
+    expect(offerOf(state)).toStrictEqual({
+      item: ITEM,
+      seq: 3,
+      text: "the selection",
+      unsaved: "because",
+    });
+  });
+
+  it("writes the same words again on a click or a second Double Shift, still without the keyboard", () => {
+    const failed = run([
+      ...OPEN_FIELD,
+      RETURN,
+      stored({ kind: "failed", message: "The disk is full." }),
+    ]);
+
+    const again = run([{ seq: 3, type: "whyAsked" }], failed.state);
+
+    expect(types(again.effects)).not.toContain("takeKeys");
+    expect(holdsKeys(again.state)).toBeFalsy();
+    expect(again.effects).toContainEqual({
+      at: "same",
+      type: "show",
+      view: { kind: "why", phase: "saving", seq: 3, text: "because" },
+    });
+    expect(again.effects.at(-1)).toStrictEqual({
+      item: ITEM,
+      seq: 3,
+      text: "because",
+      type: "saveWhy",
+    });
+  });
+
+  it("says Why saved after a second try, or offers the words once more", () => {
+    const again = run([
+      ...OPEN_FIELD,
+      RETURN,
+      stored({ kind: "failed", message: "The disk is full." }),
+      { seq: 3, type: "whyAsked" },
+    ]);
+
+    const saved = run([stored({ kind: "saved" }, 3)], again.state);
+
+    expect(saved.effects[0]).toMatchObject({ view: { phase: "saved" } });
+
+    const refused = run(
+      [stored({ kind: "failed", message: "The disk is full." }, 3)],
+      again.state
     );
 
-    expect(stored.effects[0]).toStrictEqual({ type: "giveKeys" });
-    expect(stored.effects).toContainEqual({
-      at: "same",
-      type: "show",
-      view: { kind: "why", phase: "saved", seq: 2 },
-    });
-    expect(holdsKeys(stored.state)).toBeFalsy();
+    expect(offerOf(refused.state)).toMatchObject({ unsaved: "because" });
   });
 
-  it("keeps the typed words and says why when they couldn't be written, and Return tries again", () => {
+  it("opens the shelf at the item from the words that couldn't be written", () => {
     const failed = run([
       ...OPEN_FIELD,
-      { seq: 2, text: "because", type: "whySaved" },
-      {
-        outcome: { kind: "failed", message: "The disk is full." },
-        seq: 2,
-        text: "because",
-        type: "whyStored",
-      },
+      RETURN,
+      stored({ kind: "failed", message: "The disk is full." }),
     ]);
 
-    expect(failed.effects.at(-2)).toStrictEqual({
-      at: "same",
-      type: "show",
-      view: {
-        kind: "why",
-        phase: "typing",
-        problem: "The disk is full.",
-        seq: 2,
-      },
-    });
-    expect(failed.state.shown).toMatchObject({
-      phase: "typing",
-      text: "because",
-    });
-  });
-
-  it("tries again on Return after the words couldn't be written, still holding the keyboard", () => {
-    const failed = run([
-      ...OPEN_FIELD,
-      { seq: 2, text: "because", type: "whySaved" },
-      {
-        outcome: { kind: "failed", message: "The disk is full." },
-        seq: 2,
-        text: "because",
-        type: "whyStored",
-      },
-    ]);
-
-    expect(holdsKeys(failed.state)).toBeTruthy();
     expect(
-      run([{ seq: 2, text: "because", type: "whySaved" }], failed.state).effects
-    ).toContainEqual({ item: ITEM, seq: 2, text: "because", type: "saveWhy" });
+      run([{ seq: 3, type: "opened" }], failed.state).effects.at(-1)
+    ).toStrictEqual({ field: null, item: ITEM, type: "openShelf" });
   });
 
-  it("says the item is gone, and gives the keyboard back, when it was deleted meanwhile", () => {
+  it("says the item is gone when it was deleted meanwhile", () => {
     const { effects, state } = run([
       ...OPEN_FIELD,
-      { seq: 2, text: "because", type: "whySaved" },
-      { outcome: { kind: "gone" }, seq: 2, text: "because", type: "whyStored" },
+      RETURN,
+      stored({ kind: "gone" }),
     ]);
 
-    expect(effects.at(-4)).toStrictEqual({ type: "giveKeys" });
+    expect(keysReach(effects)).toBe("the app in front");
     expect(state.shown).toMatchObject({
       kind: "notice",
-      tone: "failed",
+      offer: null,
       title: WHY_GONE,
+      tone: "failed",
     });
   });
 
@@ -434,32 +503,42 @@ describe("the why field", () => {
       view: {
         kind: "notice",
         seq: 3,
-        title: "“half a thought” wasn’t saved. The disk is full.",
+        title: "The disk is full. “half a thought” wasn’t saved.",
         tone: "failed",
-        why: false,
+        offer: null,
       },
     });
   });
 
-  it("lets go of the keyboard once, and saves once, when the user leaves while the words are written", () => {
-    const saving = run([
-      ...OPEN_FIELD,
-      { seq: 2, text: "because", type: "whySaved" },
-    ]);
+  it("shows a capture made while the words are written at once, and still says when they couldn't be", () => {
+    const saving = run([...OPEN_FIELD, RETURN]);
+    const captured = run([CAPTURED], saving.state);
 
-    for (const event of [
-      { type: "blurred" },
-      { type: "shelfShown" },
-    ] as const) {
-      const left = run([event], saving.state);
+    expect(captured.state.shown).toMatchObject({
+      kind: "notice",
+      title: "Saved to Inbox",
+    });
+    expect(
+      run([stored({ kind: "saved" })], captured.state).effects
+    ).toStrictEqual([]);
+    expect(
+      run(
+        [stored({ kind: "failed", message: "The disk is full." })],
+        captured.state
+      ).state.shown
+    ).toMatchObject({
+      kind: "notice",
+      title: "The disk is full. “because” wasn’t saved.",
+    });
+  });
 
-      expect(types(left.effects)).toStrictEqual([
-        "giveKeys",
-        "hide",
-        "stopTimer",
-      ]);
-      expect(holdsKeys(left.state)).toBeFalsy();
-    }
+  it("goes when the shelf shows while the words are written, and ignores its own window losing the keyboard", () => {
+    const saving = run([...OPEN_FIELD, RETURN]);
+
+    expect(run([{ type: "blurred" }], saving.state).effects).toStrictEqual([]);
+    expect(
+      types(run([{ type: "shelfShown" }], saving.state).effects)
+    ).toStrictEqual(["hide", "stopTimer"]);
   });
 
   it("saves nothing on Return with nothing typed", () => {
@@ -508,16 +587,7 @@ describe("the why field", () => {
   });
 
   it("ignores the keyboard leaving after Return gave it back", () => {
-    const saved = run([
-      ...OPEN_FIELD,
-      { seq: 2, text: "because", type: "whySaved" },
-      {
-        outcome: { kind: "saved" },
-        seq: 2,
-        text: "because",
-        type: "whyStored",
-      },
-    ]);
+    const saved = run([...OPEN_FIELD, RETURN, stored({ kind: "saved" })]);
 
     expect(run([{ type: "blurred" }], saved.state).effects).toStrictEqual([]);
   });
@@ -542,7 +612,7 @@ describe("the why field", () => {
         seq: 3,
         title: "Inset Shelf is up to date.",
         tone: "done",
-        why: false,
+        offer: null,
       },
     });
   });

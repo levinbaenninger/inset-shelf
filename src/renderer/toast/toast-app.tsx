@@ -9,7 +9,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { NoticeCorner, ToastView } from "@shared/contracts";
 import { WHY_MAX } from "@shared/pill";
-import type { WhyPhase } from "@shared/pill";
 import { shortcutLabels } from "@shared/shortcut";
 import { useEffect, useRef } from "react";
 
@@ -83,63 +82,81 @@ const PlainNotice = ({ view }: { readonly view: NoticeView }) => {
   );
 };
 
-/** The capture notice: its words open the shelf, and Why at its end opens the why field, as ⇧⇧ again does. */
-const CaptureNotice = ({ view }: { readonly view: NoticeView }) => (
-  <div
-    className={cn(
-      NOTICE_CLASS,
-      "animate-in fade-in-0 zoom-in-95 gap-0 p-0 font-medium duration-150"
-    )}
-    key={view.seq}
-    {...hover}
-  >
-    <button
-      className="hover:bg-accent flex min-w-0 flex-1 cursor-default items-center gap-2 rounded-l-2xl py-1.5 pr-2 pl-3 text-left"
-      onClick={() => {
-        api.open(view.seq);
-      }}
-      title={tooltipText(`${view.title}\nClick to open the shelf`)}
-      type="button"
+/**
+ * A notice with an offer at its end, which ⇧⇧ again takes too. After a
+ * capture its words open the shelf and Why opens the why field. When the why
+ * couldn't be written it says so with the words, and Try again writes them
+ * again without taking the keyboard.
+ */
+const OfferNotice = ({
+  offer,
+  view,
+}: {
+  readonly offer: "why" | "again";
+  readonly view: NoticeView;
+}) => {
+  const again = offer === "again";
+  const keys = shortcutLabels(isMac).doubleShift;
+
+  return (
+    <div
+      className={cn(
+        NOTICE_CLASS,
+        "animate-in fade-in-0 zoom-in-95 gap-0 p-0 font-medium duration-150"
+      )}
+      key={view.seq}
+      role={again ? "alert" : undefined}
+      {...hover}
     >
-      <NoticeIcon failed={false} />
-      <span className="truncate">{view.title}</span>
-    </button>
-    <button
-      className="hover:bg-accent text-muted-foreground hover:text-foreground flex shrink-0 cursor-default items-center gap-1 rounded-r-2xl border-l py-1.5 pr-3 pl-2"
-      onClick={() => {
-        api.why(view.seq);
-      }}
-      title={`Say why this matters (${shortcutLabels(isMac).doubleShift} again)`}
-      type="button"
-    >
-      Why
-      <span aria-hidden="true" className="text-xs tracking-tight">
-        ⇧⇧
-      </span>
-    </button>
-  </div>
-);
+      <button
+        className="hover:bg-accent flex min-w-0 flex-1 cursor-default items-center gap-2 rounded-l-2xl py-1.5 pr-2 pl-3 text-left"
+        onClick={() => {
+          api.open(view.seq);
+        }}
+        title={tooltipText(`${view.title}\nClick to open the shelf`)}
+        type="button"
+      >
+        <NoticeIcon failed={view.tone === "failed"} />
+        <span className={again ? "line-clamp-2" : "truncate"}>
+          {view.title}
+        </span>
+      </button>
+      <button
+        className="hover:bg-accent text-muted-foreground hover:text-foreground flex shrink-0 cursor-default items-center gap-1 self-stretch rounded-r-2xl border-l py-1.5 pr-3 pl-2"
+        onClick={() => {
+          api.why(view.seq);
+        }}
+        title={
+          again
+            ? `Save these words again (${keys} again)`
+            : `Say why this matters (${keys} again)`
+        }
+        type="button"
+      >
+        {again ? "Try again" : "Why"}
+        <span aria-hidden="true" className="text-xs tracking-tight">
+          ⇧⇧
+        </span>
+      </button>
+    </div>
+  );
+};
 
 /**
  * One line for why the capture matters. The caret and placeholder show only
  * once the window has the keyboard, so nobody types at a field that can't
- * hear them. Return saves, Esc throws the words away; main decides the rest.
- * While the words are written the field keeps them and reads Saving…; when
- * they couldn't be, it keeps them and says why under them, for Return to try
- * again.
+ * hear them. Return saves, Esc throws the words away; main decides the rest,
+ * and on Return it takes the keyboard back to the app in front at once.
  */
 const WhyField = ({
   phase,
-  problem,
   seq,
 }: {
-  readonly phase: Exclude<WhyPhase, "saved">;
-  readonly problem: string | undefined;
+  readonly phase: "taking" | "typing";
   readonly seq: number;
 }) => {
   const input = useRef<HTMLInputElement>(null);
   const typing = phase === "typing";
-  const saving = phase === "saving";
 
   useEffect(() => {
     input.current?.focus();
@@ -163,9 +180,8 @@ const WhyField = ({
     <label
       className={cn(
         NOTICE_CLASS,
-        "w-full cursor-text flex-wrap font-medium",
-        (typing || saving) && "ring-ring/40 ring-2",
-        problem !== undefined && "ring-destructive/50"
+        "w-full cursor-text font-medium",
+        typing && "ring-ring/40 ring-2"
       )}
     >
       <HugeiconsIcon
@@ -174,7 +190,6 @@ const WhyField = ({
         size={14}
       />
       <input
-        aria-describedby={problem === undefined ? undefined : "why-problem"}
         aria-label="Why this matters"
         className={cn(
           "placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent outline-none",
@@ -198,33 +213,40 @@ const WhyField = ({
           }
         }}
         placeholder={typing ? "Why this matters" : ""}
-        readOnly={saving}
         ref={input}
         spellCheck={false}
         type="text"
       />
       <span
-        aria-hidden={saving ? undefined : "true"}
+        aria-hidden="true"
         className={cn(
           "text-muted-foreground shrink-0 text-xs",
-          !typing && !saving && "invisible"
+          !typing && "invisible"
         )}
       >
-        {saving ? "Saving…" : "↩"}
+        ↩
       </span>
-      {problem === undefined ? null : (
-        <span
-          className="text-destructive line-clamp-2 basis-full pl-5.5 font-normal wrap-break-word"
-          id="why-problem"
-          role="alert"
-          title={tooltipText(problem)}
-        >
-          Not saved. {problem} ↩ tries again.
-        </span>
-      )}
     </label>
   );
 };
+
+/**
+ * The words after Return, on their way to the disk. Nothing here can take a
+ * key: the keyboard is back with the app in front.
+ */
+const WhySaving = ({ text }: { readonly text: string }) => (
+  <output className={cn(NOTICE_CLASS, "w-full font-medium")}>
+    <HugeiconsIcon
+      className={cn(NOTICE_ICON_CLASS, "text-muted-foreground")}
+      icon={TextAlignLeftIcon}
+      size={14}
+    />
+    <span className="text-muted-foreground min-w-0 flex-1 truncate">
+      {text}
+    </span>
+    <span className="text-muted-foreground shrink-0 text-xs">Saving…</span>
+  </output>
+);
 
 type RecallView = Extract<ToastView, { readonly kind: "recall" }>;
 
@@ -300,7 +322,8 @@ const WhySaved = () => (
  * shelf was hidden, or says a copy failed, without taking focus; a click on it
  * opens the shelf there. A capture's notice can become a one-line field for
  * why it matters, which then has the keyboard until Return, Esc or a click
- * elsewhere. The same window says, unasked, how many open items came from
+ * elsewhere; what follows Return (Saving…, Why saved, or the words offered
+ * again) never has it. The same window says, unasked, how many open items came from
  * the window in front.
  */
 export const ToastApp = () => {
@@ -312,10 +335,10 @@ export const ToastApp = () => {
 
   const content = (() => {
     if (view.kind === "notice") {
-      return view.why ? (
-        <CaptureNotice view={view} />
-      ) : (
+      return view.offer === null ? (
         <PlainNotice view={view} />
+      ) : (
+        <OfferNotice offer={view.offer} view={view} />
       );
     }
 
@@ -323,15 +346,14 @@ export const ToastApp = () => {
       return <RecallPill view={view} />;
     }
 
+    if (view.phase === "saving") {
+      return <WhySaving text={view.text} />;
+    }
+
     return view.phase === "saved" ? (
       <WhySaved />
     ) : (
-      <WhyField
-        key={view.seq}
-        phase={view.phase}
-        problem={view.problem}
-        seq={view.seq}
-      />
+      <WhyField key={view.seq} phase={view.phase} seq={view.seq} />
     );
   })();
 

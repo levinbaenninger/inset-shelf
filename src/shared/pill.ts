@@ -26,6 +26,9 @@ export const IDLE_WHY_MS = 8000;
 /** How long "Why saved" shows. */
 export const SAVED_MS = 900;
 
+/** How long words that couldn't be written are offered again, unless the pointer holds the notice: long enough to look up from typing. */
+export const UNSAVED_MS = 8000;
+
 /** The longest why the field takes. */
 export const WHY_MAX = 500;
 
@@ -53,7 +56,11 @@ export const RECALL_MS = 4000;
  */
 export const RECALL_AT: "window" | "pointer" = "window";
 
-/** Taking the keyboard, typing, writing the words (the keyboard stays), and the short confirmation once the disk holds them. */
+/**
+ * The field taking the keyboard and typing; then, with the keyboard back with
+ * the app in front, the words on their way to the disk and the short
+ * confirmation once it holds them.
+ */
 export type WhyPhase = "taking" | "typing" | "saving" | "saved";
 
 /** How writing a why ended. */
@@ -75,16 +82,21 @@ export type PillBody =
       readonly seq: number;
       readonly title: string;
       readonly tone: NoticeTone;
-      /** The capture notice offers the why field. */
-      readonly why: boolean;
+      /** What its end offers, as ⇧⇧ again does: the why field after a capture, or writing again the words that couldn't be written. */
+      readonly offer: "why" | "again" | null;
     }
   | {
       readonly kind: "why";
       readonly seq: number;
-      /** "typing" once the page has the keyboard, "saving" while the words are written, "saved" for the short confirmation. */
-      readonly phase: WhyPhase;
-      /** Why the words couldn't be written; the field keeps them for Return to try again. */
-      readonly problem?: string;
+      /** The field, "typing" once the page has the keyboard, and "saved" for the short confirmation. */
+      readonly phase: Exclude<WhyPhase, "saving">;
+    }
+  | {
+      readonly kind: "why";
+      readonly seq: number;
+      readonly phase: "saving";
+      /** The words on their way to the disk, shown beside Saving…. */
+      readonly text: string;
     }
   | {
       readonly kind: "recall";
@@ -100,10 +112,13 @@ export type PillView = PillBody & {
   readonly corner: NoticeCorner;
 };
 
-/** What a second Double Shift is compared with: the item the capture notice is for. */
+/** What a notice offers a second Double Shift, or a click on its end. */
 export interface WhyOffer {
   readonly item: ItemId;
+  /** The selection the capture took, which a second Double Shift is compared with. */
   readonly text: string;
+  /** Words a write couldn't keep: taking the offer writes them again. Without them it opens the field. */
+  readonly unsaved: string | null;
 }
 
 interface Notice {
@@ -114,6 +129,16 @@ interface Notice {
   readonly offer: WhyOffer | null;
 }
 
+interface Why {
+  readonly item: ItemId;
+  /** The selection the capture took, for offering the words again. */
+  readonly selection: string;
+  /** What the field holds, as the page last said; after Return, the words being written. */
+  readonly text: string;
+  /** A notice that arrived while the field had the keyboard, shown after it. */
+  readonly waiting: Notice | null;
+}
+
 export type Shown =
   | { readonly kind: "hidden" }
   | (Notice & {
@@ -122,15 +147,16 @@ export type Shown =
       /** A Double Shift is copying to decide whether it means the why field; the notice waits for it. */
       readonly held: boolean;
     })
-  | {
+  /** The why field. This is the only pill that holds the keyboard, or is taking it. */
+  | (Why & {
       readonly kind: "why";
-      readonly item: ItemId;
-      readonly phase: WhyPhase;
-      /** What the field holds, as the page last said. */
-      readonly text: string;
-      /** A notice that arrived while the field had the keyboard, shown after it. */
-      readonly waiting: Notice | null;
-    }
+      readonly phase: "taking" | "typing";
+    })
+  /** The words after Return, on their way to the disk and then confirmed. The keyboard is back with the app in front. */
+  | (Why & {
+      readonly kind: "write";
+      readonly phase: "saving" | "saved";
+    })
   | {
       readonly kind: "recall";
       readonly place: PlaceKey;
@@ -167,7 +193,7 @@ export type PillEvent =
   | { readonly type: "timeout"; readonly seq: number }
   /** A click on the pill's body. */
   | { readonly type: "opened"; readonly seq: number }
-  /** A second Double Shift, or a click on Why. */
+  /** A second Double Shift, or a click on the notice's end: Why, or Try again. */
   | { readonly type: "whyAsked"; readonly seq: number }
   /** The page's field has the keyboard. */
   | { readonly type: "whyReady"; readonly seq: number }
@@ -177,7 +203,7 @@ export type PillEvent =
   | { readonly type: "whySaved"; readonly seq: number; readonly text: string }
   /** Esc. */
   | { readonly type: "whyCancelled"; readonly seq: number }
-  /** Main wrote the words Return or a click away saved, or couldn't. */
+  /** Main wrote the words Return, a click away or Try again saved, or couldn't. */
   | {
       readonly type: "whyStored";
       readonly seq: number;
@@ -256,9 +282,9 @@ export interface PillStep {
   readonly effects: readonly PillEffect[];
 }
 
-/** The why field holds the keyboard, is taking it, or keeps it while its words are written: Double Shift must not copy now. */
+/** The why field holds the keyboard, or is taking it: Double Shift must not copy now. */
 export const holdsKeys = (state: PillState): boolean =>
-  state.shown.kind === "why" && state.shown.phase !== "saved";
+  state.shown.kind === "why";
 
 /** The why field a second Double Shift would open, for the capture notice showing now. */
 export const offerOf = (
@@ -348,24 +374,31 @@ const showRecall = (
   };
 };
 
-const showNotice = (state: PillState, notice: Notice): PillStep => {
+/** Beside the pointer, or where the pill it answers already is. */
+const showNotice = (
+  state: PillState,
+  notice: Notice,
+  at: "pointer" | "same" = "pointer"
+): PillStep => {
   const seq = state.seq + 1;
+  const again = notice.offer !== null && notice.offer.unsaved !== null;
+  const offered = again ? "again" : "why";
 
   return {
     effects: [
       { take: false, type: "clicks" },
       {
-        at: "pointer",
+        at,
         type: "show",
         view: {
           kind: "notice",
+          offer: notice.offer === null ? null : offered,
           seq,
           title: notice.title,
           tone: notice.tone,
-          why: notice.offer !== null,
         },
       },
-      { ms: NOTICE_MS, seq, type: "timer" },
+      { ms: again ? UNSAVED_MS : NOTICE_MS, seq, type: "timer" },
     ],
     state: {
       seq,
@@ -400,49 +433,49 @@ const leaveWhy = (
       ? [{ item: shown.item, seq: state.seq, text, type: "saveWhy" }]
       : [];
 
-  const given: readonly PillEffect[] =
-    shown.phase === "saved" ? [] : [{ type: "giveKeys" }];
-
   const closed = closeWhy(state, shown.waiting);
 
   return {
-    effects: [...given, ...save, ...closed.effects],
+    effects: [{ type: "giveKeys" }, ...save, ...closed.effects],
     state: closed.state,
   };
 };
 
 /**
- * Return: the words are written while the field keeps the keyboard, so a
- * failure can leave them in it, said why, for Return to try again. With
- * nothing typed the field just closes.
+ * Starts writing the words. The pill reads Saving… where it is and holds no
+ * keyboard: `first` gives it back when the field had it, before anything else.
  */
-const saveWhy = (state: PillState, typed: string): PillStep => {
-  const { shown } = state;
-  const text = typed.trim().slice(0, WHY_MAX);
-
-  if (shown.kind !== "why" || text === "") {
-    return leaveWhy(state, { save: false });
-  }
-
-  return {
-    effects: [
-      { type: "stopTimer" },
-      {
-        at: "same",
-        type: "show",
-        view: { kind: "why", phase: "saving", seq: state.seq },
-      },
-      { item: shown.item, seq: state.seq, text, type: "saveWhy" },
-    ],
-    state: { ...state, shown: { ...shown, phase: "saving", text } },
-  };
-};
+const write = (
+  state: PillState,
+  why: Why,
+  first: readonly PillEffect[]
+): PillStep => ({
+  effects: [
+    ...first,
+    { take: false, type: "clicks" },
+    { type: "stopTimer" },
+    {
+      at: "same",
+      type: "show",
+      view: { kind: "why", phase: "saving", seq: state.seq, text: why.text },
+    },
+    { item: why.item, seq: state.seq, text: why.text, type: "saveWhy" },
+  ],
+  state: { ...state, shown: { ...why, kind: "write", phase: "saving" } },
+});
 
 const askWhy = (state: PillState, seq: number): PillStep => {
   const { shown } = state;
 
   if (seq !== state.seq || shown.kind !== "notice" || shown.offer === null) {
     return same(state);
+  }
+
+  const { item, text: selection, unsaved } = shown.offer;
+
+  // Words a write couldn't keep: the same words go again, and nobody's keyboard is taken for it.
+  if (unsaved !== null) {
+    return write(state, { item, selection, text: unsaved, waiting: null }, []);
   }
 
   const next = state.seq + 1;
@@ -462,9 +495,10 @@ const askWhy = (state: PillState, seq: number): PillStep => {
     state: {
       seq: next,
       shown: {
-        item: shown.offer.item,
+        item,
         kind: "why",
         phase: "taking",
+        selection,
         text: "",
         waiting: null,
       },
@@ -481,44 +515,34 @@ const idleTimer = (state: PillState, text: string): PillEffect =>
 const timedOut = (state: PillState): PillStep => {
   const { shown } = state;
 
+  if (shown.kind === "write") {
+    // While the words are written the write answers, not a timer.
+    return shown.phase === "saved"
+      ? closeWhy(state, shown.waiting)
+      : same(state);
+  }
+
   if (shown.kind !== "why") {
     return shown.kind === "hidden" ? same(state) : ended(state, "ignored");
   }
 
-  switch (shown.phase) {
-    // The field never got the keyboard: the shelf opens at the item's description instead.
-    case "taking": {
-      const closed = hidden(state);
+  // The field never got the keyboard: the shelf opens at the item's description instead.
+  if (shown.phase === "taking") {
+    const closed = hidden(state);
 
-      return {
-        effects: [
-          { type: "giveKeys" },
-          ...closed.effects,
-          { field: "description", item: shown.item, type: "openShelf" },
-        ],
-        state: closed.state,
-      };
-    }
-
-    case "typing": {
-      return shown.text.trim() === ""
-        ? leaveWhy(state, { save: false })
-        : same(state);
-    }
-
-    case "saved": {
-      return closeWhy(state, shown.waiting);
-    }
-
-    // The write answers, not a timer.
-    case "saving": {
-      return same(state);
-    }
-
-    default: {
-      return same(state);
-    }
+    return {
+      effects: [
+        { type: "giveKeys" },
+        ...closed.effects,
+        { field: "description", item: shown.item, type: "openShelf" },
+      ],
+      state: closed.state,
+    };
   }
+
+  return shown.text.trim() === ""
+    ? leaveWhy(state, { save: false })
+    : same(state);
 };
 
 type Handler<T extends PillEvent["type"]> = (
@@ -532,7 +556,7 @@ const arrived = (state: PillState, notice: Notice): PillStep => {
   const { shown } = state;
 
   // The field keeps the keyboard; the notice shows once it closes.
-  if (shown.kind === "why" && holdsKeys(state)) {
+  if (shown.kind === "why") {
     return same({ ...state, shown: { ...shown, waiting: notice } });
   }
 
@@ -561,14 +585,14 @@ const soon = (state: PillState): readonly PillEffect[] => {
   return free ? [{ ms: AFTER_HOVER_MS, seq: state.seq, type: "timer" }] : [];
 };
 
-/** "“half a thought” wasn’t saved. The disk is full." */
+/** "The disk is full. “half a thought” wasn’t saved." The reason comes first, so long words never push it out of the notice. */
 const notWritten = (text: string, message: string): string => {
   const line = text.replaceAll(/\s+/gu, " ");
 
   const echo =
     line.length > WHY_ECHO ? `${line.slice(0, WHY_ECHO - 1)}…` : line;
 
-  return `“${echo}” wasn’t saved. ${message}`;
+  return `${message} “${echo}” wasn’t saved.`;
 };
 
 const failedNotice = (title: string): Notice => ({
@@ -579,9 +603,10 @@ const failedNotice = (title: string): Notice => ({
 });
 
 /**
- * How writing the words ended. While the field still waits for them it says
- * Why saved, keeps them with the reason, or says the item is gone; once the
- * pill has moved on, only a failure is said, in a notice that repeats them.
+ * How writing the words ended. While the pill still reads Saving… it says Why
+ * saved, offers the words again with the reason, or says the item is gone;
+ * once the pill has moved on, only a failure is said, in a notice that
+ * repeats them. No answer takes the keyboard.
  */
 const stored = (
   state: PillState,
@@ -590,73 +615,52 @@ const stored = (
   const { shown } = state;
   const { outcome } = event;
 
-  const waiting =
-    isCurrent(state, event.seq) &&
-    shown.kind === "why" &&
-    shown.phase === "saving";
-
-  if (!waiting) {
-    return outcome.kind === "saved"
-      ? same(state)
-      : arrived(
-          state,
-          failedNotice(
-            outcome.kind === "gone"
-              ? WHY_GONE
-              : notWritten(event.text, outcome.message)
-          )
-        );
-  }
-
-  switch (outcome.kind) {
-    case "saved": {
-      return {
-        effects: [
-          { type: "giveKeys" },
-          { take: false, type: "clicks" },
-          {
-            at: "same",
-            type: "show",
-            view: { kind: "why", phase: "saved", seq: state.seq },
-          },
-          { ms: SAVED_MS, seq: state.seq, type: "timer" },
-        ],
-        state: { ...state, shown: { ...shown, phase: "saved" } },
-      };
-    }
-
-    case "failed": {
-      return {
-        effects: [
-          {
-            at: "same",
-            type: "show",
-            view: {
-              kind: "why",
-              phase: "typing",
-              problem: outcome.message,
-              seq: state.seq,
+  if (outcome.kind === "saved") {
+    return isCurrent(state, event.seq) && shown.kind === "write"
+      ? {
+          effects: [
+            {
+              at: "same",
+              type: "show",
+              view: { kind: "why", phase: "saved", seq: state.seq },
             },
-          },
-          { type: "stopTimer" },
-        ],
-        state: { ...state, shown: { ...shown, phase: "typing" } },
-      };
-    }
-
-    case "gone": {
-      const notice = showNotice(state, failedNotice(WHY_GONE));
-
-      return {
-        effects: [{ type: "giveKeys" }, ...notice.effects],
-        state: notice.state,
-      };
-    }
-
-    default: {
-      return same(state);
-    }
+            { ms: SAVED_MS, seq: state.seq, type: "timer" },
+          ],
+          state: { ...state, shown: { ...shown, phase: "saved" } },
+        }
+      : same(state);
   }
+
+  const title =
+    outcome.kind === "gone"
+      ? WHY_GONE
+      : notWritten(event.text, outcome.message);
+
+  if (
+    !isCurrent(state, event.seq) ||
+    shown.kind !== "write" ||
+    shown.phase !== "saving"
+  ) {
+    return arrived(state, failedNotice(title));
+  }
+
+  // The words the shelf couldn't write are offered again where Saving… was; a notice that waited for the field gives way to them.
+  return showNotice(
+    state,
+    outcome.kind === "gone"
+      ? failedNotice(title)
+      : {
+          item: shown.item,
+          offer: {
+            item: shown.item,
+            text: shown.selection,
+            unsaved: shown.text,
+          },
+          title,
+          tone: "failed",
+        },
+    "same"
+  );
 };
 
 /** One handler per event, each given only its own event. */
@@ -666,21 +670,16 @@ const HANDLERS: Handlers = {
   blurred: (state) => {
     const { shown } = state;
 
-    // Losing the keyboard while taking it is left to the timer: the field never had it.
-    if (shown.kind !== "why" || shown.phase === "taking") {
-      return same(state);
-    }
-
-    // While the words are written the field goes; how the write ends comes back as a notice if it failed.
-    return shown.phase === "saved"
-      ? same(state)
-      : leaveWhy(state, { save: shown.phase === "typing" && BLUR_SAVES });
+    // Losing the keyboard while taking it is left to the timer: the field never had it. After Return the pill has given it back itself.
+    return shown.kind === "why" && shown.phase === "typing"
+      ? leaveWhy(state, { save: BLUR_SAVES })
+      : same(state);
   },
 
   captured: (state, event) =>
     arrived(state, {
       item: event.item,
-      offer: { item: event.item, text: event.text },
+      offer: { item: event.item, text: event.text, unsaved: null },
       title: event.title,
       tone: "done",
     }),
@@ -775,7 +774,7 @@ const HANDLERS: Handlers = {
   shelfShown: (state) => {
     const { shown } = state;
 
-    if (shown.kind === "why" && holdsKeys(state)) {
+    if (shown.kind === "why") {
       return leaveWhy(
         { ...state, shown: { ...shown, waiting: null } },
         { save: shown.phase === "typing" && BLUR_SAVES }
@@ -794,24 +793,15 @@ const HANDLERS: Handlers = {
 
   whyAsked: (state, event) => askWhy(state, event.seq),
 
-  // Esc while the words are written waits: they are on their way to the disk.
   whyCancelled: (state, event) =>
-    isCurrent(state, event.seq) &&
-    holdsKeys(state) &&
-    state.shown.kind === "why" &&
-    state.shown.phase !== "saving"
+    isCurrent(state, event.seq) && state.shown.kind === "why"
       ? leaveWhy(state, { save: false })
       : same(state),
 
   whyInput: (state, event) => {
     const { shown } = state;
 
-    if (
-      !isCurrent(state, event.seq) ||
-      shown.kind !== "why" ||
-      !holdsKeys(state) ||
-      shown.phase === "saving"
-    ) {
+    if (!isCurrent(state, event.seq) || shown.kind !== "why") {
       return same(state);
     }
 
@@ -848,19 +838,16 @@ const HANDLERS: Handlers = {
   whySaved: (state, event) => {
     const { shown } = state;
 
-    if (
-      !isCurrent(state, event.seq) ||
-      shown.kind !== "why" ||
-      !holdsKeys(state) ||
-      shown.phase === "saving"
-    ) {
+    if (!isCurrent(state, event.seq) || shown.kind !== "why") {
       return same(state);
     }
 
-    return saveWhy(
-      { ...state, shown: { ...shown, text: event.text } },
-      event.text
-    );
+    const text = event.text.trim().slice(0, WHY_MAX);
+
+    // Return: the keyboard goes back at once and the words are written behind it. With nothing typed the field just closes.
+    return text === ""
+      ? leaveWhy({ ...state, shown: { ...shown, text } }, { save: false })
+      : write(state, { ...shown, text }, [{ type: "giveKeys" }]);
   },
 
   whyStored: stored,

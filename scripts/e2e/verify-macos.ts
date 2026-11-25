@@ -1164,9 +1164,10 @@ const sayWhyTrial = async (
 
 /**
  * Say why on a disk that refuses the why's write (INSET_FAIL_NEXT_WRITE=2:
- * the capture's write lands, the why's fails): the field keeps the words and
- * the keyboard and says why, no key reaches the source, and Return then
- * writes them and gives the keyboard back.
+ * the capture's write lands, the why's fails): Return gives the keyboard
+ * back at once, so a key pressed with it reaches the source while the notice
+ * offers the words again. A second Double Shift then writes them, once,
+ * without opening the field or taking a key.
  */
 const checkSayWhyFailed = async (): Promise<void> => {
   const text = "Why trial failing disk sentence";
@@ -1190,32 +1191,36 @@ const checkSayWhyFailed = async (): Promise<void> => {
     input("double-shift");
   });
   await waitFor("whyOpened", second, Date.now() + 3000);
+  // The x replaces the selection, so the second Double Shift below copies nothing.
   guardedKeys(() => {
     input("type", "because");
     input("key", RETURN);
+    input("type", "x");
   });
 
   const refused = await waitFor("whyNotSaved", second, Date.now() + 5000);
 
-  guardedKeys(() => {
-    input("type", "x");
-  });
   await delay(400);
   record(
-    "say why: a failed write keeps the words and the keyboard, and says why",
+    "say why: a failed write still gives the keyboard back on Return, and nothing is on disk",
     refused !== undefined &&
-      sourceText() === text &&
+      sourceText().includes("x") &&
       itemWith(text)[0]?.description === "",
-    JSON.stringify({ refused: refused !== undefined, source: sourceText() })
+    JSON.stringify({
+      description: itemWith(text)[0]?.description,
+      refused: refused !== undefined,
+      source: sourceText(),
+    })
   );
 
-  // The x went into the field: take it out again, then Return writes the words.
+  // The notice offers the words again: Double Shift takes the offer.
+  const third = events().length;
+
   guardedKeys(() => {
-    input("key", "51");
-    input("key", RETURN);
+    input("double-shift");
   });
 
-  const saved = await waitFor("whySaved", second, Date.now() + 5000);
+  const saved = await waitFor("whySaved", third, Date.now() + 5000);
 
   await delay(400);
   guardedKeys(() => {
@@ -1223,10 +1228,13 @@ const checkSayWhyFailed = async (): Promise<void> => {
   });
   await delay(400);
   record(
-    "say why: Return after a failed write saves the words and gives the keyboard back",
+    "say why: Double Shift after a failed write saves the words once and takes no key",
     saved !== undefined &&
       itemWith(text)[0]?.description === "because" &&
-      sourceText().includes("y"),
+      sourceText().includes("y") &&
+      !events()
+        .slice(third)
+        .some((event) => event.event === "whyOpened"),
     JSON.stringify({
       description: itemWith(text)[0]?.description,
       source: sourceText(),
@@ -1290,7 +1298,7 @@ const checkSayWhy = async (): Promise<void> => {
     );
   }
 
-  // A key pressed right after Return, while the words are written: where does it land?
+  // A key pressed right after Return, while the words are written, lands in the source.
   const burstText = "Why trial burst sentence";
 
   if (await showSource(burstText, "all")) {
@@ -1315,7 +1323,7 @@ const checkSayWhy = async (): Promise<void> => {
     await waitFor("whySaved", second, Date.now() + 5000);
     await delay(400);
     record(
-      "say why: a key pressed with Return reaches the source once the words are saved, or is said lost",
+      "say why: a key pressed with Return reaches the source, and the words are saved",
       sourceText().includes("z") &&
         itemWith(burstText)[0]?.description === "because",
       JSON.stringify({

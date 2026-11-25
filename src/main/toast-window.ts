@@ -30,8 +30,7 @@ import { harden, secureWebPreferences } from "./window-security";
 /** The window is clear; the pill is drawn inside it, hugging the corner nearest the pointer, with room for its shadow. */
 const sizeOf = (view: PillBody): Size<"screen"> => {
   if (view.kind === "why") {
-    // A why that couldn't be written says so under the words.
-    return size(320, view.problem === undefined ? 44 : 88);
+    return size(320, 44);
   }
 
   return view.kind === "notice" && view.tone === "failed"
@@ -46,7 +45,7 @@ export interface ToastWindow {
   readonly send: (event: PillEvent) => void;
   /** The why field has the keyboard, or is taking it. */
   readonly holdsKeys: () => boolean;
-  /** The why field the capture notice showing now offers. */
+  /** What the notice showing now offers a second Double Shift: the why field, or the words a write couldn't keep. */
   readonly offer: () => (WhyOffer & { readonly seq: number }) | null;
   readonly view: () => PillView | null;
   readonly onView: (listener: (view: PillView) => void) => void;
