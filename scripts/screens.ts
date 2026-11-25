@@ -660,7 +660,7 @@ const DETAILS_HINT = {
   page: "shelf",
   placement: "below",
   task: null,
-  text: "Add a description, next steps, a due date or linked windows. None of it is needed when you capture.",
+  text: "Add a description, next steps, a due date, linked windows, or a screenshot or file. None of it is needed when you capture.",
   title: null,
 };
 
