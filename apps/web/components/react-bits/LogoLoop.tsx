@@ -1321,7 +1321,7 @@ export const LogoLoop = memo<LogoLoopProps>(
 
     const lists = useMemo(() => {
       const itemClass = cx(
-        "group/item relative flex-none text-[length:var(--logoloop-logoHeight)] leading-none group-data-[intro]/loop:opacity-0",
+        "group/item relative flex-none text-[length:var(--logoloop-logoHeight)] leading-none group-data-[intro]/loop:opacity-0 noscript:m-0! noscript:opacity-100!",
         vertical ? "mb-[var(--logoloop-gap)]" : "mr-[var(--logoloop-gap)]"
       );
       const contentClass = (item: LogoItem) =>
@@ -1356,7 +1356,11 @@ export const LogoLoop = memo<LogoLoopProps>(
           <ul
             className={cx(
               "m-0 flex list-none items-center p-0",
-              vertical && "flex-col"
+              vertical && "flex-col",
+              // Without scripts nothing moves the track, so one copy wraps in place.
+              isPrimary
+                ? "noscript:w-full noscript:flex-wrap noscript:justify-center noscript:gap-(--logoloop-gap)"
+                : "noscript:hidden"
             )}
             key={copyIndex}
             role="list"
@@ -1482,7 +1486,7 @@ export const LogoLoop = memo<LogoLoopProps>(
     } as React.CSSProperties;
 
     const rootClassName = cx(
-      "group/loop relative overflow-hidden [-webkit-tap-highlight-color:transparent]",
+      "group/loop relative overflow-hidden [-webkit-tap-highlight-color:transparent] noscript:[-webkit-mask-image:none]! noscript:[mask-image:none]!",
       vertical
         ? "inline-block h-full px-[var(--logoloop-pad)]"
         : "py-[var(--logoloop-pad)]",
@@ -1510,7 +1514,7 @@ export const LogoLoop = memo<LogoLoopProps>(
         <div
           className={cx(
             "relative z-0 flex select-none will-change-transform [-webkit-user-select:none]",
-            vertical ? "h-max w-full flex-col" : "w-max"
+            vertical ? "h-max w-full flex-col" : "w-max noscript:w-full"
           )}
           ref={trackRef}
         >
