@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 import {
   drawingContract,
@@ -24,7 +25,12 @@ import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
 import type { IconPlace, SettingsView } from "@shared/settings";
-import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
+import {
+  AttachmentIdSchema,
+  ItemIdSchema,
+  SectionIdSchema,
+  itemText,
+} from "@shared/shelf";
 import type {
   ItemContext,
   ItemId,
@@ -62,8 +68,9 @@ import type {
   WebContents,
 } from "electron";
 
-import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
+import { createAttachments } from "./attachments";
+import type { DecodedImage } from "./attachments";
 import {
   clipboardContent,
   holdsAgainIn,
@@ -252,6 +259,59 @@ const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
       )
     )
   );
+};
+
+/** A picture as PNG with its size; null when it is empty, as an unreadable one is. */
+const decoded = (image: NativeImage): DecodedImage | null => {
+  if (image.isEmpty()) {
+    return null;
+  }
+
+  const { height, width } = image.getSize();
+
+  return { heightPx: height, png: image.toPNG(), widthPx: width };
+};
+
+/** How a copied file sits on the clipboard: the macOS pasteboard's file URL, or a URI list elsewhere. */
+const COPIED_FILE_TYPES = [
+  'electron application/osclipboard;format="public.file-url"',
+  "text/uri-list",
+] as const;
+
+/** The picture on the clipboard as PNG, else the path of a file copied in Finder or Explorer; null for neither. */
+const readClipboardUpload = async (): Promise<
+  | { readonly kind: "png"; readonly png: Uint8Array }
+  | { readonly kind: "file"; readonly path: string }
+  | null
+> => {
+  const items = withFormats(await clipboard.read());
+  const picture = items.find((item) => item.types.includes("image/png"));
+
+  if (picture !== undefined) {
+    const blob = await picture.getType("image/png");
+
+    return { kind: "png", png: new Uint8Array(await blob.arrayBuffer()) };
+  }
+
+  for (const item of items) {
+    const type = COPIED_FILE_TYPES.find((known) => item.types.includes(known));
+
+    if (type !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- the first item holding a file.
+      const blob = await item.getType(type);
+      // oxlint-disable-next-line no-await-in-loop -- the same item's words.
+      const text = await blob.text();
+      const [url = ""] = text.split(/\r?\n/u);
+
+      try {
+        return { kind: "file", path: fileURLToPath(url.trim()) };
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
 };
 
 /** The HTML on the clipboard, or "" without any. */
@@ -846,56 +906,61 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /** Reads one added file into an operation, or says why it can't be added. */
+  // Pictures and files attached to an item after capture (attachments.ts).
+  const attachments = createAttachments({
+    apply: (op) => {
+      controller.apply(op);
+    },
+    clipboard: async () => {
+      const upload = await readClipboardUpload();
+
+      if (upload?.kind !== "png") {
+        return upload;
+      }
+
+      const image = decoded(
+        nativeImage.createFromBuffer(Buffer.from(upload.png))
+      );
+
+      return image === null ? null : { image, kind: "image" };
+    },
+    copyAttachment: store.copyAttachment,
+    decodeImage: (bytes) =>
+      decoded(nativeImage.createFromBuffer(Buffer.from(bytes))),
+    deleteAttachment: store.deleteAttachment,
+    isStaged: staging.contains,
+    item: controller.item,
+    newAttachmentId: () => AttachmentIdSchema.parse(randomUUID()),
+    now: () => new Date(),
+    readImage: (file) => decoded(nativeImage.createFromPath(file)),
+    stat: async (file) => {
+      const info = await stat(file);
+
+      return { isFile: info.isFile(), size: info.size };
+    },
+    writeAttachment: async (png) => await store.writeAttachment(png),
+  });
+
+  /** Reads one added file into an operation, or says why it can’t be added. */
   const prepareFile = async (
     filePath: string
   ): Promise<MainOp | { readonly problem: string }> => {
-    const added = classifyAddedFile(filePath);
+    const upload = await attachments.prepare(filePath);
 
-    try {
-      const info = await stat(filePath);
+    if ("problem" in upload) {
+      return upload;
+    }
 
-      if (!info.isFile()) {
-        return { problem: `${added.name} is a folder, not a file.` };
-      }
-
-      if (info.size > ADDED_FILE_MAX_BYTES) {
-        return { problem: `${added.name} is larger than 200 MB.` };
-      }
-
-      const image =
-        added.kind === "image" ? nativeImage.createFromPath(filePath) : null;
-
-      if (image !== null && !image.isEmpty()) {
-        const { height, width } = image.getSize();
-
-        return {
+    return upload.kind === "image"
+      ? {
           context: null,
-          image: {
-            file: await store.writeAttachment(image.toPNG()),
-            heightPx: height,
-            pixelsPerDip: 1,
-            widthPx: width,
-          },
+          image: upload.image,
           pins: [],
           source: null,
           type: "addImage",
           via: "paste",
-        };
-      }
-
-      return {
-        context: null,
-        file: {
-          bytes: info.size,
-          name: added.name,
-          stored: await store.copyAttachment(filePath, added.extension),
-        },
-        type: "addFile",
-      };
-    } catch {
-      return { problem: `${added.name} couldn’t be read.` };
-    }
+        }
+      : { context: null, file: upload.file, type: "addFile" };
   };
 
   /** Adds files in the order given; the last one added is shown. */
