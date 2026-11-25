@@ -1805,12 +1805,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   }}
                   renaming={renamingId === group.section.id}
                   section={group.section}
+                  several={doc.sections.length > 1}
                 />
-                {open && group.items.length === 0 ? (
-                  <p className="text-muted-foreground px-2 pb-1 text-xs">
-                    Nothing here yet
-                  </p>
-                ) : null}
                 {open ? (
                   <ul className="flex flex-col gap-1.5">
                     {group.items.map((item) => (

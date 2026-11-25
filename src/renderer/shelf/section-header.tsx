@@ -184,19 +184,26 @@ const anchorUnder = (element: Element): MenuAnchor => {
 };
 
 /**
- * Marks the section new items go to with a filled dot. The other sections
- * show an empty ring in the same place, and one click on it sends new items
- * there.
+ * Marks the section new items go to with a filled dot, once there is more
+ * than one. The other sections show an empty ring in the same place while
+ * the pointer is on their heading or the ring has focus, and one click on
+ * it sends new items there.
  */
 const TargetDot = ({
   active,
   name,
   onMakeActive,
+  several,
 }: {
   readonly active: boolean;
   readonly name: string;
   readonly onMakeActive: () => void;
+  readonly several: boolean;
 }) => {
+  if (!several) {
+    return null;
+  }
+
   if (active) {
     return (
       <Tooltip>
@@ -216,7 +223,7 @@ const TargetDot = ({
       <TooltipTrigger asChild>
         <button
           aria-label={`Add new items to ${name}`}
-          className="group/dot focus-visible:ring-ring/50 flex size-7 shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-3"
+          className="group/dot focus-visible:ring-ring/50 flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 outline-none group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:ring-3"
           onClick={onMakeActive}
           type="button"
         >
@@ -243,8 +250,11 @@ export const SectionHeader = ({
   onToggle,
   renaming,
   section,
+  several,
 }: {
   readonly section: Section;
+  /** The shelf has more than one section, so where new items go needs a mark. */
+  readonly several: boolean;
   readonly active: boolean;
   readonly collapsed: boolean;
   readonly renaming: boolean;
@@ -281,7 +291,9 @@ export const SectionHeader = ({
             active ? "text-foreground" : "text-muted-foreground"
           )}
           onClick={onToggle}
-          title={collapsed ? "Show this section" : "Fold this section away"}
+          title={
+            collapsed ? `Show “${section.name}”` : `Fold “${section.name}” away`
+          }
           type="button"
         >
           <HugeiconsIcon
@@ -316,6 +328,7 @@ export const SectionHeader = ({
           active={active}
           name={section.name}
           onMakeActive={onMakeActive}
+          several={several}
         />
       </>
     )}
