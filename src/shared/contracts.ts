@@ -325,8 +325,8 @@ export interface ScreenshotView {
   readonly imageUrl: string;
   readonly widthPx: number;
   readonly heightPx: number;
-  /** The item Add to “…” attaches it to, named by its first words; null when there is none the user can know, or it holds all it can. */
-  readonly target: { readonly label: string } | null;
+  /** The item Add to “…” attaches it to, and its name on the button; null when there is none the user can know, or it holds all it can. */
+  readonly target: { readonly id: ItemId; readonly label: string } | null;
   /** Where its save stands. */
   readonly save: ShotSave;
 }
@@ -387,8 +387,8 @@ export const screenshotContract = defineContract({
   methods: {
     ...tutorialMethods,
     addToShelf: send(Seq),
-    /** Attaches it to the item the card names. */
-    addToItem: send(Seq),
+    /** Attaches it to the item the card named when pressed; main refuses once the card names another. */
+    addToItem: send(z.object({ id: ItemIdSchema, seq: Seq })),
     /** Adds it to the shelf and opens it to draw on. */
     annotate: send(Seq),
     copy: send(Seq),

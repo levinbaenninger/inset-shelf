@@ -4,7 +4,7 @@ import type {
   ShotSaveTo,
 } from "@shared/contracts";
 import { ATTACHMENTS_MAX, itemText } from "@shared/shelf";
-import type { ItemId, ShelfItem } from "@shared/shelf";
+import type { AttachmentId, ItemId, ShelfItem } from "@shared/shelf";
 
 import { reportSaveError } from "./save-error";
 import type { WriteResult } from "./shelf-store";
@@ -16,6 +16,10 @@ const CARD_LABEL = 40;
 export const RECENT_ITEM_MS = 2 * 60_000;
 
 export const ITEM_GONE = "This item no longer exists.";
+
+/** A press of Add to “…” that reached main after the card had changed to name another item. */
+export const CARD_RETARGETED =
+  "The card now names another item, so nothing was added. Look again and choose.";
 
 /** A screenshot the card shows, held in memory: the file may be moved or deleted meanwhile. */
 export interface Shot {
@@ -61,8 +65,11 @@ interface Held<S extends Shot> {
   readonly shot: S;
   /** The shelf item Add to Shelf made of it, so Retry after a failed save doesn't add it twice. */
   item: ItemId | null;
-  /** The item Add to “…” attached it to, so Retry after a failed save doesn't attach it twice. */
-  attachedTo: ItemId | null;
+  /** Where Add to “…” attached it, so Retry after a failed save doesn't attach it twice, and attaches again once it is gone. */
+  attachedTo: {
+    readonly item: ItemId;
+    readonly attachment: AttachmentId;
+  } | null;
   /** A save is under way: a second click waits for it. */
   saving: boolean;
   /** The item Add to “…” last tried: its Retry stands only while the card still names it. */
@@ -126,7 +133,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
   const target = (): ScreenshotView["target"] => {
     // Once attached, the card keeps naming that item, so Retry after a failed save saves it there and never attaches twice.
-    const attached = held?.attachedTo ?? null;
+    const attached = held?.attachedTo?.item ?? null;
     const id = attached ?? candidate();
     const item = id === null ? undefined : deps.item(id);
 
@@ -138,7 +145,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     return item === undefined || cardItem === null
       ? null
-      : { label: excerpt(itemText(item)) };
+      : { id: item.id, label: excerpt(itemText(item)) };
   };
 
   /** The card names the item that counts now, without moving it or keeping it longer. */
@@ -151,7 +158,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     const next = target();
 
-    if (next?.label !== view.target?.label) {
+    if (next?.id !== view.target?.id || next?.label !== view.target?.label) {
       card.update({ target: next });
     }
 
@@ -248,11 +255,21 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           : { id: now.item, ok: true };
       }),
 
-    /** Add to “…”: the screenshot attached to the item the card named, while that item exists. */
-    addToItem: async (seq: number): Promise<ItemId | null> => {
-      const id = current(seq)?.attachedTo ?? cardItem;
+    /**
+     * Add to “…”: the screenshot attached to `id`, the item the card named
+     * when it was pressed, while the card still names it and it exists.
+     */
+    addToItem: async (seq: number, id: ItemId): Promise<ItemId | null> => {
+      const named = current(seq)?.attachedTo?.item ?? cardItem;
 
-      if (id === null) {
+      if (named === null) {
+        return null;
+      }
+
+      // The card changed under the press: the screenshot never goes somewhere the user didn't see.
+      if (named !== id) {
+        deps.notify(CARD_RETARGETED, "failed");
+
         return null;
       }
 
@@ -269,14 +286,27 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { message: ITEM_GONE, ok: false, retry: false };
         }
 
-        if (holding.attachedTo !== id) {
-          const result = await deps.attach(holding.shot, id);
+        // A Retry checks the attachment itself: Discard changes may have taken it off since.
+        const kept =
+          holding.attachedTo !== null &&
+          deps
+            .item(id)
+            ?.attachments.some(
+              (attachment) => attachment.id === holding.attachedTo?.attachment
+            ) === true;
 
-          if (result.message !== null) {
-            return { message: result.message, ok: false };
+        if (!kept) {
+          const result = await deps.attach(holding.shot, id);
+          const [attachment] = result.attached;
+
+          if (attachment === undefined) {
+            return {
+              message: result.message ?? "The screenshot couldn’t be attached.",
+              ok: false,
+            };
           }
 
-          holding.attachedTo = id;
+          holding.attachedTo = { attachment, item: id };
           retarget();
         }
 

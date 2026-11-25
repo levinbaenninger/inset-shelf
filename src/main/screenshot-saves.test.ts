@@ -1,12 +1,22 @@
 import { setImmediate } from "node:timers/promises";
 
 import type { ScreenshotView } from "@shared/contracts";
-import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
+import {
+  AttachmentIdSchema,
+  emptyShelf,
+  ItemIdSchema,
+  SectionIdSchema,
+} from "@shared/shelf";
 import type { ItemId } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
 import { createCardClock } from "./card-clock";
-import { createShotSaves, ITEM_GONE, RECENT_ITEM_MS } from "./screenshot-saves";
+import {
+  CARD_RETARGETED,
+  createShotSaves,
+  ITEM_GONE,
+  RECENT_ITEM_MS,
+} from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
 import { createShelfController } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
@@ -105,16 +115,37 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
         via: "screenshot",
       });
     },
-    attach: async (_each, id) => {
+    attach: async (each, id) => {
       await turn();
 
       if (attachmentWrites !== null) {
         throw attachmentWrites;
       }
 
-      attached.push(id);
+      const attachment = AttachmentIdSchema.parse(uuid((next += 1)));
 
-      return { attached: [], message: null };
+      attached.push(id);
+      controller.apply({
+        attachments: [
+          {
+            addedAt: new Date(clock).toISOString(),
+            id: attachment,
+            image: {
+              file: `${attachment}.png`,
+              heightPx: each.heightPx,
+              pixelsPerDip: 2,
+              widthPx: each.widthPx,
+            },
+            kind: "image",
+            name: "Screenshot",
+            pins: [],
+          },
+        ],
+        id,
+        type: "attach",
+      });
+
+      return { attached: [attachment], message: null };
     },
     card: {
       hide: () => {
@@ -161,6 +192,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     held: () => held,
     images: () =>
       controller.snapshot().doc.items.filter((each) => each.kind === "image"),
+    /** How many attachments an item holds now. */
+    attachmentsOn: (id: ItemId) => controller.item(id)?.attachments.length,
     note: ItemIdSchema.parse(note),
     notices,
     attached,
@@ -324,6 +357,7 @@ describe("Add to “…” on the screenshot card", () => {
     card.saves.show(shot(1));
 
     expect(card.view()?.target).toStrictEqual({
+      id: card.note,
       label: "Quote from the movers",
     });
 
@@ -338,6 +372,7 @@ describe("Add to “…” on the screenshot card", () => {
     card.saves.show(shot(1));
 
     expect(card.view()?.target).toStrictEqual({
+      id: card.note,
       label: "Quote from the movers",
     });
   });
@@ -357,13 +392,53 @@ describe("Add to “…” on the screenshot card", () => {
     card.saves.show(shot(1));
     card.failWrites({ message: "The disk is full.", ok: false });
 
-    await expect(card.saves.addToItem(1)).resolves.toBeNull();
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
     expect(card.view()?.save).toMatchObject({ state: "failed", to: "item" });
 
     card.failWrites({ ok: true });
 
-    await expect(card.saves.addToItem(1)).resolves.toBe(card.note);
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBe(card.note);
     expect(card.attached).toStrictEqual([card.note]);
+  });
+
+  it("attaches to the item the card showed, and refuses with a notice once the card names another", async () => {
+    const card = setup();
+
+    const other = ItemIdSchema.parse(
+      card.controller.apply({ text: "Book the lift", type: "compose" })
+    );
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    // The click left the card while it named the note; the shelf's selection moved before it reached main.
+    card.select(other, true);
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect(card.attached).toStrictEqual([]);
+    expect(card.notices).toStrictEqual([CARD_RETARGETED]);
+    expect(card.view()?.target).toStrictEqual({
+      id: other,
+      label: "Book the lift",
+    });
+  });
+
+  it("attaches again on Retry when Discard changes took the unsaved screenshot off the item", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    card.failWrites({ message: "The disk is full.", ok: false });
+    await card.saves.addToItem(1, card.note);
+
+    expect(card.controller.discard(card.note)).toBeTruthy();
+    expect(card.attachmentsOn(card.note)).toBe(0);
+
+    card.failWrites({ ok: true });
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBe(card.note);
+    expect(card.attachmentsOn(card.note)).toBe(1);
+    expect(card.view()).toBeNull();
   });
 
   it("says the item is gone when it was deleted before Retry, and never reports it added", async () => {
@@ -372,11 +447,11 @@ describe("Add to “…” on the screenshot card", () => {
     card.select(card.note, true);
     card.saves.show(shot(1));
     card.failAttachments(DISK_FULL);
-    await card.saves.addToItem(1);
+    await card.saves.addToItem(1, card.note);
     card.controller.apply({ id: card.note, type: "remove" });
     card.failAttachments(null);
 
-    await expect(card.saves.addToItem(1)).resolves.toBeNull();
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
     expect(card.view()?.save).toStrictEqual({
       message: ITEM_GONE,
       state: "failed",
@@ -395,11 +470,14 @@ describe("Add to “…” on the screenshot card", () => {
     card.select(card.note, true);
     card.saves.show(shot(1));
     card.failAttachments(DISK_FULL);
-    await card.saves.addToItem(1);
+    await card.saves.addToItem(1, card.note);
     card.controller.apply({ id: card.note, type: "remove" });
     card.select(other, true);
 
-    expect(card.view()?.target).toStrictEqual({ label: "Book the lift" });
+    expect(card.view()?.target).toStrictEqual({
+      id: other,
+      label: "Book the lift",
+    });
     expect(card.view()?.save).toMatchObject({ state: "failed", to: null });
   });
 });

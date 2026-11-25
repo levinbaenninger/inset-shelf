@@ -2359,9 +2359,9 @@ const start = async (): Promise<void> => {
   const screenshotServer = serveContract(
     screenshotContract,
     {
-      addToItem: (seq) => {
+      addToItem: ({ id: named, seq }) => {
         void (async () => {
-          const id = await shotSaves.addToItem(seq);
+          const id = await shotSaves.addToItem(seq, named);
 
           if (id === null) {
             return;

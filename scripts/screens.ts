@@ -3648,7 +3648,7 @@ const CARD_FAILURE = `Die Bildschirmaufnahme konnte nicht gespeichert werden: ${
 const failedCard = (
   to: "shelf" | "item",
   message = CARD_FAILURE,
-  target: { readonly label: string } | null = null
+  target: { readonly id: string; readonly label: string } | null = null
 ) => ({
   ...SCREENSHOT_VIEW,
   save: { message, state: "failed", to },
@@ -6146,11 +6146,21 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           return "Add to “…” covers a corner button";
         }
 
-        return sent.some((each) => each.call === "addToItem" && each.arg === 1)
+        // The press carries the item the button named, so main can refuse it once the card names another.
+        return sent.some(
+          (each) =>
+            each.call === "addToItem" &&
+            isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+        )
           ? null
           : `Add to “…” sent ${JSON.stringify(sent)}`;
       },
-      data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
+      data: {
+        view: {
+          ...SCREENSHOT_VIEW,
+          target: { id: uuid(12), label: CARD_LABEL },
+        },
+      },
       name: "screenshot-card-attach",
       page: "screenshot",
     },
@@ -6172,7 +6182,11 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
 
         const sent = await calls(page);
 
-        return sent.some((each) => each.call === "addToItem" && each.arg === 1)
+        return sent.some(
+          (each) =>
+            each.call === "addToItem" &&
+            isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+        )
           ? null
           : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
       },
@@ -6180,9 +6194,7 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
         view: failedCard(
           "item",
           "Nothing was attached. An item holds up to 12.",
-          {
-            label: CARD_LABEL,
-          }
+          { id: uuid(12), label: CARD_LABEL }
         ),
       },
       name: "screenshot-card-attach-failed",
@@ -6204,7 +6216,12 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           ? null
           : `the third Tab stop is “${String(on)}”, not Add to “…”`;
       },
-      data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
+      data: {
+        view: {
+          ...SCREENSHOT_VIEW,
+          target: { id: uuid(12), label: CARD_LABEL },
+        },
+      },
       keepPointer: true,
       name: "screenshot-card-attach-focus",
       page: "screenshot",

@@ -114,7 +114,7 @@ const FailureBar = ({ message }: { readonly message: string }) => (
  * offers Retry. Dragging the picture into another app drops it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
-  const { save, seq } = view;
+  const { save, seq, target } = view;
   const [held, setHeld] = useState(false);
   const saving = save.state === "saving";
 
@@ -151,13 +151,13 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
               Copy
             </Button>
           </div>
-          {view.target === null ? null : (
+          {target === null ? null : (
             <Button
               aria-disabled={saving ? true : undefined}
               className="max-w-full"
               onClick={() => {
                 if (!saving) {
-                  api.addToItem(seq);
+                  api.addToItem({ id: target.id, seq });
                 }
               }}
               size="pill-xs"
@@ -168,7 +168,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
                 "item",
                 <Truncated
                   className="min-w-0"
-                  text={`Add to “${view.target.label}”`}
+                  text={`Add to “${target.label}”`}
                 />
               )}
             </Button>
