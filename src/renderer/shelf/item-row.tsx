@@ -18,7 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
-import { itemText, TEXT_MAX } from "@shared/shelf";
+import { itemText } from "@shared/shelf";
 import type {
   FileItem,
   ImageItem,
@@ -32,11 +32,10 @@ import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -58,6 +57,16 @@ import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
+import { Note } from "./note";
+import {
+  contextMenuAt,
+  DESCRIPTION_LINES,
+  DONE,
+  EDITING,
+  OPEN_LINES,
+  TITLE_LINES,
+  WORDS,
+} from "./row-look";
 import { filledSteps, moreText, rowParts } from "./row-parts";
 import type { RowExtras } from "./row-parts";
 import type { ItemDrag } from "./use-item-drag";
@@ -77,20 +86,6 @@ export const focusRow = (row: Element | null): boolean => {
 
   return target !== null && document.activeElement === target;
 };
-
-/** A right-click on any part of an item opens its menu at the pointer. */
-const contextMenuAt =
-  (open: RowHandlers["onContextMenu"]) =>
-  (event: MouseEvent): void => {
-    event.preventDefault();
-    open({
-      align: "start",
-      height: 0,
-      width: 0,
-      x: event.clientX,
-      y: event.clientY,
-    });
-  };
 
 const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
   chatgpt: ChatGptIcon,
@@ -458,22 +453,6 @@ const metaText = (item: ShelfItem): string => {
   return `${when} · ${KIND_LABEL[item.via]}${where}`;
 };
 
-/** A row's words, read or edited: the same type either way, so starting an edit moves nothing. */
-const WORDS = "text-sm leading-snug break-words";
-
-/** How many lines of its words, caption or description an open row shows before Show more. */
-const OPEN_LINES = 10;
-
-const DESCRIPTION_LINES = 3;
-
-const TITLE_LINES = 3;
-
-const DONE = "text-muted-foreground line-through";
-
-/** Words being typed in where they are read: the quiet tint details' fields have, drawn around them, so nothing moves (as the inline Textarea). */
-const EDITING =
-  "bg-muted ring-muted dark:bg-muted/50 dark:ring-muted/50 rounded-xs ring-4";
-
 /**
  * Edits a text item in place, with its Markdown formatted as it is typed;
  * ⌘↩ or Return saves, ⇧↩ adds a line or list item, Escape keeps the old text.
@@ -551,218 +530,6 @@ export const TextEditor = ({
         edit().change(markdown);
       }}
       value={item.text}
-    />
-  );
-};
-
-/** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
-const noteLook = (item: ImageItem | FileItem): string =>
-  cn(
-    "text-sm leading-snug break-words whitespace-pre-wrap",
-    // Under a title the caption is the second line, quiet as it is in details.
-    item.title !== null && "text-muted-foreground",
-    item.done && DONE
-  );
-
-/** Where in the note's words a click landed, as an index into the note, or null off its words. */
-const noteOffsetAt = (event: MouseEvent<HTMLElement>): number | null => {
-  const at = document.caretPositionFromPoint(event.clientX, event.clientY);
-
-  return at !== null && event.currentTarget.contains(at.offsetNode)
-    ? at.offset
-    : null;
-};
-
-/**
- * The note under an image or a file, typed in where it is read: no box, the
- * same type and lines. It saves as you type; the main process waits for a
- * pause before writing.
- */
-const NoteField = ({
-  caret,
-  item,
-  onChange,
-  onDone,
-  onHide,
-}: {
-  readonly item: ImageItem | FileItem;
-  /** Where the caret starts, as an index into the note; the end without one. */
-  readonly caret: number | null;
-  readonly onChange: (note: string) => void;
-  readonly onDone: () => void;
-  readonly onHide: () => void;
-}) => {
-  const [note, setNote] = useState(item.note);
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const field = ref.current;
-    const at = caret ?? field?.value.length ?? 0;
-
-    field?.focus();
-    field?.setSelectionRange(at, at);
-  }, [caret]);
-
-  return (
-    // The field takes its type from the note's own (a field's font is inherited), so nothing moves.
-    <div className={noteLook(item)}>
-      <Textarea
-        aria-label={
-          item.kind === "image" ? "Note for this image" : "Note for this file"
-        }
-        variant="inline"
-        maxLength={TEXT_MAX}
-        onBlur={onDone}
-        onChange={(event) => {
-          setNote(event.target.value);
-          onChange(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          const escape = event.key === "Escape";
-
-          if (
-            escape ||
-            (event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing)
-          ) {
-            event.preventDefault();
-            event.stopPropagation();
-            // Leaving the field ends the edit (onBlur).
-            event.currentTarget.blur();
-
-            if (escape) {
-              onHide();
-            }
-          }
-        }}
-        placeholder="What matters here?"
-        ref={ref}
-        rows={1}
-        value={note}
-      />
-    </div>
-  );
-};
-
-/**
- * The note under an image or file as text: two lines until the item is
- * selected. On the open item a click edits it there; Return, a double-click
- * or Edit Caption edits it too.
- */
-const NoteText = ({
-  item,
-  onContextMenu,
-  onEdit,
-  onEditAt,
-  onSelect,
-  selected,
-}: {
-  readonly item: ImageItem | FileItem;
-  readonly selected: boolean;
-  readonly onEditAt: (offset: number | null) => void;
-} & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) => {
-  if (item.note === "") {
-    return null;
-  }
-
-  const note = (
-    <button
-      className={cn(
-        "focus-visible:ring-ring/50 w-full rounded-sm text-left outline-none focus-visible:ring-3",
-        selected && "cursor-text",
-        noteLook(item)
-      )}
-      data-row-keys
-      onClick={(event) => {
-        if (!selected) {
-          onSelect();
-        } else if (window.getSelection()?.isCollapsed !== false) {
-          onEditAt(noteOffsetAt(event));
-        }
-      }}
-      onContextMenu={contextMenuAt(onContextMenu)}
-      onDoubleClick={onEdit}
-      type="button"
-    >
-      {/* A clamp has no effect on a button itself, only on a box inside it. */}
-      <span className={cn("block", !selected && "line-clamp-2")}>
-        {item.note}
-      </span>
-    </button>
-  );
-
-  return selected ? (
-    <Clamp className={noteLook(item)} lines={OPEN_LINES}>
-      {note}
-    </Clamp>
-  ) : (
-    note
-  );
-};
-
-/** The note, read or typed in, in one place: a click on the open note edits it at that word. */
-const Note = ({
-  editing,
-  item,
-  onContextMenu,
-  onEdit,
-  onEditNote,
-  onHide,
-  onSelect,
-  onStopEditing,
-  selected,
-}: {
-  readonly item: ImageItem | FileItem;
-  readonly selected: boolean;
-  readonly editing: boolean;
-} & Pick<
-  RowHandlers,
-  | "onContextMenu"
-  | "onEdit"
-  | "onEditNote"
-  | "onHide"
-  | "onSelect"
-  | "onStopEditing"
->) => {
-  const [caret, setCaret] = useCaretStart<number>(editing);
-
-  // An open picture or file without a note offers one, a click away.
-  if (!editing && selected && item.note === "") {
-    return (
-      <button
-        className="text-muted-foreground/70 hover:text-muted-foreground focus-visible:ring-ring/50 cursor-text self-start rounded-sm text-left text-sm leading-snug outline-none focus-visible:ring-3"
-        onClick={() => {
-          setCaret(null);
-          onEdit();
-        }}
-        type="button"
-      >
-        Add a note…
-      </button>
-    );
-  }
-
-  return editing ? (
-    <NoteField
-      caret={caret}
-      item={item}
-      key={item.id}
-      onChange={onEditNote}
-      onDone={onStopEditing}
-      onHide={onHide}
-    />
-  ) : (
-    <NoteText
-      item={item}
-      onContextMenu={onContextMenu}
-      onEdit={onEdit}
-      onEditAt={(offset) => {
-        setCaret(offset);
-        onEdit();
-      }}
-      onSelect={onSelect}
-      selected={selected}
     />
   );
 };
