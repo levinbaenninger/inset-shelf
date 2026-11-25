@@ -65,6 +65,7 @@ import type { MarkdownFieldHandle } from "./markdown-field";
 import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
 import { QuitPromptDialog } from "./quit-prompt";
+import { useRowActions } from "./row-actions";
 import {
   DueSuggestions,
   NoMatches,
@@ -1871,6 +1872,91 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     };
   }, []);
 
+  // What every row asks of the shelf, by item: one object for the list, so a row re-renders only when its own data changes.
+  const rowActions = useRowActions({
+    attachments: attachmentHandlers,
+    contextMenu: (id, anchor) => {
+      // On one of several picked items, the menu acts on all of them.
+      const several = picked.length > 1 && picked.includes(id);
+
+      showMenu(
+        {
+          ...anchor,
+          target: several
+            ? { ids: picked, kind: "items" }
+            : { id, kind: "item", place: "row" },
+        },
+        id
+      );
+
+      // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      if (!several) {
+        unpick();
+        setSelectedId(id);
+      }
+    },
+    discardChanges,
+    dragImage: (id) => {
+      flushEdits();
+      drag.startDragOut(id);
+      api.startDrag(id);
+    },
+    dragProps: drag.itemProps,
+    dropProps: attachDrop.rowProps,
+    edit: (id) => {
+      setSelectedId(id);
+      setEditingId(id);
+    },
+    editNote: (id, note) => {
+      apply({ id, note, type: "editNote" });
+    },
+    editText: (id, text) => {
+      apply({ id, text, type: "editText" });
+    },
+    hide: hideShelf,
+    open: (id) => {
+      api.openImage(id);
+    },
+    openLink: (id, url) => {
+      api.openLink({ id, url });
+    },
+    pick,
+    reopenWindow,
+    retrySave: () => {
+      void retrySave();
+    },
+    select: (id) => {
+      // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
+      if (editingId !== id) {
+        setEditingId(null);
+
+        const field = document.activeElement;
+
+        if (field instanceof HTMLElement && isTextField(field)) {
+          field.blur();
+        }
+      }
+
+      unpick();
+      setAnchorId(id);
+      setSelectedId(id);
+    },
+    showDetails: openDetails,
+    stopEditing: () => {
+      setEditingId(null);
+    },
+    toggle: (id) => {
+      apply({ id, type: "toggleDone" });
+    },
+    toggleStep: (id, step) => {
+      apply({ id, stepId: step.id, type: "toggleStep" });
+    },
+  });
+
   return (
     <div
       className={cn(
@@ -2087,118 +2173,17 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   <ul className="flex flex-col gap-1.5">
                     {group.items.map((item) => (
                       <ItemRow
+                        actions={rowActions}
                         copied={copiedId === item.id}
-                        attachments={attachmentHandlers(item.id)}
-                        dragProps={drag.itemProps(item.id, itemText(item))}
-                        dropProps={attachDrop.rowProps(
-                          item,
-                          selectedId === item.id
-                        )}
-                        dropLook={dropLook(attachDrop.target, item.id)}
                         dragging={drag.draggingId === item.id}
-                        example={examples.has(item.id)}
-                        onPick={(mode) => {
-                          pick(item.id, mode);
-                        }}
-                        picked={picked.includes(item.id)}
+                        dropLook={dropLook(attachDrop.target, item.id)}
                         editing={editingId === item.id}
+                        example={examples.has(item.id)}
                         item={item}
                         key={item.id}
-                        onContextMenu={(anchor) => {
-                          // On one of several picked items, the menu acts on all of them.
-                          const several =
-                            picked.length > 1 && picked.includes(item.id);
-
-                          showMenu(
-                            {
-                              ...anchor,
-                              target: several
-                                ? { ids: picked, kind: "items" }
-                                : { id: item.id, kind: "item", place: "row" },
-                            },
-                            item.id
-                          );
-
-                          // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
-                          if (document.activeElement instanceof HTMLElement) {
-                            document.activeElement.blur();
-                          }
-
-                          if (!several) {
-                            unpick();
-                            setSelectedId(item.id);
-                          }
-                        }}
-                        onDragImage={() => {
-                          flushEdits();
-                          drag.startDragOut(item.id);
-                          api.startDrag(item.id);
-                        }}
-                        onEdit={() => {
-                          setSelectedId(item.id);
-                          setEditingId(item.id);
-                        }}
-                        onEditNote={(note) => {
-                          apply({ id: item.id, note, type: "editNote" });
-                        }}
-                        onOpen={() => {
-                          api.openImage(item.id);
-                        }}
-                        onOpenLink={(url) => {
-                          api.openLink({ id: item.id, url });
-                        }}
-                        onHide={() => {
-                          hideShelf();
-                        }}
-                        onEditText={(text) => {
-                          apply({ id: item.id, text, type: "editText" });
-                        }}
-                        onSelect={() => {
-                          // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
-                          if (editingId !== item.id) {
-                            setEditingId(null);
-
-                            const field = document.activeElement;
-
-                            if (
-                              field instanceof HTMLElement &&
-                              isTextField(field)
-                            ) {
-                              field.blur();
-                            }
-                          }
-
-                          unpick();
-                          setAnchorId(item.id);
-                          setSelectedId(item.id);
-                        }}
-                        onStopEditing={() => {
-                          setEditingId(null);
-                        }}
-                        onToggle={() => {
-                          apply({ id: item.id, type: "toggleDone" });
-                        }}
-                        onToggleStep={(step) => {
-                          apply({
-                            id: item.id,
-                            stepId: step.id,
-                            type: "toggleStep",
-                          });
-                        }}
-                        onReopenWindow={(window) => {
-                          reopenWindow(item.id, window);
-                        }}
-                        onShowDetails={() => {
-                          openDetails(item.id);
-                        }}
                         notSaved={notSaved.get(item.id)}
-                        onDiscardChanges={() => {
-                          discardChanges(item.id);
-                        }}
-                        onRetrySave={() => {
-                          void retrySave();
-                        }}
                         now={now}
+                        picked={picked.includes(item.id)}
                         selected={selectedId === item.id}
                       />
                     ))}

@@ -31,7 +31,15 @@ import type {
 import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
-import { useContext, useEffect, useRef, useState } from "react";
+import {
+  isValidElement,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -61,6 +69,8 @@ import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
 import { moreText } from "./open-row";
+import { bindRow } from "./row-actions";
+import type { RowActions } from "./row-actions";
 import {
   budgetOf,
   contextMenuAt,
@@ -354,7 +364,11 @@ const BadgeLine = ({
   const words = children !== null && children !== undefined;
   const ref = useRef<HTMLDivElement>(null);
 
-  // A new observer reports once on every render, when the badges may have changed, and again on each resize.
+  // Which badges show: the observer starts again when they change, as useMeasure does on its words, and reports on each resize.
+  const shown = badges
+    .map((badge) => (isValidElement(badge) ? String(badge.key) : ""))
+    .join(" ");
+
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
       if (entry?.target instanceof HTMLElement) {
@@ -362,14 +376,14 @@ const BadgeLine = ({
       }
     });
 
-    if (ref.current !== null) {
+    if (ref.current !== null && shown !== "") {
       observer.observe(ref.current);
     }
 
     return () => {
       observer.disconnect();
     };
-  });
+  }, [shown]);
 
   if (badges.length === 0) {
     return words ? <div className="flex min-w-0">{children}</div> : null;
@@ -440,7 +454,8 @@ export interface RowHandlers {
   readonly attachments: AttachmentHandlers;
 }
 
-export interface ItemRowProps extends RowHandlers {
+/** What a row is drawn from: its data, and its handlers bound to it (row-actions.ts). */
+interface RowViewProps extends RowHandlers {
   readonly item: ShelfItem;
   /** One of the first run's example items (the tutorial's), tagged so. */
   readonly example?: boolean;
@@ -1167,7 +1182,7 @@ const placeBadges = (
   };
 };
 
-export const ItemRow = (props: ItemRowProps) => {
+const RowView = (props: RowViewProps) => {
   const { copied, editing, item, selected } = props;
   const parts = rowParts(item, selected);
   const badges = badgeNodes(parts.badges, props.now);
@@ -1330,3 +1345,29 @@ export const ItemRow = (props: ItemRowProps) => {
     </OpenRow>
   );
 };
+
+/** A row's data, and the list's actions; the row re-renders only when its data changes. */
+export type ItemRowProps = Omit<
+  RowViewProps,
+  keyof ReturnType<typeof bindRow>
+> & {
+  readonly actions: RowActions;
+};
+
+/**
+ * One item in the list. Memoised on its data: a change to another row, the
+ * selection elsewhere or the search text leaves it alone. Its handlers are
+ * bound once per item and call the list's latest code when they run.
+ */
+const BoundRow = ({ actions, ...props }: ItemRowProps) => {
+  const { item, selected } = props;
+
+  const handlers = useMemo(
+    () => bindRow(actions, item, selected),
+    [actions, item, selected]
+  );
+
+  return <RowView {...props} {...handlers} />;
+};
+
+export const ItemRow = memo(BoundRow);
