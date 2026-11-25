@@ -871,8 +871,11 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     const { attached, message } = result;
 
+    // Nothing landed: say why, unless nothing was meant to (the shelf's own files dropped back).
     if (attached.length === 0) {
-      toast.error(message, { duration: NOTICE_MS });
+      if (message !== null) {
+        toast.error(message, { duration: NOTICE_MS });
+      }
 
       return;
     }

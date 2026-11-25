@@ -289,6 +289,11 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
      * when it was pressed, while the card still names it and it exists.
      */
     addToItem: async (seq: number, id: ItemId): Promise<ItemId | null> => {
+      // An older card's click: its screenshot is gone, and the card names nothing now.
+      if (current(seq) === null) {
+        return null;
+      }
+
       const named = current(seq)?.attachedTo?.item ?? cardItem;
 
       if (named === null) {
