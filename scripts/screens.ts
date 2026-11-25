@@ -3663,7 +3663,7 @@ const CARD_FAILURE = `Der Datenträger „${LONG_WORD}“ ist voll.`;
 
 /** The card as main shows it once a save failed. */
 const failedCard = (
-  to: "shelf" | "item",
+  to: "shelf" | "item" | null,
   message = CARD_FAILURE,
   target: { readonly id: string; readonly label: string } | null = null
 ) => ({
@@ -6574,14 +6574,42 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           ? null
           : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
       },
+      // The disk refused the screenshot: trying again can work, so the line offers it.
       data: {
-        view: failedCard(
-          "item",
-          "Nothing was attached. An item holds up to 12.",
-          { id: uuid(12), label: CARD_LABEL }
-        ),
+        view: failedCard("item", "The disk is full.", {
+          id: uuid(12),
+          label: CARD_LABEL,
+        }),
       },
       name: "screenshot-card-attach-failed",
+      page: "screenshot",
+    },
+    {
+      // The item filled up: main names it no more and offers no Retry (screenshot-saves.ts), and Add to Shelf is the way left.
+      check: async (page) => {
+        const problem = await failedCardCheck([
+          "Add to Shelf",
+          "Copy",
+          "Save to Downloads",
+          "Dismiss",
+        ])(page);
+
+        if (problem !== null) {
+          return problem;
+        }
+
+        const retries = await page
+          .getByRole("button", { name: /Retry|Add to “/u })
+          .count();
+
+        return retries === 0
+          ? null
+          : "a full item must offer no Retry and no Add to “…”";
+      },
+      data: {
+        view: failedCard(null, "Nothing was attached. An item holds up to 12."),
+      },
+      name: "screenshot-card-attach-full",
       page: "screenshot",
     },
     {

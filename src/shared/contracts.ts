@@ -340,7 +340,7 @@ export type ShotSave =
   | { readonly state: "saving"; readonly to: ShotSaveTo }
   | {
       readonly state: "failed";
-      /** The button that offers Retry; null when none does (the item it went to is gone, or the card names another now). */
+      /** The button that offers Retry; null when none does (the item it went to is gone or full, or the card names another now). */
       readonly to: ShotSaveTo | null;
       readonly message: string;
     };

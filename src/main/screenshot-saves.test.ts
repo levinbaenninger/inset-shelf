@@ -3,11 +3,12 @@ import { setImmediate } from "node:timers/promises";
 import type { ScreenshotView } from "@shared/contracts";
 import {
   AttachmentIdSchema,
+  ATTACHMENTS_MAX,
   emptyShelf,
   ItemIdSchema,
   SectionIdSchema,
 } from "@shared/shelf";
-import type { ItemId } from "@shared/shelf";
+import type { AttachmentId, ItemId } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 
 import { createCardClock } from "./card-clock";
@@ -32,6 +33,22 @@ const shot = (seq: number): Shot => ({
   png: new Uint8Array([137, 80, 78, 71, seq]),
   seq,
   widthPx: 800,
+});
+
+const ITEM_FULL = `Nothing was attached. An item holds up to ${ATTACHMENTS_MAX}.`;
+
+const pictureAttachment = (id: AttachmentId, each: Shot) => ({
+  addedAt: new Date(NOW).toISOString(),
+  id,
+  image: {
+    file: `${id}.png`,
+    heightPx: each.heightPx,
+    pixelsPerDip: 2,
+    widthPx: each.widthPx,
+  },
+  kind: "image" as const,
+  name: "Screenshot",
+  pins: [],
 });
 
 const DISK_FULL = Object.assign(new Error("no space"), { code: "ENOSPC" });
@@ -123,25 +140,16 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
         throw attachmentWrites;
       }
 
+      // A full item takes nothing, as attachResult in attachments.ts says it.
+      if ((controller.item(id)?.attachments.length ?? 0) >= ATTACHMENTS_MAX) {
+        return { attached: [], message: ITEM_FULL };
+      }
+
       const attachment = AttachmentIdSchema.parse(uuid((next += 1)));
 
       attached.push(id);
       controller.apply({
-        attachments: [
-          {
-            addedAt: new Date(clock).toISOString(),
-            id: attachment,
-            image: {
-              file: `${attachment}.png`,
-              heightPx: each.heightPx,
-              pixelsPerDip: 2,
-              widthPx: each.widthPx,
-            },
-            kind: "image",
-            name: "Screenshot",
-            pins: [],
-          },
-        ],
+        attachments: [pictureAttachment(attachment, each)],
         id,
         type: "attach",
       });
@@ -184,6 +192,19 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
 
   return {
     controller,
+    /** Fills the item to its 12 attachments, as drops in the shelf would. */
+    fill: (id: ItemId) => {
+      controller.apply({
+        attachments: Array.from({ length: ATTACHMENTS_MAX }, () =>
+          pictureAttachment(
+            AttachmentIdSchema.parse(uuid((next += 1))),
+            shot(0)
+          )
+        ),
+        id,
+        type: "attach",
+      });
+    },
     failAttachments: (error: Error | null) => {
       attachmentWrites = error;
     },
@@ -459,6 +480,54 @@ describe("Add to “…” on the screenshot card", () => {
       to: null,
     });
     expect(card.attached).toStrictEqual([]);
+  });
+
+  it("offers no Retry, and names the item no more, when the item filled up before the click arrived", async () => {
+    const card = setup();
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    card.fill(card.note);
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect(card.view()).toMatchObject({
+      save: { message: ITEM_FULL, state: "failed", to: null },
+      target: null,
+    });
+    expect(card.attachmentsOn(card.note)).toBe(ATTACHMENTS_MAX);
+  });
+
+  it("offers no Retry when Discard changes took the screenshot off and the item filled up meanwhile", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    card.failWrites({ message: "The disk is full.", ok: false });
+    await card.saves.addToItem(1, card.note);
+    card.controller.discard(card.note);
+    card.failWrites({ ok: true });
+    card.fill(card.note);
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect(card.view()).toMatchObject({
+      save: { message: ITEM_FULL, state: "failed", to: null },
+      target: null,
+    });
+  });
+
+  it("still offers Retry adding to the item when the disk refused the screenshot", async () => {
+    const card = setup();
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    card.failAttachments(DISK_FULL);
+    await card.saves.addToItem(1, card.note);
+
+    expect(card.view()).toMatchObject({
+      save: { state: "failed", to: "item" },
+      target: { id: card.note },
+    });
   });
 
   it("offers no Retry once the card names another item, so a press never goes somewhere unseen", async () => {

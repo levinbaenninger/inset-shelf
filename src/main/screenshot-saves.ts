@@ -81,9 +81,12 @@ type Placed =
   | {
       readonly ok: false;
       readonly message: string;
-      /** False when trying again can't help: the item is gone. */
+      /** False when trying again can't help: the item is gone, or holds all it can. */
       readonly retry?: false;
     };
+
+const isFull = (item: ShelfItem | undefined): boolean =>
+  item !== undefined && item.attachments.length >= ATTACHMENTS_MAX;
 
 const twoDigits = (value: number): string => String(value).padStart(2, "0");
 
@@ -167,8 +170,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     const item = id === null ? undefined : deps.item(id);
 
     cardItem =
-      item === undefined ||
-      (attached === null && item.attachments.length >= ATTACHMENTS_MAX)
+      item === undefined || (attached === null && isFull(item))
         ? null
         : item.id;
 
@@ -330,14 +332,20 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
             ) === true;
 
         if (!kept) {
+          // The item no longer holds it, so the card names the item only while it could take it.
+          holding.attachedTo = null;
+
           const result = await deps.attach(holding.shot, id);
           const [attachment] = result.attached;
 
           if (attachment === undefined) {
-            return {
-              message: result.message ?? "The screenshot couldn’t be attached.",
-              ok: false,
-            };
+            const message =
+              result.message ?? "The screenshot couldn’t be attached.";
+
+            // A full item takes nothing however often it is tried: no Retry stands, and Add to Shelf is the way left.
+            return isFull(deps.item(id))
+              ? { message, ok: false, retry: false }
+              : { message, ok: false };
           }
 
           holding.attachedTo = { attachment, item: id };
