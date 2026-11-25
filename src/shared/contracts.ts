@@ -323,9 +323,24 @@ export interface ScreenshotView {
   readonly imageUrl: string;
   readonly widthPx: number;
   readonly heightPx: number;
-  /** The item Add to “…” attaches it to, named by its first words; null when none is selected, or it holds all it can. */
+  /** The item Add to “…” attaches it to, named by its first words; null when there is none the user can know, or it holds all it can. */
   readonly target: { readonly label: string } | null;
+  /** Where its save stands. */
+  readonly save: ShotSave;
 }
+
+/** Which add saves the screenshot: Add to Shelf, or Add to “…”. */
+export type ShotSaveTo = "shelf" | "item";
+
+/** A screenshot card's save: none yet, writing (its button reads Saving…), or failed (the card says why and offers Retry). */
+export type ShotSave =
+  | { readonly state: "idle" }
+  | { readonly state: "saving"; readonly to: ShotSaveTo }
+  | {
+      readonly state: "failed";
+      readonly to: ShotSaveTo;
+      readonly message: string;
+    };
 
 const Seq = z.number().int().min(0);
 
@@ -363,8 +378,6 @@ export const toastContract = defineContract({
 export const screenshotContract = defineContract({
   events: {
     view: event<ScreenshotView | null>(),
-    /** Add to Shelf didn't reach the disk: the card stays, says why, and offers Retry. */
-    addFailed: event<{ readonly seq: number; readonly message: string }>(),
     ...tutorialEvents,
   },
   global: "insetScreenshot",

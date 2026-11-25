@@ -121,7 +121,7 @@ import {
   nativeDialog,
   withinWait,
 } from "./quit-hold";
-import { causeText, FsErrorSchema, reportSaveError } from "./save-error";
+import { causeText, FsErrorSchema } from "./save-error";
 import { createShotSaves } from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
 import { createScreenshotWatcher } from "./screenshot-watcher";
@@ -893,37 +893,33 @@ const start = async (): Promise<void> => {
   /** The item selected or open in details in the shelf, or null; the page reports it. */
   let shelfSelection: ItemId | null = null;
 
-  // Set once the screenshot card's IPC server exists.
-  let reportAddFailed: (seq: number, message: string) => void = ignore;
-
   const shotSaves = createShotSaves<CardShot>({
     addItem: addShotItem,
     attach: attachShotTo,
     card: {
-      failed: (seq, message) => {
-        reportAddFailed(seq, message);
-      },
       hide: screenshotCard.hide,
       hold: screenshotCard.hold,
       isVisible: screenshotCard.isVisible,
-      retarget: screenshotCard.retarget,
       show: (view) => {
         screenshotCard.show(view, shelf.bounds());
       },
+      update: screenshotCard.update,
       view: screenshotCard.view,
     },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
+    items: () => controller.snapshot().doc.items,
     notify: (message, tone) => {
       notify(message, tone);
     },
+    now: () => Date.now(),
     persisted: async () =>
       await withinWait(
         controller.persisted(controller.snapshot().rev),
         setTimer
       ),
-    reportSaveError,
     selection: () => shelfSelection,
+    shelfVisible: () => shelf.isVisible(),
   });
 
   let shotSeq = 0;
@@ -2420,10 +2416,6 @@ const start = async (): Promise<void> => {
     }
   );
 
-  reportAddFailed = (seq, message) => {
-    screenshotServer.emit("addFailed", { message, seq });
-  };
-
   screenshotCard.onView((view) => {
     screenshotServer.emit("view", view);
   });
@@ -2755,10 +2747,13 @@ const start = async (): Promise<void> => {
     toast.send({ type: "shelfShown" });
     e2eLog("shelfShown", { bounds });
     refreshTray();
+    shotSaves.retarget();
   });
+  // A hidden shelf's selection is no target the user can know.
   shelf.onHidden(() => {
     e2eLog("shelfHidden");
     refreshTray();
+    shotSaves.retarget();
   });
 
   const shortcutsRegistered = globalShortcut.register(

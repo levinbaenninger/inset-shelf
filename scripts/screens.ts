@@ -3630,9 +3630,141 @@ const editedInPlace = async (
 const SCREENSHOT_VIEW = {
   heightPx: LOGIN.heightPx,
   imageUrl: `/.fixtures/${LOGIN.file}`,
+  save: { state: "idle" },
   seq: 1,
   target: null,
   widthPx: LOGIN.widthPx,
+};
+
+const CARD_FAILURE = `Die Bildschirmaufnahme konnte nicht gespeichert werden: ${LONG_WORD}. Der Datenträger ist voll.`;
+
+/** The card as main shows it once a save failed. */
+const failedCard = (
+  to: "shelf" | "item",
+  message = CARD_FAILURE,
+  target: { readonly label: string } | null = null
+) => ({
+  ...SCREENSHOT_VIEW,
+  save: { message, state: "failed", to },
+  target,
+});
+
+const CardButtonSchema = z.object({
+  covered: z.boolean(),
+  found: z.boolean(),
+  opacity: z.number(),
+});
+
+/** Whether the card's button with this name shows (not faded out) and nothing covers its middle. */
+const cardButtonUsable = async (
+  page: Page,
+  name: string
+): Promise<string | null> => {
+  const state = CardButtonSchema.parse(
+    await page.evaluate((label) => {
+      const button = [...document.querySelectorAll("button")].find(
+        (each) =>
+          (each.getAttribute("aria-label") ?? each.textContent?.trim()) ===
+          label
+      );
+
+      if (button === undefined) {
+        return { covered: false, found: false, opacity: 0 };
+      }
+
+      let opacity = 1;
+
+      for (
+        let element: Element | null = button;
+        element !== null;
+        element = element.parentElement
+      ) {
+        opacity = Math.min(opacity, Number(getComputedStyle(element).opacity));
+      }
+
+      const box = button.getBoundingClientRect();
+
+      const top = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2
+      );
+
+      return {
+        covered: top === null || !button.contains(top),
+        found: true,
+        opacity,
+      };
+    }, name)
+  );
+
+  if (!state.found) {
+    return `no “${name}” on the card`;
+  }
+
+  if (state.opacity < 0.9) {
+    return `“${name}” is faded out (opacity ${state.opacity})`;
+  }
+
+  return state.covered ? `something covers “${name}”` : null;
+};
+
+/** The failed card: its message in two lines at most under the picture, every action in view without hover. */
+const failedCardCheck = (names: readonly string[]) =>
+  async function check(page: Page): Promise<string | null> {
+    const lines = z.object({ height: z.number(), line: z.number() }).parse(
+      await page.evaluate(() => {
+        const alert = document.querySelector("[role=alert]");
+
+        return alert === null
+          ? { height: 0, line: 1 }
+          : {
+              height: alert.getBoundingClientRect().height,
+              line: Number(
+                getComputedStyle(alert).lineHeight.replace("px", "")
+              ),
+            };
+      })
+    );
+
+    if (lines.height === 0) {
+      return "the failed card doesn't say why";
+    }
+
+    if (lines.height > lines.line * 2 + 1) {
+      return `the failure takes ${Math.round(lines.height / lines.line)} lines, not 2`;
+    }
+
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- one button after another.
+      const problem = await cardButtonUsable(page, name);
+
+      if (problem !== null) {
+        return problem;
+      }
+    }
+
+    return (await page.getByRole("img", { name: "New screenshot" }).isVisible())
+      ? null
+      : "the failed card lost its picture";
+  };
+
+/** Tabs until the keyboard is on the failure message, or says it never got there. */
+const tabToFailure = async (page: Page): Promise<boolean> => {
+  for (let key = 0; key < 12; key += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one key after another.
+    await page.keyboard.press("Tab");
+
+    // oxlint-disable-next-line no-await-in-loop -- read after each key.
+    const on = await page.evaluate(
+      "document.activeElement?.getAttribute('role') ?? ''"
+    );
+
+    if (on === "alert") {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 /** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
@@ -4261,9 +4393,69 @@ const STRESS_SCENES: readonly Scene[] = (
         await page.mouse.move(140, 90);
         await page.waitForTimeout(300);
       },
+      check: async (page) => {
+        const add = await boxOf(
+          page.getByRole("button", { exact: true, name: "Add to Shelf" })
+        );
+
+        const copy = await boxOf(
+          page.getByRole("button", { exact: true, name: "Copy" })
+        );
+
+        if (tall(add) !== tall(copy) || Math.abs(add.top - copy.top) > 0.5) {
+          return "Copy isn't beside Add to Shelf at the same size";
+        }
+
+        if (copy.left < add.right) {
+          return "Add to Shelf doesn't come first";
+        }
+
+        const pair = (add.left + copy.right) / 2;
+
+        return Math.abs(pair - 140) > 1
+          ? `Add to Shelf and Copy sit off the card's middle (${pair} ≠ 140)`
+          : null;
+      },
       data: { view: SCREENSHOT_VIEW },
       keepPointer: true,
       name: "stress-screenshot-hover",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await page.getByRole("button", { name: "Saving…" }).click({ force: true });
+      },
+      check: async (page) => {
+        const saving = page.getByRole("button", { name: "Saving…" });
+
+        if ((await saving.getAttribute("aria-disabled")) !== "true") {
+          return "Saving… can be pressed again";
+        }
+
+        const sent = await calls(page);
+
+        if (sent.some((each) => each.call === "addToShelf")) {
+          return "a click on Saving… saved again";
+        }
+
+        const { label } = await focusedOpacity(page);
+
+        if (label !== "Saving…") {
+          return `the keyboard left Saving… for “${label}”`;
+        }
+
+        return (await page
+          .getByRole("img", { name: "New screenshot" })
+          .isVisible())
+          ? null
+          : "the picture went while it saves";
+      },
+      data: {
+        view: { ...SCREENSHOT_VIEW, save: { state: "saving", to: "shelf" } },
+      },
+      keepPointer: true,
+      name: "stress-screenshot-saving",
       page: "screenshot",
     },
     {
@@ -4298,23 +4490,61 @@ const STRESS_SCENES: readonly Scene[] = (
       page: "screenshot",
     },
     {
-      act: async (page) => {
-        await page.getByRole("button", { name: "Add to Shelf" }).click();
-        await page.evaluate(
-          `globalThis.__emit("addFailed", ${JSON.stringify({
-            message: `Die Bildschirmaufnahme konnte nicht gespeichert werden: ${LONG_WORD}. Der Datenträger ist voll.`,
-            seq: SCREENSHOT_VIEW.seq,
-          })})`
-        );
-        await page.getByRole("button", { name: "Retry" }).waitFor();
-      },
-      check: async (page) =>
-        (await page.getByRole("alert").isVisible()) &&
-        (await page.getByRole("img", { name: "New screenshot" }).isVisible())
+      check: async (page) => {
+        const problem = await failedCardCheck([
+          "Retry",
+          "Copy",
+          "Save to Downloads",
+          "Dismiss",
+          "Annotate",
+          "Keep on Screen",
+        ])(page);
+
+        if (problem !== null) {
+          return problem;
+        }
+
+        await page.getByRole("button", { name: "Retry" }).click();
+
+        const sent = await calls(page);
+
+        return sent.some((each) => each.call === "addToShelf" && each.arg === 1)
           ? null
-          : "a failed Add to Shelf didn't keep the picture and say why",
-      data: { view: SCREENSHOT_VIEW },
+          : `Retry sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: failedCard("shelf") },
       name: "stress-screenshot-add-failed",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        if (!(await tabToFailure(page))) {
+          throw new Error("Tab never reached the failure message");
+        }
+      },
+      check: async (page) => {
+        const shown = z
+          .object({ client: z.number(), scroll: z.number(), style: z.string() })
+          .parse(
+            await page.evaluate(() => {
+              const alert = document.querySelector("[role=alert]");
+
+              return {
+                client: alert?.clientHeight ?? 0,
+                scroll: alert?.scrollHeight ?? 0,
+                style: alert === null ? "" : getComputedStyle(alert).overflowY,
+              };
+            })
+          );
+
+        // The keyboard reads it all: whole in view, or in a box it scrolls.
+        return shown.scroll <= shown.client + 1 || shown.style === "auto"
+          ? null
+          : "the keyboard on the failure message can't reach its end";
+      },
+      data: { view: failedCard("shelf") },
+      keepPointer: true,
+      name: "stress-screenshot-add-failed-focus",
       page: "screenshot",
     },
   ] satisfies readonly StressScene[]
@@ -5451,28 +5681,42 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       page: "screenshot",
     },
     {
-      act: async (page) => {
-        await page.getByRole("button", { name: /^Add to “/u }).click();
-        await page.evaluate(
-          `globalThis.__emit("addFailed", ${JSON.stringify({
-            message: "Nothing was attached. An item holds up to 12.",
-            seq: SCREENSHOT_VIEW.seq,
-          })})`
-        );
-        await page.getByRole("button", { name: "Retry" }).waitFor();
-      },
-      check: async (page) =>
-        (await page
-          .getByRole("button", { name: "Add to Shelf" })
-          .isVisible()) && (await page.getByRole("alert").isVisible())
+      check: async (page) => {
+        const problem = await failedCardCheck([
+          "Retry",
+          "Add to Shelf",
+          "Copy",
+          "Save to Downloads",
+          "Dismiss",
+        ])(page);
+
+        if (problem !== null) {
+          return problem;
+        }
+
+        await page.getByRole("button", { name: "Retry" }).click();
+
+        const sent = await calls(page);
+
+        return sent.some((each) => each.call === "addToItem" && each.arg === 1)
           ? null
-          : "a failed Add to “…” must say why, offer Retry in its place, and keep Add to Shelf",
-      data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
+          : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
+      },
+      data: {
+        view: failedCard(
+          "item",
+          "Nothing was attached. An item holds up to 12.",
+          {
+            label: CARD_LABEL,
+          }
+        ),
+      },
       name: "screenshot-card-attach-failed",
       page: "screenshot",
     },
     {
       act: async (page) => {
+        await page.keyboard.press("Tab");
         await page.keyboard.press("Tab");
         await page.keyboard.press("Tab");
       },
@@ -5481,9 +5725,10 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           "document.activeElement?.textContent ?? ''"
         );
 
+        // Add to Shelf, Copy beside it, then Add to “…”.
         return String(on).startsWith("Add to “")
           ? null
-          : `the second Tab stop is “${String(on)}”, not Add to “…”`;
+          : `the third Tab stop is “${String(on)}”, not Add to “…”`;
       },
       data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
       keepPointer: true,

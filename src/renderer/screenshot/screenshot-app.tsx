@@ -5,9 +5,10 @@ import {
   PinIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ScreenshotView } from "@shared/contracts";
+import type { ScreenshotView, ShotSaveTo } from "@shared/contracts";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +18,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { screenshotBridge } from "@/shared/bridge";
-import { Truncated } from "@/shared/clamp";
+import { tooltipText, Truncated } from "@/shared/clamp";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
@@ -71,152 +72,175 @@ const CornerButton = ({
   </div>
 );
 
-/** Why Add to Shelf didn't reach the disk, for this card; null until it fails. */
-const useAddFailure = (seq: number) => {
-  const [failure, setFailure] = useState<string | null>(null);
+/** Shows with the card's other actions: while the pointer or the keyboard is on the card, and while a failed save keeps it open. */
+const REVEAL =
+  "opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-data-[failed]:opacity-100";
 
-  useEffect(
-    () =>
-      api.on("addFailed", (failed) => {
-        if (failed.seq === seq) {
-          setFailure(failed.message);
-        }
-      }),
-    [seq]
-  );
+/** A save button's label: Saving… while it writes, Retry once it failed. */
+const saveLabel = (
+  save: ScreenshotView["save"],
+  to: ShotSaveTo,
+  label: ReactNode
+): ReactNode => {
+  if (save.state === "idle" || save.to !== to) {
+    return label;
+  }
 
-  return [failure, setFailure] as const;
+  return save.state === "saving" ? "Saving…" : "Retry";
 };
+
+/** Why the save failed, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
+const FailureBar = ({ message }: { readonly message: string }) => (
+  <div className="shrink-0 bg-black/80 px-3 py-1.5 text-white">
+    <p
+      className="-mx-1 line-clamp-2 max-h-16 rounded-sm px-1 text-xs leading-4 wrap-break-word outline-none focus-visible:line-clamp-none focus-visible:overflow-y-auto focus-visible:ring-2 focus-visible:ring-white"
+      role="alert"
+      // The keyboard reaches the whole message: on focus it unclamps and scrolls.
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a clamped message the keyboard must be able to read whole.
+      tabIndex={0}
+      title={tooltipText(message)}
+    >
+      {message}
+    </p>
+  </div>
+);
 
 /**
  * A screenshot card beside the shelf. Add to Shelf shows at once and is the
- * first key stop, with Add to “…” under it while an item is selected; on hover or keyboard focus the picture dims behind the
- * other actions. Dragging it into another app drops it as a file.
+ * first key stop, with Add to “…” over it when an item can be named; on
+ * hover or keyboard focus the picture dims, Copy shows beside Add to Shelf,
+ * and the corner actions show. While a save runs its button reads Saving…;
+ * a failed save keeps every action in view, says why under the picture, and
+ * offers Retry. Dragging the picture into another app drops it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
-  const { seq } = view;
+  const { save, seq } = view;
   const [held, setHeld] = useState(false);
-  const [failure, setFailure] = useAddFailure(seq);
-  // Which add was pressed last: after a failed save, that one reads Retry.
-  const [adding, setAdding] = useState<"shelf" | "item">("shelf");
-
-  const retry = (which: "shelf" | "item"): boolean =>
-    failure !== null && adding === which;
+  const saving = save.state === "saving";
 
   return (
     <main
-      className="group bg-muted ring-foreground/10 relative h-svh overflow-hidden rounded-2xl ring-1 ring-inset"
+      className="group bg-muted ring-foreground/10 relative flex h-svh flex-col overflow-hidden rounded-2xl ring-1 ring-inset"
+      data-failed={save.state === "failed" ? "" : undefined}
       {...coach("screenshot-card")}
     >
-      {/* First in the page, so Tab lands on it first; drawn above the picture and its dimming. */}
-      <div className="absolute inset-x-12 bottom-2.5 z-10 flex flex-col items-center gap-1.5">
-        {failure === null ? null : (
-          <p
-            className="max-w-full rounded-md bg-black/70 px-2 py-1 text-center text-xs leading-snug wrap-break-word text-white"
-            role="alert"
-          >
-            {failure}
-          </p>
-        )}
-        <Button
-          onClick={() => {
-            setFailure(null);
-            setAdding("shelf");
-            api.addToShelf(seq);
-          }}
-          size="pill-xs"
-          variant="overlay"
-        >
-          {retry("shelf") ? "Retry" : "Add to Shelf"}
-        </Button>
-        {view.target === null ? null : (
-          <Button
-            className="max-w-full"
-            onClick={() => {
-              setFailure(null);
-              setAdding("item");
-              api.addToItem(seq);
-            }}
-            size="pill-xs"
-            variant="overlay"
-          >
-            {retry("item") ? (
-              "Retry"
-            ) : (
-              <Truncated
-                className="min-w-0"
-                text={`Add to “${view.target.label}”`}
-              />
-            )}
-          </Button>
-        )}
-      </div>
-      <button
-        aria-label="Drag the screenshot into another app"
-        className="block h-full w-full cursor-grab active:cursor-grabbing"
-        draggable
-        onDragStart={(event) => {
-          event.preventDefault();
-          api.startDrag(seq);
-        }}
-        type="button"
-      >
-        <img
-          alt="New screenshot"
-          className="h-full w-full object-cover transition duration-200 group-hover:blur-xs group-has-[:focus-visible]:blur-xs"
-          draggable={false}
-          src={view.imageUrl}
-        />
-      </button>
-      {/* The other actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
-      <div className="pointer-events-none absolute inset-0 bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100" />
-      <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 [&_button]:pointer-events-auto">
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <Button
-            onClick={() => {
-              api.copy(seq);
-            }}
-            size="pill"
-            variant="overlay"
-          >
-            Copy
-          </Button>
+      <div className="relative min-h-0 flex-1">
+        {/* First in the page, so Tab lands on Add to Shelf first; drawn above the picture and its dimming. */}
+        <div className="absolute inset-x-12 bottom-3.5 z-10 flex flex-col-reverse items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <Button
+              aria-disabled={saving ? true : undefined}
+              onClick={() => {
+                if (!saving) {
+                  api.addToShelf(seq);
+                }
+              }}
+              size="pill-xs"
+              variant="overlay"
+            >
+              {saveLabel(save, "shelf", "Add to Shelf")}
+            </Button>
+            <Button
+              className="hidden group-hover:inline-flex group-has-[:focus-visible]:inline-flex group-data-[failed]:inline-flex"
+              onClick={() => {
+                api.copy(seq);
+              }}
+              size="pill-xs"
+              variant="overlay"
+            >
+              Copy
+            </Button>
+          </div>
+          {view.target === null ? null : (
+            <Button
+              aria-disabled={saving ? true : undefined}
+              className="max-w-full"
+              onClick={() => {
+                if (!saving) {
+                  api.addToItem(seq);
+                }
+              }}
+              size="pill-xs"
+              variant="overlay"
+            >
+              {saveLabel(
+                save,
+                "item",
+                <Truncated
+                  className="min-w-0"
+                  text={`Add to “${view.target.label}”`}
+                />
+              )}
+            </Button>
+          )}
         </div>
-        <CornerButton
-          className="top-2.5 left-2.5"
-          icon={Cancel01Icon}
-          label="Dismiss"
-          onClick={() => {
-            api.dismiss(seq);
+        <button
+          aria-label="Drag the screenshot into another app"
+          className="block h-full w-full cursor-grab active:cursor-grabbing"
+          draggable
+          onDragStart={(event) => {
+            event.preventDefault();
+            api.startDrag(seq);
           }}
+          type="button"
+        >
+          <img
+            alt="New screenshot"
+            className="h-full w-full object-cover transition duration-200 group-hover:blur-xs group-has-[:focus-visible]:blur-xs group-data-[failed]:blur-xs"
+            draggable={false}
+            src={view.imageUrl}
+          />
+        </button>
+        {/* The other actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0 bg-black/35",
+            REVEAL
+          )}
         />
-        <CornerButton
-          className="top-2.5 right-2.5"
-          icon={PinIcon}
-          label={held ? "Kept on Screen" : "Keep on Screen"}
-          onClick={() => {
-            setHeld(true);
-            api.hold(seq);
-          }}
-          pressed={held}
-        />
-        <CornerButton
-          className="bottom-2.5 left-2.5"
-          icon={PaintBrush01Icon}
-          label="Annotate"
-          onClick={() => {
-            api.annotate(seq);
-          }}
-        />
-        <CornerButton
-          className="right-2.5 bottom-2.5"
-          icon={Download01Icon}
-          label="Save to Downloads"
-          onClick={() => {
-            api.saveToDownloads(seq);
-          }}
-        />
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0 [&_button]:pointer-events-auto",
+            REVEAL
+          )}
+        >
+          <CornerButton
+            className="top-2.5 left-2.5"
+            icon={Cancel01Icon}
+            label="Dismiss"
+            onClick={() => {
+              api.dismiss(seq);
+            }}
+          />
+          <CornerButton
+            className="top-2.5 right-2.5"
+            icon={PinIcon}
+            label={held ? "Kept on Screen" : "Keep on Screen"}
+            onClick={() => {
+              setHeld(true);
+              api.hold(seq);
+            }}
+            pressed={held}
+          />
+          <CornerButton
+            className="bottom-2.5 left-2.5"
+            icon={PaintBrush01Icon}
+            label="Annotate"
+            onClick={() => {
+              api.annotate(seq);
+            }}
+          />
+          <CornerButton
+            className="right-2.5 bottom-2.5"
+            icon={Download01Icon}
+            label="Save to Downloads"
+            onClick={() => {
+              api.saveToDownloads(seq);
+            }}
+          />
+        </div>
       </div>
+      {save.state === "failed" ? <FailureBar message={save.message} /> : null}
     </main>
   );
 };

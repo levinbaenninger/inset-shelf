@@ -1,11 +1,21 @@
-import type { ActionResult, ScreenshotView } from "@shared/contracts";
+import type {
+  ActionResult,
+  ScreenshotView,
+  ShotSaveTo,
+} from "@shared/contracts";
 import { ATTACHMENTS_MAX, itemText } from "@shared/shelf";
 import type { ItemId, ShelfItem } from "@shared/shelf";
 
+import { reportSaveError } from "./save-error";
 import type { WriteResult } from "./shelf-store";
 
 /** How much of an item's words the screenshot card's Add to “…” names. */
 const CARD_LABEL = 40;
+
+/** With the shelf hidden, Add to “…” names the newest item while it is this new: the user just made it. */
+export const RECENT_ITEM_MS = 2 * 60_000;
+
+export const ITEM_GONE = "This item no longer exists.";
 
 /** A screenshot the card shows, held in memory: the file may be moved or deleted meanwhile. */
 export interface Shot {
@@ -20,30 +30,30 @@ export interface Shot {
 export interface ShotCard {
   readonly show: (view: ScreenshotView) => void;
   readonly hide: () => void;
+  /** Stops its time until it hides. */
   readonly hold: () => void;
   readonly isVisible: () => boolean;
   readonly view: () => ScreenshotView | null;
-  readonly retarget: (target: ScreenshotView["target"]) => void;
-  /** Add to Shelf didn't reach the disk: the card says why and offers Retry. */
-  readonly failed: (seq: number, message: string) => void;
+  readonly update: (
+    change: Partial<Pick<ScreenshotView, "target" | "save">>
+  ) => void;
 }
 
 export interface ShotSavesDeps<S extends Shot> {
   readonly card: ShotCard;
   readonly item: (id: ItemId) => ShelfItem | undefined;
+  readonly items: () => readonly ShelfItem[];
   /** The item selected or open in details in the shelf, or null. */
   readonly selection: () => ItemId | null;
+  readonly shelfVisible: () => boolean;
+  readonly now: () => number;
   /** Makes the screenshot an item in the section new items go to; null when the shelf refuses it. Throws when its file can't be written. */
   readonly addItem: (shot: S) => Promise<ItemId | null>;
   /** Attaches the screenshot to an item. Throws when its file can't be written. */
   readonly attach: (shot: S, id: ItemId) => Promise<ActionResult>;
   /** Waits until the disk holds every change so far. */
   readonly persisted: () => Promise<WriteResult>;
-  /** Turns a thrown write error into its sentence. */
-  readonly reportSaveError: <Result>(
-    run: () => Promise<Result>
-  ) => Promise<Result | { readonly ok: false; readonly message: string }>;
-  readonly notify: (message: string, tone?: "failed") => void;
+  readonly notify: (message: string, tone: "failed") => void;
   readonly imageUrl: (shot: S) => string;
 }
 
@@ -51,11 +61,15 @@ interface Held<S extends Shot> {
   readonly shot: S;
   /** The shelf item Add to Shelf made of it, so Retry after a failed save doesn't add it twice. */
   item: ItemId | null;
-  /** A save is under way: a second click waits for it. */
-  adding: boolean;
   /** The item Add to “…” attached it to, so Retry after a failed save doesn't attach it twice. */
   attachedTo: ItemId | null;
+  /** A save is under way: a second click waits for it. */
+  saving: boolean;
 }
+
+type Placed =
+  | { readonly ok: true; readonly id: ItemId }
+  | { readonly ok: false; readonly message: string };
 
 const excerpt = (text: string): string => {
   const line = text.replaceAll(/\s+/gu, " ").trim();
@@ -65,8 +79,10 @@ const excerpt = (text: string): string => {
 
 /**
  * The screenshot card's save path: Add to Shelf, Add to “…” and their Retry.
- * The card goes once the disk holds the screenshot; when the save fails it
- * stays, says why, and offers Retry.
+ * From the moment a save starts the card's time stops and its button reads
+ * Saving…; the card goes once the disk holds the screenshot. When the save
+ * fails the card stays, says why, and offers Retry. Everything is tied to
+ * the card's screenshot: an older save never marks a newer card.
  */
 export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   const { card } = deps;
@@ -74,11 +90,37 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   // The item the card last named: Add to “…” attaches to it, whatever is selected by the time it is pressed.
   let cardItem: ItemId | null = null;
 
-  /** What the card's Add to “…” names: the selected item while it has room; else nothing, and the card shows no such button. */
+  /** The newest item, while the user can still know it is the one just made. */
+  const recentItem = (): ItemId | null => {
+    let newest: ShelfItem | null = null;
+
+    for (const each of deps.items()) {
+      if (newest === null || each.createdAt > newest.createdAt) {
+        newest = each;
+      }
+    }
+
+    return newest !== null &&
+      deps.now() - Date.parse(newest.createdAt) <= RECENT_ITEM_MS
+      ? newest.id
+      : null;
+  };
+
+  /**
+   * What Add to “…” names: an item the user can know. That is the item open
+   * on the visible shelf, else the item made in the last two minutes; never a
+   * selection on a hidden shelf, which may be hours old.
+   */
+  const candidate = (): ItemId | null => {
+    const selected = deps.shelfVisible() ? deps.selection() : null;
+
+    return selected ?? recentItem();
+  };
+
   const target = (): ScreenshotView["target"] => {
     // Once attached, the card keeps naming that item, so Retry after a failed save saves it there and never attaches twice.
     const attached = held?.attachedTo ?? null;
-    const id = attached ?? deps.selection();
+    const id = attached ?? candidate();
     const item = id === null ? undefined : deps.item(id);
 
     cardItem =
@@ -103,7 +145,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     const next = target();
 
     if (next?.label !== view.target?.label) {
-      card.retarget(next);
+      card.update({ target: next });
     }
   };
 
@@ -113,24 +155,23 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
   const save = async (
     seq: number,
-    place: (
-      now: Held<S>
-    ) => Promise<
-      | { readonly ok: true; readonly id: ItemId }
-      | { readonly ok: false; readonly message: string }
-    >
+    to: ShotSaveTo,
+    place: (now: Held<S>) => Promise<Placed>
   ): Promise<ItemId | null> => {
     const now = current(seq);
 
-    if (now === null || now.adding) {
+    if (now === null || now.saving) {
       return null;
     }
 
-    now.adding = true;
+    now.saving = true;
+    // The card stays while its screenshot is written, however slow the disk.
+    card.hold();
+    card.update({ save: { state: "saving", to } });
 
     let placed: ItemId | null = null;
 
-    const written = await deps.reportSaveError(async () => {
+    const written = await reportSaveError(async () => {
       const result = await place(now);
 
       if (!result.ok) {
@@ -142,13 +183,16 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return await deps.persisted();
     });
 
-    now.adding = false;
+    now.saving = false;
+
+    // Only the card that started this save says how it went; a newer card, or none, leaves it to a notice.
+    const mine = held === now && card.isVisible();
 
     if (!written.ok) {
-      // A card its time put away meanwhile can't say it: the notice does.
-      if (card.isVisible()) {
-        card.hold();
-        card.failed(seq, written.message);
+      if (mine) {
+        card.update({
+          save: { message: written.message, state: "failed", to },
+        });
       } else {
         deps.notify(written.message, "failed");
       }
@@ -165,9 +209,13 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   };
 
   return {
-    /** Add to Shelf: the screenshot as a new item. */
+    /** Add to Shelf: the screenshot as a new item; Retry makes it again if its row was deleted meanwhile. */
     addToShelf: async (seq: number): Promise<ItemId | null> =>
-      await save(seq, async (now) => {
+      await save(seq, "shelf", async (now) => {
+        if (now.item !== null && deps.item(now.item) === undefined) {
+          now.item = null;
+        }
+
         now.item ??= await deps.addItem(now.shot);
 
         return now.item === null
@@ -175,7 +223,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           : { id: now.item, ok: true };
       }),
 
-    /** Add to “…”: the screenshot attached to the item the card named. */
+    /** Add to “…”: the screenshot attached to the item the card named, while that item exists. */
     addToItem: async (seq: number): Promise<ItemId | null> => {
       const id = current(seq)?.attachedTo ?? cardItem;
 
@@ -183,7 +231,14 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return null;
       }
 
-      return await save(seq, async (now) => {
+      return await save(seq, "item", async (now) => {
+        if (deps.item(id) === undefined) {
+          now.attachedTo = null;
+          retarget();
+
+          return { message: ITEM_GONE, ok: false };
+        }
+
         if (now.attachedTo !== id) {
           const result = await deps.attach(now.shot, id);
 
@@ -214,19 +269,18 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     /** A new screenshot: the card shows it, and the last one is forgotten. */
     show: (shot: S): void => {
-      held = { adding: false, attachedTo: null, item: null, shot };
+      held = { attachedTo: null, item: null, saving: false, shot };
       card.show({
         heightPx: shot.heightPx,
         imageUrl: deps.imageUrl(shot),
+        save: { state: "idle" },
         seq: shot.seq,
         target: target(),
         widthPx: shot.widthPx,
       });
     },
 
-    /** The newest screenshot's bytes, for the token its card's picture names. */
+    /** The newest screenshot, for the token its card's picture names. */
     shot: (): S | null => held?.shot ?? null,
   };
 };
-
-export type ShotSaves<S extends Shot> = ReturnType<typeof createShotSaves<S>>;

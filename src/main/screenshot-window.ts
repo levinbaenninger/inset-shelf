@@ -2,15 +2,13 @@ import type { ScreenshotView } from "@shared/contracts";
 import { BrowserWindow, screen } from "electron";
 import type { Rectangle, WebContents } from "electron";
 
+import { createCardClock } from "./card-clock";
 import { harden, secureWebPreferences } from "./window-security";
 
 const WIDTH = 280;
 const MIN_HEIGHT = 180;
 const MAX_HEIGHT = 260;
 const GAP = 12;
-
-/** Without the pointer on it, the card goes after this long. */
-const VISIBLE_MS = 12_000;
 
 export interface ScreenshotWindow {
   readonly webContents: WebContents;
@@ -19,13 +17,15 @@ export interface ScreenshotWindow {
   readonly show: (view: ScreenshotView, shelf: Rectangle | null) => void;
   readonly hide: () => void;
   readonly isVisible: () => boolean;
-  /** The pointer is on the card: it stays until the pointer leaves. */
+  /** The pointer or the keyboard is on the card: it stays until both leave. */
   readonly hover: (on: boolean) => void;
   /** Keeps the card until it is used or dismissed. */
   readonly hold: () => void;
   readonly view: () => ScreenshotView | null;
-  /** The card names another item for Add to “…”, or none, where it is and for as long as it had. */
-  readonly retarget: (target: ScreenshotView["target"]) => void;
+  /** The card names another item for Add to “…”, or shows how its save stands, where it is and for as long as it had. */
+  readonly update: (
+    change: Partial<Pick<ScreenshotView, "target" | "save">>
+  ) => void;
   readonly onView: (listener: (view: ScreenshotView | null) => void) => void;
   readonly allowClose: () => void;
 }
@@ -77,9 +77,6 @@ export const createScreenshotWindow = (options: {
 }): ScreenshotWindow => {
   let current: ScreenshotView | null = null;
   let closable = false;
-  let hovered = false;
-  let held = false;
-  let timer: NodeJS.Timeout | undefined;
   let listener: (view: ScreenshotView | null) => void = ignore;
 
   const window = new BrowserWindow({
@@ -116,10 +113,7 @@ export const createScreenshotWindow = (options: {
     }
   });
 
-  const hide = (): void => {
-    clearTimeout(timer);
-    hovered = false;
-    held = false;
+  const close = (): void => {
     current = null;
     listener(null);
 
@@ -128,9 +122,20 @@ export const createScreenshotWindow = (options: {
     }
   };
 
-  const hideLater = (): void => {
-    clearTimeout(timer);
-    timer = setTimeout(hide, VISIBLE_MS);
+  const clock = createCardClock({
+    expire: close,
+    setTimer: (run, ms) => {
+      const timer = setTimeout(run, ms);
+
+      return () => {
+        clearTimeout(timer);
+      };
+    },
+  });
+
+  const hide = (): void => {
+    clock.hidden();
+    close();
   };
 
   return {
@@ -138,19 +143,8 @@ export const createScreenshotWindow = (options: {
       closable = true;
     },
     hide,
-    hover: (on) => {
-      hovered = on;
-
-      if (hovered) {
-        clearTimeout(timer);
-      } else if (current !== null && !held) {
-        hideLater();
-      }
-    },
-    hold: () => {
-      held = true;
-      clearTimeout(timer);
-    },
+    hover: clock.hover,
+    hold: clock.hold,
     // Asked by the tutorial while the app quits, too: a destroyed window throws.
     isVisible: () => !window.isDestroyed() && window.isVisible(),
     load: async () => {
@@ -161,18 +155,14 @@ export const createScreenshotWindow = (options: {
     },
     show: (view, shelf) => {
       current = view;
-      held = false;
       listener(view);
       window.setBounds(placement(heightFor(view), shelf));
       window.showInactive();
-
-      if (!hovered) {
-        hideLater();
-      }
+      clock.shown();
     },
-    retarget: (target) => {
+    update: (change) => {
       if (current !== null) {
-        current = { ...current, target };
+        current = { ...current, ...change };
         listener(current);
       }
     },
