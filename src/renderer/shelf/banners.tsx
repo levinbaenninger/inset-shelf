@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Clamp } from "@/shared/clamp";
 
+import { nextNews, openFirst, signature } from "./banner-order";
+import type { Signed } from "./banner-order";
+
 export interface BannersProps {
   readonly status: ShelfStatus;
   /** Opens the onboarding at Accessibility. */
@@ -182,23 +185,11 @@ export const NotSavedBanner = ({
   />
 );
 
-interface BannerEntry {
-  readonly id: "keys" | "save" | "problem";
+interface BannerEntry extends Signed {
   readonly title: string;
-  readonly text: string;
   readonly tone: Tone;
   readonly actions: readonly BannerAction[];
 }
-
-/** Which banner takes the open slot first: anything about unsaved data, then a failed capture, then a missing permission. */
-const SEVERITY: Readonly<Record<BannerEntry["id"], number>> = {
-  keys: 0,
-  problem: 1,
-  save: 2,
-};
-
-/** A banner as last seen: a new text is news, as a new banner is. */
-const signature = (entry: BannerEntry): string => `${entry.id}\n${entry.text}`;
 
 /** What needs the user, oldest kind first: a missing permission, a failed save, a failed capture. */
 const entriesOf = ({
@@ -272,30 +263,6 @@ const MoreBanners = ({
   </button>
 );
 
-/** The banner that takes the open slot: the most severe, and of those the newest news. */
-const openFirst = (
-  entries: readonly BannerEntry[],
-  news: readonly string[]
-): BannerEntry["id"] | null => {
-  let best: BannerEntry | null = null;
-
-  for (const entry of entries) {
-    const newer =
-      best !== null &&
-      news.indexOf(signature(entry)) > news.indexOf(signature(best));
-
-    if (
-      best === null ||
-      SEVERITY[entry.id] > SEVERITY[best.id] ||
-      (SEVERITY[entry.id] === SEVERITY[best.id] && newer)
-    ) {
-      best = entry;
-    }
-  }
-
-  return best?.id ?? null;
-};
-
 /**
  * One banner per thing that needs the user. With more than one, the most
  * severe shows open (unsaved data first), and of equals the newest; the
@@ -306,15 +273,14 @@ export const Banners = (props: BannersProps) => {
   const entries = entriesOf(props);
   const signatures = entries.map(signature);
   // Signatures in the order they first showed: later is newer.
-  const [news, setNews] = useState(signatures);
+  const [news, setNews] = useState<readonly string[]>(signatures);
   const [all, setAll] = useState<"folded" | "open" | "opened-by-key">("folded");
 
+  const latest = nextNews(news, signatures);
+
   // Something new arrived: the open slot is decided again, and the others fold.
-  if (signatures.some((each) => !news.includes(each))) {
-    setNews([
-      ...news.filter((each) => signatures.includes(each)),
-      ...signatures.filter((each) => !news.includes(each)),
-    ]);
+  if (latest !== news) {
+    setNews(latest);
     setAll("folded");
   }
 
