@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { NotSavedItem, ShelfStatus } from "@shared/contracts";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export interface BannersProps {
   readonly status: ShelfStatus;
@@ -33,13 +34,20 @@ const Banner = ({
   <div
     className={
       tone === "error"
-        ? "bg-destructive/10 text-destructive mx-3 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
-        : "bg-foreground/5 mx-3 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
+        ? "bg-destructive/10 text-destructive mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
+        : "bg-foreground/5 mx-3 mb-1.5 flex flex-col gap-1 rounded-lg px-3 py-2 text-xs"
     }
     role={tone === "error" ? "alert" : "status"}
   >
     <p className="text-sm font-medium">{title}</p>
-    <p className={tone === "error" ? undefined : "text-muted-foreground"}>
+    {/* Four lines at most, so a long reason never pushes the list away; the whole of it shows on hover. */}
+    <p
+      className={cn(
+        "line-clamp-4 break-words",
+        tone === "notice" && "text-muted-foreground"
+      )}
+      title={text}
+    >
       {text}
     </p>
     {actions.length === 0 ? null : (
