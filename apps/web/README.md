@@ -4,6 +4,7 @@ The public page for Inset: a Next.js static export with Tailwind and shadcn. It 
 
 ```sh
 vp install     # at the repository root
+cd apps/web
 vp run dev     # http://localhost:3000
 vp run build   # writes the static site to out/
 vp run preview # serves out/ with wrangler, as Cloudflare will
