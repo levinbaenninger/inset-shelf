@@ -134,8 +134,10 @@ const Quoted = ({
     className={cn("flex min-w-0", stacked && "flex-col items-center")}
     title={tooltipText(`${lead} “${name}”`)}
   >
-    <span className="shrink-0">{lead}</span>
-    <span className={cn("flex max-w-full min-w-0", !stacked && "ml-1")}>
+    <span className="shrink-0 whitespace-pre">
+      {stacked ? lead : `${lead} `}
+    </span>
+    <span className="flex max-w-full min-w-0">
       <span className="shrink-0">“</span>
       <span className="min-w-0 truncate">{name}</span>
       <span className="shrink-0">”</span>
