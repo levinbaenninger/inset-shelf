@@ -957,6 +957,62 @@ const checkFailedWrite = async (): Promise<void> => {
   );
 };
 
+// Files pasted onto the shelf (src/main/index.ts noticeAdded): the notice comes once the disk holds them and names what was refused.
+
+/** A file and a folder on the clipboard, as Finder's Copy puts them there. */
+const copyFileAndFolder = () => {
+  const file = path.join(work, "Offer 2026-114.pdf");
+  const folder = path.join(work, "Quotes");
+
+  writeFileSync(file, "%PDF-1.4\n");
+  mkdirSync(folder, { recursive: true });
+  jxa(`ObjC.import("AppKit");
+    const board = $.NSPasteboard.generalPasteboard;
+    board.clearContents;
+    board.writeObjects($([$.NSURL.fileURLWithPath(${JSON.stringify(file)}), $.NSURL.fileURLWithPath(${JSON.stringify(folder)})]));
+    "";`);
+
+  return { folder: path.basename(folder) };
+};
+
+/**
+ * Pastes a file and a folder into the shelf. On a good disk the notice says
+ * "Added 1 of 2." and names the folder; with `failing` (INSET_FAIL_NEXT_WRITE=1)
+ * it says no Added at all, and the banner says the save failed.
+ */
+const checkAddedNotice = async (failing: boolean): Promise<void> => {
+  const { folder } = copyFileAndFolder();
+  const before = items().length;
+
+  enableWebAccessibility();
+  showShelfFromTray();
+  await delay(800);
+  menuItem("Edit", "Paste");
+
+  if (failing) {
+    record(
+      "a paste whose save fails says so",
+      await windowShows("Not saved to disk")
+    );
+    record(
+      "a paste whose save fails never says Added",
+      !windowText().includes("Added 1")
+    );
+
+    return;
+  }
+
+  record(
+    "pasted files are confirmed once saved, naming the folder refused",
+    await windowShows(`Added 1 of 2. ${folder} is a folder, not a file.`)
+  );
+  record(
+    "the file became one item",
+    items().length === before + 1,
+    `${items().length - before} added`
+  );
+};
+
 // The screenshot card's save path (src/main/screenshot-saves.ts), on a disk that refuses the first write.
 
 /** A screenshot of a corner of the screen, to the clipboard: the card shows it. */
@@ -1434,8 +1490,13 @@ const main = async (): Promise<void> => {
   }
 
   const clipboardBefore = pbpaste();
-  // The card's trial starts on a disk that refuses the first write.
-  let app = launch(only === "card" ? { INSET_FAIL_NEXT_WRITE: "1" } : {});
+
+  // The card's trial and the failed paste start on a disk that refuses the first write.
+  let app = launch(
+    only === "card" || only === "added-failed"
+      ? { INSET_FAIL_NEXT_WRITE: "1" }
+      : {}
+  );
 
   try {
     await checkLaunch();
@@ -1449,6 +1510,8 @@ const main = async (): Promise<void> => {
       app = await checkRecall(app);
     } else if (only === "card") {
       await checkScreenshotCard();
+    } else if (only === "added" || only === "added-failed") {
+      await checkAddedNotice(only === "added-failed");
     } else {
       await checkShelfStaysInFront();
       await checkComposer();
