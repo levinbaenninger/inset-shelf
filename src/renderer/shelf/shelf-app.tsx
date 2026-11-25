@@ -1555,15 +1555,25 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     []
   );
 
+  // Set while the shelf is hidden, so the next focus knows it is a fresh opening, not a window closing over it.
+  const wasHidden = useRef(false);
+
   // Coming forward, the shelf is ready for a note, unless something else is
-  // under way: a note or item being edited, or a search with words in it.
+  // under way: a note or item being edited, details, or a search with words
+  // in it. Opened again after it was hidden, an item that kept the keyboard
+  // lets go of it too; a window closing over the open shelf (a drawing, the
+  // picker) leaves it where it was.
   const onWindowFocus = useEffectEvent(() => {
+    const reopened = wasHidden.current;
     const active = document.activeElement;
+
+    wasHidden.current = false;
 
     const idle =
       active === null ||
       active === document.body ||
-      (active === searchRef.current && query === "");
+      (active === searchRef.current && query === "") ||
+      (reopened && !inDetails && openMenu === null && !isTextField(active));
 
     if (idle && editingId === null) {
       composerRef.current?.focus();
@@ -1571,7 +1581,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   });
 
   useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.visibilityState === "hidden") {
+        wasHidden.current = true;
+      }
+    };
+
     window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibility);
 
     if (document.hasFocus()) {
       onWindowFocus();
@@ -1579,6 +1596,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
     return () => {
       window.removeEventListener("focus", onWindowFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
