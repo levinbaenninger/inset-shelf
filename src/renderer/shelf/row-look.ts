@@ -1,3 +1,4 @@
+import { createContext } from "react";
 import type { MouseEvent } from "react";
 
 import type { MenuAnchor } from "./menus";
@@ -9,6 +10,15 @@ export const WORDS = "text-sm leading-snug break-words";
 
 /** How many lines of its words, caption or description an open row shows before Show more. */
 export const OPEN_LINES = 10;
+
+/** An open row takes at most this share of the list's height: past it, its words or caption show fewer lines. */
+export const OPEN_SHARE = 0.6;
+
+/** The fewest lines an open row's words or caption show before Show more, however little room is left. */
+export const MIN_OPEN_LINES = 3;
+
+/** How many lines the open row's words or caption show now: OPEN_LINES, or fewer when the row's other parts take the room (item-row.tsx). */
+export const OpenLines = createContext(OPEN_LINES);
 
 export const DESCRIPTION_LINES = 3;
 

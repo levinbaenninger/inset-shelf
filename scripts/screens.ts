@@ -3767,6 +3767,122 @@ const tabToFailure = async (page: Page): Promise<boolean> => {
   return false;
 };
 
+/** A plain note that runs to about nine lines at 300 wide, between short ones. */
+const NINE_LINES = `${LONG_DESCRIPTION} Danach die Ergebnisse an das gesamte Projektteam schicken und die Zwischenablage wiederherstellen.`;
+
+const NINE_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(720, 40, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Ask the caretaker for the keys",
+      via: "typed",
+    },
+    {
+      ...base(721, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: NINE_LINES,
+      via: "typed",
+    },
+    {
+      ...base(722, 20, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Book the lift for the delivery day",
+      via: "typed",
+    },
+    {
+      ...base(723, 10, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Order boxes for the archive",
+      via: "typed",
+    },
+  ],
+};
+
+const OpenShareSchema = z.object({
+  after: z.boolean(),
+  before: z.boolean(),
+  details: z.boolean(),
+  line: z.number(),
+  list: z.number(),
+  row: z.number(),
+});
+
+/** The open row takes at most about 60% of the list (a line of slack), its Details line in view and the rows around it showing. */
+const openShareCheck = (n: number, neighbours: boolean) =>
+  async function check(page: Page): Promise<string | null> {
+    const share = OpenShareSchema.parse(
+      await page.evaluate((id) => {
+        const list = document.querySelector(".shelf-list");
+        const row = document.querySelector(`[data-item-id="${id}"]`);
+        const words = row?.querySelector("[data-row-words]");
+
+        if (list === null || row === null) {
+          return {
+            after: false,
+            before: false,
+            details: false,
+            line: 0,
+            list: 0,
+            row: 0,
+          };
+        }
+
+        const view = list.getBoundingClientRect();
+        const box = row.getBoundingClientRect();
+
+        const inView = (element: Element | null | undefined): boolean => {
+          const inner = element?.getBoundingClientRect();
+
+          return (
+            inner !== undefined &&
+            inner.bottom > view.top + 4 &&
+            inner.top < view.bottom - 4
+          );
+        };
+
+        const detailsButton = [...row.querySelectorAll("button")].find(
+          (button) => button.textContent?.trim().startsWith("Details")
+        );
+
+        return {
+          after: inView(row.nextElementSibling),
+          before: inView(row.previousElementSibling),
+          details:
+            detailsButton !== undefined &&
+            detailsButton.getBoundingClientRect().bottom <= view.bottom,
+          line:
+            words === null || words === undefined
+              ? 20
+              : Number(getComputedStyle(words).lineHeight.replace("px", "")),
+          list: list.clientHeight,
+          row: box.height,
+        };
+      }, uuid(n))
+    );
+
+    if (share.row > 0.6 * share.list + share.line) {
+      return `the open row takes ${Math.round((100 * share.row) / share.list)}% of the list`;
+    }
+
+    if (!share.details) {
+      return "the open row's Details line is out of view";
+    }
+
+    return !neighbours || (share.before && share.after)
+      ? null
+      : "the rows around the open one are out of view";
+  };
+
 /** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
 type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
   readonly page?: PageName;
@@ -3800,6 +3916,17 @@ const STRESS_SCENES: readonly Scene[] = (
       },
       data: { view: stressView() },
       name: "stress-list-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 721);
+        await item(page, 721).scrollIntoViewIfNeeded();
+      },
+      check: openShareCheck(721, true),
+      data: { view: shelfView(NINE_DOC) },
+      height: 620,
+      name: "stress-open-nine-lines",
       width: NARROWEST,
     },
     {
@@ -4424,7 +4551,9 @@ const STRESS_SCENES: readonly Scene[] = (
     {
       act: async (page) => {
         await page.keyboard.press("Tab");
-        await page.getByRole("button", { name: "Saving…" }).click({ force: true });
+        await page
+          .getByRole("button", { name: "Saving…" })
+          .click({ force: true });
       },
       check: async (page) => {
         const saving = page.getByRole("button", { name: "Saving…" });

@@ -31,8 +31,8 @@ import type {
 import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
-import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,7 +42,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
+import {
+  Clamp,
+  lineHeight,
+  tooltipText,
+  Truncated,
+  useCut,
+} from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -65,7 +71,10 @@ import {
   DESCRIPTION_LINES,
   DONE,
   EDITING,
+  MIN_OPEN_LINES,
   OPEN_LINES,
+  OPEN_SHARE,
+  OpenLines,
   TITLE_LINES,
   WORDS,
 } from "./row-look";
@@ -691,6 +700,7 @@ const ImageBody = ({
             item.done && "text-muted-foreground line-through"
           )}
           lines={TITLE_LINES}
+          what="the title"
         >
           {item.title}
         </Clamp>
@@ -738,7 +748,11 @@ const FileTitle = ({
   );
 
   return selected ? (
-    <Clamp className="text-sm leading-snug" lines={TITLE_LINES}>
+    <Clamp
+      className="text-sm leading-snug"
+      lines={TITLE_LINES}
+      what="the title"
+    >
       {title}
     </Clamp>
   ) : (
@@ -834,6 +848,7 @@ const TextBody = ({
   | "onStopEditing"
 >) => {
   const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+  const openLines = useContext(OpenLines);
 
   if (editing) {
     return (
@@ -852,8 +867,8 @@ const TextBody = ({
     <>
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Ten lines at most until Show more, so one item never fills the shelf; an edit shows all of it.
-        <Clamp className={WORDS} lines={OPEN_LINES}>
+        // Ten lines at most until Show more, fewer when the rest of the row needs the room, so one item never fills the shelf; an edit shows all of it.
+        <Clamp className={WORDS} lines={openLines} rowWords what="the text">
           {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
           {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
           <div
@@ -962,6 +977,7 @@ const Expansion = ({
         <Clamp
           className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
           lines={DESCRIPTION_LINES}
+          what="the description"
         >
           {item.description.trim()}
         </Clamp>
@@ -1084,156 +1100,216 @@ const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
   open: "bg-pin/10 ring-pin ring-2 ring-inset",
 };
 
+/**
+ * How many lines an open row's words or caption may show: OPEN_LINES, fewer
+ * when its other parts already take most of OPEN_SHARE of the list's height,
+ * never under MIN_OPEN_LINES. Measured on the open row alone, again as it or
+ * the list changes size.
+ */
+const useOpenLines = (
+  row: RefObject<HTMLElement | null>,
+  open: boolean
+): number => {
+  const [lines, setLines] = useState(OPEN_LINES);
+
+  useEffect(() => {
+    const element = row.current;
+    const list = element?.closest<HTMLElement>(".shelf-list") ?? null;
+
+    const fit = (): void => {
+      const words = element?.querySelector<HTMLElement>("[data-row-words]");
+
+      if (
+        element === null ||
+        list === null ||
+        words === null ||
+        words === undefined
+      ) {
+        return;
+      }
+
+      const others =
+        element.getBoundingClientRect().height -
+        words.getBoundingClientRect().height;
+
+      const room = Math.floor(
+        (OPEN_SHARE * list.clientHeight - others) / lineHeight(words)
+      );
+
+      setLines(Math.max(MIN_OPEN_LINES, Math.min(OPEN_LINES, room)));
+    };
+
+    const observer = new ResizeObserver(fit);
+
+    if (open && element !== null && list !== null) {
+      observer.observe(element);
+      observer.observe(list);
+      fit();
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [row, open]);
+
+  return open ? lines : OPEN_LINES;
+};
+
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
   const parts = rowParts(item, selected);
   const badges = badgeNodes(parts.badges, props.now);
+  const rowRef = useRef<HTMLLIElement>(null);
+  const openLines = useOpenLines(rowRef, selected && !editing);
 
   return (
-    <li
-      aria-current={selected ? "true" : undefined}
-      className={cn(
-        "group bg-background/60 relative flex items-start gap-3 rounded-lg border px-3 py-2.5",
-        selected || props.picked
-          ? "border-primary"
-          : "border-foreground/10 hover:border-foreground/20",
-        props.picked && "bg-primary/10",
-        props.dragging && "opacity-40",
-        DROP_LOOK[props.dropLook]
-      )}
-      data-item-id={item.id}
-      // A modified click picks instead of opening; caught before the card's own buttons see it.
-      onClickCapture={(event) => {
-        const toggle = isMac ? event.metaKey : event.ctrlKey;
+    <OpenLines value={openLines}>
+      <li
+        aria-current={selected ? "true" : undefined}
+        className={cn(
+          "group bg-background/60 relative flex items-start gap-3 rounded-lg border px-3 py-2.5",
+          selected || props.picked
+            ? "border-primary"
+            : "border-foreground/10 hover:border-foreground/20",
+          props.picked && "bg-primary/10",
+          props.dragging && "opacity-40",
+          DROP_LOOK[props.dropLook]
+        )}
+        data-item-id={item.id}
+        ref={rowRef}
+        // A modified click picks instead of opening; caught before the card's own buttons see it.
+        onClickCapture={(event) => {
+          const toggle = isMac ? event.metaKey : event.ctrlKey;
 
-        if (toggle || event.shiftKey) {
-          event.preventDefault();
-          event.stopPropagation();
-          props.onPick(event.shiftKey ? "range" : "toggle");
-        }
-      }}
-      // A text field inside keeps ordinary text dragging.
-      {...(editing ? {} : props.dragProps)}
-      {...props.dropProps}
-      // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
-      onContextMenuCapture={(event) => {
-        if (!isTextField(event.target)) {
-          contextMenuAt(props.onContextMenu)(event);
-          event.stopPropagation();
-        }
-      }}
-      onDoubleClickCapture={(event) => {
-        if (
-          item.kind === "text" &&
-          selected &&
-          !editing &&
-          !(
-            event.target instanceof Element &&
-            event.target.closest("a") !== null
-          )
-        ) {
-          props.onEdit();
-        }
-      }}
-    >
-      <TagStripe item={item} />
-      <Checkbox
-        aria-label={item.done ? "Mark as not done" : "Mark as done"}
-        checked={item.done}
-        className="mt-0.5"
-        onCheckedChange={props.onToggle}
-        {...coach("item-check")}
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        {props.example === true ? (
-          <span className="bg-foreground/5 text-muted-foreground w-fit rounded-sm px-1.5 text-xs">
-            Example
-          </span>
-        ) : null}
-        {item.kind === "text" ? (
-          <TextBody
-            editing={editing}
-            item={item}
-            links={parts.extras?.links === true}
-            onContextMenu={props.onContextMenu}
-            onEdit={props.onEdit}
-            onEditText={props.onEditText}
-            onOpenLink={props.onOpenLink}
-            onSelect={props.onSelect}
-            onStopEditing={props.onStopEditing}
-            selected={selected}
-          />
-        ) : null}
-        {item.kind === "image" ? (
-          <ImageBody
-            editing={editing}
-            item={item}
-            onContextMenu={props.onContextMenu}
-            onDragImage={props.onDragImage}
-            onEdit={props.onEdit}
-            onEditNote={props.onEditNote}
-            onHide={props.onHide}
-            onOpen={props.onOpen}
-            onSelect={props.onSelect}
-            onStopEditing={props.onStopEditing}
-            selected={selected}
-          />
-        ) : null}
-        {item.kind === "file" ? (
-          <FileBody
-            badges={parts.badgesOn === "file" ? badges : []}
-            editing={editing}
-            item={item}
-            onContextMenu={props.onContextMenu}
-            onDragImage={props.onDragImage}
-            onEdit={props.onEdit}
-            onEditNote={props.onEditNote}
-            onHide={props.onHide}
-            onSelect={props.onSelect}
-            onStopEditing={props.onStopEditing}
-            selected={selected}
-          />
-        ) : null}
-        <AttachmentStrip
-          attachments={item.attachments}
-          handlers={props.attachments}
-          onMore={props.onShowDetails}
-          onSelect={props.onSelect}
-          strip={parts.strip}
+          if (toggle || event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            props.onPick(event.shiftKey ? "range" : "toggle");
+          }
+        }}
+        // A text field inside keeps ordinary text dragging.
+        {...(editing ? {} : props.dragProps)}
+        {...props.dropProps}
+        // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
+        onContextMenuCapture={(event) => {
+          if (!isTextField(event.target)) {
+            contextMenuAt(props.onContextMenu)(event);
+            event.stopPropagation();
+          }
+        }}
+        onDoubleClickCapture={(event) => {
+          if (
+            item.kind === "text" &&
+            selected &&
+            !editing &&
+            !(
+              event.target instanceof Element &&
+              event.target.closest("a") !== null
+            )
+          ) {
+            props.onEdit();
+          }
+        }}
+      >
+        <TagStripe item={item} />
+        <Checkbox
+          aria-label={item.done ? "Mark as not done" : "Mark as done"}
+          checked={item.done}
+          className="mt-0.5"
+          onCheckedChange={props.onToggle}
+          {...coach("item-check")}
         />
-        {parts.extras === null ? null : (
-          <Expansion
-            extras={parts.extras}
-            item={item}
-            onReopenWindow={props.onReopenWindow}
-            onShowDetails={props.onShowDetails}
-            onToggleStep={props.onToggleStep}
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {props.example === true ? (
+            <span className="bg-foreground/5 text-muted-foreground w-fit rounded-sm px-1.5 text-xs">
+              Example
+            </span>
+          ) : null}
+          {item.kind === "text" ? (
+            <TextBody
+              editing={editing}
+              item={item}
+              links={parts.extras?.links === true}
+              onContextMenu={props.onContextMenu}
+              onEdit={props.onEdit}
+              onEditText={props.onEditText}
+              onOpenLink={props.onOpenLink}
+              onSelect={props.onSelect}
+              onStopEditing={props.onStopEditing}
+              selected={selected}
+            />
+          ) : null}
+          {item.kind === "image" ? (
+            <ImageBody
+              editing={editing}
+              item={item}
+              onContextMenu={props.onContextMenu}
+              onDragImage={props.onDragImage}
+              onEdit={props.onEdit}
+              onEditNote={props.onEditNote}
+              onHide={props.onHide}
+              onOpen={props.onOpen}
+              onSelect={props.onSelect}
+              onStopEditing={props.onStopEditing}
+              selected={selected}
+            />
+          ) : null}
+          {item.kind === "file" ? (
+            <FileBody
+              badges={parts.badgesOn === "file" ? badges : []}
+              editing={editing}
+              item={item}
+              onContextMenu={props.onContextMenu}
+              onDragImage={props.onDragImage}
+              onEdit={props.onEdit}
+              onEditNote={props.onEditNote}
+              onHide={props.onHide}
+              onSelect={props.onSelect}
+              onStopEditing={props.onStopEditing}
+              selected={selected}
+            />
+          ) : null}
+          <AttachmentStrip
+            attachments={item.attachments}
+            handlers={props.attachments}
+            onMore={props.onShowDetails}
+            onSelect={props.onSelect}
+            strip={parts.strip}
           />
-        )}
-        <SourceRow
-          badges={parts.badgesOn === "source" ? badges : []}
-          context={item.context}
-          onOpenLink={() => {
-            props.onOpenLink();
-          }}
+          {parts.extras === null ? null : (
+            <Expansion
+              extras={parts.extras}
+              item={item}
+              onReopenWindow={props.onReopenWindow}
+              onShowDetails={props.onShowDetails}
+              onToggleStep={props.onToggleStep}
+            />
+          )}
+          <SourceRow
+            badges={parts.badgesOn === "source" ? badges : []}
+            context={item.context}
+            onOpenLink={() => {
+              props.onOpenLink();
+            }}
+          />
+          {props.notSaved === undefined ? null : (
+            <NotSavedLine
+              name={rowName(item)}
+              undo={props.notSaved.undo}
+              onDiscard={props.onDiscardChanges}
+              onRetry={props.onRetrySave}
+            />
+          )}
+          {selected ? (
+            <OpenFooter item={item} onShowDetails={props.onShowDetails} />
+          ) : null}
+        </div>
+        <MoreButton
+          copied={copied}
+          onOpen={props.onContextMenu}
+          shown={selected || copied}
         />
-        {props.notSaved === undefined ? null : (
-          <NotSavedLine
-            name={rowName(item)}
-            undo={props.notSaved.undo}
-            onDiscard={props.onDiscardChanges}
-            onRetry={props.onRetrySave}
-          />
-        )}
-        {selected ? (
-          <OpenFooter item={item} onShowDetails={props.onShowDetails} />
-        ) : null}
-      </div>
-      <MoreButton
-        copied={copied}
-        onOpen={props.onContextMenu}
-        shown={selected || copied}
-      />
-    </li>
+      </li>
+    </OpenLines>
   );
 };

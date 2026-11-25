@@ -108,10 +108,54 @@ export const Truncated = ({
   );
 };
 
+/** What a box's line-height is in pixels, from its computed style. */
+export const lineHeight = (element: HTMLElement): number =>
+  Number(getComputedStyle(element).lineHeight.replace("px", "")) || 20;
+
+/** Controls in a box, which the keyboard reaches. */
+const FOCUSABLE = "a[href], button, input, textarea, [tabindex]";
+
+/** Marks a control the clamp took out of the Tab order, so it can put it back. */
+const HIDDEN_BY_CLAMP = "data-clamp-hid";
+
+/**
+ * Keeps the keyboard off what the clamp hides: a link below the last line
+ * shown can't be focused until Show more opens it, so Show more comes
+ * before it. Everything goes back once the words show whole.
+ */
+const hideCutControls = (element: HTMLElement, clipped: boolean): void => {
+  const { bottom } = element.getBoundingClientRect();
+
+  for (const control of element.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+    const below = clipped && control.getBoundingClientRect().top >= bottom - 1;
+
+    if (below && control.tabIndex >= 0) {
+      control.setAttribute(
+        HIDDEN_BY_CLAMP,
+        control.getAttribute("tabindex") ?? ""
+      );
+      control.tabIndex = -1;
+    } else if (!below && control.hasAttribute(HIDDEN_BY_CLAMP)) {
+      const before = control.getAttribute(HIDDEN_BY_CLAMP);
+
+      if (before === "") {
+        control.removeAttribute("tabindex");
+      } else {
+        control.setAttribute("tabindex", before ?? "");
+      }
+
+      control.removeAttribute(HIDDEN_BY_CLAMP);
+    }
+  }
+};
+
 /**
  * Words cut to `lines` lines, the last one fading, with a quiet button
  * under them that shows the rest in place; no ellipsis, so a sentence's
- * own full stop never meets one. Words that fit show whole, with no button.
+ * own full stop never meets one. Words that fit show whole, with no button,
+ * and so do words that would hide a single line: a button that costs a line
+ * to save one is worse than none. `what` names the words for the button's
+ * accessible name ("Show more of the description").
  */
 export const Clamp = ({
   children,
@@ -119,6 +163,8 @@ export const Clamp = ({
   less = "Show less",
   lines,
   more = "Show more",
+  rowWords = false,
+  what,
 }: {
   readonly children: ReactNode;
   readonly lines: number;
@@ -126,18 +172,24 @@ export const Clamp = ({
   readonly className?: string;
   readonly more?: string;
   readonly less?: string;
+  /** An open row's words or caption: the part that gives way when the row would take too much of the list (item-row.tsx). */
+  readonly rowWords?: boolean;
+  readonly what?: string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [cut, setCut] = useState(false);
 
-  useMeasure(
-    ref,
-    (element) => {
-      setCut(element.scrollHeight > element.clientHeight + 1);
-    },
-    !open
-  );
+  useMeasure(ref, (element) => {
+    // The words' whole height, whether or not they are cut now.
+    const hidden = element.scrollHeight - lines * lineHeight(element);
+    const cuts = !open && hidden >= 2 * lineHeight(element) - 1;
+
+    setCut(cuts);
+    hideCutControls(element, cuts);
+  });
+
+  const label = open ? less : more;
 
   return (
     <>
@@ -145,11 +197,10 @@ export const Clamp = ({
         className={cn(
           className,
           // Only the lines below are cut: a space that hangs past a line's end isn't.
-          !open && "max-h-[calc(var(--lines)*1lh)] overflow-y-clip",
-          !open &&
-            cut &&
-            "[mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]"
+          cut &&
+            "max-h-[calc(var(--lines)*1lh)] overflow-y-clip [mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]"
         )}
+        data-row-words={rowWords ? "" : undefined}
         ref={ref}
         style={{ "--lines": lines }}
       >
@@ -158,6 +209,7 @@ export const Clamp = ({
       {cut || open ? (
         <button
           aria-expanded={open}
+          aria-label={what === undefined ? undefined : `${label} of ${what}`}
           className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -mt-0.5 self-start rounded-sm text-xs font-medium outline-none focus-visible:ring-3"
           onClick={(event) => {
             event.stopPropagation();
@@ -165,7 +217,7 @@ export const Clamp = ({
           }}
           type="button"
         >
-          {open ? less : more}
+          {label}
         </button>
       ) : null}
     </>
