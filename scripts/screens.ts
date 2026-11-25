@@ -7218,6 +7218,59 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // The list is at its top and the newest item, out of view below, is deleted: the list stays where it is. An item made then comes into view.
+    act: async (page) => {
+      await page.evaluate(
+        `globalThis.insetShelf.apply({ id: ${JSON.stringify(uuid(15))}, type: "remove" })`
+      );
+      await item(page, 15).waitFor({ state: "detached" });
+      await page.waitForTimeout(200);
+      await page.evaluate(
+        "globalThis.__afterDelete = document.querySelector('.shelf-list').scrollTop"
+      );
+      await page.evaluate(
+        `globalThis.__emit("view", ${JSON.stringify(
+          shelfView({
+            ...DOC,
+            items: [
+              ...ITEMS.filter((each) => each.id !== uuid(15)),
+              {
+                ...base(60, 0),
+                html: null,
+                kind: "text",
+                links: [],
+                text: "Order the name plates",
+                via: "typed",
+              },
+            ],
+          })
+        )})`
+      );
+      await item(page, 60).waitFor();
+      await page.waitForTimeout(200);
+    },
+    check: async (page) => {
+      const afterDelete = z
+        .number()
+        .parse(await page.evaluate("globalThis.__afterDelete"));
+
+      if (afterDelete > 1) {
+        return `deleting the newest item scrolled the list to ${afterDelete}`;
+      }
+
+      const list = await boxOf(page.locator(".shelf-list").first());
+      const made = await boxOf(item(page, 60));
+
+      return made.top >= list.top - 1 && made.bottom <= list.bottom + 1
+        ? null
+        : `an item made now must come into view: ${JSON.stringify({ list, made })}`;
+    },
+    data: { view: shelfView() },
+    height: 400,
+    name: "shelf-newest-deleted-stays",
+    page: "shelf",
+  },
+  {
     act: async (page) => {
       await page.evaluate(
         "{ const list = document.querySelector('.shelf-list'); list.scrollTop = list.scrollHeight; }"

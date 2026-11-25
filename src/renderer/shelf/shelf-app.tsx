@@ -60,6 +60,7 @@ import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
 import { focusRow, ItemRow } from "./item-row";
 import { keptItems } from "./kept-items";
+import { lookAt } from "./made-items";
 import { Markdown } from "./markdown";
 import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
@@ -803,10 +804,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   // ↑ and ↓ walk the items in the order they are shown, across sections.
   const ids = items.map((item) => item.id);
 
-  const newest = doc.items.findLast(
-    (item) => item.sectionId === doc.activeSectionId
-  )?.id;
-
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Several items picked together (⌘-click, ⇧-click, ⌘A), apart from the one open item.
@@ -1059,24 +1056,22 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   }, [focus]);
 
   const hasChecklist = tutorial.checklist !== null;
-  // New items arrive at the bottom: one made now comes into view. The newest
-  // item the shelf opens with is not new, so the first paint leaves the list
-  // where it starts (on the checklist while it shows); an item brought
-  // forward by main comes into view through `focus` above.
-  const loaded = useRef(false);
+  // An item made now comes into view. The items the shelf opens with are
+  // not new, so the first paint leaves the list where it starts (on the
+  // checklist while it shows), and so does deleting or moving the newest
+  // item; an item brought forward by main comes into view through `focus`
+  // above.
+  const heldItems = useRef<ReadonlySet<ItemId> | null>(null);
 
   useEffect(() => {
-    if (newest === undefined) {
-      return;
-    }
+    const looked = lookAt(heldItems.current, doc.items);
 
-    // The first newest is the shelf as it loads, whenever its view arrives.
-    if (loaded.current) {
-      reveal(newest);
-    }
+    heldItems.current = looked.held;
 
-    loaded.current = true;
-  }, [newest]);
+    if (looked.made !== undefined) {
+      reveal(looked.made);
+    }
+  }, [doc.items]);
 
   // The checklist coming up, at launch or from Getting Started, brings the list back to it.
   useEffect(() => {
