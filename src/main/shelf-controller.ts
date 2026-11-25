@@ -296,12 +296,13 @@ export const createShelfController = (
       setStatus({ saveError: null });
     }
 
-    // A file the saved shelf, the shown shelf or a Discard's saved version still names stays: Discard changes can bring back an image's old picture while this write was on its way.
+    // A file the saved shelf, the shown shelf, a Discard's saved version or a deleted item Undo can still bring back names stays: Discard changes can bring back an image's old picture while this write was on its way.
     const used = new Set(
       [
         ...snapshot.items,
         ...doc.items,
         ...[...kept.values()].map((e) => e.item),
+        ...pending.map((removed) => removed.item),
       ].flatMap(storedFilesOf)
     );
 

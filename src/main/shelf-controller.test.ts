@@ -1128,3 +1128,77 @@ describe("attachments", () => {
     });
   });
 });
+
+describe("an item deleted while a picture's replacement is still to be written", () => {
+  it("keeps the files of an annotated item deleted before the next write, so Undo brings it back whole", async () => {
+    const { controller, deleted, disk } = onDisk();
+
+    const id = controller.apply({
+      context: null,
+      image,
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "area",
+    });
+
+    if (id === null) {
+      throw new Error("not added");
+    }
+
+    controller.apply({ attachments: [attachedFile(60)], id, type: "attach" });
+    await controller.flush();
+    disk.full = true;
+    controller.apply({
+      id,
+      image: { ...image, file: `${uuid(91)}.png` },
+      type: "replaceImage",
+    });
+    await controller.flush();
+    controller.apply({ id, type: "remove" });
+    disk.full = false;
+    controller.apply({ text: "Anything", type: "compose" });
+    await controller.flush();
+    controller.apply({ type: "undoRemove" });
+
+    expect({
+      back: controller.item(id)?.attachments.length,
+      deleted,
+    }).toStrictEqual({ back: 1, deleted: [image.file] });
+  });
+
+  it("keeps the files of an item whose attached picture was annotated, when it is deleted before the next write", async () => {
+    const { add, controller, deleted, disk } = onDisk();
+    const id = add("Quote");
+
+    const picture: Attachment = {
+      addedAt: "2026-11-20T10:00:00.000Z",
+      id: AttachmentIdSchema.parse(uuid(70)),
+      image,
+      kind: "image",
+      name: "Screenshot",
+      pins: [],
+    };
+
+    controller.apply({
+      attachments: [picture, attachedFile(60)],
+      id,
+      type: "attach",
+    });
+    await controller.flush();
+    disk.full = true;
+    controller.apply({
+      attachmentId: picture.id,
+      id,
+      image: { ...image, file: `${uuid(91)}.png` },
+      type: "replaceAttachmentImage",
+    });
+    await controller.flush();
+    controller.apply({ id, type: "remove" });
+    disk.full = false;
+    add("Anything");
+    await controller.flush();
+
+    expect(deleted).toStrictEqual([image.file]);
+  });
+});
