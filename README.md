@@ -109,31 +109,40 @@ The app teaches itself in the shelf, on macOS and Windows:
 
 ## Develop
 
-You need Node 24 and pnpm 12. On a machine managed by Vite+, use its `node` and `pnpm`.
+The repository is one pnpm workspace, run with [Vite+](https://viteplus.dev) (`vp`), which also provides Node 24 and pnpm 12:
+
+- `apps/desktop`: the Electron app (`@inset/desktop`).
+- `apps/web`: the landing page (`@inset/web`).
+- `packages/ui`: the shadcn button, `cn` and the Inset theme both apps import (`@inset/ui`).
 
 ```sh
-pnpm install
-pnpm dev
+vp install
+cd apps/desktop
+vp run dev
 ```
+
+From the repository root:
 
 | Command | What it does |
 | --- | --- |
-| `pnpm check` | Runs Ultracite: Oxlint with type-aware rules and the React, TanStack, Vitest, shadcn and anti-slop presets, plus an Oxfmt format check. |
-| `pnpm typecheck` | Type-checks the main, preload and renderer code in strict mode. |
-| `pnpm test` | Runs the Vitest suite. |
-| `pnpm build` | Builds the app into `out/` with electron-vite. |
-| `pnpm fix` | Formats the code and applies safe lint fixes. |
-| `pnpm screens` | Builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. Writes PNGs to `release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name. |
+| `vp check` | Checks formatting with Oxfmt and lints with Oxlint: type-aware rules and Ultracite's React, TanStack, Vitest, shadcn and anti-slop presets, set in `vite.config.ts`. |
+| `vp check --fix` | Formats the code and applies safe lint fixes. |
+| `vp run typecheck` | Type-checks every package in strict mode. |
+| `vp test` | Runs the Vitest suite. |
+| `vp run build` | Builds the app into `apps/desktop/out/` with electron-vite and the page into `apps/web/out/`. |
 
-To build installers on your machine, run `pnpm package:mac` on macOS or `pnpm package:win` on Windows. The files land in `release/`.
+In `apps/desktop`, `vp run screens` builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. It writes PNGs to `apps/desktop/release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name.
+
+To build installers on your machine, run `vp run package:mac` on macOS or `vp run package:win` on Windows in `apps/desktop`. The files land in `apps/desktop/release/`.
 
 ### Verify on the real macOS desktop
 
-`scripts/e2e/verify-macos.ts` drives the real app from outside with real Shift taps, clicks and drags, and with the real clipboard. It opens its own small text app as "the app in front" and sends keys only while that app is in front.
+`apps/desktop/scripts/e2e/verify-macos.ts` drives the real app from outside with real Shift taps, clicks and drags, and with the real clipboard. It opens its own small text app as "the app in front" and sends keys only while that app is in front.
 
 ```sh
+cd apps/desktop
 node scripts/e2e/verify-macos.ts dev       # builds, then tests out/ with Electron
-pnpm package:dir && node scripts/e2e/verify-macos.ts packaged
+vp run package:dir && node scripts/e2e/verify-macos.ts packaged
 ```
 
 The script takes over the mouse and keyboard for about three minutes and overwrites the clipboard. At the end it puts back plain text it found there, but not images or files. The terminal needs **Accessibility** access, Xcode command line tools must be installed for `swiftc`, and the app under test needs **Screen & System Audio Recording** access. It writes every result and the event log to a temporary folder and prints the path.
@@ -142,8 +151,8 @@ The script takes over the mouse and keyboard for about three minutes and overwri
 
 `.github/workflows/release.yml` publishes builds to GitHub Releases.
 
-A push to `main` updates the **Preview build** prerelease in place, and installed apps update from it. Each preview build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `package.json`, the last number from the workflow's run number, so every build is newer than the one before. The new files are uploaded first, then `latest-mac.yml` and `latest.yml`, which tell the apps what is new. The update files the previous `latest*.yml` named stay for one more build, so an app that read it just before the switch can still download them. Older files are removed.
+A push to `main` updates the **Preview build** prerelease in place, and installed apps update from it. Each preview build gets the version `<major>.<minor>.<run number>`: the major and minor numbers come from `version` in `apps/desktop/package.json`, the last number from the workflow's run number, so every build is newer than the one before. The new files are uploaded first, then `latest-mac.yml` and `latest.yml`, which tell the apps what is new. The update files the previous `latest*.yml` named stay for one more build, so an app that read it just before the switch can still download them. Older files are removed.
 
-To cut a versioned release, set `version` in `package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release. Raising the minor or major number also moves the preview builds that follow to `0.2.<run number>`.
+To cut a versioned release, set `version` in `apps/desktop/package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release. Raising the minor or major number also moves the preview builds that follow to `0.2.<run number>`.
 
-The macOS job signs with the shared certificate from the `MAC_SIGNING_P12_BASE64` and `MAC_SIGNING_P12_PASSWORD` secrets, through `scripts/import-signing-key.sh` and the `scripts/sign-mac.ts` hook, and fails without them. The CI workflow has no secrets and signs ad hoc. A local `pnpm package:mac` signs with the certificate when its keychain (`~/Library/Keychains/inset-signing.keychain-db`) is on the machine, and ad hoc otherwise.
+The macOS job signs with the shared certificate from the `MAC_SIGNING_P12_BASE64` and `MAC_SIGNING_P12_PASSWORD` secrets, through `apps/desktop/scripts/import-signing-key.sh` and the `apps/desktop/scripts/sign-mac.ts` hook, and fails without them. The CI workflow has no secrets and signs ad hoc. A local `vp run package:mac` signs with the certificate when its keychain (`~/Library/Keychains/inset-signing.keychain-db`) is on the machine, and ad hoc otherwise.

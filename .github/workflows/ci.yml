@@ -19,16 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+          cache: true
+      - run: vp check
+      - run: vp run typecheck
+      - run: vp test
+      - run: vp run build
 
   package:
     name: Package (${{ matrix.name }})
@@ -41,27 +39,26 @@ jobs:
             os: macos-latest
             script: package:mac
             files: |
-              release/*.dmg
-              release/*.zip
+              apps/desktop/release/*.dmg
+              apps/desktop/release/*.zip
           - name: Windows
             os: windows-latest
             script: package:win
             files: |
-              release/*.exe
-              release/*.zip
+              apps/desktop/release/*.exe
+              apps/desktop/release/*.zip
     runs-on: ${{ matrix.os }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       CSC_FOR_PULL_REQUEST: "true"
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm ${{ matrix.script }}
+          cache: true
+      - run: vp run ${{ matrix.script }}
+        working-directory: apps/desktop
       - uses: actions/upload-artifact@v7
         with:
           name: inset-shelf-${{ matrix.name }}

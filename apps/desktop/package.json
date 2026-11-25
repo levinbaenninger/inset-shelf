@@ -17,7 +17,7 @@
     "package:win": "electron-vite build && electron-builder --win --publish never",
     "package:dir": "electron-vite build && electron-builder --dir --publish never",
     "icons": "node scripts/generate-icons.ts",
-    "screens": "pnpm build && node scripts/screens.ts"
+    "screens": "vp run build && node scripts/screens.ts"
   },
   "dependencies": {
     "electron-updater": "6.8.11",

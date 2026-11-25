@@ -7,7 +7,7 @@
  * below. The shelf is shot at 360×620 with an item that has every field
  * filled in, and the run fails a scene where anything overflows.
  *
- *   pnpm screens            (builds first)
+ *   vp run screens          (builds first)
  *   node scripts/screens.ts [output folder]
  *
  * The default output folder is release/screens.

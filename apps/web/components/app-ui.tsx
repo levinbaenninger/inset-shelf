@@ -386,7 +386,7 @@ const CornerButton = ({
   </span>
 );
 
-// The screenshot card beside the shelf (src/renderer/screenshot), 280 points wide; under the pointer it
+// The screenshot card beside the shelf (apps/desktop/src/renderer/screenshot), 280 points wide; under the pointer it
 // dims and blurs behind its actions.
 export const ScreenshotCard = ({
   hover = false,
@@ -422,7 +422,7 @@ export const ScreenshotCard = ({
   </div>
 );
 
-// The numbered map pin, with the drawing window's own outline (src/shared/pin-shape.ts).
+// The numbered map pin, with the drawing window's own outline (apps/desktop/src/shared/pin-shape.ts).
 const PIN_PATH = "M 0 0 L 6.306 -8.077 A 8 8 0 1 0 -6.306 -8.077 Z";
 
 const PIN_DIGITS: Record<1 | 2 | 3, string> = {
