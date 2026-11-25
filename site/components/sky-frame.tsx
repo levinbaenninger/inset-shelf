@@ -14,7 +14,7 @@ export function SkyFrame({ className, children, ...props }: ComponentProps<"div"
   return (
     <div
       className={cn(
-        "relative isolate overflow-hidden rounded-[24px] bg-[radial-gradient(60%_50%_at_15%_85%,#fff_0%,transparent_70%),radial-gradient(50%_45%_at_90%_70%,#f2fbff_0%,transparent_70%),linear-gradient(180deg,var(--color-sky)_0%,var(--color-sky-light)_100%)] sm:rounded-[28px]",
+        "relative isolate overflow-hidden rounded-[24px] bg-[radial-gradient(45%_35%_at_85%_12%,#f4fbff_0%,transparent_70%),radial-gradient(60%_50%_at_15%_85%,#fff_0%,transparent_70%),radial-gradient(50%_45%_at_90%_70%,#f2fbff_0%,transparent_70%),linear-gradient(180deg,var(--color-sky)_0%,var(--color-sky-light)_100%)] sm:rounded-[28px]",
         className,
       )}
       {...props}

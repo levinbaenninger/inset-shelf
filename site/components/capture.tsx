@@ -84,7 +84,7 @@ function Screenshot() {
       <ScreenshotCard hover className="absolute top-16 left-5 h-[184px] sm:left-6" />
       <ShelfPanel className="absolute top-8 left-[312px] w-[360px] sm:left-[318px]">
         <div className="px-2 pb-2">
-          <SectionHeader name="Sign-in redesign" current />
+          <SectionHeader name="Sign-in" current />
           <ul>
             <li className="flex items-start gap-3 rounded-lg border border-primary bg-background/60 px-3 py-2.5">
               <CheckCircle className="mt-0.5" />

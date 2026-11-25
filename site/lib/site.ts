@@ -13,4 +13,4 @@ export const NAV_LINKS = [
 ];
 
 export const FIRST_OPEN =
-  "The builds are unsigned: on a Mac, click Open Anyway in System Settings > Privacy & Security the first time.";
+  "The builds have no developer certificate. On a Mac, click Open Anyway in System Settings > Privacy & Security the first time.";

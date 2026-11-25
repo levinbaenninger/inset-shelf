@@ -194,7 +194,7 @@ export function Details() {
         </Tile>
         <Tile
           title="Copy with Details"
-          line="Pastes the item as Markdown, with its steps, due date and linked windows."
+          line="Copies the item as Markdown, with its steps, due date and linked windows."
           stageClassName="sm:h-[290px]"
         >
           <CopyDetails />

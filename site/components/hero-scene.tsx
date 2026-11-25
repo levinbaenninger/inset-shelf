@@ -153,7 +153,7 @@ function BrowserWindow() {
           </div>
         </div>
 
-        <aside className="w-[220px] shrink-0 text-[13px] text-[#59636e]">
+        <aside className="w-[220px] shrink-0 text-[13px] text-[#59636e] max-sm:invisible">
           {[
             ["Assignees", "levin"],
             ["Labels", ""],
