@@ -69,7 +69,7 @@ const PlainNotice = ({ view }: { readonly view: NoticeView }) => {
         api.open(view.seq);
       }}
       {...hover}
-      title={`${tooltipText(view.title)}\nClick to open the shelf`}
+      title={tooltipText(`${view.title}\nClick to open the shelf`)}
       type="button"
     >
       <NoticeIcon failed={failed} />
@@ -98,7 +98,7 @@ const CaptureNotice = ({ view }: { readonly view: NoticeView }) => (
       onClick={() => {
         api.open(view.seq);
       }}
-      title={`${tooltipText(view.title)}\nClick to open the shelf`}
+      title={tooltipText(`${view.title}\nClick to open the shelf`)}
       type="button"
     >
       <NoticeIcon failed={false} />
@@ -232,7 +232,9 @@ const RecallPill = ({ view }: { readonly view: RecallView }) => (
       onClick={() => {
         api.open(view.seq);
       }}
-      title={`${fromHere(view.count)}: ${tooltipText(view.label)}\nClick to show them in the shelf`}
+      title={tooltipText(
+        `${fromHere(view.count)}: ${view.label}\nClick to show them in the shelf`
+      )}
       type="button"
     >
       <HugeiconsIcon

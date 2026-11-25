@@ -58,7 +58,7 @@ import type { AttachmentHandlers } from "./attachment-strip";
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
-import { whenText } from "./format";
+import { fileSizeText, whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
@@ -133,18 +133,18 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** The source line's tooltip: the whole line when it shows cut, then where a click goes; null when it would only repeat what shows. */
+/** The source line's tooltip: the whole line when it shows cut, then where a click goes, 300 characters in all; null when it would only repeat what shows. */
 const sourceTitle = (
   shown: string,
   opens: string | null,
-  cut = true
+  cut: boolean
 ): string | undefined => {
   const lines = [
     ...(cut ? [shown] : []),
     ...(opens === null || opens === shown ? [] : [opens]),
   ];
 
-  return lines.length === 0 ? undefined : lines.map(tooltipText).join("\n");
+  return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
 };
 
 /**
@@ -206,40 +206,75 @@ export const SourceLine = ({
 const hostOf = (url: string): string =>
   new URL(url).hostname.replace(/^www\./u, "");
 
+const sameHost = (a: string, b: string): boolean => {
+  try {
+    return hostOf(a) === hostOf(b);
+  } catch {
+    return false;
+  }
+};
+
+/** One link of a copied selection: its words, and its site under them when both don't fit on one line. */
+const LinkRow = ({
+  link,
+  onOpenLink,
+  siteShown,
+}: {
+  readonly link: TextItem["links"][number];
+  readonly onOpenLink: (url: string) => void;
+  /** The site already shows on the source line above: it isn't named again. */
+  readonly siteShown: boolean;
+}) => {
+  const ref = useRef<HTMLButtonElement>(null);
+  const cut = useCut(ref);
+
+  return (
+    <button
+      className="hover:bg-foreground/5 focus-visible:ring-ring/50 -mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs outline-none focus-visible:ring-3"
+      onClick={() => {
+        onOpenLink(link.url);
+      }}
+      ref={ref}
+      title={sourceTitle(link.text, link.url, cut)}
+      type="button"
+    >
+      <HugeiconsIcon
+        className="text-muted-foreground shrink-0"
+        icon={Link01Icon}
+        size={12}
+      />
+      {/* The site goes under the words when both don't fit on one line, so it stays readable. */}
+      <span className="flex min-w-0 flex-wrap gap-x-1.5">
+        <span className="max-w-full truncate">{link.text}</span>
+        {link.text === link.url || siteShown ? null : (
+          <span className="text-muted-foreground max-w-full truncate">
+            {hostOf(link.url)}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+};
+
 /** The links in a copied selection, listed while the item is open; each opens in the browser. */
 export const LinkList = ({
   links,
   onOpenLink,
+  sourceUrl = null,
 }: {
   readonly links: TextItem["links"];
   readonly onOpenLink: (url: string) => void;
+  /** The page the source line above names: a link on the same site doesn't name it again. */
+  readonly sourceUrl?: string | null;
 }) => (
   <div className="flex flex-col gap-0.5">
     {links.map((link) => (
-      <button
-        className="hover:bg-foreground/5 focus-visible:ring-ring/50 -mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs outline-none focus-visible:ring-3"
+      <LinkRow
         key={link.url}
-        onClick={() => {
-          onOpenLink(link.url);
-        }}
-        title={sourceTitle(link.text, link.url)}
-        type="button"
-      >
-        <HugeiconsIcon
-          className="text-muted-foreground shrink-0"
-          icon={Link01Icon}
-          size={12}
-        />
-        {/* The site goes under the words when both don't fit on one line, so it stays readable. */}
-        <span className="flex min-w-0 flex-wrap gap-x-1.5">
-          <span className="max-w-full truncate">{link.text}</span>
-          {link.text === link.url ? null : (
-            <span className="text-muted-foreground max-w-full truncate">
-              {hostOf(link.url)}
-            </span>
-          )}
-        </span>
-      </button>
+        link={link}
+        onOpenLink={onOpenLink}
+        siteShown={sourceUrl !== null && sameHost(sourceUrl, link.url)}
+      />
     ))}
   </div>
 );
@@ -265,7 +300,7 @@ const FileName = ({
       event.stopPropagation();
       onDragImage();
     }}
-    title={`${tooltipText(item.file.name)}\nDrag into another app`}
+    title={tooltipText(`${item.file.name}\nDrag into another app`)}
     type="button"
   >
     <HugeiconsIcon
@@ -286,7 +321,14 @@ const FileName = ({
 
 /** Badges wrapped below the line are out of sight, so screen readers skip them too. */
 const hideWrapped = (line: HTMLElement): void => {
-  const { bottom } = line.getBoundingClientRect();
+  const { bottom, top } = line.getBoundingClientRect();
+  const words = line.previousElementSibling;
+
+  // Badges on a line of their own under the words: the row marks it, so they can reach its right edge.
+  line.parentElement?.toggleAttribute(
+    "data-wrapped",
+    words !== null && top >= words.getBoundingClientRect().bottom - 1
+  );
 
   for (const badge of line.children) {
     if (badge.getBoundingClientRect().top >= bottom) {
@@ -343,16 +385,19 @@ const BadgeLine = ({
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-2",
+        "group/badges flex min-w-0 items-center gap-2",
         reach && "-mr-9",
-        ownLine && "flex-wrap gap-y-1.5"
+        ownLine && "flex-wrap gap-y-1.5",
+        // Wrapped under the words, the badges end where the row's Details does; the words keep clear of ⋯, so whether they wrap stays the same.
+        ownLine && !reach && "data-[wrapped]:-mr-9"
       )}
     >
       {words ? (
         <div
           className={cn(
             "flex min-w-0 flex-1",
-            ownLine && "min-w-[min(100%,calc(12ch+1.5rem))]"
+            ownLine && "min-w-[min(100%,calc(12ch+1.5rem))]",
+            ownLine && !reach && "group-data-[wrapped]/badges:mr-9"
           )}
         >
           {children}
@@ -422,7 +467,7 @@ export interface ItemRowProps extends RowHandlers {
   /** A failed save left this item's changes unwritten. */
   readonly notSaved: NotSavedItem | undefined;
   /** Files from outside dropped on the card attach to it (use-attach-drop.ts). */
-  readonly dropProps: RowDropProps;
+  readonly dropProps: Partial<RowDropProps>;
   /** Files are over the card: it lights as their target, or refuses them when full. */
   readonly dropLook: RowDropLook;
 }
@@ -442,14 +487,6 @@ const KIND_LABEL = {
   screenshot: "Screenshot",
 } as const;
 
-const FILE_SIZE = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 1,
-  notation: "compact",
-  style: "unit",
-  unit: "byte",
-  unitDisplay: "narrow",
-});
-
 /** An image's main line: its title, else its note, else what kind of image it is. */
 const imageCaption = (item: ImageItem): string =>
   item.title ?? (item.note === "" ? KIND_LABEL[item.via] : item.note);
@@ -462,7 +499,7 @@ const metaText = (item: ShelfItem): string => {
   }
 
   if (item.kind === "file") {
-    return `${when} · ${FILE_SIZE.format(item.file.bytes)}`;
+    return `${when} · ${fileSizeText(item.file.bytes)}`;
   }
 
   const where = item.source === null ? "" : ` · ${item.source}`;
@@ -570,9 +607,9 @@ const Picture = ({
     aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
-      // At the narrowest shelf a third of the row, so the words beside it keep room to read; open, as wide as the
-      // picture shows (12rem tall at most), so its pins stay on what they mark.
-      compact ? "w-[clamp(4rem,32%,6rem)]" : "w-fit max-w-full"
+      // A third of the row, and 4rem in a shelf under 340 px, so the words beside it keep room to read; open, as
+      // wide as the picture shows (12rem tall at most), so its pins stay on what they mark.
+      compact ? "w-[clamp(4rem,32%,6rem)] max-[340px]:w-16" : "w-fit max-w-full"
     )}
     draggable
     data-row-keys
@@ -602,6 +639,7 @@ const Picture = ({
     {item.pins.map((pin, index) => (
       <PinMarker
         height={compact ? 13 : 20}
+        inset
         // Pins have no identity but their place, which is their number.
         // oxlint-disable-next-line react/no-array-index-key
         key={index}

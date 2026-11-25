@@ -699,8 +699,8 @@ const WindowRow = ({
         >
           <WindowThumb className="h-9 w-14" window={window} />
         </button>
-        {/* The name has the row's width; on hover or focus it makes room for the actions. */}
-        <div className="flex min-w-0 flex-1 flex-col group-focus-within/window:pr-17 group-hover/window:pr-17 group-has-[[data-state=open]]/window:pr-17">
+        {/* The name ends where the actions begin. */}
+        <div className="flex min-w-0 flex-1 flex-col pr-17">
           <Truncated
             className="text-sm leading-tight font-medium"
             text={name}
@@ -711,8 +711,8 @@ const WindowRow = ({
           />
         </div>
       </div>
-      {/* Shown on hover, or while the keyboard or a menu is on them, so the name has the row's width otherwise. */}
-      <div className="pointer-events-none absolute top-0 right-0 flex h-9 items-center gap-0.5 opacity-0 group-focus-within/window:opacity-100 group-hover/window:opacity-100 has-[[data-state=open]]:opacity-100 [&_button]:pointer-events-auto">
+      {/* Quiet at rest, so they are seen without competing with the name; full on hover, or while the keyboard or a menu is on them. */}
+      <div className="absolute top-0 right-0 flex h-9 items-center gap-0.5 opacity-40 transition-opacity group-focus-within/window:opacity-100 group-hover/window:opacity-100 has-[[data-state=open]]:opacity-100">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1375,7 +1375,11 @@ const SourceField = ({
           </div>
         )}
         {item.kind === "text" && item.links.length > 0 ? (
-          <LinkList links={item.links} onOpenLink={onOpenLink} />
+          <LinkList
+            links={item.links}
+            onOpenLink={onOpenLink}
+            sourceUrl={item.context?.url ?? null}
+          />
         ) : null}
       </div>
     </Field>

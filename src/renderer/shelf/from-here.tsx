@@ -7,6 +7,7 @@ import type { ItemGroup, ItemId } from "@shared/shelf";
 import { useMemo, useState } from "react";
 
 import { InputGroupButton } from "@/components/ui/input-group";
+import { tooltipText } from "@/shared/clamp";
 
 /** The search with `from:here` added, once. */
 export const withFromHere = (query: string): string => {
@@ -77,7 +78,9 @@ export const FromHereChip = ({
         onChange(withFromHere(query));
       }}
       size="xs"
-      title={`${count === 1 ? "1 open item" : `${count} open items`} from ${here.label}`}
+      title={tooltipText(
+        `${count === 1 ? "1 open item" : `${count} open items`} from ${here.label}`
+      )}
     >
       <HugeiconsIcon icon={Location01Icon} />
       {count}

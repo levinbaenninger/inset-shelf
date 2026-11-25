@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { tooltipText, Truncated } from "@/shared/clamp";
 
+import { fileSizeText } from "./format";
 import type { RowList } from "./row-parts";
 
 // Attachments on an item: the tiles a row shows, and everything details show of them.
@@ -41,14 +42,6 @@ export interface AttachmentAdders {
   readonly newDrawing: () => void;
 }
 
-const FILE_SIZE = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 1,
-  notation: "compact",
-  style: "unit",
-  unit: "byte",
-  unitDisplay: "narrow",
-});
-
 const pinCount = (count: number): string =>
   count === 1 ? "1 pin" : `${count} pins`;
 
@@ -57,7 +50,7 @@ export const attachmentLabel = (attachment: Attachment): string => {
   const name = attachmentName(attachment);
 
   if (attachment.kind === "file") {
-    return `${name} · ${FILE_SIZE.format(attachment.file.bytes)}`;
+    return `${name} · ${fileSizeText(attachment.file.bytes)}`;
   }
 
   const what = attachment.scene?.base === null ? "Drawing" : "Picture";

@@ -329,7 +329,8 @@ export const WindowStrip = ({
         <Button
           aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
           onClick={onMore}
-          size="icon-sm"
+          // As tall as icon-sm, and as wide as "+25" needs.
+          size="sm"
           variant="quiet"
         >
           +{more}
