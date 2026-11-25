@@ -11,7 +11,7 @@ import type {
 } from "@shared/contracts";
 import { parseSearch } from "@shared/due";
 import type { MenuChoice } from "@shared/menus";
-import { groupItems, itemText, UNDO_MAX } from "@shared/shelf";
+import { ATTACHMENTS_MAX, groupItems, itemText, UNDO_MAX } from "@shared/shelf";
 import type {
   ItemId,
   SectionId,
@@ -79,6 +79,8 @@ import {
   togglePick,
 } from "./selection";
 import { ShortcutSheet } from "./shortcut-sheet";
+import { useAttachDrop } from "./use-attach-drop";
+import type { AttachTarget, RowDropLook } from "./use-attach-drop";
 import { useDetails } from "./use-details";
 import type { Details } from "./use-details";
 import { useItemDrag } from "./use-item-drag";
@@ -322,6 +324,79 @@ const addDataFiles = async (files: readonly File[]): Promise<void> => {
   );
 };
 
+/** Files for one item, by path when they have one, else as image bytes, one after another; null when none can be attached. */
+const attachDataFiles = async (
+  id: ItemId,
+  files: readonly File[]
+): Promise<ActionResult | null> => {
+  const paths = files.flatMap((file) => {
+    const found = filePath(file);
+
+    return found === "" ? [] : [found];
+  });
+
+  if (paths.length > 0) {
+    return await api.addFilesTo({ id, paths });
+  }
+
+  const images = await Promise.all(
+    files.flatMap((file) =>
+      file.type.startsWith("image/")
+        ? [file.arrayBuffer().then((buffer) => new Uint8Array(buffer))]
+        : []
+    )
+  );
+
+  let result: ActionResult | null = null;
+
+  for (const bytes of images) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, so what fits is what came first.
+    const next = await api.pasteImageTo({ bytes, id });
+
+    result = result === null || result.ok ? next : result;
+  }
+
+  return result;
+};
+
+/** A drop on an item that holds all it can: refused, and said why while the files are over it. */
+const fullToast = (item: ShelfItem): void => {
+  toast.error(
+    `This item holds ${ATTACHMENTS_MAX} attachments, the most it can`,
+    {
+      description: <Excerpt item={item} />,
+      duration: NOTICE_MS,
+      id: "attach-full",
+    }
+  );
+};
+
+/** The window's ring while files are over it, unless a row is their target. */
+const dropRing = (over: boolean, target: AttachTarget): string | null =>
+  over && target === null ? "ring-pin ring-2 ring-inset" : null;
+
+/** How a row looks while files are over the shelf. */
+const dropLook = (target: AttachTarget, id: ItemId): RowDropLook => {
+  if (target?.id !== id) {
+    return "none";
+  }
+
+  return target.full ? "full" : "open";
+};
+
+/** What a screenshot card's Add to “…” goes to: the item open in details, else the one selected, never one of several picked. */
+const selectionForMain = (
+  detailsId: ItemId | undefined,
+  picked: readonly ItemId[],
+  selectedId: ItemId | null
+): ItemId | null => {
+  if (detailsId !== undefined) {
+    return detailsId;
+  }
+
+  return picked.length > 1 ? null : selectedId;
+};
+
 const hasFiles = (event: DragEvent): boolean =>
   event.dataTransfer?.types.includes("Files") === true;
 
@@ -348,6 +423,11 @@ const useFileDrops = (ownDrag: () => boolean): boolean => {
 
   const onDrop = useEffectEvent((event: DragEvent) => {
     setOver(false);
+
+    // A row took it: the files attach to that item (use-attach-drop.ts).
+    if (event.defaultPrevented) {
+      return;
+    }
 
     if (hasFiles(event) && !ownDrag()) {
       event.preventDefault();
@@ -717,7 +797,69 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     },
   });
 
-  const dropping = useFileDrops(drag.draggingOut);
+  // Kept for an Undo pressed long after the render that made its toast.
+  const latestDoc = useRef(doc);
+
+  useEffect(() => {
+    latestDoc.current = doc;
+  }, [doc]);
+
+  /** Files dropped on a row: attached, with Undo for a drop that landed on the wrong item. */
+  const attachDropped = async (
+    item: ShelfItem,
+    files: readonly File[]
+  ): Promise<void> => {
+    const before = new Set(item.attachments.map((attachment) => attachment.id));
+    const result = await attachDataFiles(item.id, files);
+
+    if (result === null) {
+      return;
+    }
+
+    if (!result.ok) {
+      toast.error(result.message, { duration: NOTICE_MS });
+
+      return;
+    }
+
+    toast(
+      files.length === 1 ? "Attached 1 file" : `Attached ${files.length} files`,
+      {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const current = latestDoc.current.items.find(
+              (other) => other.id === item.id
+            );
+
+            for (const attachment of current?.attachments ?? []) {
+              if (!before.has(attachment.id)) {
+                apply({
+                  attachmentId: attachment.id,
+                  id: item.id,
+                  type: "removeAttachment",
+                });
+              }
+            }
+          },
+        },
+        description: <Excerpt item={item} />,
+        duration: UNDO_VISIBLE_MS,
+      }
+    );
+  };
+
+  const attachDrop = useAttachDrop({
+    onDrop: (item, files) => {
+      void attachDropped(item, files);
+    },
+    onFull: fullToast,
+    ownDrag: drag.draggingOut,
+  });
+
+  const dropping = useFileDrops(
+    () => drag.draggingOut() || attachDrop.draggingOut()
+  );
 
   const sectionName =
     doc.sections.find((section) => section.id === doc.activeSectionId)?.name ??
@@ -758,6 +900,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const examples = new Set<string>(tutorial.examples);
   const detailsItem = details.item;
   const inDetails = detailsItem !== undefined;
+
+  const selection = selectionForMain(detailsItem?.id, picked, selectedId);
+
+  useEffect(() => {
+    api.selection(selection);
+  }, [selection]);
+
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useSearchHighlight(listRef, query);
@@ -1674,7 +1823,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     <div
       className={cn(
         "shelf-panel text-foreground flex h-svh flex-col rounded-xl",
-        dropping && "ring-pin ring-2 ring-inset"
+        dropRing(dropping, attachDrop.target)
       )}
       onPointerDownCapture={onPanelPointerDown}
     >
@@ -1878,7 +2027,26 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                     {group.items.map((item) => (
                       <ItemRow
                         copied={copiedId === item.id}
+                        attachments={{
+                          dragOut: (attachment) => {
+                            flushEdits();
+                            attachDrop.startDragOut();
+                            api.startAttachmentDrag({
+                              attachmentId: attachment.id,
+                              id: item.id,
+                            });
+                          },
+                          open: (attachment, pins = false) => {
+                            api.openAttachment({
+                              attachmentId: attachment.id,
+                              id: item.id,
+                              pinMode: pins,
+                            });
+                          },
+                        }}
                         dragProps={drag.itemProps(item.id, itemText(item))}
+                        dropProps={attachDrop.rowProps(item)}
+                        dropLook={dropLook(attachDrop.target, item.id)}
                         dragging={drag.draggingId === item.id}
                         example={examples.has(item.id)}
                         onPick={(mode) => {

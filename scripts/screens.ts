@@ -4686,6 +4686,416 @@ const PILL_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map((scene) => stress({ page: "toast", ...scene }));
 
+// Attachments on an item (release/ux-rounds/plans/attachments.md, section 6)
+
+/** An attached picture: one of the sample windows, or a file that isn't in the data folder. */
+const attachedImage = (n: number, name: string, file?: string) => {
+  const win = SAMPLE_WINDOWS[n % SAMPLE_WINDOWS.length] ?? SAMPLE_WINDOWS[0];
+
+  return {
+    addedAt: ago(5),
+    id: uuid(900 + n),
+    image: {
+      file: file ?? png(win.n),
+      heightPx: 720,
+      pixelsPerDip: 1,
+      widthPx: 1152,
+    },
+    kind: "image",
+    name,
+    pins: [],
+  };
+};
+
+const attachedFile = (n: number, name: string, bytes = 48_000) => ({
+  addedAt: ago(5),
+  file: { bytes, name, stored: `${uuid(900 + n)}.bin` },
+  id: uuid(900 + n),
+  kind: "file",
+});
+
+/** Twelve, the most an item holds: eight pictures and four files. */
+const TWELVE = [
+  ...Array.from({ length: 8 }, (_, index) =>
+    attachedImage(index, `Screenshot ${index + 1}`)
+  ),
+  attachedFile(8, "quote-2026-114.pdf", 2_480_000),
+  attachedFile(9, "floor-plan-level-3.dwg"),
+  attachedFile(10, "budget.xlsx", 96_000),
+  attachedFile(11, "notes"),
+];
+
+const LONG_NAME =
+  `${"Angebot-Bueromoebel-Lieferung-und-Montage-dritter-Stock-".repeat(4)}Endfassung.pdf`.slice(
+    -255
+  );
+
+/** File names at the edges: 255 characters, one word without spaces, a long extension. */
+const LONG_NAMES = [
+  attachedFile(20, LONG_NAME),
+  attachedFile(21, `${LONG_WORD}${LONG_WORD}.txt`),
+  attachedFile(22, "export.backup-before-the-move-2026"),
+  attachedImage(23, LONG_TITLE),
+];
+
+const ATTACH_TEXT = {
+  ...base(901, 45),
+  attachments: TWELVE,
+  html: null,
+  kind: "text",
+  links: [],
+  text: "Movers' damage report: photos of every scratch, and the forms they sent",
+  via: "typed",
+};
+
+const ATTACH_IMAGE = {
+  ...IMAGE,
+  ...base(902, 44),
+  attachments: TWELVE,
+  image: LOGIN,
+  kind: "image",
+  note: "The sign-in screen with the problems marked",
+  pins: IMAGE.pins,
+  source: IMAGE.source,
+  title: null,
+  via: "screenshot",
+};
+
+const ATTACH_EVERYTHING = {
+  ...FULL,
+  attachments: TWELVE,
+  due: isoDay(-400),
+  id: uuid(903),
+};
+
+const ATTACH_LONG = {
+  ...base(904, 40),
+  attachments: LONG_NAMES,
+  html: null,
+  kind: "text",
+  links: [],
+  text: "The files Rieder sent with the quote",
+  via: "typed",
+};
+
+const ATTACH_MISSING = {
+  ...base(905, 35),
+  attachments: [
+    attachedImage(30, "Deleted by hand", `${uuid(999)}.png`),
+    attachedImage(31, "Still there"),
+  ],
+  html: null,
+  kind: "text",
+  links: [],
+  text: "A picture whose file was deleted outside the app",
+  via: "typed",
+};
+
+const ATTACH_TWO = {
+  ...base(906, 30),
+  attachments: [attachedImage(40, "Before"), attachedFile(41, "after.pdf")],
+  html: null,
+  kind: "text",
+  links: [],
+  text: "Chair arm, before and after the repair",
+  via: "typed",
+};
+
+const attachDoc = (items: readonly object[]) => ({
+  ...DOC,
+  items: [...items, ...ITEMS.filter((entry) => entry.id === uuid(12))],
+});
+
+const attachView = (items: readonly object[]) => ({
+  ...shelfView(),
+  doc: attachDoc(items),
+});
+
+const ROW_ATTACH_VIEW = attachView([
+  ATTACH_TEXT,
+  ATTACH_TWO,
+  ATTACH_MISSING,
+  ATTACH_LONG,
+]);
+
+/** The row's tiles and +N: how many, on one line, inside the card. */
+const stripProblem = async (
+  page: Page,
+  n: number,
+  tiles: number,
+  more: string | null
+): Promise<string | null> => {
+  const strip = z
+    .object({
+      inside: z.boolean(),
+      lines: z.number(),
+      more: z.string().nullable(),
+      tiles: z.number(),
+    })
+    .parse(
+      await item(page, n).evaluate((row) => {
+        const entries = [
+          ...row.querySelectorAll("[data-attachment-strip] > li"),
+        ];
+
+        const card = row.getBoundingClientRect();
+
+        const boxes = entries.map((entry) => entry.getBoundingClientRect());
+
+        return {
+          inside: entries.every(
+            (entry) => entry.getBoundingClientRect().right <= card.right - 1
+          ),
+          // One line: every entry overlaps every other vertically.
+          lines:
+            Math.max(...boxes.map((box) => box.top)) <
+            Math.min(...boxes.map((box) => box.bottom))
+              ? 1
+              : 2,
+          more:
+            entries
+              .find((entry) => entry.textContent?.startsWith("+"))
+              ?.textContent?.trim() ?? null,
+          tiles: entries.filter(
+            (entry) =>
+              entry.querySelector("img, svg") !== null &&
+              !entry.textContent?.startsWith("+")
+          ).length,
+        };
+      })
+    );
+
+  if (strip.tiles !== tiles || strip.more !== more) {
+    return `the row shows ${strip.tiles} tiles and ${strip.more ?? "no +N"}, not ${tiles} and ${more ?? "no +N"}`;
+  }
+
+  if (strip.lines !== 1 || !strip.inside) {
+    return "the row's tiles don't sit on one line inside the card";
+  }
+
+  return null;
+};
+
+/** The arguments of every call of one kind the page made, in order. */
+const sentArgs = async (page: Page, call: string) => {
+  const sent = await calls(page);
+
+  return sent.filter((each) => each.call === call).map((each) => each.arg);
+};
+
+/** Whether an element's classes hold the ring files over it draw. */
+const ringed = async (page: Page, selector: string): Promise<boolean> =>
+  z
+    .boolean()
+    .parse(
+      await page.evaluate(
+        `document.querySelector(${JSON.stringify(selector)})?.classList.contains("ring-pin") === true`
+      )
+    );
+
+/** Files dragged from outside over an element, as the system's drag would bring them. */
+const dragFilesOver = async (page: Page, selector: string) =>
+  z.string().parse(
+    await page.evaluate((target) => {
+      const element = document.querySelector(target);
+      const files = new DataTransfer();
+
+      files.items.add(
+        new File(["%PDF"], "offer.pdf", { type: "application/pdf" })
+      );
+
+      const over = new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: files,
+      });
+
+      element?.dispatchEvent(over);
+
+      return files.dropEffect;
+    }, selector)
+  );
+
+const ATTACHMENT_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) => await stripProblem(page, 901, 3, "+9"),
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-12-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 901);
+      },
+      check: async (page) => await stripProblem(page, 901, 3, "+9"),
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-12-open-narrow",
+      width: NARROWEST,
+    },
+    {
+      check: async (page) => await stripProblem(page, 902, 3, "+9"),
+      data: { view: attachView([ATTACH_IMAGE]) },
+      name: "attach-row-image-item-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 902);
+        await item(page, 902).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      check: async (page) => await stripProblem(page, 902, 3, "+9"),
+      data: { view: attachView([ATTACH_IMAGE]) },
+      name: "attach-row-image-item-open-narrow",
+      width: NARROWEST,
+    },
+    {
+      check: async (page) => await stripProblem(page, 903, 3, "+9"),
+      data: { view: attachView([ATTACH_EVERYTHING]) },
+      name: "attach-row-with-everything-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await item(page, 904).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      check: async (page) => {
+        const labels = await item(page, 904)
+          .locator("[data-attachment-strip] button[draggable]")
+          .evaluateAll((buttons) =>
+            buttons.map((button) => button.getAttribute("aria-label") ?? "")
+          );
+
+        return labels.length === 3 && labels[0]?.startsWith(LONG_NAME)
+          ? null
+          : `the tiles don't carry their whole names: ${JSON.stringify(labels)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-long-names",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await item(page, 905).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      check: async (page) => {
+        const shown = await item(page, 905)
+          .locator("[data-attachment-strip] [data-missing]")
+          .count();
+
+        const broken = await item(page, 905)
+          .locator("[data-attachment-strip] img")
+          .evaluateAll(
+            (images) =>
+              images.filter(
+                (image) =>
+                  image instanceof HTMLImageElement &&
+                  image.complete &&
+                  image.naturalWidth === 0
+              ).length
+          );
+
+        return shown === 1 && broken === 0
+          ? null
+          : `the missing picture shows ${shown} missing tiles and ${broken} broken images`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-missing-picture",
+    },
+    {
+      check: async (page) =>
+        (await page.locator("[data-attachment-strip]").count()) === 0
+          ? null
+          : "a shelf without attachments shows an attachment strip",
+      data: { view: shelfView() },
+      name: "attach-none-unchanged",
+    },
+    {
+      act: async (page) => {
+        await dragFilesOver(page, `[data-item-id="${uuid(906)}"]`);
+      },
+      check: async (page) => {
+        const lit = await ringed(page, `[data-item-id="${uuid(906)}"]`);
+        const panel = await ringed(page, ".shelf-panel");
+
+        const full = await dragFilesOver(page, `[data-item-id="${uuid(901)}"]`);
+
+        const said = await page.getByText(/the most it can/u).isVisible();
+
+        if (!lit || panel) {
+          return "files over a row must light the row and not the window";
+        }
+
+        return full === "none" && said
+          ? null
+          : `a full row must refuse files and say why (${full}, ${String(said)})`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-target",
+    },
+    {
+      act: async (page) => {
+        // A click on a tile selects its row and leaves the keyboard on the tile.
+        await item(page, 906)
+          .locator("[data-attachment-strip] button")
+          .first()
+          .click();
+        await page.keyboard.press("Backspace");
+      },
+      check: async (page) => {
+        const ops = await applied(page);
+
+        return ops.some((op) => op.type === "remove") &&
+          !ops.some((op) => op.type === "removeAttachment")
+          ? null
+          : `⌫ on a row tile must delete the item: ${JSON.stringify(ops)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-keys",
+    },
+    {
+      check: async (page) => {
+        const last = async () => {
+          const sent = await sentArgs(page, "selection");
+
+          return sent.at(-1);
+        };
+
+        const seen: unknown[] = [];
+
+        await select(page, 906);
+        await page.waitForTimeout(100);
+        seen.push(await last());
+        await page.keyboard.press("ArrowRight");
+        await page.getByRole("button", { name: "Back to the list" }).waitFor();
+        seen.push(await last());
+        await page.getByRole("button", { name: "Back to the list" }).click();
+        await item(page, 906).click({ modifiers: ["Meta"] });
+        await item(page, 12).click({ modifiers: ["Meta"] });
+        await page.waitForTimeout(100);
+        seen.push(await last());
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(100);
+        seen.push(await last());
+
+        const want = [uuid(906), uuid(906), null, null];
+
+        return JSON.stringify(seen) === JSON.stringify(want)
+          ? null
+          : `the selection main hears was ${JSON.stringify(seen)}, not ${JSON.stringify(want)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-selection-reported",
+    },
+  ] satisfies readonly StressScene[]
+).map(stress);
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -7456,6 +7866,7 @@ const SCENES: readonly Scene[] = [
   ...STRESS_SCENES,
   ...DRAWING_STRESS_SCENES,
   ...PILL_SCENES,
+  ...ATTACHMENT_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {

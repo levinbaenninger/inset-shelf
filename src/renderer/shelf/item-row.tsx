@@ -47,6 +47,8 @@ import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import { AttachmentStrip } from "./attachment-strip";
+import type { AttachmentHandlers } from "./attachment-strip";
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
@@ -69,6 +71,7 @@ import {
 } from "./row-look";
 import { filledSteps, moreText, rowParts } from "./row-parts";
 import type { RowExtras } from "./row-parts";
+import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
 
@@ -387,6 +390,7 @@ export interface RowHandlers {
   readonly onRetrySave: () => void;
   /** Not saved: Discard changes, or Delete for an item the disk has never held. */
   readonly onDiscardChanges: () => void;
+  readonly attachments: AttachmentHandlers;
 }
 
 export interface ItemRowProps extends RowHandlers {
@@ -408,6 +412,10 @@ export interface ItemRowProps extends RowHandlers {
   readonly now: Date;
   /** A failed save left this item's changes unwritten. */
   readonly notSaved: NotSavedItem | undefined;
+  /** Files from outside dropped on the card attach to it (use-attach-drop.ts). */
+  readonly dropProps: RowDropProps;
+  /** Files are over the card: it lights as their target, or refuses them when full. */
+  readonly dropLook: RowDropLook;
 }
 
 /** What an item is called on its row's buttons: its words, or its title when it has one. */
@@ -1070,6 +1078,12 @@ const OpenFooter = ({
   </div>
 );
 
+const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
+  full: "ring-destructive/50 ring-2 ring-inset",
+  none: null,
+  open: "bg-pin/10 ring-pin ring-2 ring-inset",
+};
+
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
   const parts = rowParts(item, selected);
@@ -1084,7 +1098,8 @@ export const ItemRow = (props: ItemRowProps) => {
           ? "border-primary"
           : "border-foreground/10 hover:border-foreground/20",
         props.picked && "bg-primary/10",
-        props.dragging && "opacity-40"
+        props.dragging && "opacity-40",
+        DROP_LOOK[props.dropLook]
       )}
       data-item-id={item.id}
       // A modified click picks instead of opening; caught before the card's own buttons see it.
@@ -1099,6 +1114,7 @@ export const ItemRow = (props: ItemRowProps) => {
       }}
       // A text field inside keeps ordinary text dragging.
       {...(editing ? {} : props.dragProps)}
+      {...props.dropProps}
       // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
       onContextMenuCapture={(event) => {
         if (!isTextField(event.target)) {
@@ -1178,6 +1194,13 @@ export const ItemRow = (props: ItemRowProps) => {
             selected={selected}
           />
         ) : null}
+        <AttachmentStrip
+          attachments={item.attachments}
+          handlers={props.attachments}
+          onMore={props.onShowDetails}
+          onSelect={props.onSelect}
+          strip={parts.strip}
+        />
         {parts.extras === null ? null : (
           <Expansion
             extras={parts.extras}
