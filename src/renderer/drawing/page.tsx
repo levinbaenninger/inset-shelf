@@ -257,6 +257,9 @@ const gestureCursor = (gesture: Gesture, tool: Tool): string => {
     : TOOL_CURSOR[tool];
 };
 
+/** The Text tool's field is never narrower than this, near the page's right edge too: a few words stay readable. */
+const TEXT_MIN_WIDTH = 160;
+
 const TextField = ({
   dark,
   draft,
@@ -322,8 +325,11 @@ const TextField = ({
     <input
       aria-label="Text"
       // Never closer than 12 px to the page's right edge: longer words scroll inside the field instead of the window.
-      className="absolute top-(--y) left-(--x) field-sizing-content max-w-[calc(100%-var(--x)-12px)] min-w-4 bg-transparent [mask-image:linear-gradient(to_right,transparent,#000_var(--fade-in),#000_calc(100%-var(--fade-out)),transparent)] p-0 font-(family-name:--font) text-(length:--size) leading-tight font-normal text-(color:--ink) outline-none"
-      onBlur={() => {
+      // Near that edge the field moves left to stay at least --min wide; the words are still drawn where you clicked.
+      className="absolute top-(--y) left-[min(var(--x),calc(100%-12px-var(--min)))] field-sizing-content max-w-[max(calc(100%-var(--x)-12px),var(--min))] min-w-(--min) bg-transparent [mask-image:linear-gradient(to_right,transparent,#000_var(--fade-in),#000_calc(100%-var(--fade-out)),transparent)] p-0 font-(family-name:--font) text-(length:--size) leading-tight font-normal text-(color:--ink) outline-none"
+      onBlur={(event) => {
+        // Typed, the field follows the caret; done, it shows the line from its start.
+        event.currentTarget.scrollLeft = 0;
         onCommit(true);
       }}
       onChange={(event) => {
@@ -347,6 +353,7 @@ const TextField = ({
         "--fade-out": scrolled.end ? "1.5em" : "0px",
         "--font": TEXT_FONT,
         "--ink": inkColor(draft.color, dark),
+        "--min": `min(${TEXT_MIN_WIDTH}px, calc(100% - 24px))`,
         "--size": `${draft.size * view.scale}px`,
         "--x": `${at.x}px`,
         "--y": `${at.y}px`,
