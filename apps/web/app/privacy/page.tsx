@@ -79,6 +79,13 @@ const Privacy = () => (
         <code>settings.json</code> next to it.
       </li>
       <li>
+        Next to it, <code>shelf.json.prev</code> keeps the shelf as it was
+        before the last save, so an item you deleted stays there until the next
+        save, and its images and files until the app starts after that. If the
+        app ever can’t read the shelf at launch, it keeps that file as{" "}
+        <code>shelf.unreadable-&lt;date&gt;.json</code> and starts a new one.
+      </li>
+      <li>
         On macOS they are in{" "}
         <code>~/Library/Application Support/Inset Shelf</code>, on Windows in{" "}
         <code>%APPDATA%\Inset Shelf</code>.
@@ -115,8 +122,9 @@ const Privacy = () => (
       Under the revDSG you can ask what data about you is processed, and have it
       corrected or deleted. This website keeps no data about you itself; for the
       request logs, Cloudflare is the place to ask. To delete everything the app
-      stored, quit it and delete its folder named above. Write to{" "}
-      <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> with any request.
+      stored, quit it and delete its folder named above, with these copies.
+      Write to <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> with any
+      request.
     </p>
 
     <h2>Changes</h2>
