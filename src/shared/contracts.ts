@@ -5,6 +5,7 @@ import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
 import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
 import type { OnboardingView } from "./onboarding";
+import type { PillView } from "./pill";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import {
@@ -249,12 +250,10 @@ export type NoticeCorner =
   | "bottom-left"
   | "bottom-right";
 
-export interface ToastView {
-  readonly corner: NoticeCorner;
-  readonly title: string;
-  readonly seq: number;
-  readonly tone: NoticeTone;
-}
+/** What the pill shows (src/shared/pill.ts). */
+export type ToastView = PillView;
+
+export type { PillView } from "./pill";
 
 /** A new screenshot on its card beside the shelf. */
 export interface ScreenshotView {

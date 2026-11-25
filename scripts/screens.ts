@@ -4059,9 +4059,11 @@ const STRESS_SCENES: readonly Scene[] = (
       data: {
         view: {
           corner: "bottom-right",
+          kind: "notice",
           seq: 1,
           title: `Saved to ${SECTION_PHRASE}`,
           tone: "done",
+          why: false,
         },
       },
       name: "stress-notice-done",
@@ -4071,9 +4073,11 @@ const STRESS_SCENES: readonly Scene[] = (
       data: {
         view: {
           corner: "top-left",
+          kind: "notice",
           seq: 1,
           title: `Zwischenablage wiederhergestellt, aber die Bildschirmaufnahme und Systemaudio konnten nicht gespeichert werden, weil ${LONG_WORD} den Datenträger blockiert.`,
           tone: "failed",
+          why: false,
         },
       },
       height: 72,

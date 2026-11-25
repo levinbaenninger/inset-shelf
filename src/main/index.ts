@@ -642,6 +642,15 @@ const start = async (): Promise<void> => {
   });
 
   const toast = createToastWindow({
+    openShelf: (item) => {
+      void (async () => {
+        await showShelf();
+
+        if (item !== null) {
+          controller.focus(item);
+        }
+      })();
+    },
     preload: preloadPath("toast"),
     url: pageUrl("toast"),
   });
@@ -819,7 +828,12 @@ const start = async (): Promise<void> => {
               candidate.id === controller.view().doc.activeSectionId
           );
 
-        toast.show(`Saved to ${section?.name ?? "the shelf"}`, "done", id);
+        toast.send({
+          item: id,
+          text: result.text,
+          title: `Saved to ${section?.name ?? "the shelf"}`,
+          type: "captured",
+        });
       }
     } finally {
       capturingSelection = false;
@@ -963,7 +977,7 @@ const start = async (): Promise<void> => {
     message,
     tone = "done"
   ) => {
-    toast.show(message, tone);
+    toast.send({ title: message, tone, type: "notified" });
   };
 
   const pickFiles = async (): Promise<void> => {
@@ -1961,22 +1975,10 @@ const start = async (): Promise<void> => {
     {
       getView: () => toast.view(),
       hover: (on) => {
-        toast.hover(on);
+        toast.send({ on, type: "hover" });
       },
       open: (seq) => {
-        const taken = toast.take(seq);
-
-        if (taken === null) {
-          return;
-        }
-
-        void (async () => {
-          await showShelf();
-
-          if (taken.item !== null) {
-            controller.focus(taken.item);
-          }
-        })();
+        toast.send({ seq, type: "opened" });
       },
     },
     {
@@ -2068,7 +2070,7 @@ const start = async (): Promise<void> => {
     if (shelf.isVisible()) {
       shelfServer.emit("notice", { message, tone });
     } else {
-      toast.show(message, tone);
+      toast.send({ title: message, tone, type: "notified" });
     }
   };
 
@@ -2267,7 +2269,7 @@ const start = async (): Promise<void> => {
     toastServer.emit("view", view);
   });
   shelf.onShown((bounds) => {
-    toast.hide();
+    toast.send({ type: "shelfShown" });
     e2eLog("shelfShown", { bounds });
     refreshTray();
   });
