@@ -26,7 +26,7 @@ import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
-import { secondTap, withWhy } from "@shared/pill";
+import { secondTap } from "@shared/pill";
 import { hereOf } from "@shared/recall";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import {
@@ -161,6 +161,7 @@ import { createTutorialStore } from "./tutorial/store";
 import { createTutorial } from "./tutorial/tutorial";
 import { updateNotice } from "./update-state";
 import { createUpdater } from "./updater";
+import { createWhySave } from "./why-save";
 import { createWindowLinker } from "./window-links";
 import {
   appOrigin,
@@ -774,29 +775,18 @@ const start = async (): Promise<void> => {
       // oxlint-disable-next-line no-use-before-define -- recall watches input, so it is made with the key monitor.
       recall.ended(place, how);
     },
-    // Say why: the words go after what the item's description already says; the pill says so once the disk holds them.
-    saveWhy: async (item, text) => {
-      const saved = controller.item(item);
-
-      if (saved === undefined) {
-        return { kind: "gone" };
-      }
-
-      controller.apply({
-        description: withWhy(saved.description, text),
-        id: item,
-        type: "setDescription",
-      });
-
-      const written = await withinWait(
-        controller.persisted(controller.snapshot().rev),
-        setTimer
-      );
-
-      return written.ok
-        ? { kind: "saved" }
-        : { kind: "failed", message: written.message };
-    },
+    // Say why: the pill says so once the disk holds the words.
+    saveWhy: createWhySave({
+      describe: (id, description) => {
+        controller.apply({ description, id, type: "setDescription" });
+      },
+      item: controller.item,
+      written: async () =>
+        await withinWait(
+          controller.persisted(controller.snapshot().rev),
+          setTimer
+        ),
+    }),
     url: pageUrl("toast"),
   });
 
