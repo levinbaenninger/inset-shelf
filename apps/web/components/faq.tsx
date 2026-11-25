@@ -74,9 +74,13 @@ export const Faq = () => (
             <AccordionTrigger className="py-5 text-[17px] tracking-[-0.015em] hover:no-underline">
               {item.q}
             </AccordionTrigger>
-            <AccordionContent className="text-muted-foreground max-w-[60ch] pb-6 text-[15px] leading-6">
+            <AccordionContent className="text-muted-foreground max-w-[60ch] pb-6 text-[15px] leading-6 noscript:hidden">
               {item.a}
             </AccordionContent>
+            {/* The accordion renders only the open answer, so a browser without scripts gets every answer here. */}
+            <p className="text-muted-foreground hidden max-w-[60ch] pb-6 text-[15px] leading-6 noscript:block">
+              {item.a}
+            </p>
           </AccordionItem>
         ))}
       </Accordion>

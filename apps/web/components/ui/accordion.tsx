@@ -52,13 +52,13 @@ function AccordionTrigger({
           icon={ArrowDown01Icon}
           strokeWidth={2}
           data-slot="accordion-trigger-icon"
-          className="pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden"
+          className="pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden noscript:hidden"
         />
         <HugeiconsIcon
           icon={ArrowUp01Icon}
           strokeWidth={2}
           data-slot="accordion-trigger-icon"
-          className="pointer-events-none hidden shrink-0 group-aria-expanded/accordion-trigger:inline"
+          className="pointer-events-none hidden shrink-0 group-aria-expanded/accordion-trigger:inline noscript:hidden!"
         />
       </AccordionPrimitive.Trigger>
     </AccordionPrimitive.Header>
