@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { trayMenu, trayTooltip } from "./tray-menu";
 import type { TrayItem, TrayModel } from "./tray-menu";

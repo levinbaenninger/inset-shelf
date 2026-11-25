@@ -1,5 +1,5 @@
 import type { SpotlightStep } from "@shared/tutorial";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   cutOut,

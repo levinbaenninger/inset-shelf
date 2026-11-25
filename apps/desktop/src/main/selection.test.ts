@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { readableClipboard, sameClipboard } from "./clipboard-match";
 import { captureSelection } from "./selection";

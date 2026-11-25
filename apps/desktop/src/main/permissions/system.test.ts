@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { appBundlePath, bundleDisplayName, createAppTile } from "./bundle";
 import { fakeMac } from "./fakes";

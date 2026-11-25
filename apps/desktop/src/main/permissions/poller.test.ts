@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { fakeClock } from "./fakes";
 import { createPoller, FAST_POLL_MS, SLOW_POLL_MS } from "./poller";

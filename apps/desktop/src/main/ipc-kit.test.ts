@@ -7,7 +7,7 @@ import {
   send as sendSpec,
 } from "@shared/ipc";
 import type { Handlers } from "@shared/ipc";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { serveContract } from "./ipc-kit";

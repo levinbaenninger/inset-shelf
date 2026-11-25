@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { openedMarks, parseSceneFile, sceneFileText } from "./drawing-scene";
 import type { StrokeMark } from "./drawing-scene";

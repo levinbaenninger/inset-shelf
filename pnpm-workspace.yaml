@@ -3,7 +3,6 @@ packages:
   - packages/*
 minimumReleaseAgeExclude:
   - electron@45.0.0
-  - vite@8.3.5
 allowBuilds:
   electron-winstaller: false
   # Both install scripts only pick the bundled prebuilds.
@@ -12,3 +11,13 @@ allowBuilds:
   # wrangler's bundler and its local runtime: both install scripts only pick a prebuilt binary.
   esbuild: true
   workerd: true
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
+  vite-plus: 1.6.0
+overrides:
+  vite@*: "catalog:"
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

@@ -5,7 +5,7 @@ import { ItemIdSchema } from "@shared/shelf";
 import type { ItemId } from "@shared/shelf";
 import { shortcutLabels } from "@shared/shortcut";
 import { DRAWING_TOOL_KEYS, shortcutSheet } from "@shared/shortcuts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   removeShelfExamples,

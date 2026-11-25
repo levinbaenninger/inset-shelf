@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createLiveEdits, LIVE_EDIT_DELAY_MS } from "./live-edits";
 

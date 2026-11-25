@@ -1,6 +1,6 @@
 import { emptyShelf, SectionIdSchema } from "@shared/shelf";
 import type { MenuItemConstructorOptions } from "electron";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appMenuTemplate } from "./app-menu";
 import type { AppMenuActions } from "./app-menu";

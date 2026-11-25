@@ -19,7 +19,7 @@ import {
   WindowIdSchema,
 } from "@shared/shelf";
 import type { ShelfDoc, WindowRef } from "@shared/shelf";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { createShelfController } from "./shelf-controller";
 import { failNextWrite, nodeStoreFs, openShelfStore } from "./shelf-store";

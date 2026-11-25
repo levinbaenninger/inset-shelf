@@ -1,6 +1,6 @@
 import { setImmediate as tick } from "node:timers/promises";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   INITIAL_UPDATE_STATE,

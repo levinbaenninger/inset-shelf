@@ -1,5 +1,5 @@
 import type { OnboardingView, PermissionRowState } from "@shared/onboarding";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { fakeMac } from "./fakes";
 import { ACCESS, DONE, record, WELCOME } from "./flow";

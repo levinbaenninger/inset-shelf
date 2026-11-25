@@ -8,7 +8,14 @@ import type { QuitPrompt } from "@shared/contracts";
 import { parseSceneFile } from "@shared/drawing-scene";
 import type { StrokeMark } from "@shared/drawing-scene";
 import { ItemIdSchema, SectionIdSchema } from "@shared/shelf";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { createDrawingSaves } from "./drawing-save";
 import { createQuitHold, drawingMarks } from "./quit-hold";

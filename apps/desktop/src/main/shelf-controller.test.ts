@@ -9,7 +9,7 @@ import {
   WindowIdSchema,
 } from "@shared/shelf";
 import type { ShelfDoc, WindowRef } from "@shared/shelf";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createShelfController, EDIT_SAVE_DELAY_MS } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";

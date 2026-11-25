@@ -6,7 +6,7 @@ import type {
   TutorialHint,
   TutorialTask,
 } from "@shared/tutorial";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createTutorialStore, freshRecord } from "./store";
 import type { TutorialRecord } from "./store";

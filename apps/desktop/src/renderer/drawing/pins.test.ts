@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { nudgeStep, pinAt, pinIndexOf, pinMarkIndex, pinsOf } from "./pins";
 import { moveMarks } from "./selection";

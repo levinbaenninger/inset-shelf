@@ -5,7 +5,7 @@ import {
   NO_META,
 } from "@shared/shelf";
 import type { ShelfDoc } from "@shared/shelf";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appMenuTemplate } from "./app-menu";
 import type { AppMenuActions, AppMenuState } from "./app-menu";

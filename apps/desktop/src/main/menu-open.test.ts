@@ -1,5 +1,5 @@
 import type { MenuItem } from "electron";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import type { KeyInput, MenuNode } from "./menu-keys";
 import {

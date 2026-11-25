@@ -1,5 +1,5 @@
 import { WindowIdSchema, WindowRefSchema } from "@shared/shelf";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { windowRef } from "./window-ref";
 

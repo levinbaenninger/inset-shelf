@@ -3,6 +3,7 @@ out/
 dist/
 release/
 coverage/
+.vitest/
 *.log
 .DS_Store
 .env*

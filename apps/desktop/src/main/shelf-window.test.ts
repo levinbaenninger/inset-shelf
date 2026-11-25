@@ -4,7 +4,7 @@ import { setImmediate } from "node:timers/promises";
 import { compileFunction } from "node:vm";
 
 import type { QuitAnswer, QuitPrompt } from "@shared/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createPageSettle, followPage } from "./page-settle";
 import { createQuitHold } from "./quit-hold";

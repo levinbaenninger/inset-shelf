@@ -4,7 +4,7 @@ import { setImmediate } from "node:timers/promises";
 import type { QuitAnswer, QuitPrompt } from "@shared/contracts";
 import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
 import type { ItemId, ShelfDoc } from "@shared/shelf";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createPageSettle, followPage } from "./page-settle";
 import {
