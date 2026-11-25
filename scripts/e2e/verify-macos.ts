@@ -1290,6 +1290,41 @@ const checkSayWhy = async (): Promise<void> => {
     );
   }
 
+  // A key pressed right after Return, while the words are written: where does it land?
+  const burstText = "Why trial burst sentence";
+
+  if (await showSource(burstText, "all")) {
+    const mark = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("itemAdded", mark);
+
+    const second = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("whyOpened", second, Date.now() + 3000);
+    guardedKeys(() => {
+      input("type", "because");
+      input("key", RETURN);
+      input("type", "z");
+    });
+    await waitFor("whySaved", second, Date.now() + 5000);
+    await delay(400);
+    record(
+      "say why: a key pressed with Return reaches the source once the words are saved, or is said lost",
+      sourceText().includes("z") &&
+        itemWith(burstText)[0]?.description === "because",
+      JSON.stringify({
+        description: itemWith(burstText)[0]?.description,
+        source: sourceText(),
+      })
+    );
+  }
+
   // Unused: a capture with no second Double Shift costs nothing.
   const plainText = "Why trial unused sentence";
 
