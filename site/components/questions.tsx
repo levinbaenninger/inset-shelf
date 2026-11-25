@@ -14,7 +14,7 @@ const QUESTIONS = [
   },
   {
     q: "How does the download update?",
-    a: "It checks for a newer build at launch and every four hours, and installs it when you restart or quit.",
+    a: "The Mac builds and the Windows installer check for a newer build at launch and every four hours. The portable Windows zip does not update itself.",
     // left out from 1024 to 1279px, where four answers fill the screen
     wideOnly: true,
   },
@@ -42,20 +42,36 @@ export function Questions() {
           <div className="flex flex-col gap-3">
             {PLATFORMS.map((platform) => (
               <p key={platform.icon} className="flex items-center gap-3">
-                <img src={`/icons/${platform.icon}.svg`} alt="" width={platform.w} height={32} loading="lazy" className="h-8 w-auto" />
+                <img
+                  src={`/icons/${platform.icon}.svg`}
+                  alt=""
+                  width={platform.w}
+                  height={32}
+                  loading="lazy"
+                  className="h-8 w-auto"
+                />
                 {platform.label}
               </p>
             ))}
           </div>
           <a href={SOURCE.href} className="link-draw group font-medium">
-            {SOURCE.label} <span aria-hidden="true" className="inline-block transition-transform group-hover:translate-x-[3px]">→</span>
+            {SOURCE.label}{" "}
+            <span
+              aria-hidden="true"
+              className="inline-block transition-transform group-hover:translate-x-[3px]"
+            >
+              →
+            </span>
           </a>
         </div>
         <dl className="col-span-12 sm:col-span-7 sm:col-start-6 lg:col-span-6 lg:col-start-7">
           {QUESTIONS.map((item) => (
             <div
               key={item.q}
-              className={cn("grid gap-2 border-b py-5 first:pt-0", item.wideOnly && "lg:max-xl:hidden")}
+              className={cn(
+                "grid gap-2 border-b py-5 first:pt-0",
+                item.wideOnly && "lg:max-xl:hidden",
+              )}
             >
               <dt className="text-lead font-medium">{item.q}</dt>
               <dd className="text-foreground/85">{item.a}</dd>
