@@ -59,6 +59,7 @@ import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
 import { focusRow, ItemRow } from "./item-row";
+import { keptItems } from "./kept-items";
 import { Markdown } from "./markdown";
 import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
@@ -101,10 +102,21 @@ onMenusOpen((open) => {
 const COPIED_MS = 1400;
 const UNDO_VISIBLE_MS = 6000;
 
-const load = async (): Promise<ShelfView> => await api.getView();
+// The last shelf the page took, so the next keeps the items that didn't change (kept-items.ts).
+let held: ShelfView | null = null;
+
+const keep = (view: ShelfView): ShelfView => {
+  held = { ...view, doc: keptItems(held?.doc, view.doc) };
+
+  return held;
+};
+
+const load = async (): Promise<ShelfView> => keep(await api.getView());
 
 const subscribe = (listener: (view: ShelfView | null) => void) =>
-  api.on("view", listener);
+  api.on("view", (view) => {
+    listener(view === null ? null : keep(view));
+  });
 
 const apply = (op: ShelfOp): void => {
   api.apply(op);
