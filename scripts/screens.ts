@@ -6660,13 +6660,8 @@ const SCENES: readonly Scene[] = [
           "a step's checkbox",
           row.getByRole("checkbox", { name: /^(?:Done|Not done): /u }).first(),
         ],
-        [
-          "a window",
-          row
-            .getByRole("list", { name: "Linked windows" })
-            .getByRole("button")
-            .first(),
-        ],
+        // At 60% of the list its windows give way to the line that counts them.
+        ["the more line", row.getByRole("button", { name: /more steps/u })],
         ["Details", row.getByRole("button", { name: "Show details" })],
         ["⋯", row.getByRole("button", { exact: true, name: "More" })],
       ]);
