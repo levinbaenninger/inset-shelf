@@ -7123,8 +7123,9 @@ const ProblemsSchema = z.array(z.string());
  * What breaks at the edges, anywhere on the page, menus and notices
  * included (scripts/fixtures/screens-layout.js): a box past the window's
  * sides, a menu entry outside its menu, words cut off sideways without an
- * ellipsis, an ellipsis with no title that holds the whole text, and two
- * controls that partly cover each other.
+ * ellipsis, an ellipsis with no title that holds the whole text, a field the
+ * keyboard isn't in that hides part of its words, words squeezed into a
+ * column under 4ch, and two controls that partly cover each other.
  */
 const strictProblems = async (page: Page): Promise<readonly string[]> =>
   ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));
