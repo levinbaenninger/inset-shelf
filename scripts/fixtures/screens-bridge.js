@@ -64,6 +64,9 @@ globalThis.__applied = [];
 /** Every operation and copy the shelf asked main for, in order: `{ call: "copy", arg: id }`. */
 globalThis.__calls = [];
 
+/** Every item the shelf page told main it has selected or open in details, in order. */
+globalThis.__selection = [];
+
 const logged = (call, answer) => (arg) => {
   // A call without an argument logs null, so the log reads back as JSON.
   globalThis.__calls.push({ arg: arg ?? null, call });
@@ -321,7 +324,10 @@ if (page === "shelf") {
       openAttachment: logged("openAttachment", nothing),
       pasteImageTo: logged("pasteImageTo", ok),
       pickFilesFor: logged("pickFilesFor", nothing),
-      selection: logged("selection", nothing),
+      // A report, not an action: kept apart, so scenes that compare what the page asked for stay exact.
+      selection: (id) => {
+        globalThis.__selection.push(id);
+      },
       startAttachmentDrag: logged("startAttachmentDrag", nothing),
     },
     nothing

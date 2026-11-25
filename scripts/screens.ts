@@ -5061,11 +5061,11 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
     },
     {
       check: async (page) => {
-        const last = async () => {
-          const sent = await sentArgs(page, "selection");
-
-          return sent.at(-1);
-        };
+        const last = async () =>
+          z
+            .array(z.string().nullable())
+            .parse(await page.evaluate("globalThis.__selection"))
+            .at(-1);
 
         const seen: unknown[] = [];
 
