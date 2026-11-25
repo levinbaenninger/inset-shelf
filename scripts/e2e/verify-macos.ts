@@ -1219,6 +1219,8 @@ const sayWhyTrial = async (
  * without opening the field or taking a key.
  */
 const checkSayWhyFailed = async (): Promise<void> => {
+  await hideShelf();
+
   const text = "Why trial failing disk sentence";
 
   if (!(await showSource(text, "all"))) {
@@ -1294,6 +1296,9 @@ const checkSayWhyFailed = async (): Promise<void> => {
 const SAY_WHY_TRIALS = 20;
 
 const checkSayWhy = async (): Promise<void> => {
+  // The notice that offers the why field shows only while the shelf is hidden.
+  await hideShelf();
+
   const failures: string[] = [];
 
   for (let n = 1; n <= SAY_WHY_TRIALS; n += 1) {
@@ -1674,11 +1679,8 @@ const main = async (): Promise<void> => {
       await showSource("", "none");
       await checkReopenCaret();
     } else if (only === "say-why") {
-      // The notice that offers the why field shows only while the shelf is hidden.
-      await hideShelf();
       await checkSayWhy();
     } else if (only === "say-why-failed") {
-      await hideShelf();
       await checkSayWhyFailed();
     } else if (only === "recall") {
       app = await checkRecall(app);
