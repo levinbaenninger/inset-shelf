@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { itemsFrom, onlyItems, pageKey, placeOf, samePlace } from "./recall";
-import type { PlaceSource } from "./recall";
+import {
+  AWAY_MS,
+  GAP_MS,
+  INITIAL_RECALL,
+  itemsFrom,
+  onlyItems,
+  pageKey,
+  placeOf,
+  samePlace,
+  stepRecall,
+} from "./recall";
+import type { PlaceKey, PlaceSource, RecallEvent, RecallState } from "./recall";
 import {
   applyOp,
   emptyShelf,
@@ -401,5 +411,183 @@ describe(onlyItems, () => {
     expect(groups[0]?.items.map((item) => item.id)).toStrictEqual(
       ids.slice(0, 1)
     );
+  });
+});
+
+const MINUTE = 60_000;
+
+const place = (name: string): PlaceKey => {
+  const key = placeOf(source({ app: "Notes", title: name }));
+
+  if (key === null) {
+    throw new Error(`no place for ${name}`);
+  }
+
+  return key;
+};
+
+const PR_PAGE = place("Pull request 12");
+const EDITOR = place("Editor window");
+const OTHER = place("Other window");
+const ONE = [ItemIdSchema.parse(uuid(40))];
+const TWO = [...ONE, ItemIdSchema.parse(uuid(41))];
+
+type Step =
+  | readonly ["at", number, PlaceKey | null, (readonly (typeof ONE)[number][])?]
+  | readonly ["ended", PlaceKey, "opened" | "dismissed" | "ignored"];
+
+/** The minutes at which a pill showed, for front windows read at those minutes. */
+const shown = (steps: readonly Step[], from: RecallState = INITIAL_RECALL) => {
+  let state = from;
+  const at: number[] = [];
+
+  for (const step of steps) {
+    const event: RecallEvent =
+      step[0] === "at"
+        ? {
+            at: step[1] * MINUTE,
+            ids: step[3] ?? ONE,
+            place: step[2],
+            type: "arrived",
+          }
+        : { how: step[2], place: step[1], type: "ended" };
+
+    const next = stepRecall(state, event);
+
+    ({ state } = next);
+
+    if (next.show && event.type === "arrived") {
+      at.push(event.at / MINUTE);
+    }
+  }
+
+  return at;
+};
+
+describe(stepRecall, () => {
+  it("shows once per visit, however often the window is read", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["at", 1, PR_PAGE],
+        ["at", 30, PR_PAGE],
+      ])
+    ).toStrictEqual([0]);
+  });
+
+  it("shows nothing for a place no open item came from", () => {
+    expect(shown([["at", 0, PR_PAGE, []]])).toStrictEqual([]);
+  });
+
+  it("stays quiet on a return within 10 minutes and shows after", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["at", 1, EDITOR, []],
+        ["at", 5, PR_PAGE],
+        ["at", 6, EDITOR, []],
+        ["at", 17, PR_PAGE],
+      ])
+    ).toStrictEqual([0, 17]);
+  });
+
+  it("counts away from when the place was left, not when it came", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["at", 30, EDITOR, []],
+        ["at", 35, PR_PAGE],
+      ])
+    ).toStrictEqual([0]);
+  });
+
+  it("waits an hour after one ignored pill and four after two", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["ended", PR_PAGE, "ignored"],
+        ["at", 1, EDITOR, []],
+        ["at", 30, PR_PAGE],
+        ["at", 31, EDITOR, []],
+        ["at", 92, PR_PAGE],
+        ["ended", PR_PAGE, "ignored"],
+        ["at", 93, EDITOR, []],
+        ["at", 200, PR_PAGE],
+        ["at", 201, EDITOR, []],
+        ["at", 442, PR_PAGE],
+      ])
+    ).toStrictEqual([0, 92, 442]);
+    expect(AWAY_MS).toStrictEqual([10 * MINUTE, 60 * MINUTE, 240 * MINUTE]);
+  });
+
+  it("mutes a place after three ignored pills", () => {
+    const visits: Step[] = [0, 1000, 2000, 3000, 4000].flatMap((minute) => [
+      ["at", minute, PR_PAGE] as const,
+      ["ended", PR_PAGE, "ignored"] as const,
+      ["at", minute + 1, EDITOR, []] as const,
+    ]);
+
+    expect(shown(visits)).toStrictEqual([0, 1000, 2000]);
+  });
+
+  it("mutes a place at once with the close button", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["ended", PR_PAGE, "dismissed"],
+        ["at", 1, EDITOR, []],
+        ["at", 500, PR_PAGE],
+      ])
+    ).toStrictEqual([0]);
+  });
+
+  it("unmutes a place when its items change, still only after it was away", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["ended", PR_PAGE, "dismissed"],
+        ["at", 1, EDITOR, []],
+        ["at", 5, PR_PAGE, TWO],
+        ["at", 6, EDITOR, []],
+        ["at", 20, PR_PAGE, TWO],
+      ])
+    ).toStrictEqual([0, 20]);
+  });
+
+  it("keeps two pills at least 2 minutes apart, wherever they are", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["at", 1, EDITOR],
+        ["at", 1.5, OTHER],
+        ["at", 2, PR_PAGE, []],
+        ["at", 2.5, OTHER],
+      ])
+    ).toStrictEqual([0]);
+    expect(GAP_MS).toBe(2 * MINUTE);
+  });
+
+  it("forgets ignored pills when one is clicked", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["ended", PR_PAGE, "ignored"],
+        ["at", 1, EDITOR, []],
+        ["at", 62, PR_PAGE],
+        ["ended", PR_PAGE, "opened"],
+        ["at", 63, EDITOR, []],
+        ["at", 74, PR_PAGE],
+      ])
+    ).toStrictEqual([0, 62, 74]);
+  });
+
+  it("treats a window that is no place as leaving the last one", () => {
+    expect(
+      shown([
+        ["at", 0, PR_PAGE],
+        ["at", 1, null],
+        ["at", 20, PR_PAGE],
+      ])
+    ).toStrictEqual([0, 20]);
   });
 });

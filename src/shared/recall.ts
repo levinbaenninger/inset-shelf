@@ -258,3 +258,169 @@ export const onlyItems = (
 
     return items.length > 0 ? [{ ...group, items }] : [];
   });
+
+// When the pill shows. Everything here lives in memory and is gone when the app quits.
+
+const MINUTE = 60_000;
+
+/** How long a place must have been away before it is recalled again: after 0, 1 and 2 ignored pills. */
+export const AWAY_MS: readonly [number, number, number] = [
+  10 * MINUTE,
+  60 * MINUTE,
+  240 * MINUTE,
+];
+
+/** No two recall pills closer than this, wherever they are: a walk through five matching tabs shows one. */
+export const GAP_MS = 2 * MINUTE;
+
+/** Ignored pills that mute a place, until its items change. */
+export const MUTE_AFTER = 3;
+
+/** The most places remembered; the longest unseen go first. */
+const PLACES_MAX = 500;
+
+export interface PlaceMemory {
+  /** When the place was last in front: when it was left, or is still in front. */
+  readonly lastSeenAt: number;
+  /** Pills for this place that hid unused since the last click or change of items. */
+  readonly ignored: number;
+  /** The matching item ids, joined. A change unmutes the place and forgets its ignored pills. */
+  readonly itemsKey: string;
+  readonly muted: boolean;
+}
+
+export interface RecallState {
+  /** The place in front now. */
+  readonly here: PlaceKey | null;
+  readonly places: ReadonlyMap<PlaceKey, PlaceMemory>;
+  readonly lastShownAt: number | null;
+}
+
+export const INITIAL_RECALL: RecallState = {
+  here: null,
+  lastShownAt: null,
+  places: new Map(),
+};
+
+export type RecallEvent =
+  /** A front window was read: the place it is, or null when it is none, with the open items from it. */
+  | {
+      readonly type: "arrived";
+      readonly place: PlaceKey | null;
+      readonly ids: readonly ItemId[];
+      readonly at: number;
+    }
+  /** The pill for `place` went: clicked, closed with its button, or left alone. */
+  | {
+      readonly type: "ended";
+      readonly place: PlaceKey;
+      readonly how: "opened" | "dismissed" | "ignored";
+    };
+
+const awayFor = (memory: PlaceMemory): number =>
+  AWAY_MS[Math.min(memory.ignored, AWAY_MS.length - 1)] ?? AWAY_MS[2];
+
+/** The map with one place changed, at most PLACES_MAX long. */
+const remember = (
+  places: ReadonlyMap<PlaceKey, PlaceMemory>,
+  place: PlaceKey,
+  memory: PlaceMemory
+): ReadonlyMap<PlaceKey, PlaceMemory> => {
+  const next = new Map(places);
+
+  next.delete(place);
+  next.set(place, memory);
+
+  for (const oldest of next.keys()) {
+    if (next.size <= PLACES_MAX) {
+      break;
+    }
+
+    next.delete(oldest);
+  }
+
+  return next;
+};
+
+/** The next state, and whether the pill shows now. */
+export interface RecallStep {
+  readonly state: RecallState;
+  readonly show: boolean;
+}
+
+const arrive = (
+  state: RecallState,
+  event: Extract<RecallEvent, { readonly type: "arrived" }>
+): RecallStep => {
+  const { at, ids, place } = event;
+  const left = state.here === null ? undefined : state.places.get(state.here);
+
+  // The place just left was in front until now.
+  const places =
+    state.here !== null && left !== undefined && state.here !== place
+      ? remember(state.places, state.here, { ...left, lastSeenAt: at })
+      : state.places;
+
+  if (place === null) {
+    return { show: false, state: { ...state, here: null, places } };
+  }
+
+  const before = places.get(place);
+  const itemsKey = ids.join(",");
+  const changed = before !== undefined && before.itemsKey !== itemsKey;
+
+  const memory: PlaceMemory =
+    before === undefined || changed
+      ? { ignored: 0, itemsKey, lastSeenAt: at, muted: false }
+      : { ...before, lastSeenAt: at };
+
+  const show =
+    place !== state.here &&
+    ids.length > 0 &&
+    !memory.muted &&
+    (before === undefined || at - before.lastSeenAt > awayFor(memory)) &&
+    (state.lastShownAt === null || at - state.lastShownAt >= GAP_MS);
+
+  return {
+    show,
+    state: {
+      here: place,
+      lastShownAt: show ? at : state.lastShownAt,
+      places: remember(places, place, memory),
+    },
+  };
+};
+
+const end = (
+  state: RecallState,
+  event: Extract<RecallEvent, { readonly type: "ended" }>
+): RecallState => {
+  const memory = state.places.get(event.place);
+
+  if (memory === undefined) {
+    return state;
+  }
+
+  const ignored = event.how === "ignored" ? memory.ignored + 1 : memory.ignored;
+
+  const next: PlaceMemory = {
+    ...memory,
+    ignored: event.how === "opened" ? 0 : ignored,
+    muted: memory.muted || event.how === "dismissed" || ignored >= MUTE_AFTER,
+  };
+
+  return { ...state, places: remember(state.places, event.place, next) };
+};
+
+/**
+ * Whether the recall pill shows. Only once per visit, for a place with open
+ * items from it, away long enough (longer after each ignored pill), not
+ * muted, and not within GAP_MS of the last pill anywhere.
+ */
+export const stepRecall = (
+  state: RecallState,
+  event: RecallEvent
+): RecallStep =>
+  event.type === "arrived"
+    ? arrive(state, event)
+    : { show: false, state: end(state, event) };
