@@ -306,17 +306,35 @@ const TextField = ({
   };
 
   const at = toPage(view, draft.at);
+  const [scrolled, setScrolled] = useState({ end: false, start: false });
+
+  // Which of the field's ends hide words: those fade out, rather than end on half a letter.
+  const measure = (field: HTMLInputElement): void => {
+    const start = field.scrollLeft > 0;
+    const end = field.scrollLeft + field.clientWidth < field.scrollWidth - 1;
+
+    if (start !== scrolled.start || end !== scrolled.end) {
+      setScrolled({ end, start });
+    }
+  };
 
   return (
     <input
       aria-label="Text"
-      // Never past the page's right edge: longer words scroll inside the field instead of the window.
-      className="absolute top-(--y) left-(--x) field-sizing-content max-w-[calc(100%-var(--x))] min-w-4 bg-transparent p-0 font-(family-name:--font) text-(length:--size) leading-tight font-normal text-(color:--ink) outline-none"
+      // Never closer than 12 px to the page's right edge: longer words scroll inside the field instead of the window.
+      className="absolute top-(--y) left-(--x) field-sizing-content max-w-[calc(100%-var(--x)-12px)] min-w-4 bg-transparent [mask-image:linear-gradient(to_right,transparent,#000_var(--fade-in),#000_calc(100%-var(--fade-out)),transparent)] p-0 font-(family-name:--font) text-(length:--size) leading-tight font-normal text-(color:--ink) outline-none"
       onBlur={() => {
         onCommit(true);
       }}
       onChange={(event) => {
         onChange(event.target.value);
+        measure(event.currentTarget);
+      }}
+      onScroll={(event) => {
+        measure(event.currentTarget);
+      }}
+      onSelect={(event) => {
+        measure(event.currentTarget);
       }}
       onKeyDown={onKeyDown}
       readOnly={locked}
@@ -325,6 +343,8 @@ const TextField = ({
       }}
       spellCheck={false}
       style={{
+        "--fade-in": scrolled.start ? "1.5em" : "0px",
+        "--fade-out": scrolled.end ? "1.5em" : "0px",
         "--font": TEXT_FONT,
         "--ink": inkColor(draft.color, dark),
         "--size": `${draft.size * view.scale}px`,

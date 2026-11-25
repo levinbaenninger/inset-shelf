@@ -116,7 +116,7 @@ import {
   nativeDialog,
   withinWait,
 } from "./quit-hold";
-import { causeText, FsErrorSchema } from "./save-error";
+import { causeText, FsErrorSchema, reportSaveError } from "./save-error";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
@@ -728,6 +728,10 @@ const start = async (): Promise<void> => {
     readonly image: NativeImage;
     readonly png: Uint8Array;
     readonly file: string | null;
+    /** The shelf item Add to Shelf made of it, so Retry after a failed save doesn't add it twice. */
+    item: ItemId | null;
+    /** Add to Shelf is under way: a second click waits for it. */
+    adding: boolean;
   } | null = null;
 
   let shotSeq = 0;
@@ -739,8 +743,10 @@ const start = async (): Promise<void> => {
 
     shotSeq += 1;
     shot = {
+      adding: false,
       file,
       image,
+      item: null,
       png: image.toPNG(),
       seq: shotSeq,
       token: randomUUID().replaceAll("-", ""),
@@ -883,7 +889,21 @@ const start = async (): Promise<void> => {
               candidate.id === controller.view().doc.activeSectionId
           );
 
-        toast.show(`Saved to ${section?.name ?? "the shelf"}`, "done", id);
+        // The notice says saved only once the disk holds it, and why not when it doesn't.
+        void (async () => {
+          const written = await withinWait(
+            controller.persisted(controller.snapshot().rev),
+            setTimer
+          );
+
+          toast.show(
+            written.ok
+              ? `Saved to ${section?.name ?? "the shelf"}`
+              : written.message,
+            written.ok ? "done" : "failed",
+            id
+          );
+        })();
       }
     } finally {
       capturingSelection = false;
@@ -2027,21 +2047,15 @@ const start = async (): Promise<void> => {
     drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
+  // Set once the screenshot card's IPC server exists.
+  let reportAddFailed: (seq: number, message: string) => void = ignore;
+
   /** The card's screenshot, when it is still the newest; null for an older card's request. */
   const currentShot = (seq: number) =>
     shot !== null && shot.seq === seq ? shot : null;
 
-  /** Saves the card's screenshot to the shelf, in the section new items go to, and puts the card away. */
-  const addShot = async (seq: number): Promise<ItemId | null> => {
-    const current = currentShot(seq);
-
-    if (current === null) {
-      return null;
-    }
-
-    shot = null;
-    screenshotCard.hide();
-
+  /** Makes the card's screenshot an item in the section new items go to. */
+  const addShotItem = async (current: NonNullable<typeof shot>) => {
     const { height, width } = current.image.getSize();
 
     const { scaleFactor } = screen.getDisplayNearestPoint(
@@ -2068,6 +2082,52 @@ const start = async (): Promise<void> => {
     }
 
     return id;
+  };
+
+  /**
+   * Saves the card's screenshot to the shelf. The card goes once the disk
+   * holds it; when the save fails it stays, says why, and offers Retry.
+   */
+  const addShot = async (seq: number): Promise<ItemId | null> => {
+    const current = currentShot(seq);
+
+    if (current === null || current.adding) {
+      return null;
+    }
+
+    current.adding = true;
+
+    const written = await reportSaveError(async () => {
+      current.item ??= await addShotItem(current);
+
+      return current.item === null
+        ? { message: "The shelf couldn’t take the screenshot.", ok: false }
+        : await withinWait(
+            controller.persisted(controller.snapshot().rev),
+            setTimer
+          );
+    });
+
+    current.adding = false;
+
+    if (!written.ok) {
+      // A card its time put away meanwhile can't say it: the notice does.
+      if (screenshotCard.isVisible()) {
+        screenshotCard.hold();
+        reportAddFailed(seq, written.message);
+      } else {
+        notify(written.message, "failed");
+      }
+
+      return null;
+    }
+
+    if (shot === current) {
+      shot = null;
+      screenshotCard.hide();
+    }
+
+    return current.item;
   };
 
   const activeSectionName = (): string => {
@@ -2101,8 +2161,13 @@ const start = async (): Promise<void> => {
         void (async () => {
           const id = await addShot(seq);
 
+          // Not saved: the card says why and offers Retry.
+          if (id === null) {
+            return;
+          }
+
           // An open drawing keeps its marks; the screenshot is only saved then.
-          if (id === null || drawing.isVisible()) {
+          if (drawing.isVisible()) {
             notify(`Added to ${activeSectionName()}`);
 
             return;
@@ -2204,6 +2269,10 @@ const start = async (): Promise<void> => {
       target: () => screenshotCard.webContents,
     }
   );
+
+  reportAddFailed = (seq, message) => {
+    screenshotServer.emit("addFailed", { message, seq });
+  };
 
   screenshotCard.onView((view) => {
     screenshotServer.emit("view", view);
@@ -2520,6 +2589,7 @@ const start = async (): Promise<void> => {
     toastServer.emit("view", view);
   });
   shelf.onShown((bounds) => {
+    shelfServer.emit("shown", null);
     toast.hide();
     e2eLog("shelfShown", { bounds });
     refreshTray();

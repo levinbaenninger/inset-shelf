@@ -2,7 +2,8 @@
 // loads this file into the shelf, notice, screenshot card and drawing pages with
 // `page.addInitScript({ path })` and calls `globalThis.__strictProblems()` after a scene's act.
 // Text hidden below a line (badges wrapped out of sight, a clamp) is intended, so only the
-// horizontal is checked for cut words.
+// horizontal is checked for cut words. A field the keyboard isn't in must show its words whole,
+// and no words may be squeezed into a column narrower than four characters.
 
 const NAME_LENGTH = 30;
 
@@ -27,6 +28,10 @@ const unseen = (element) =>
 
 const clips = (element) => getComputedStyle(element).overflowX !== "visible";
 
+/** Cuts what runs past its top or bottom, as a clamp that clips only downwards does. */
+const clipsDown = (element) =>
+  getComputedStyle(element).overflowY !== "visible";
+
 const windowWidth = () => document.documentElement.clientWidth;
 
 /**
@@ -42,16 +47,16 @@ const inSight = (element, box) => {
     parent !== null && parent !== document.body;
     parent = parent.parentElement
   ) {
-    if (clips(parent)) {
-      const outer = parent.getBoundingClientRect();
+    const outer = parent.getBoundingClientRect();
 
+    if (clipsDown(parent)) {
       top = Math.max(top, outer.top);
       bottom = Math.min(bottom, outer.bottom);
+    }
 
-      if (outer.width < windowWidth() - 1) {
-        left = Math.max(left, outer.left);
-        right = Math.min(right, outer.right);
-      }
+    if (clips(parent) && outer.width < windowWidth() - 1) {
+      left = Math.max(left, outer.left);
+      right = Math.min(right, outer.right);
     }
   }
 
@@ -247,6 +252,110 @@ const overlaps = (elements) => {
   );
 };
 
+const FIELDS =
+  "input:not([type=checkbox], [type=radio], [type=range]), textarea";
+
+/** A field the keyboard isn't in that hides part of its words sideways: they are cut mid-glyph. */
+const cutFields = (elements) =>
+  elements.flatMap((element) =>
+    element.matches(FIELDS) &&
+    element !== document.activeElement &&
+    element.value !== "" &&
+    element.scrollWidth > element.clientWidth + 1
+      ? [
+          `${nameOf(element)} cuts “${element.value.slice(0, NAME_LENGTH)}” off without an ellipsis`,
+        ]
+      : []
+  );
+
+const COLUMN_CH = 4;
+
+const measure = document.createElement("canvas").getContext("2d");
+
+/** How wide `text` is on one line in an element's font. */
+const widthIn = (element, text) => {
+  measure.font = getComputedStyle(element).font;
+
+  return measure.measureText(text).width;
+};
+
+const INLINE = new Set(["contents", "inline"]);
+
+/** The box that lays a text out: its nearest ancestor that isn't inline. */
+const columnOf = (element) => {
+  let column = element;
+
+  while (
+    column.parentElement !== null &&
+    INLINE.has(getComputedStyle(column).display)
+  ) {
+    column = column.parentElement;
+  }
+
+  return column;
+};
+
+const contentWidth = (element) => {
+  const style = getComputedStyle(element);
+
+  return (
+    element.clientWidth -
+    Number(style.paddingLeft.replace("px", "")) -
+    Number(style.paddingRight.replace("px", ""))
+  );
+};
+
+/**
+ * Words squeezed into a column narrower than four characters (1ch is the
+ * width of "0"): one letter per line, or a label cut to “A…”. A short word
+ * that fits on one line in it (a count, “Retry”) is not squeezed.
+ */
+const narrowColumns = (elements) => {
+  const problems = [];
+  const columns = new Map();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const owner = node.parentElement;
+    const text = (node.textContent ?? "").trim();
+
+    if (
+      owner !== null &&
+      text.length > COLUMN_CH &&
+      !unseen(owner) &&
+      owner.closest("script, style, svg") === null
+    ) {
+      columns.set(columnOf(owner), text);
+    }
+  }
+
+  for (const field of elements.filter((element) => element.matches(FIELDS))) {
+    const text = field.value === "" ? field.placeholder : field.value;
+
+    if (text.trim().length > COLUMN_CH) {
+      columns.set(field, text);
+    }
+  }
+
+  for (const [column, text] of columns) {
+    const width = contentWidth(column);
+    const box = column.getBoundingClientRect();
+
+    if (
+      box.width > 0 &&
+      box.height > 0 &&
+      width < COLUMN_CH * widthIn(column, "0") - 0.5 &&
+      widthIn(column, text.trim()) > width + 1
+    ) {
+      problems.push(
+        `${nameOf(column)} squeezes “${text.slice(0, NAME_LENGTH)}” into ${Math.round(width)} px, under ${COLUMN_CH}ch`
+      );
+    }
+  }
+
+  return problems;
+};
+
 globalThis.__strictProblems = () => {
   const elements = shown();
 
@@ -255,6 +364,8 @@ globalThis.__strictProblems = () => {
       ...pastTheWindow(elements),
       ...outOfMenus(),
       ...cutWords(),
+      ...cutFields(elements),
+      ...narrowColumns(elements),
       ...overlaps(elements),
     ]),
   ];

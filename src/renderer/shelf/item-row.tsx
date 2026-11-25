@@ -18,7 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
-import { itemText, TEXT_MAX } from "@shared/shelf";
+import { itemText } from "@shared/shelf";
 import type {
   FileItem,
   ImageItem,
@@ -32,23 +32,24 @@ import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
+import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import { whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
@@ -56,6 +57,16 @@ import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
+import { Note } from "./note";
+import {
+  contextMenuAt,
+  DESCRIPTION_LINES,
+  DONE,
+  EDITING,
+  OPEN_LINES,
+  TITLE_LINES,
+  WORDS,
+} from "./row-look";
 import { filledSteps, moreText, rowParts } from "./row-parts";
 import type { RowExtras } from "./row-parts";
 import type { ItemDrag } from "./use-item-drag";
@@ -75,20 +86,6 @@ export const focusRow = (row: Element | null): boolean => {
 
   return target !== null && document.activeElement === target;
 };
-
-/** A right-click on any part of an item opens its menu at the pointer. */
-const contextMenuAt =
-  (open: RowHandlers["onContextMenu"]) =>
-  (event: MouseEvent): void => {
-    event.preventDefault();
-    open({
-      align: "start",
-      height: 0,
-      width: 0,
-      x: event.clientX,
-      y: event.clientY,
-    });
-  };
 
 const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
   chatgpt: ChatGptIcon,
@@ -124,9 +121,19 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** The source line's tooltip: the whole line, which may end in an ellipsis, then where a click goes. */
-const sourceTitle = (shown: string, opens: string | null): string =>
-  opens === null || opens === shown ? shown : `${shown}\n${opens}`;
+/** The source line's tooltip: the whole line when it shows cut, then where a click goes; null when it would only repeat what shows. */
+const sourceTitle = (
+  shown: string,
+  opens: string | null,
+  cut = true
+): string | undefined => {
+  const lines = [
+    ...(cut ? [shown] : []),
+    ...(opens === null || opens === shown ? [] : [opens]),
+  ];
+
+  return lines.length === 0 ? undefined : lines.map(tooltipText).join("\n");
+};
 
 /**
  * Where an item came from, in one quiet line: the site and what on it for
@@ -145,12 +152,17 @@ export const SourceLine = ({
   // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
   const app = openingApp(context, isMac);
   const shown = label === "" ? (context.url ?? "") : label;
+  const plain = useRef<HTMLParagraphElement>(null);
+  const link = useRef<HTMLButtonElement>(null);
+  const plainCut = useCut(plain);
+  const linkCut = useCut(link);
 
   if (context.url === null && app === null) {
     return label === "" ? null : (
       <p
         className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
-        title={label}
+        ref={plain}
+        title={plainCut ? tooltipText(label) : undefined}
       >
         {service === null ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -165,7 +177,12 @@ export const SourceLine = ({
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
       {...coach("item-source")}
       onClick={onOpenLink}
-      title={sourceTitle(shown, app === null ? context.url : `Open ${app}`)}
+      ref={link}
+      title={sourceTitle(
+        shown,
+        app === null ? context.url : `Open ${app}`,
+        linkCut
+      )}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -193,7 +210,7 @@ export const LinkList = ({
         onClick={() => {
           onOpenLink(link.url);
         }}
-        title={link.text === link.url ? link.url : `${link.text}\n${link.url}`}
+        title={sourceTitle(link.text, link.url)}
         type="button"
       >
         <HugeiconsIcon
@@ -201,12 +218,15 @@ export const LinkList = ({
           icon={Link01Icon}
           size={12}
         />
-        <span className="min-w-[4ch] truncate">{link.text}</span>
-        {link.text === link.url ? null : (
-          <span className="text-muted-foreground min-w-0 shrink-[4] truncate">
-            {hostOf(link.url)}
-          </span>
-        )}
+        {/* The site goes under the words when both don't fit on one line, so it stays readable. */}
+        <span className="flex min-w-0 flex-wrap gap-x-1.5">
+          <span className="max-w-full truncate">{link.text}</span>
+          {link.text === link.url ? null : (
+            <span className="text-muted-foreground max-w-full truncate">
+              {hostOf(link.url)}
+            </span>
+          )}
+        </span>
       </button>
     ))}
   </div>
@@ -233,7 +253,7 @@ const FileName = ({
       event.stopPropagation();
       onDragImage();
     }}
-    title={`${item.file.name}\nDrag into another app`}
+    title={`${tooltipText(item.file.name)}\nDrag into another app`}
     type="button"
   >
     <HugeiconsIcon
@@ -269,16 +289,20 @@ const hideWrapped = (line: HTMLElement): void => {
  * A line with its words on the left and the metadata badges right-aligned.
  * The words keep at least 14 characters; badges that don't fit wrap out of
  * sight, lowest priority first, so the line never grows. `reach` lets the
- * badges run on under the More button's column, below its button.
+ * badges run on under the More button's column, below its button. With
+ * `ownLine`, badges that would leave the words (an icon and a name) under
+ * 12 characters take a line of their own under them instead.
  */
 const BadgeLine = ({
   badges,
   children,
+  ownLine = false,
   reach,
 }: {
   readonly badges: readonly ReactNode[];
   readonly children: ReactNode;
   readonly reach: boolean;
+  readonly ownLine?: boolean;
 }) => {
   const words = children !== null && children !== undefined;
   const ref = useRef<HTMLDivElement>(null);
@@ -305,13 +329,28 @@ const BadgeLine = ({
   }
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-2", reach && "-mr-9")}>
-      {words ? <div className="flex min-w-0 flex-1">{children}</div> : null}
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-2",
+        reach && "-mr-9",
+        ownLine && "flex-wrap gap-y-1.5"
+      )}
+    >
+      {words ? (
+        <div
+          className={cn(
+            "flex min-w-0 flex-1",
+            ownLine && "min-w-[min(100%,calc(12ch+1.5rem))]"
+          )}
+        >
+          {children}
+        </div>
+      ) : null}
       <div
         className={cn(
           // Never narrower than its widest badge, the Due chip: the words give way first.
           "ml-auto flex h-5 min-w-min shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
-          words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
+          words && !ownLine ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
         )}
         data-badges
         ref={ref}
@@ -414,41 +453,6 @@ const metaText = (item: ShelfItem): string => {
   return `${when} · ${KIND_LABEL[item.via]}${where}`;
 };
 
-/** A row's words, read or edited: the same type either way, so starting an edit moves nothing. */
-const WORDS = "text-sm leading-snug break-words";
-
-const DONE = "text-muted-foreground line-through";
-
-/**
- * Where a click on an open item's words starts an edit: at the click, unless
- * it was on a link (which opens) or ended a drag that selected words (which
- * stay selected to copy). Null when it starts none.
- */
-const editPoint = (event: MouseEvent): ScreenPoint | null =>
-  (event.target instanceof Element && event.target.closest("a") !== null) ||
-  window.getSelection()?.isCollapsed === false
-    ? null
-    : { x: event.clientX, y: event.clientY };
-
-/**
- * Where a click asked for the caret, kept from the click until the edit it
- * starts mounts, and forgotten once that edit ends.
- */
-const useCaretStart = <T,>(editing: boolean) => {
-  const [start, setStart] = useState<T | null>(null);
-  const [wasEditing, setWasEditing] = useState(editing);
-
-  if (editing !== wasEditing) {
-    setWasEditing(editing);
-
-    if (!editing) {
-      setStart(null);
-    }
-  }
-
-  return [start, setStart] as const;
-};
-
 /**
  * Edits a text item in place, with its Markdown formatted as it is typed;
  * ⌘↩ or Return saves, ⇧↩ adds a line or list item, Escape keeps the old text.
@@ -507,7 +511,7 @@ export const TextEditor = ({
       autoFocus
       caretAt={caretAt}
       // The read text's own type, so the words stay exactly where they were.
-      className={cn("min-h-0", WORDS, item.done && DONE)}
+      className={cn("min-h-0", WORDS, item.done && DONE, EDITING)}
       keys={{
         onEscape: () => {
           cancelled.current = true;
@@ -526,188 +530,6 @@ export const TextEditor = ({
         edit().change(markdown);
       }}
       value={item.text}
-    />
-  );
-};
-
-/** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
-const noteLook = (item: ImageItem | FileItem): string =>
-  cn(
-    "text-sm leading-snug break-words whitespace-pre-wrap",
-    // Under a title the caption is the second line, quiet as it is in details.
-    item.title !== null && "text-muted-foreground",
-    item.done && DONE
-  );
-
-/** Where in the note's words a click landed, as an index into the note, or null off its words. */
-const noteOffsetAt = (event: MouseEvent<HTMLElement>): number | null => {
-  const at = document.caretPositionFromPoint(event.clientX, event.clientY);
-
-  return at !== null && event.currentTarget.contains(at.offsetNode)
-    ? at.offset
-    : null;
-};
-
-/**
- * The note under an image or a file, typed in where it is read: no box, the
- * same type and lines. It saves as you type; the main process waits for a
- * pause before writing.
- */
-const NoteField = ({
-  caret,
-  item,
-  onChange,
-  onDone,
-  onHide,
-}: {
-  readonly item: ImageItem | FileItem;
-  /** Where the caret starts, as an index into the note; the end without one. */
-  readonly caret: number | null;
-  readonly onChange: (note: string) => void;
-  readonly onDone: () => void;
-  readonly onHide: () => void;
-}) => {
-  const [note, setNote] = useState(item.note);
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const field = ref.current;
-    const at = caret ?? field?.value.length ?? 0;
-
-    field?.focus();
-    field?.setSelectionRange(at, at);
-  }, [caret]);
-
-  return (
-    // The field takes its type from the note's own (a field's font is inherited), so nothing moves.
-    <div className={noteLook(item)}>
-      <Textarea
-        aria-label={
-          item.kind === "image" ? "Note for this image" : "Note for this file"
-        }
-        variant="inline"
-        maxLength={TEXT_MAX}
-        onChange={(event) => {
-          setNote(event.target.value);
-          onChange(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          const escape = event.key === "Escape";
-
-          if (
-            escape ||
-            (event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing)
-          ) {
-            event.preventDefault();
-            event.stopPropagation();
-            event.currentTarget.blur();
-            onDone();
-
-            if (escape) {
-              onHide();
-            }
-          }
-        }}
-        placeholder="What matters here?"
-        ref={ref}
-        rows={1}
-        value={note}
-      />
-    </div>
-  );
-};
-
-/**
- * The note under an image or file as text: two lines until the item is
- * selected. On the open item a click edits it there; Return, a double-click
- * or Edit Caption edits it too.
- */
-const NoteText = ({
-  item,
-  onContextMenu,
-  onEdit,
-  onEditAt,
-  onSelect,
-  selected,
-}: {
-  readonly item: ImageItem | FileItem;
-  readonly selected: boolean;
-  readonly onEditAt: (offset: number | null) => void;
-} & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) =>
-  item.note === "" ? null : (
-    <button
-      className={cn(
-        "focus-visible:ring-ring/50 rounded-sm text-left outline-none focus-visible:ring-3",
-        selected && "cursor-text",
-        noteLook(item)
-      )}
-      data-row-keys
-      onClick={(event) => {
-        if (!selected) {
-          onSelect();
-        } else if (window.getSelection()?.isCollapsed !== false) {
-          onEditAt(noteOffsetAt(event));
-        }
-      }}
-      onContextMenu={contextMenuAt(onContextMenu)}
-      onDoubleClick={onEdit}
-      type="button"
-    >
-      {/* A clamp has no effect on a button itself, only on a box inside it. */}
-      <span className={cn("block", !selected && "line-clamp-2")}>
-        {item.note}
-      </span>
-    </button>
-  );
-
-/** The note, read or typed in, in one place: a click on the open note edits it at that word. */
-const Note = ({
-  editing,
-  item,
-  onContextMenu,
-  onEdit,
-  onEditNote,
-  onHide,
-  onSelect,
-  onStopEditing,
-  selected,
-}: {
-  readonly item: ImageItem | FileItem;
-  readonly selected: boolean;
-  readonly editing: boolean;
-} & Pick<
-  RowHandlers,
-  | "onContextMenu"
-  | "onEdit"
-  | "onEditNote"
-  | "onHide"
-  | "onSelect"
-  | "onStopEditing"
->) => {
-  const [caret, setCaret] = useCaretStart<number>(editing);
-
-  return editing ? (
-    <NoteField
-      caret={caret}
-      item={item}
-      key={item.id}
-      onChange={onEditNote}
-      onDone={onStopEditing}
-      onHide={onHide}
-    />
-  ) : (
-    <NoteText
-      item={item}
-      onContextMenu={onContextMenu}
-      onEdit={onEdit}
-      onEditAt={(offset) => {
-        setCaret(offset);
-        onEdit();
-      }}
-      onSelect={onSelect}
-      selected={selected}
     />
   );
 };
@@ -731,8 +553,9 @@ const Picture = ({
     aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
-      // At the narrowest shelf a third of the row, so the words beside it keep room to read.
-      compact ? "w-[clamp(4rem,32%,6rem)]" : "w-full"
+      // At the narrowest shelf a third of the row, so the words beside it keep room to read; open, as wide as the
+      // picture shows (12rem tall at most), so its pins stay on what they mark.
+      compact ? "w-[clamp(4rem,32%,6rem)]" : "w-fit max-w-full"
     )}
     draggable
     data-row-keys
@@ -750,7 +573,10 @@ const Picture = ({
   >
     <img
       alt={imageCaption(item)}
-      className="block h-auto w-full"
+      className={cn(
+        "block h-auto",
+        compact ? "w-full" : "max-h-48 w-auto max-w-full"
+      )}
       draggable={false}
       height={item.image.heightPx}
       src={insetUrl.attachment(item.image.file)}
@@ -851,14 +677,15 @@ const ImageBody = ({
         onSelect={onSelect}
       />
       {item.title === null ? null : (
-        <p
+        <Clamp
           className={cn(
             "text-sm leading-snug font-medium break-words",
             item.done && "text-muted-foreground line-through"
           )}
+          lines={TITLE_LINES}
         >
           {item.title}
-        </p>
+        </Clamp>
       )}
       <Note
         editing={editing}
@@ -872,6 +699,42 @@ const ImageBody = ({
         selected={selected}
       />
     </div>
+  );
+};
+
+/** A file's title: two lines on the closed row, three on the open one until Show more. */
+const FileTitle = ({
+  item,
+  onContextMenu,
+  onSelect,
+  selected,
+}: {
+  readonly item: FileItem;
+  readonly selected: boolean;
+} & Pick<RowHandlers, "onContextMenu" | "onSelect">) => {
+  const title = (
+    <button
+      className={cn(
+        "focus-visible:ring-ring/50 w-full rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
+        item.done && "text-muted-foreground line-through"
+      )}
+      data-row-keys
+      onClick={onSelect}
+      onContextMenu={contextMenuAt(onContextMenu)}
+      type="button"
+    >
+      <span className={cn("block", !selected && "line-clamp-2")}>
+        {item.title}
+      </span>
+    </button>
+  );
+
+  return selected ? (
+    <Clamp className="text-sm leading-snug" lines={TITLE_LINES}>
+      {title}
+    </Clamp>
+  ) : (
+    title
   );
 };
 
@@ -906,22 +769,14 @@ const FileBody = ({
 >) => (
   <div className="flex min-w-0 flex-col gap-2">
     {item.title === null ? null : (
-      <button
-        className={cn(
-          "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
-          item.done && "text-muted-foreground line-through"
-        )}
-        data-row-keys
-        onClick={onSelect}
-        onContextMenu={contextMenuAt(onContextMenu)}
-        type="button"
-      >
-        <span className={cn("block", !selected && "line-clamp-2")}>
-          {item.title}
-        </span>
-      </button>
+      <FileTitle
+        item={item}
+        onContextMenu={onContextMenu}
+        onSelect={onSelect}
+        selected={selected}
+      />
     )}
-    <BadgeLine badges={badges} reach={item.title !== null}>
+    <BadgeLine badges={badges} ownLine reach={item.title !== null}>
       <FileName
         item={item}
         onContextMenu={onContextMenu}
@@ -989,28 +844,31 @@ const TextBody = ({
     <>
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Where focus comes back to from details: the row, whose keys are Return and Space.
-        // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes.
-        <div
-          className="cursor-text rounded-sm outline-none"
-          data-row-keys
-          onClick={(event) => {
-            const point = editPoint(event);
+        // Ten lines at most until Show more, so one item never fills the shelf; an edit shows all of it.
+        <Clamp className={WORDS} lines={OPEN_LINES}>
+          {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
+          {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
+          <div
+            className="cursor-text rounded-sm outline-none"
+            data-row-keys
+            onClick={(event) => {
+              const point = editPoint(wordsClick(event));
 
-            if (point !== null) {
-              setCaretAt(point);
-              onEdit();
-            }
-          }}
-          tabIndex={-1}
-        >
-          <Markdown
-            className={words}
-            interactive
-            onOpenLink={onOpenLink}
-            text={item.text}
-          />
-        </div>
+              if (point !== null) {
+                setCaretAt(point);
+                onEdit();
+              }
+            }}
+            tabIndex={-1}
+          >
+            <Markdown
+              className={words}
+              interactive
+              onOpenLink={onOpenLink}
+              text={item.text}
+            />
+          </div>
+        </Clamp>
       ) : (
         <button
           className={cn(
@@ -1093,12 +951,12 @@ const Expansion = ({
         <PinLegend pins={item.pins} shown={extras.pinLegend.shown} />
       )}
       {extras.description ? (
-        <p
-          className="text-muted-foreground line-clamp-3 text-sm leading-snug break-words whitespace-pre-line"
-          title={item.description.trim()}
+        <Clamp
+          className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
+          lines={DESCRIPTION_LINES}
         >
           {item.description.trim()}
-        </p>
+        </Clamp>
       ) : null}
       {extras.steps === null ? null : (
         <StepChecklist
@@ -1108,6 +966,8 @@ const Expansion = ({
       )}
       {extras.windows === null ? null : (
         <WindowStrip
+          more={extras.windows.more}
+          onMore={onShowDetails}
           onReopen={onReopenWindow}
           windows={item.windows.slice(0, extras.windows.shown)}
         />
@@ -1117,10 +977,9 @@ const Expansion = ({
           className="-ml-2 max-w-full self-start"
           onClick={onShowDetails}
           size="xs"
-          title={more}
           variant="quiet"
         >
-          <span className="min-w-0 truncate">{more}</span>
+          <Truncated className="min-w-0" text={more} />
           <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
         </Button>
       )}
@@ -1192,12 +1051,10 @@ const OpenFooter = ({
 }) => (
   // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
   <div className="-mr-9 flex min-h-6 items-center gap-2">
-    <p
-      className="text-muted-foreground min-w-0 flex-1 truncate text-xs"
-      title={metaText(item)}
-    >
-      {metaText(item)}
-    </p>
+    <Truncated
+      className="text-muted-foreground min-w-0 flex-1 text-xs"
+      text={metaText(item)}
+    />
     <Button
       aria-label="Show details"
       className="-mr-2.75 shrink-0"

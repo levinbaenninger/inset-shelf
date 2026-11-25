@@ -48,7 +48,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -56,10 +55,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Truncated } from "@/shared/clamp";
 import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import {
   dueLabel,
   DueMenu,
@@ -70,6 +71,7 @@ import {
 } from "./item-meta";
 import { LinkList, SourceLine, TextEditor } from "./item-row";
 import { Markdown } from "./markdown";
+import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 
 /** What ⌘Z in details can bring back. */
@@ -282,8 +284,13 @@ const AutoText = ({
       }
     },
     onChange: (event: { readonly target: { readonly value: string } }) => {
-      setText(event.target.value);
-      onSave(event.target.value);
+      // A one-line text stays one line, even when a pasted text has breaks.
+      const typed = multiline
+        ? event.target.value
+        : event.target.value.replaceAll(/\s*\n\s*/gu, " ");
+
+      setText(typed);
+      onSave(typed);
     },
     onFocus: () => {
       before.current = text;
@@ -295,11 +302,12 @@ const AutoText = ({
     value: text,
   };
 
-  // Read as text until typed in: no border, a quiet tint on hover and focus (src/renderer/components/ui/input.tsx).
+  // Read as text until typed in: no border, a quiet tint on hover and focus. A
+  // one-line text wraps as it grows, an input's height while it fits, so a long title shows whole.
   return multiline ? (
     <Textarea {...props} rows={rows} variant="quiet" />
   ) : (
-    <Input {...props} variant="quiet" />
+    <Textarea {...props} rows={1} variant="quietLine" />
   );
 };
 
@@ -662,7 +670,7 @@ const WindowRow = ({
   };
 
   return (
-    <li className="flex flex-col gap-1.5">
+    <li className="group/window relative flex flex-col gap-1.5">
       <div className="flex min-w-0 items-center gap-2.5">
         <button
           aria-label={`${reopen}: ${name}`}
@@ -672,20 +680,20 @@ const WindowRow = ({
         >
           <WindowThumb className="h-9 w-14" window={window} />
         </button>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <p
-            className="truncate text-sm leading-tight font-medium"
-            title={name}
-          >
-            {name}
-          </p>
-          <p
-            className="text-muted-foreground truncate text-xs"
-            title={windowPlace(window)}
-          >
-            {windowPlace(window)}
-          </p>
+        {/* The name has the row's width; on hover or focus it makes room for the actions. */}
+        <div className="flex min-w-0 flex-1 flex-col group-focus-within/window:pr-17 group-hover/window:pr-17 group-has-[[data-state=open]]/window:pr-17">
+          <Truncated
+            className="text-sm leading-tight font-medium"
+            text={name}
+          />
+          <Truncated
+            className="text-muted-foreground text-xs"
+            text={windowPlace(window)}
+          />
         </div>
+      </div>
+      {/* Shown on hover, or while the keyboard or a menu is on them, so the name has the row's width otherwise. */}
+      <div className="pointer-events-none absolute top-0 right-0 flex h-9 items-center gap-0.5 opacity-0 group-focus-within/window:opacity-100 group-hover/window:opacity-100 has-[[data-state=open]]:opacity-100 [&_button]:pointer-events-auto">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -743,7 +751,7 @@ const WindowRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex min-w-0 flex-col pl-16.5">
+      <div className="flex min-w-0 flex-col">
         <WindowDescription
           name={name}
           onSave={(description) => {
@@ -786,11 +794,14 @@ const PinLabels = ({
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
       {item.pins.map((pin, index) => (
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
+        // The pin sits beside a label's first line (h-8, a one-line field's height), however many lines it wraps to.
         <li
-          className="flex items-center gap-2"
+          className="flex items-start gap-2"
           key={`${index}:${pin.x}:${pin.y}`}
         >
-          <PinGlyph height={18} number={index + 1} />
+          <span className="flex h-8 shrink-0 items-center">
+            <PinGlyph height={18} number={index + 1} />
+          </span>
           <AutoText
             label={`Label for pin ${index + 1}`}
             max={PIN_LABEL_MAX}
@@ -826,9 +837,7 @@ const FileLine = ({ item }: { readonly item: FileItem }) => (
       icon={File01Icon}
       size={16}
     />
-    <span className="truncate" title={item.file.name}>
-      {item.file.name}
-    </span>
+    <Truncated text={item.file.name} />
   </p>
 );
 
@@ -855,11 +864,14 @@ const TextContent = ({
   onStopEditing,
 }: Omit<ContentProps, "item" | "onOpenImage" | "onOpenPins" | "onUndoable"> & {
   readonly item: TextItem;
-}) =>
-  editing ? (
+}) => {
+  const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+
+  return editing ? (
     // The same card as the words read in, so starting an edit moves nothing.
     <div className={cn(SURFACE, "px-3 py-2.5")}>
       <TextEditor
+        caretAt={caretAt}
         item={item}
         onDone={onStopEditing}
         onSave={(text) => {
@@ -868,7 +880,19 @@ const TextContent = ({
       />
     </div>
   ) : (
-    <div className={cn(SURFACE, "px-3 py-2.5")} onDoubleClick={onEdit}>
+    // A click on the words edits them there, as in the open row; a link still opens.
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Edit in the item menu (Return) edits from the keyboard; the click only says where the caret goes.
+    <div
+      className={cn(SURFACE, "cursor-text px-3 py-2.5")}
+      onClick={(event) => {
+        const point = editPoint(wordsClick(event));
+
+        if (point !== null) {
+          setCaretAt(point);
+          onEdit();
+        }
+      }}
+    >
       <Markdown
         className="text-sm leading-snug break-words"
         interactive
@@ -877,6 +901,7 @@ const TextContent = ({
       />
     </div>
   );
+};
 
 /** The item's own content at the top: its words, or its image or file with title, pins and note. */
 const Content = (props: ContentProps) => {

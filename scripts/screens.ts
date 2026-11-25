@@ -2859,9 +2859,14 @@ const calendarKeysCheck = async (page: Page): Promise<string | null> => {
   }
 
   // A click on text that takes no keyboard (empty space, in effect) closes the calendar and,
-  // as nothing took the keyboard, gives it back to Due.
+  // as nothing took the keyboard, gives it back to Due. The item's own words edit on a click,
+  // so the footer that says when it was added is that text.
   await openCalendar(page, /^Due Today/u);
-  await page.getByText("Book the movers for Monday").first().click();
+  await page
+    .locator("[data-details]")
+    .getByText(/^Added /u)
+    .first()
+    .click();
   await calendar(page).waitFor({ state: "detached" });
   await page.waitForTimeout(150);
 
@@ -3314,26 +3319,13 @@ const CROWDED_DOC = {
 const composerField = (page: Page) =>
   page.getByRole("textbox", { name: /^New note in/u });
 
-/** As Electron does when the shelf is hidden and shown again: the page goes hidden, then visible, then the window takes focus. */
+/** As main does when the shelf is hidden and shown again: the window loses focus, takes it back, and main says it showed the shelf. */
 const hideAndShow = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
-    let state = "visible";
-
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      get: () => state,
-    });
-    Object.defineProperty(document, "hidden", {
-      configurable: true,
-      get: () => state === "hidden",
-    });
     window.dispatchEvent(new Event("blur"));
-    state = "hidden";
-    document.dispatchEvent(new Event("visibilitychange"));
-    state = "visible";
-    document.dispatchEvent(new Event("visibilitychange"));
     window.dispatchEvent(new Event("focus"));
   });
+  await page.evaluate('globalThis.__emit("shown", null)');
   await page.waitForTimeout(150);
 };
 
@@ -3738,6 +3730,27 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // A linked window's actions sit over its name's end, shown for the keyboard as for the pointer.
+      act: async (page) => {
+        await details(page, 710);
+        await page
+          .getByRole("button", { name: /^More for /u })
+          .first()
+          .focus();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) => {
+        const { label, opacity } = await focusedOpacity(page);
+
+        return opacity > 0.5
+          ? null
+          : `the keyboard on “${label}” can't see it (opacity ${opacity})`;
+      },
+      data: { view: stressView() },
+      name: "stress-details-window-keys",
+      width: NARROWEST,
+    },
+    {
       act: async (page) => {
         await details(page, 711);
       },
@@ -3866,8 +3879,46 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      check: async (page) => {
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        return open === 1
+          ? null
+          : `${open} banners show open; only the newest should, the others one line each`;
+      },
       data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
       name: "stress-banners",
+      width: NARROWEST,
+    },
+    {
+      // The keyboard opens a folded banner and reads the whole of its message.
+      act: async (page) => {
+        await page.getByRole("button", { name: "Not saved to disk" }).focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("button", { name: "Show full message" }).focus();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(200);
+      },
+      check: async (page) => {
+        const alert = page.getByRole("alert");
+        const shown = (await alert.textContent()) ?? "";
+
+        const whole = await alert.evaluate((element) => {
+          const text =
+            element.querySelector("[aria-expanded]")?.previousElementSibling;
+
+          return (
+            text instanceof HTMLElement &&
+            text.scrollHeight <= text.clientHeight + 1
+          );
+        });
+
+        return shown.includes(STRESS_STATUS.saveError) && whole
+          ? null
+          : "Show full message didn't show the whole failed save's message";
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-full",
       width: NARROWEST,
     },
     {
@@ -4062,6 +4113,114 @@ const STRESS_SCENES: readonly Scene[] = (
       name: "stress-edit-in-place-note",
     },
     {
+      // An open file without a note offers one; a click starts it.
+      act: async (page) => {
+        await select(page, 714);
+        await page.getByRole("button", { name: "Add a note…" }).click();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) =>
+        (await page.evaluate(
+          () => document.activeElement?.getAttribute("aria-label") ?? ""
+        )) === "Note for this file"
+          ? null
+          : "Add a note… didn't start the note",
+      data: { view: stressView() },
+      name: "stress-open-add-note",
+      width: NARROWEST,
+    },
+    {
+      // The empty section new items go to says so, once; the other empty ones are just their headings.
+      check: async (page) => {
+        const hints = await page
+          .getByText("New notes and captures land here")
+          .count();
+
+        return hints === 1
+          ? null
+          : `${hints} empty sections say new items land there; only the one they go to should`;
+      },
+      data: { view: stressView({ ...EDIT_DOC, activeSectionId: STRESS_D }) },
+      name: "stress-empty-target-section",
+    },
+    {
+      // In details, one click on the words edits them there, as on the open row.
+      act: async (page) => {
+        await details(page, 720);
+
+        const word = page.locator("[data-details]").getByText("Monday", {
+          exact: false,
+        });
+
+        const box = await word.first().evaluate((element) => {
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT
+          );
+
+          for (
+            let node = walker.nextNode();
+            node !== null;
+            node = walker.nextNode()
+          ) {
+            const at = (node.textContent ?? "").indexOf("Monday");
+
+            if (at !== -1) {
+              const range = document.createRange();
+
+              range.setStart(node, at);
+              range.setEnd(node, at + 6);
+
+              const rect = range.getBoundingClientRect();
+
+              return {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+              };
+            }
+          }
+
+          return null;
+        });
+
+        if (box !== null) {
+          await page.mouse.click(box.x, box.y);
+        }
+
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const editing = await page
+          .getByRole("textbox", { name: "Edit item" })
+          .count();
+
+        const at = await caretWord(page);
+
+        return editing === 1 && at === "Monday"
+          ? null
+          : `one click on the words in details ${editing === 1 ? `put the caret in “${at}”` : "started no edit"}, not in “Monday”`;
+      },
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-details-click-edits",
+    },
+    {
+      // A note being typed under a picture ends its edit when the keyboard leaves it, as the words' editor does.
+      act: async (page) => {
+        await clickToEdit(page, 722, "button");
+        await page.getByRole("textbox", { name: /^New note in/u }).focus();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) =>
+        (await page
+          .getByRole("textbox", { name: "Note for this image" })
+          .count()) === 0
+          ? null
+          : "the note's field stayed open after the keyboard left it",
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-note-blur",
+    },
+    {
       data: {
         view: {
           corner: "bottom-right",
@@ -4105,20 +4264,52 @@ const STRESS_SCENES: readonly Scene[] = (
     {
       act: async (page) => {
         await page.keyboard.press("Tab");
-        await page.keyboard.press("Tab");
         await page.waitForTimeout(300);
       },
       check: async (page) => {
         const { label, opacity } = await focusedOpacity(page);
 
-        return opacity > 0.5
+        const held = z
+          .array(z.boolean())
+          .parse(await page.evaluate("globalThis.__hover"))
+          .at(-1);
+
+        if (label !== "Add to Shelf") {
+          return `the first Tab put the keyboard on “${label}”, not on Add to Shelf`;
+        }
+
+        if (opacity <= 0.5) {
+          return `Tab put the keyboard on “${label}”, which can’t be seen (opacity ${opacity})`;
+        }
+
+        return held === true
           ? null
-          : `Tab put the keyboard on “${label}”, which can’t be seen (opacity ${opacity})`;
+          : "the keyboard on an action didn't keep the card on screen, as the pointer does";
       },
       data: { view: SCREENSHOT_VIEW },
       // The pointer stays off the card, so only the keyboard shows its actions.
       keepPointer: true,
       name: "stress-screenshot-focus",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: "Add to Shelf" }).click();
+        await page.evaluate(
+          `globalThis.__emit("addFailed", ${JSON.stringify({
+            message: `Die Bildschirmaufnahme konnte nicht gespeichert werden: ${LONG_WORD}. Der Datenträger ist voll.`,
+            seq: SCREENSHOT_VIEW.seq,
+          })})`
+        );
+        await page.getByRole("button", { name: "Retry" }).waitFor();
+      },
+      check: async (page) =>
+        (await page.getByRole("alert").isVisible()) &&
+        (await page.getByRole("img", { name: "New screenshot" }).isVisible())
+          ? null
+          : "a failed Add to Shelf didn't keep the picture and say why",
+      data: { view: SCREENSHOT_VIEW },
+      name: "stress-screenshot-add-failed",
       page: "screenshot",
     },
   ] satisfies readonly StressScene[]
@@ -4295,7 +4486,7 @@ const SCENES: readonly Scene[] = [
             .first(),
         ],
         ["Details", row.getByRole("button", { name: "Show details" })],
-        ["⋯", row.getByRole("button", { name: "More" })],
+        ["⋯", row.getByRole("button", { exact: true, name: "More" })],
       ]);
 
       for (const [name, control] of controls) {
@@ -7129,8 +7320,9 @@ const ProblemsSchema = z.array(z.string());
  * What breaks at the edges, anywhere on the page, menus and notices
  * included (scripts/fixtures/screens-layout.js): a box past the window's
  * sides, a menu entry outside its menu, words cut off sideways without an
- * ellipsis, an ellipsis with no title that holds the whole text, and two
- * controls that partly cover each other.
+ * ellipsis, an ellipsis with no title that holds the whole text, a field the
+ * keyboard isn't in that hides part of its words, words squeezed into a
+ * column under 4ch, and two controls that partly cover each other.
  */
 const strictProblems = async (page: Page): Promise<readonly string[]> =>
   ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));

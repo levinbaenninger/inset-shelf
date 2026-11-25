@@ -196,6 +196,8 @@ export const shelfContract = defineContract({
     /** A short note on something main did, shown as a toast: a confirmation, or why it failed. */
     notice: event<{ readonly message: string; readonly tone: NoticeTone }>(),
     view: event<ShelfView>(),
+    /** Main showed the shelf: the page puts the caret in the note field unless something is under way. */
+    shown: event<null>(),
     ...tutorialEvents,
   },
   global: "insetShelf",
@@ -324,7 +326,12 @@ export const toastContract = defineContract({
 });
 
 export const screenshotContract = defineContract({
-  events: { view: event<ScreenshotView | null>(), ...tutorialEvents },
+  events: {
+    view: event<ScreenshotView | null>(),
+    /** Add to Shelf didn't reach the disk: the card stays, says why, and offers Retry. */
+    addFailed: event<{ readonly seq: number; readonly message: string }>(),
+    ...tutorialEvents,
+  },
   global: "insetScreenshot",
   methods: {
     ...tutorialMethods,

@@ -166,6 +166,15 @@ describe(rowParts, () => {
     expect(parts.badges).toStrictEqual([{ count: 1, kind: "pins" }]);
   });
 
+  it("drops the pin count once the open row lists the pins' labels", () => {
+    const labelled = image({ pins: [{ label: "Button", x: 1, y: 1 }] });
+
+    expect(rowParts(labelled, false).badges).toStrictEqual([
+      { count: 1, kind: "pins" },
+    ]);
+    expect(rowParts(labelled, true).badges).toStrictEqual([]);
+  });
+
   it("carries a file's badges on its name's line when it has no source", () => {
     expect(rowParts(file({ due: "2026-11-01" }), false).badgesOn).toBe("file");
     expect(
@@ -186,13 +195,15 @@ describe(rowParts, () => {
         y: n,
       })),
       steps: Array.from({ length: 6 }, (_, n) => step(10 + n, `Step ${n}`)),
-      windows: [windowRef(1)],
+      windows: [1, 2, 3, 4, 5].map(windowRef),
     });
 
     const { extras } = rowParts(crowded, true);
 
     expect(extras?.pinLegend).toStrictEqual({ more: 27, shown: 3 });
     expect(extras?.steps).toStrictEqual({ more: 1, shown: 5 });
+    // The windows' own row says "+2", so the line leaves them out.
+    expect(extras?.windows).toStrictEqual({ more: 2, shown: 3 });
     expect(extras === null ? null : moreText(extras)).toBe(
       "27 more pins · 1 more step"
     );

@@ -21,9 +21,9 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
-        /** White on a picture, whatever the theme: the screenshot card's controls. */
+        /** White on a picture, whatever the theme: the screenshot card's controls. Focus draws a dark ring inside a white one, which shows on light and dark pictures alike. */
         overlay:
-          "bg-white text-neutral-900 shadow-md hover:bg-neutral-100 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100",
+          "bg-white text-neutral-900 shadow-md hover:bg-neutral-100 focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100",
       },
       size: {
         default:
@@ -39,6 +39,8 @@ const buttonVariants = cva(
         "icon-lg": "size-9",
         /** Fully rounded, for buttons set on a picture. */
         pill: "h-8 gap-1.5 rounded-full px-4",
+        /** A small pill: the screenshot card's action that shows before hover. */
+        "pill-xs": "h-6 gap-1 rounded-full px-2.5 text-xs",
         "icon-round": "size-8 rounded-full",
       },
     },

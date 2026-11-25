@@ -25,6 +25,9 @@ import type { ShelfDoc } from "../../src/shared/shelf.ts";
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
 
+// `reopen` runs only the launch and the caret-on-reopen checks.
+const only = process.argv[3] ?? "";
+
 const packagedApp = path.join(
   root,
   "release/mac-arm64/Inset Shelf.app/Contents/MacOS/Inset Shelf"
@@ -264,6 +267,29 @@ const showShelfFromTray = (): void => {
 
   if (!open) {
     trayItem("Show Inset Shelf");
+  }
+};
+
+/**
+ * Quits from the tray, else from the app's own menu: the tray's item isn't
+ * reachable when macOS hides it in a full menu bar. A quit that reaches
+ * neither stops the process, so no test instance is left running.
+ */
+const quitApp = (app: ChildProcess): void => {
+  try {
+    trayItem(quitLabel);
+
+    return;
+  } catch {
+    // The tray's menu bar isn't there: the app menu next.
+  }
+
+  try {
+    osa(
+      `tell application "System Events" to tell process "${processName}" to click menu item "${quitLabel}" of menu 1 of menu bar item 2 of menu bar 1`
+    );
+  } catch {
+    app.kill();
   }
 };
 
@@ -546,6 +572,78 @@ const checkComposer = async (): Promise<void> => {
   );
   typeIntoShelf("# Inbox");
   await delay(600);
+};
+
+const elementValue = (role: string, name: string): string =>
+  jxa(`const hit = ${processElements}.findLast((e) => {
+      try { return e.role() === ${JSON.stringify(role)} && (e.name() === ${JSON.stringify(name)} || e.description() === ${JSON.stringify(name)}); } catch { return false; }
+    });
+    hit ? String(hit.value() ?? "") : "";`);
+
+/** The global shortcut, as a keyboard sends it. */
+const toggleKeys = (): void => {
+  osa(
+    'tell application "System Events" to keystroke "s" using {control down, option down}'
+  );
+};
+
+/**
+ * Hidden with the global shortcut while an item has the keyboard and shown
+ * with it again, the shelf opens with the caret in the note field: the next
+ * key typed lands there.
+ */
+const checkReopenCaret = async (): Promise<void> => {
+  enableWebAccessibility();
+
+  const note = "Reopen check item";
+
+  showShelfFromTray();
+  await clickElement("AXTextArea", "New note in Inbox");
+  await waitForFocus("AXTextArea", "New note in Inbox");
+  typeIntoShelf(note);
+  await delay(800);
+
+  // A click on the item's words gives it the keyboard, as a person reading it would.
+  const onItem = await clickElement("AXButton", note);
+
+  await delay(400);
+  record(
+    "an item has the keyboard before the shelf is hidden",
+    onItem && !isFocused("AXTextArea", "New note in Inbox")
+  );
+
+  const hiding = events().length;
+
+  guardedKeys(toggleKeys, [processName]);
+
+  const hidden = await waitFor("shelfHidden", hiding);
+
+  await delay(600);
+
+  // The keys go to the shelf's shortcut only from the test's own app.
+  if (frontmost() !== "source") {
+    await showSource("", "none");
+  }
+
+  const showing = events().length;
+
+  guardedKeys(toggleKeys);
+
+  const shown = await waitFor("shelfShown", showing);
+
+  await delay(800);
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "q"');
+  }, [processName]);
+  await delay(400);
+
+  const typed = elementValue("AXTextArea", "New note in Inbox");
+
+  record(
+    "hidden with the shortcut from an item and shown with it again, the next key lands in the note field",
+    hidden !== undefined && shown !== undefined && typed.includes("q"),
+    `note field: ${JSON.stringify(typed)}, front: ${frontmost()}`
+  );
 };
 
 const checkSelection = async (): Promise<void> => {
@@ -863,19 +961,26 @@ const main = async (): Promise<void> => {
 
   try {
     await checkLaunch();
-    await checkShelfStaysInFront();
-    await checkComposer();
-    await checkSelection();
-    await checkNoFalseTaps();
-    await checkToggle();
-    await checkCopy();
-    await checkDrawing();
-    await checkSettings();
-    app = await checkRestart(app);
-    await checkFailedWrite();
+
+    if (only === "reopen") {
+      await showSource("", "none");
+      await checkReopenCaret();
+    } else {
+      await checkShelfStaysInFront();
+      await checkComposer();
+      await checkSelection();
+      await checkNoFalseTaps();
+      await checkToggle();
+      await checkCopy();
+      await checkDrawing();
+      await checkSettings();
+      await checkReopenCaret();
+      app = await checkRestart(app);
+      await checkFailedWrite();
+    }
   } finally {
     stopSource();
-    trayItem(quitLabel);
+    quitApp(app);
     await exited(app);
     pbcopy(clipboardBefore);
   }

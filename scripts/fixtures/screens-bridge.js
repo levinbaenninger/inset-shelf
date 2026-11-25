@@ -425,6 +425,8 @@ if (page === "toast") {
 }
 
 if (page === "screenshot") {
+  /** Each time the card told main the pointer or the keyboard is on it (true) or has left (false). */
+  globalThis.__hover = [];
   globalThis.insetScreenshot = withFallback(
     {
       addToShelf: logged("addToShelf", nothing),
@@ -434,7 +436,9 @@ if (page === "screenshot") {
       getTutorial: resolved(data.tutorial),
       getView: resolved(data.view),
       hold: logged("hold", nothing),
-      hover: nothing,
+      hover: (held) => {
+        globalThis.__hover.push(held);
+      },
       on,
       saveToDownloads: logged("saveToDownloads", nothing),
       startDrag: logged("startDrag", nothing),
