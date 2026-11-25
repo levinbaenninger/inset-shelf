@@ -8,6 +8,7 @@ import type { OnboardingView } from "./onboarding";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import {
+  AttachmentIdSchema,
   ItemIdSchema,
   PinsSchema,
   ShelfOpSchema,
@@ -146,6 +147,37 @@ const tutorialMethods = {
   tutorial: send(TutorialActionSchema),
 } as const;
 
+/** Pictures and files attached to an item after capture (src/main/attachments.ts). */
+const attachmentMethods = {
+  /** The file dialog, for files to attach to this item. */
+  pickFilesFor: send(ItemIdSchema),
+  /** Files dropped on an item's row, by path; main reads them. */
+  addFilesTo: invoke(
+    z.object({
+      id: ItemIdSchema,
+      paths: z.array(z.string().min(1).max(4096)).min(1).max(50),
+    }),
+    out<ActionResult>()
+  ),
+  /** A picture pasted with the item open, or with null the clipboard's own: main reads it. */
+  pasteImageTo: invoke(
+    z.object({
+      bytes: z
+        .instanceof(Uint8Array)
+        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES)
+        .nullable(),
+      id: ItemIdSchema,
+    }),
+    out<ActionResult>()
+  ),
+  /** Drags one attachment out as a file: a picture with its pins drawn in, a file as itself. */
+  startAttachmentDrag: send(
+    z.object({ attachmentId: AttachmentIdSchema, id: ItemIdSchema })
+  ),
+  /** The item selected or open in details, so main knows what an attachment from outside the shelf goes to. */
+  selection: send(ItemIdSchema.nullable()),
+} as const;
+
 export const shelfContract = defineContract({
   events: {
     command: event<ShelfCommand>(),
@@ -159,6 +191,7 @@ export const shelfContract = defineContract({
   global: "insetShelf",
   methods: {
     ...tutorialMethods,
+    ...attachmentMethods,
     /** Getting Started in the ⋯ menu (Windows): the checklist comes back. */
     gettingStarted: send(z.void()),
     /** Show Me Around in the ⋯ menu (Windows): the walkthrough. */

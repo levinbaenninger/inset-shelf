@@ -11,6 +11,8 @@ export type E2eEvent =
   | "doubleTap"
   | "selection"
   | "itemAdded"
+  /** The item selected or open in details in the shelf changed. */
+  | "itemSelected"
   | "drawingShown"
   | "screenshotShown"
   | "saveFailed"

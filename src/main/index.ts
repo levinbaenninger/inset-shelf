@@ -32,6 +32,7 @@ import {
   itemText,
 } from "@shared/shelf";
 import type {
+  AttachmentId,
   ItemContext,
   ItemId,
   MainOp,
@@ -69,8 +70,8 @@ import type {
 } from "electron";
 
 import { appMenuTemplate, HELP_URL } from "./app-menu";
-import { createAttachments } from "./attachments";
-import type { DecodedImage } from "./attachments";
+import { attachResult, createAttachments } from "./attachments";
+import type { AttachOutcome, DecodedImage } from "./attachments";
 import {
   clipboardContent,
   holdsAgainIn,
@@ -1677,9 +1678,131 @@ const start = async (): Promise<void> => {
     });
   };
 
+  // Attachments: what the shelf page asks for an item's pictures and files (attachments.ts).
+  /** The item selected or open in details in the shelf, or null. */
+  let shelfSelection: ItemId | null = null;
+
+  /** Says what attaching to an item did: how many landed, or why not. */
+  const noticeAttached = (id: ItemId, outcome: AttachOutcome): void => {
+    const result = attachResult(outcome);
+
+    if (!result.ok) {
+      notify(result.message, "failed");
+
+      return;
+    }
+
+    const item = controller.item(id);
+
+    if (outcome.added > 0 && item !== undefined) {
+      const count = outcome.added === 1 ? "1 file" : `${outcome.added} files`;
+
+      notify(`Attached ${count} to “${excerpt(itemText(item))}”`);
+    }
+  };
+
+  /** Drags one attachment out as a named file, staged under its item so deleting the item clears it. */
+  const dragAttachmentOut = async (
+    id: ItemId,
+    attachmentId: AttachmentId
+  ): Promise<void> => {
+    const attachment = controller
+      .item(id)
+      ?.attachments.find((candidate) => candidate.id === attachmentId);
+
+    const folder = path.join(id, attachmentId);
+
+    if (attachment?.kind === "file") {
+      const stored = store.attachmentPath(attachment.file.stored);
+
+      if (stored !== null) {
+        const file = staging.copy(folder, attachment.file.name, stored);
+
+        shelf.webContents.startDrag({
+          file,
+          icon: await app.getFileIcon(file, { size: "normal" }),
+        });
+      }
+
+      return;
+    }
+
+    const file =
+      attachment === undefined
+        ? null
+        : store.attachmentPath(attachment.image.file);
+
+    const exported =
+      attachment === undefined || file === null
+        ? null
+        : exportImage(attachment, file);
+
+    if (attachment !== undefined && exported !== null) {
+      shelf.webContents.startDrag({
+        file: staging.write(
+          folder,
+          exportFileName(attachment.name),
+          exported.png
+        ),
+        icon: exported.image.resize({ width: 128 }),
+      });
+    }
+  };
+
+  const attachmentHandlers = {
+    addFilesTo: async ({
+      id,
+      paths,
+    }: {
+      readonly id: ItemId;
+      readonly paths: readonly string[];
+    }): Promise<ActionResult> =>
+      attachResult(await attachments.attachFilesTo(id, paths)),
+    pasteImageTo: async ({
+      bytes,
+      id,
+    }: {
+      readonly bytes: Uint8Array | null;
+      readonly id: ItemId;
+    }): Promise<ActionResult> =>
+      attachResult(await attachments.pasteImageTo(id, bytes)),
+    pickFilesFor: (id: ItemId): void => {
+      void (async () => {
+        const picked = await dialog.showOpenDialog(shelf.dialogParent, {
+          properties: ["openFile", "multiSelections"],
+          title: "Attach Files",
+        });
+
+        if (!picked.canceled && picked.filePaths.length > 0) {
+          noticeAttached(
+            id,
+            await attachments.attachFilesTo(id, picked.filePaths)
+          );
+        }
+      })();
+    },
+    selection: (id: ItemId | null): void => {
+      shelfSelection = id;
+      e2eLog(
+        "itemSelected",
+        shelfSelection === null ? {} : { itemId: shelfSelection }
+      );
+    },
+    startAttachmentDrag: ({
+      attachmentId,
+      id,
+    }: {
+      readonly attachmentId: AttachmentId;
+      readonly id: ItemId;
+    }): void => {
+      void dragAttachmentOut(id, attachmentId);
+    },
+  };
+
   const shelfServer = serveContract(
     shelfContract,
     {
+      ...attachmentHandlers,
       addFiles: async (paths) => await addFiles(paths),
       apply: (op) => {
         controller.apply(op);

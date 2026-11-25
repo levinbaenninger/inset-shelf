@@ -96,9 +96,57 @@ const updateItem = (doc, id, change) => ({
   items: doc.items.map((item) => (item.id === id ? change(item) : item)),
 });
 
+// Attachments removed in details, so ⌘Z can put each back where it was, as main remembers them.
+const removedAttachments = new Map();
+
+const attachmentKey = (op) => `${op.id}/${op.attachmentId}`;
+
+/** An item's attachments after a removal or a restore, as src/shared/shelf.ts and the controller change them. */
+const changeAttachments = (doc, op) =>
+  updateItem(doc, op.id, (item) => {
+    const list = item.attachments ?? [];
+
+    if (op.type === "removeAttachment") {
+      const index = list.findIndex((entry) => entry.id === op.attachmentId);
+
+      if (index === -1) {
+        return item;
+      }
+
+      removedAttachments.set(attachmentKey(op), {
+        attachment: list[index],
+        index,
+      });
+
+      return { ...item, attachments: list.filter((_, at) => at !== index) };
+    }
+
+    const removed = removedAttachments.get(attachmentKey(op));
+
+    if (removed === undefined) {
+      return item;
+    }
+
+    removedAttachments.delete(attachmentKey(op));
+
+    return {
+      ...item,
+      attachments: list.toSpliced(
+        Math.min(removed.index, list.length),
+        0,
+        removed.attachment
+      ),
+    };
+  });
+
 /** The operations scenes perform, as src/shared/shelf.ts applies them. */
 const applyOp = (doc, op) => {
   switch (op.type) {
+    case "removeAttachment":
+    case "restoreAttachment": {
+      return changeAttachments(doc, op);
+    }
+
     case "toggleDone": {
       return updateItem(doc, op.id, (item) => ({ ...item, done: !item.done }));
     }
@@ -267,6 +315,14 @@ if (page === "shelf") {
       on,
       openImage: logged("openImage", nothing),
       openLink: logged("openLink", nothing),
+      // Attachments: each call logged; adding answers as main does when all of it fits.
+      addFilesTo: logged("addFilesTo", ok),
+      newDrawingFor: logged("newDrawingFor", nothing),
+      openAttachment: logged("openAttachment", nothing),
+      pasteImageTo: logged("pasteImageTo", ok),
+      pickFilesFor: logged("pickFilesFor", nothing),
+      selection: logged("selection", nothing),
+      startAttachmentDrag: logged("startAttachmentDrag", nothing),
     },
     nothing
   );
