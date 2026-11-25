@@ -11,7 +11,6 @@ import {
   DUE_CHOICE_LABEL,
   DUE_CHOICES,
   dueBucket,
-  dueChipText,
   dueFor,
   dueText,
   isoDay,
@@ -20,10 +19,10 @@ import {
 } from "@shared/due";
 import type { DueBucket } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
-import type { Pin, ShelfItem, Step, WindowRef } from "@shared/shelf";
+import type { Pin, Step, WindowRef } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
 import { useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -50,6 +49,9 @@ import {
 import { cn } from "@/lib/utils";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
+
+import { filledSteps } from "./row-parts";
+import type { RowBadge } from "./row-parts";
 
 const BADGE_TONE: Readonly<Record<DueBucket | "plain", string>> = {
   later: "bg-foreground/[0.06] text-muted-foreground",
@@ -108,7 +110,10 @@ export const dueLabel = (due: string, now: Date): string => {
     : `Due ${dueText(due, now)}, ${date}`;
 };
 
-/** The Due chip: "Overdue · Nov 3" in red once overdue, in the accent when due today. */
+/**
+ * The Due chip on a row: "Overdue" in red once overdue, the day in the
+ * accent when due today, else the day. Its title and label give the date.
+ */
 export const DueBadge = ({
   due,
   now,
@@ -121,69 +126,57 @@ export const DueBadge = ({
     label={dueLabel(due, now)}
     tone={dueBucket(due, now)}
   >
-    {dueChipText(due, now)}
+    {dueBucket(due, now) === "overdue" ? "Overdue" : dueText(due, now)}
   </Badge>
 );
 
-const stepsDone = (steps: readonly Step[]): number =>
-  steps.filter((step) => step.done).length;
+/** The counted badges: an icon, the number, and the words said aloud. */
+const COUNTED = {
+  pins: { icon: Location01Icon, many: "pins", one: "pin" },
+  windows: {
+    icon: AppWindowIcon,
+    many: "linked windows",
+    one: "linked window",
+  },
+} as const;
 
-/** Steps that hold words; an empty one being typed doesn't count. */
-export const filledSteps = (steps: readonly Step[]): readonly Step[] =>
-  steps.filter((step) => step.text.trim() !== "");
+const badgeNode = (badge: RowBadge, now: Date): ReactElement => {
+  if (badge.kind === "due") {
+    return <DueBadge due={badge.due} key="due" now={now} />;
+  }
 
-/**
- * The badges on an item's source line, at most three, most telling first:
- * due, step progress, linked windows, pins. A description has none. An open
- * row lists its steps and windows, so it leaves out their counts.
- */
-export const metaBadges = (
-  item: ShelfItem,
-  now: Date,
-  open = false
-): readonly ReactNode[] => {
-  const steps = open ? [] : filledSteps(item.steps);
-  const pins = item.kind === "image" ? item.pins.length : 0;
-
-  return [
-    item.due === null ? null : <DueBadge due={item.due} key="due" now={now} />,
-    steps.length === 0 ? null : (
+  if (badge.kind === "steps") {
+    return (
       <Badge
         icon={CheckListIcon}
         key="steps"
-        label={`${stepsDone(steps)} of ${steps.length} steps done`}
+        label={`${badge.done} of ${badge.total} steps done`}
       >
-        {stepsDone(steps)}/{steps.length}
+        {badge.done}/{badge.total}
       </Badge>
-    ),
-    open || item.windows.length === 0 ? null : (
-      <Badge
-        icon={AppWindowIcon}
-        key="windows"
-        label={
-          item.windows.length === 1
-            ? "1 linked window"
-            : `${item.windows.length} linked windows`
-        }
-      >
-        {item.windows.length}
-      </Badge>
-    ),
-    pins === 0 ? null : (
-      <Badge
-        icon={Location01Icon}
-        key="pins"
-        label={pins === 1 ? "1 pin" : `${pins} pins`}
-      >
-        {pins}
-      </Badge>
-    ),
-  ]
-    .filter((badge) => badge !== null)
-    .slice(0, 3);
+    );
+  }
+
+  const { icon, many, one } = COUNTED[badge.kind];
+
+  return (
+    <Badge
+      icon={icon}
+      key={badge.kind}
+      label={badge.count === 1 ? `1 ${one}` : `${badge.count} ${many}`}
+    >
+      {badge.count}
+    </Badge>
+  );
 };
 
-/** Checkable next steps, inline in the open row: ticking one never leaves the list. */
+/** A row's badges (row-parts.ts), as chips. */
+export const badgeNodes = (
+  badges: readonly RowBadge[],
+  now: Date
+): readonly ReactElement[] => badges.map((badge) => badgeNode(badge, now));
+
+/** Checkable next steps, inline in the open row: ticking one never leaves the list. Each shows two lines at most. */
 export const StepChecklist = ({
   onToggle,
   steps,
@@ -204,11 +197,13 @@ export const StepChecklist = ({
             onToggle(step);
           }}
         />
+        {/* Two lines in the row; details show the whole step. */}
         <span
           className={cn(
-            "min-w-0 text-sm leading-snug break-words",
+            "line-clamp-2 min-w-0 text-sm leading-snug break-words",
             step.done && "text-muted-foreground line-through"
           )}
+          title={step.text}
         >
           {step.text}
         </span>
@@ -225,7 +220,9 @@ export const PinLegend = ({ pins }: { readonly pins: readonly Pin[] }) => (
         // oxlint-disable-next-line react/no-array-index-key -- a pin's place is its number.
         <li className="flex min-w-0 items-center gap-1.5 text-sm" key={index}>
           <PinGlyph height={15} number={index + 1} />
-          <span className="min-w-0 truncate">{pin.label}</span>
+          <span className="min-w-0 truncate" title={pin.label}>
+            {pin.label}
+          </span>
         </li>
       )
     )}

@@ -50,17 +50,13 @@ import { coach } from "@/tutorial/anchors";
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
 import { whenText } from "./format";
-import {
-  filledSteps,
-  PinLegend,
-  metaBadges,
-  StepChecklist,
-  WindowStrip,
-} from "./item-meta";
+import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
+import { rowParts } from "./row-parts";
+import type { RowExtras } from "./row-parts";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
 
@@ -127,6 +123,10 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
+/** The source line's tooltip: the whole line, which may end in an ellipsis, then where a click goes. */
+const sourceTitle = (shown: string, opens: string | null): string =>
+  opens === null || opens === shown ? shown : `${shown}\n${opens}`;
+
 /**
  * Where an item came from, in one quiet line: the site and what on it for
  * pages the shelf knows, else the app and window. A page address opens in the
@@ -143,10 +143,14 @@ export const SourceLine = ({
   const icon = service === null ? Link01Icon : SERVICE_ICON[service];
   // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
   const app = openingApp(context, isMac);
+  const shown = label === "" ? (context.url ?? "") : label;
 
   if (context.url === null && app === null) {
     return label === "" ? null : (
-      <p className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs">
+      <p
+        className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
+        title={label}
+      >
         {service === null ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
         )}
@@ -160,11 +164,11 @@ export const SourceLine = ({
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
       {...coach("item-source")}
       onClick={onOpenLink}
-      title={app === null ? (context.url ?? undefined) : `Open ${app}`}
+      title={sourceTitle(shown, app === null ? context.url : `Open ${app}`)}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
-      <SourceText label={label === "" ? (context.url ?? "") : label} />
+      <SourceText label={shown} />
     </button>
   );
 };
@@ -188,7 +192,7 @@ export const LinkList = ({
         onClick={() => {
           onOpenLink(link.url);
         }}
-        title={link.url}
+        title={link.text === link.url ? link.url : `${link.text}\n${link.url}`}
         type="button"
       >
         <HugeiconsIcon
@@ -196,9 +200,9 @@ export const LinkList = ({
           icon={Link01Icon}
           size={12}
         />
-        <span className="truncate">{link.text}</span>
+        <span className="min-w-[4ch] truncate">{link.text}</span>
         {link.text === link.url ? null : (
-          <span className="text-muted-foreground shrink-0">
+          <span className="text-muted-foreground min-w-0 shrink-[4] truncate">
             {hostOf(link.url)}
           </span>
         )}
@@ -228,7 +232,7 @@ const FileName = ({
       event.stopPropagation();
       onDragImage();
     }}
-    title="Drag into another app"
+    title={`${item.file.name}\nDrag into another app`}
     type="button"
   >
     <HugeiconsIcon
@@ -601,7 +605,8 @@ const Picture = ({
     aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
-      compact ? "w-24" : "w-full"
+      // At the narrowest shelf a third of the row, so the words beside it keep room to read.
+      compact ? "w-[clamp(4rem,32%,6rem)]" : "w-full"
     )}
     draggable
     data-row-keys
@@ -830,6 +835,7 @@ const FileBody = ({
 const TextBody = ({
   editing,
   item,
+  links,
   onContextMenu,
   onEdit,
   onEditText,
@@ -841,6 +847,8 @@ const TextBody = ({
   readonly item: TextItem;
   readonly selected: boolean;
   readonly editing: boolean;
+  /** The open row lists the links its words held. */
+  readonly links: boolean;
 } & Pick<
   RowHandlers,
   | "onContextMenu"
@@ -894,9 +902,7 @@ const TextBody = ({
           />
         </button>
       )}
-      {selected && item.links.length > 0 ? (
-        <LinkList links={item.links} onOpenLink={onOpenLink} />
-      ) : null}
+      {links ? <LinkList links={item.links} onOpenLink={onOpenLink} /> : null}
     </>
   );
 };
@@ -922,47 +928,50 @@ const SourceRow = ({
   </BadgeLine>
 );
 
-/** What an open row shows besides its words: the description, checkable steps and the linked windows. */
+/**
+ * What an open row shows besides its words, each only once it is set: pin
+ * labels, the description (three lines; details hold the rest), checkable
+ * steps and the linked windows.
+ */
 const Expansion = ({
+  extras,
   item,
   onReopenWindow,
   onToggleStep,
 }: {
+  readonly extras: RowExtras;
   readonly item: ShelfItem;
   readonly onToggleStep: (step: Step) => void;
   readonly onReopenWindow: (window: WindowRef) => void;
 }) => {
-  const description = item.description.trim();
-  const steps = filledSteps(item.steps);
-
-  const labelled =
-    item.kind === "image" && item.pins.some((pin) => pin.label !== undefined);
-
   if (
-    description === "" &&
-    steps.length === 0 &&
-    item.windows.length === 0 &&
-    !labelled
+    !extras.description &&
+    !extras.steps &&
+    !extras.windows &&
+    !extras.pinLegend
   ) {
     return null;
   }
 
   return (
     <div className="flex flex-col gap-2 pt-0.5">
-      {labelled && item.kind === "image" ? (
+      {extras.pinLegend && item.kind === "image" ? (
         <PinLegend pins={item.pins} />
       ) : null}
-      {description === "" ? null : (
-        <p className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-wrap">
-          {description}
+      {extras.description ? (
+        <p
+          className="text-muted-foreground line-clamp-3 text-sm leading-snug break-words whitespace-pre-line"
+          title={item.description.trim()}
+        >
+          {item.description.trim()}
         </p>
-      )}
-      {steps.length === 0 ? null : (
+      ) : null}
+      {extras.steps ? (
         <StepChecklist onToggle={onToggleStep} steps={item.steps} />
-      )}
-      {item.windows.length === 0 ? null : (
+      ) : null}
+      {extras.windows ? (
         <WindowStrip onReopen={onReopenWindow} windows={item.windows} />
-      )}
+      ) : null}
     </div>
   );
 };
@@ -977,21 +986,85 @@ const TagStripe = ({ item }: { readonly item: ShelfItem }) =>
     />
   );
 
-/** A file without a source line carries its badges on the file's own line, not on a line of their own. */
-const placedBadges = (
-  item: ShelfItem,
-  badges: readonly ReactNode[]
-): {
-  readonly fileLine: readonly ReactNode[];
-  readonly sourceLine: readonly ReactNode[];
-} =>
-  item.kind === "file" && item.context === null
-    ? { fileLine: badges, sourceLine: [] }
-    : { fileLine: [], sourceLine: badges };
+/** ⋯, which opens the item's menu under it: shown on the open row, on hover or focus, and as a tick once copied. */
+const MoreButton = ({
+  copied,
+  onOpen,
+  shown,
+}: {
+  readonly copied: boolean;
+  readonly onOpen: RowHandlers["onContextMenu"];
+  readonly shown: boolean;
+}) => (
+  <span
+    className={cn(
+      "-my-0.5 shrink-0",
+      shown
+        ? "opacity-100"
+        : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+    )}
+  >
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={copied ? "Copied" : "More"}
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+
+            onOpen({
+              align: "end",
+              height: box.height,
+              width: box.width,
+              x: box.left,
+              y: box.top,
+            });
+          }}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <HugeiconsIcon icon={copied ? Tick02Icon : MoreHorizontalIcon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="left">{copied ? "Copied" : "More"}</TooltipContent>
+    </Tooltip>
+  </span>
+);
+
+/** The open row's foot: when and how it was captured, and Details (→). */
+const OpenFooter = ({
+  item,
+  onShowDetails,
+}: {
+  readonly item: ShelfItem;
+  readonly onShowDetails: () => void;
+}) => (
+  // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
+  <div className="-mr-9 flex min-h-6 items-center gap-2">
+    <p
+      className="text-muted-foreground min-w-0 flex-1 truncate text-xs"
+      title={metaText(item)}
+    >
+      {metaText(item)}
+    </p>
+    <Button
+      aria-label="Show details"
+      className="-mr-2.75 shrink-0"
+      data-details-button
+      onClick={onShowDetails}
+      size="xs"
+      title={`Details (${keyText("Right", isMac)})`}
+      variant="quiet"
+    >
+      Details
+      <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
+    </Button>
+  </div>
+);
 
 export const ItemRow = (props: ItemRowProps) => {
   const { copied, editing, item, selected } = props;
-  const badges = placedBadges(item, metaBadges(item, props.now, selected));
+  const parts = rowParts(item, selected);
+  const badges = badgeNodes(parts.badges, props.now);
 
   return (
     <li
@@ -1056,6 +1129,7 @@ export const ItemRow = (props: ItemRowProps) => {
           <TextBody
             editing={editing}
             item={item}
+            links={parts.extras?.links === true}
             onContextMenu={props.onContextMenu}
             onEdit={props.onEdit}
             onEditText={props.onEditText}
@@ -1082,7 +1156,7 @@ export const ItemRow = (props: ItemRowProps) => {
         ) : null}
         {item.kind === "file" ? (
           <FileBody
-            badges={badges.fileLine}
+            badges={parts.badgesOn === "file" ? badges : []}
             editing={editing}
             item={item}
             onContextMenu={props.onContextMenu}
@@ -1095,15 +1169,16 @@ export const ItemRow = (props: ItemRowProps) => {
             selected={selected}
           />
         ) : null}
-        {selected ? (
+        {parts.extras === null ? null : (
           <Expansion
+            extras={parts.extras}
             item={item}
             onReopenWindow={props.onReopenWindow}
             onToggleStep={props.onToggleStep}
           />
-        ) : null}
+        )}
         <SourceRow
-          badges={badges.sourceLine}
+          badges={parts.badgesOn === "source" ? badges : []}
           context={item.context}
           onOpenLink={() => {
             props.onOpenLink();
@@ -1118,60 +1193,14 @@ export const ItemRow = (props: ItemRowProps) => {
           />
         )}
         {selected ? (
-          // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
-          <div className="-mr-9 flex min-h-6 items-center gap-2">
-            <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
-              {metaText(item)}
-            </p>
-            <Button
-              aria-label="Show details"
-              className="-mr-2.75 shrink-0"
-              data-details-button
-              onClick={props.onShowDetails}
-              size="xs"
-              title={`Details (${keyText("Right", isMac)})`}
-              variant="quiet"
-            >
-              Details
-              <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
-            </Button>
-          </div>
+          <OpenFooter item={item} onShowDetails={props.onShowDetails} />
         ) : null}
       </div>
-      <span
-        className={cn(
-          "-my-0.5 shrink-0",
-          selected || copied
-            ? "opacity-100"
-            : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-        )}
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={copied ? "Copied" : "More"}
-              onClick={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-
-                props.onContextMenu({
-                  align: "end",
-                  height: box.height,
-                  width: box.width,
-                  x: box.left,
-                  y: box.top,
-                });
-              }}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <HugeiconsIcon icon={copied ? Tick02Icon : MoreHorizontalIcon} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            {copied ? "Copied" : "More"}
-          </TooltipContent>
-        </Tooltip>
-      </span>
+      <MoreButton
+        copied={copied}
+        onOpen={props.onContextMenu}
+        shown={selected || copied}
+      />
     </li>
   );
 };
