@@ -13,7 +13,8 @@ export const tooltipText = (text: string): string =>
 
 /**
  * Calls `measure` with the element now, and again whenever what decides the
- * measurement changes: the box's size, or the words and classes inside it.
+ * measurement changes: its size or its parent's, or the words and classes
+ * inside it.
  * Nothing else re-measures, so a render that changes neither (a keystroke in
  * the composer above a long list) costs no layout reads.
  */
@@ -40,6 +41,12 @@ const useMeasure = (
 
     if (element !== null && enabled) {
       resized.observe(element);
+
+      // An inline box reports no size of its own: the box it sits in says when its room changes.
+      if (element.parentElement !== null) {
+        resized.observe(element.parentElement);
+      }
+
       changed.observe(element, {
         attributeFilter: ["class", "style"],
         characterData: true,
@@ -61,7 +68,8 @@ const hidesWords = (element: Element): boolean =>
   [element, ...element.querySelectorAll("*")].some(
     (box) =>
       getComputedStyle(box).overflow !== "visible" &&
-      (box.scrollWidth > box.clientWidth + 1 ||
+      // A pixel past is cut too: its ellipsis shows.
+      (box.scrollWidth > box.clientWidth ||
         box.scrollHeight > box.clientHeight + 1)
   );
 
@@ -178,15 +186,17 @@ export const Clamp = ({
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [cut, setCut] = useState(false);
+  // At least two lines would hide: the words are cut until Show more opens them.
+  const [long, setLong] = useState(false);
+  const cut = long && !open;
 
   useMeasure(ref, (element) => {
     // The words' whole height, whether or not they are cut now.
     const hidden = element.scrollHeight - lines * lineHeight(element);
-    const cuts = !open && hidden >= 2 * lineHeight(element) - 1;
+    const isLong = hidden >= 2 * lineHeight(element) - 1;
 
-    setCut(cuts);
-    hideCutControls(element, cuts);
+    setLong(isLong);
+    hideCutControls(element, isLong && !open);
   });
 
   const label = open ? less : more;
@@ -206,11 +216,11 @@ export const Clamp = ({
       >
         {children}
       </div>
-      {cut || open ? (
+      {long ? (
         <button
           aria-expanded={open}
           aria-label={what === undefined ? undefined : `${label} of ${what}`}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -mt-0.5 self-start rounded-sm text-xs font-medium outline-none focus-visible:ring-3"
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -mx-0.5 -mt-0.5 self-start rounded-sm px-0.5 text-xs font-medium outline-none focus-visible:ring-3"
           onClick={(event) => {
             event.stopPropagation();
             setOpen(!open);
