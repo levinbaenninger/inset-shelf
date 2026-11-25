@@ -1208,4 +1208,26 @@ describe("drawing on an item's attachments", () => {
       saved: { ok: true },
     });
   });
+
+  it("saves a new drawing for a full item as one item of its own however often a held quit's Retry saves it", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app, ATTACHMENTS_MAX);
+
+    app.saves.open({ id: note.id, kind: "newAttachment" });
+    await app.quit();
+    app.disk.full = true;
+    app.quitHold.answer("retry");
+    await vi.waitFor(() => {
+      expect(app.prompt()?.state).toBe("stillFailing");
+    });
+    app.disk.full = false;
+    app.quitHold.answer("retry");
+    await vi.waitFor(() => {
+      expect(app.finished).toStrictEqual(["quit"]);
+    });
+    await Promise.all(app.pageSaves);
+    const { items } = await app.reopened();
+
+    expect(items.map((item) => item.kind)).toStrictEqual(["text", "image"]);
+  });
 });

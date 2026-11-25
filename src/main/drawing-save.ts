@@ -279,6 +279,14 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
           return attachmentDestination(made.id, made.attachmentId);
         }
 
+        // A held quit's save made it an item of its own, the item being full: the next save replaces that one.
+        const fallback =
+          made?.kind === "item" ? deps.controller.item(made.id) : undefined;
+
+        if (fallback?.kind === "image") {
+          return { item: fallback, kind: "item" };
+        }
+
         return item.attachments.length >= ATTACHMENTS_MAX
           ? { full: true, kind: "newItem" }
           : { item, kind: "attach" };
