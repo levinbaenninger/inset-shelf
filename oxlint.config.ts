@@ -9,7 +9,12 @@ import vitest from "ultracite/oxlint/vitest";
 export default defineConfig({
   env: core.env,
   extends: [core, react, tanstack, vitest, shadcn, antiSlop],
-  ignorePatterns: [...core.ignorePatterns, "src/renderer/components/ui/**"],
+  ignorePatterns: [
+    ...core.ignorePatterns,
+    "src/renderer/components/ui/**",
+    // The landing page is plain HTML with the design kit's own files.
+    "site/**",
+  ],
   jsPlugins: shadcn.jsPlugins,
   options: { typeAware: true },
   overrides: [
