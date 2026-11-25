@@ -8,7 +8,7 @@ export const SOURCE = {
   label: "See the source",
 };
 
-export const SITE_URL = "https://inset.levexis.workers.dev";
+export const SITE_URL = "https://inset-shelf.levexis.workers.dev";
 
 export const NAV_LINKS = [
   { href: "#capture", label: "Capture" },
