@@ -15,6 +15,7 @@ import {
 } from "@shared/contracts";
 import type {
   ActionResult,
+  AttachResult,
   NoticeTone,
   Permission,
   PickerView,
@@ -2035,20 +2036,49 @@ const start = async (): Promise<void> => {
 
   // Attachments: what the shelf page asks for an item's pictures and files (attachments.ts).
 
-  /** Says what attaching to an item did: how many landed, or why not. */
-  const noticeAttached = (id: ItemId, outcome: AttachOutcome): void => {
+  /** What attaching did, once the disk holds what landed: a failed write is said with the rest. */
+  const attachedOnDisk = async (
+    outcome: AttachOutcome
+  ): Promise<AttachResult> => {
     const result = attachResult(outcome);
 
-    if (!result.ok) {
-      notify(result.message, "failed");
+    if (result.attached.length === 0) {
+      return result;
+    }
+
+    const written = await withinWait(
+      controller.persisted(controller.snapshot().rev),
+      setTimer
+    );
+
+    return written.ok
+      ? result
+      : {
+          ...result,
+          message: [result.message, written.message]
+            .filter((each) => each !== null)
+            .join(" "),
+        };
+  };
+
+  /** Says what attaching to an item did: how many landed, or why not. */
+  const noticeAttached = async (
+    id: ItemId,
+    outcome: AttachOutcome
+  ): Promise<void> => {
+    const { attached, message } = await attachedOnDisk(outcome);
+
+    if (message !== null) {
+      notify(message, "failed");
 
       return;
     }
 
     const item = controller.item(id);
 
-    if (outcome.added > 0 && item !== undefined) {
-      const count = outcome.added === 1 ? "1 file" : `${outcome.added} files`;
+    if (attached.length > 0 && item !== undefined) {
+      const count =
+        attached.length === 1 ? "1 file" : `${attached.length} files`;
 
       notify(`Attached ${count} to “${excerpt(itemText(item))}”`);
     }
@@ -2132,16 +2162,16 @@ const start = async (): Promise<void> => {
     }: {
       readonly id: ItemId;
       readonly paths: readonly string[];
-    }): Promise<ActionResult> =>
-      attachResult(await attachments.attachFilesTo(id, paths)),
+    }): Promise<AttachResult> =>
+      await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
     pasteImageTo: async ({
       bytes,
       id,
     }: {
       readonly bytes: Uint8Array | null;
       readonly id: ItemId;
-    }): Promise<ActionResult> =>
-      attachResult(await attachments.pasteImageTo(id, bytes)),
+    }): Promise<AttachResult> =>
+      await attachedOnDisk(await attachments.pasteImageTo(id, bytes)),
     pickFilesFor: (id: ItemId): void => {
       void (async () => {
         const picked = await dialog.showOpenDialog(shelf.dialogParent, {
@@ -2150,7 +2180,7 @@ const start = async (): Promise<void> => {
         });
 
         if (!picked.canceled && picked.filePaths.length > 0) {
-          noticeAttached(
+          await noticeAttached(
             id,
             await attachments.attachFilesTo(id, picked.filePaths)
           );

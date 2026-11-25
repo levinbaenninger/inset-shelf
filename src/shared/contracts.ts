@@ -16,7 +16,7 @@ import {
   ShelfOpSchema,
   WindowIdSchema,
 } from "./shelf";
-import type { ItemId, ShelfDoc } from "./shelf";
+import type { AttachmentId, ItemId, ShelfDoc } from "./shelf";
 import { TutorialActionSchema } from "./tutorial";
 import type { TutorialView } from "./tutorial";
 
@@ -151,6 +151,12 @@ export type ActionResult =
       readonly retrySave?: true;
     };
 
+/** What attaching to an item did: the attachments it put there, and why any or all weren't, or null when all were. */
+export interface AttachResult {
+  readonly attached: readonly AttachmentId[];
+  readonly message: string | null;
+}
+
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
 /**
@@ -174,7 +180,7 @@ const attachmentMethods = {
       id: ItemIdSchema,
       paths: z.array(z.string().min(1).max(4096)).min(1).max(50),
     }),
-    out<ActionResult>()
+    out<AttachResult>()
   ),
   /** A picture pasted with the item open, or with null the clipboard's own: main reads it. */
   pasteImageTo: invoke(
@@ -185,7 +191,7 @@ const attachmentMethods = {
         .nullable(),
       id: ItemIdSchema,
     }),
-    out<ActionResult>()
+    out<AttachResult>()
   ),
   /** Drags one attachment out as a file: a picture with its pins drawn in, a file as itself. */
   startAttachmentDrag: send(

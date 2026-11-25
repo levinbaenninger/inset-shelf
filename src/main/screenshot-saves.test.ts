@@ -114,7 +114,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
 
       attached.push(id);
 
-      return { ok: true };
+      return { attached: [], message: null };
     },
     card: {
       hide: () => {

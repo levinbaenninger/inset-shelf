@@ -1,5 +1,5 @@
 import type {
-  ActionResult,
+  AttachResult,
   ScreenshotView,
   ShotSaveTo,
 } from "@shared/contracts";
@@ -50,7 +50,7 @@ export interface ShotSavesDeps<S extends Shot> {
   /** Makes the screenshot an item in the section new items go to; null when the shelf refuses it. Throws when its file can't be written. */
   readonly addItem: (shot: S) => Promise<ItemId | null>;
   /** Attaches the screenshot to an item. Throws when its file can't be written. */
-  readonly attach: (shot: S, id: ItemId) => Promise<ActionResult>;
+  readonly attach: (shot: S, id: ItemId) => Promise<AttachResult>;
   /** Waits until the disk holds every change so far. */
   readonly persisted: () => Promise<WriteResult>;
   readonly notify: (message: string, tone: "failed") => void;
@@ -272,8 +272,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         if (holding.attachedTo !== id) {
           const result = await deps.attach(holding.shot, id);
 
-          if (!result.ok) {
-            return result;
+          if (result.message !== null) {
+            return { message: result.message, ok: false };
           }
 
           holding.attachedTo = id;

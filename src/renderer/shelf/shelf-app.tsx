@@ -2,6 +2,7 @@ import { Cancel01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
   ActionResult,
+  AttachResult,
   DetailField,
   ItemAction,
   NotSavedItem,
@@ -13,6 +14,7 @@ import { parseSearch } from "@shared/due";
 import type { MenuChoice } from "@shared/menus";
 import { ATTACHMENTS_MAX, groupItems, itemText, UNDO_MAX } from "@shared/shelf";
 import type {
+  AttachmentId,
   ItemId,
   SectionId,
   ShelfItem,
@@ -324,7 +326,7 @@ const addDataFiles = async (files: readonly File[]): Promise<void> => {
 const attachDataFiles = async (
   id: ItemId,
   files: readonly File[]
-): Promise<ActionResult | null> => {
+): Promise<AttachResult | null> => {
   const paths = files.flatMap((file) => {
     const found = filePath(file);
 
@@ -343,16 +345,22 @@ const attachDataFiles = async (
     )
   );
 
-  let result: ActionResult | null = null;
+  if (images.length === 0) {
+    return null;
+  }
+
+  const attached: AttachmentId[] = [];
+  let message: string | null = null;
 
   for (const bytes of images) {
     // oxlint-disable-next-line no-await-in-loop -- in order, so what fits is what came first.
     const next = await api.pasteImageTo({ bytes, id });
 
-    result = result === null || result.ok ? next : result;
+    attached.push(...next.attached);
+    message ??= next.message;
   }
 
-  return result;
+  return { attached, message };
 };
 
 /** A drop on an item that holds all it can: refused, and said why while the files are over it. */
@@ -399,9 +407,10 @@ const attachPasted = async (
   files: readonly File[]
 ): Promise<void> => {
   const result = await attachDataFiles(id, files);
+  const message = result?.message ?? null;
 
-  if (result !== null && !result.ok) {
-    toast.error(result.message, { duration: NOTICE_MS });
+  if (message !== null) {
+    toast.error(message, { duration: NOTICE_MS });
   }
 };
 
@@ -660,10 +669,10 @@ const removedTitle = (
 
 /** Paste Image in details: the clipboard's picture, read by main, attached to the item; says why when there is none. */
 const pasteClipboardImage = async (id: ItemId): Promise<void> => {
-  const result = await api.pasteImageTo({ bytes: null, id });
+  const { message } = await api.pasteImageTo({ bytes: null, id });
 
-  if (!result.ok) {
-    toast.error(result.message, { duration: NOTICE_MS });
+  if (message !== null) {
+    toast.error(message, { duration: NOTICE_MS });
   }
 };
 
@@ -836,56 +845,48 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     },
   });
 
-  // Kept for an Undo pressed long after the render that made its toast.
-  const latestDoc = useRef(doc);
-
-  useEffect(() => {
-    latestDoc.current = doc;
-  }, [doc]);
-
-  /** Files dropped on a row: attached, with Undo for a drop that landed on the wrong item. */
+  /** Files dropped on a row: attached, with Undo for a drop that landed on the wrong item. Undo takes off what this drop attached, and nothing else. */
   const attachDropped = async (
     item: ShelfItem,
     files: readonly File[]
   ): Promise<void> => {
-    const before = new Set(item.attachments.map((attachment) => attachment.id));
     const result = await attachDataFiles(item.id, files);
 
     if (result === null) {
       return;
     }
 
-    if (!result.ok) {
-      toast.error(result.message, { duration: NOTICE_MS });
+    const { attached, message } = result;
+
+    if (attached.length === 0) {
+      toast.error(message, { duration: NOTICE_MS });
 
       return;
     }
 
-    toast(
-      files.length === 1 ? "Attached 1 file" : `Attached ${files.length} files`,
-      {
-        action: {
-          label: "Undo",
-          onClick: () => {
-            const current = latestDoc.current.items.find(
-              (other) => other.id === item.id
-            );
-
-            for (const attachment of current?.attachments ?? []) {
-              if (!before.has(attachment.id)) {
-                apply({
-                  attachmentId: attachment.id,
-                  id: item.id,
-                  type: "removeAttachment",
-                });
-              }
-            }
-          },
+    const options = {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          for (const attachmentId of attached) {
+            apply({ attachmentId, id: item.id, type: "removeAttachment" });
+          }
         },
-        description: <Excerpt item={item} />,
-        duration: UNDO_VISIBLE_MS,
-      }
-    );
+      },
+      description: <Excerpt item={item} />,
+      duration: UNDO_VISIBLE_MS,
+    };
+
+    if (message === null) {
+      toast(
+        attached.length === 1
+          ? "Attached 1 file"
+          : `Attached ${attached.length} files`,
+        options
+      );
+    } else {
+      toast.error(message, options);
+    }
   };
 
   const attachDrop = useAttachDrop({

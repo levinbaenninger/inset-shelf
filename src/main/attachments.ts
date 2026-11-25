@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { ActionResult } from "@shared/contracts";
+import type { AttachResult } from "@shared/contracts";
 import { ATTACHMENTS_MAX } from "@shared/shelf";
 import type {
   Attachment,
@@ -60,9 +60,9 @@ export interface AttachmentDeps {
   readonly now: () => Date;
 }
 
-/** What attaching did: how many were attached, how many the item had no room for, and what couldn't be read. */
+/** What attaching did: the attachments put on the item, how many it had no room for, and what couldn't be read. */
 export interface AttachOutcome {
-  readonly added: number;
+  readonly attached: readonly AttachmentId[];
   readonly refused: number;
   readonly problems: readonly string[];
 }
@@ -158,14 +158,12 @@ export const createAttachments = (deps: AttachmentDeps) => {
     const left = uploads.slice(fitting.length);
     const addedAt = deps.now().toISOString();
 
-    if (fitting.length > 0) {
-      deps.apply({
-        attachments: fitting.map((upload) =>
-          toAttachment(upload, deps.newAttachmentId(), addedAt)
-        ),
-        id,
-        type: "attach",
-      });
+    const attached = fitting.map((upload) =>
+      toAttachment(upload, deps.newAttachmentId(), addedAt)
+    );
+
+    if (attached.length > 0) {
+      deps.apply({ attachments: attached, id, type: "attach" });
     }
 
     for (const file of left.flatMap(storedFiles)) {
@@ -173,8 +171,12 @@ export const createAttachments = (deps: AttachmentDeps) => {
     }
 
     return item === undefined
-      ? { added: 0, problems: [GONE], refused: 0 }
-      : { added: fitting.length, problems: [], refused: left.length };
+      ? { attached: [], problems: [GONE], refused: 0 }
+      : {
+          attached: attached.map((attachment) => attachment.id),
+          problems: [],
+          refused: left.length,
+        };
   };
 
   /** Files dropped on an item or picked for it, in the order given; the shelf's own dragged-out copies are skipped. */
@@ -212,7 +214,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
 
       return image === null
         ? {
-            added: 0,
+            attached: [],
             problems: ["The pasted data is not an image Inset can read."],
             refused: 0,
           }
@@ -223,7 +225,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
 
     if (copied === null) {
       return {
-        added: 0,
+        attached: [],
         problems: ["The clipboard holds no image."],
         refused: 0,
       };
@@ -237,9 +239,10 @@ export const createAttachments = (deps: AttachmentDeps) => {
   return { attachFilesTo, attachTo, pasteImageTo, prepare, storePicture };
 };
 
-/** How attaching ended, for the page: a refusal says why, and how many did land. */
-export const attachResult = (outcome: AttachOutcome): ActionResult => {
-  const { added, problems, refused } = outcome;
+/** How attaching ended, for the page: what landed, and why the rest didn't. */
+export const attachResult = (outcome: AttachOutcome): AttachResult => {
+  const { attached, problems, refused } = outcome;
+  const added = attached.length;
 
   const full =
     refused === 0
@@ -252,7 +255,8 @@ export const attachResult = (outcome: AttachOutcome): ActionResult => {
 
   const messages = [...full, ...problems];
 
-  return messages.length === 0
-    ? { ok: true }
-    : { message: messages.join(" "), ok: false };
+  return {
+    attached,
+    message: messages.length === 0 ? null : messages.join(" "),
+  };
 };

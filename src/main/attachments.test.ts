@@ -141,7 +141,7 @@ describe(createAttachments, () => {
         id: uuid(15),
         kind: "file",
       },
-      outcome: { added: 2, problems: [], refused: 0 },
+      outcome: { attached: [uuid(14), uuid(15)], problems: [], refused: 0 },
       picture: {
         addedAt: "2026-11-21T09:00:00.000Z",
         id: uuid(14),
@@ -159,7 +159,7 @@ describe(createAttachments, () => {
   });
 
   it("gives two drops landing at once only the room there is, and deletes the files that didn't fit", async () => {
-    const { attachments, deleted, id, names, stored } = setup(
+    const { attachments, controller, deleted, id, names, stored } = setup(
       ATTACHMENTS_MAX - 1
     );
 
@@ -176,19 +176,23 @@ describe(createAttachments, () => {
       total: names().length,
     }).toStrictEqual({
       deleted: [stored[1]],
-      first: { added: 1, problems: [], refused: 0 },
+      first: {
+        attached: [controller.item(id)?.attachments.at(-1)?.id],
+        problems: [],
+        refused: 0,
+      },
       last: "First.pdf",
-      second: { added: 0, problems: [], refused: 1 },
+      second: { attached: [], problems: [], refused: 1 },
       total: ATTACHMENTS_MAX,
     });
     expect(attachResult(second)).toStrictEqual({
+      attached: [],
       message: `Nothing was attached. An item holds up to ${ATTACHMENTS_MAX}.`,
-      ok: false,
     });
   });
 
   it("attaches what fits of a larger drop and says how much did", async () => {
-    const { attachments, id, names } = setup(ATTACHMENTS_MAX - 2);
+    const { attachments, controller, id, names } = setup(ATTACHMENTS_MAX - 2);
 
     const outcome = await attachments.attachFilesTo(
       id,
@@ -201,14 +205,36 @@ describe(createAttachments, () => {
     }).toStrictEqual({
       added: ["A.pdf", "B.pdf"],
       result: {
+        attached: controller
+          .item(id)
+          ?.attachments.slice(-2)
+          .map((each) => each.id),
         message: `Attached 2 of 5. An item holds up to ${ATTACHMENTS_MAX}.`,
-        ok: false,
       },
     });
   });
 
+  it("names what a partial drop attached, so its Undo takes off exactly those", async () => {
+    const { attachments, controller, id } = setup(ATTACHMENTS_MAX - 2);
+
+    const outcome = await attachments.attachFilesTo(
+      id,
+      ["A", "B", "C"].map((name) => `/a/${name}.pdf`)
+    );
+
+    const landed = controller
+      .item(id)
+      ?.attachments.slice(-2)
+      .map((attachment) => attachment.id);
+
+    expect(attachResult(outcome)).toStrictEqual({
+      attached: landed,
+      message: `Attached 2 of 3. An item holds up to ${ATTACHMENTS_MAX}.`,
+    });
+  });
+
   it("ignores the shelf's own dragged-out copy dropped back, and names what can't be read", async () => {
-    const { attachments, id, names, stored } = setup(0);
+    const { attachments, controller, id, names, stored } = setup(0);
 
     const outcome = await attachments.attachFilesTo(id, [
       "/tmp/Inset Shelf/abc/Quote.pdf",
@@ -224,9 +250,9 @@ describe(createAttachments, () => {
     }).toStrictEqual({
       names: ["Notes.txt"],
       result: {
+        attached: controller.item(id)?.attachments.map((each) => each.id),
         message:
           "Folder is a folder, not a file. huge.mov is larger than 200 MB.",
-        ok: false,
       },
       stored: [`${uuid(12)}.txt`],
     });
@@ -253,7 +279,7 @@ describe(createAttachments, () => {
       await fromImage.attachments.pasteImageTo(fromImage.id, null),
       await fromFile.attachments.pasteImageTo(fromFile.id, null),
       await empty.attachments.pasteImageTo(empty.id, null),
-    ].map(attachResult);
+    ].map((outcome) => attachResult(outcome).message);
 
     expect({
       names: [pasted, fromImage, fromFile, empty].map((at) => at.names()),
@@ -261,14 +287,11 @@ describe(createAttachments, () => {
     }).toStrictEqual({
       names: [["Pasted image"], ["Pasted image"], ["Plan"], []],
       results: [
-        { ok: true },
-        {
-          message: "The pasted data is not an image Inset can read.",
-          ok: false,
-        },
-        { ok: true },
-        { ok: true },
-        { message: "The clipboard holds no image.", ok: false },
+        null,
+        "The pasted data is not an image Inset can read.",
+        null,
+        null,
+        "The clipboard holds no image.",
       ],
     });
   });
@@ -280,8 +303,8 @@ describe(createAttachments, () => {
     controller.apply({ id, type: "remove" });
 
     expect(attachResult(await outcome)).toStrictEqual({
+      attached: [],
       message: "This item no longer exists.",
-      ok: false,
     });
     expect(deleted).toStrictEqual(stored);
   });

@@ -5758,6 +5758,41 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       name: "attach-row-drop-real",
     },
     {
+      // Undo on a drop takes off what that drop attached, and nothing attached after it.
+      act: async (page) => {
+        await select(page, 906);
+        await dropFilesOn(page, `[data-item-id="${uuid(906)}"]`);
+        await page.getByText("Attached 1 file").first().waitFor();
+        await dropFilesOn(page, `[data-item-id="${uuid(906)}"]`);
+        await page.waitForTimeout(300);
+        // The first drop's notice, now under the second's.
+        await page
+          .locator("[data-sonner-toast][data-index='1']")
+          .getByRole("button", { exact: true, name: "Undo" })
+          .evaluate((button: HTMLElement) => {
+            button.click();
+          });
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const ops = await applied(page);
+        const removed = ops.filter((op) => op.type === "removeAttachment");
+
+        const tiles = await item(page, 906)
+          .locator("[data-attachment-strip] button")
+          .count();
+
+        return isDeepStrictEqual(
+          removed.map((op) => op.attachmentId),
+          ["00000000-0000-4000-8000-000000700001"]
+        ) && tiles === 3
+          ? null
+          : `Undo must remove only the first drop's file: ${JSON.stringify(removed)}, ${String(tiles)} tiles`;
+      },
+      data: { filePaths: true, view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-undo",
+    },
+    {
       act: async (page) => {
         // A click on a tile selects its row and leaves the keyboard on the tile.
         await item(page, 906)

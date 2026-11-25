@@ -220,6 +220,8 @@ const applyOp = (doc, op) => {
 
 if (page === "shelf") {
   let view = { discarded: null, notSaved: [], ...data.view };
+  // How many files were dropped on items so far, for each one's own id.
+  let dropped = 0;
 
   // What the disk holds: Discard changes puts an item back as it is here.
   const savedDoc = data.savedDoc ?? data.view.doc;
@@ -318,11 +320,43 @@ if (page === "shelf") {
       on,
       openImage: logged("openImage", nothing),
       openLink: logged("openLink", nothing),
-      // Attachments: each call logged; adding answers as main does when all of it fits.
-      addFilesTo: logged("addFilesTo", ok),
+      // Attachments: each call logged; files dropped on an item land on it, and the answer names them, as main's does when all of it fits.
+      addFilesTo: logged("addFilesTo", ({ id, paths }) => {
+        const added = paths.map((file) => {
+          dropped += 1;
+
+          return {
+            addedAt: "2026-11-25T14:15:00.000Z",
+            file: {
+              bytes: 4,
+              name: file.split("/").at(-1),
+              stored: `dropped-${dropped}.bin`,
+            },
+            id: `00000000-0000-4000-8000-${String(700_000 + dropped).padStart(12, "0")}`,
+            kind: "file",
+          };
+        });
+
+        view = {
+          ...view,
+          doc: updateItem(view.doc, id, (item) => ({
+            ...item,
+            attachments: [...(item.attachments ?? []), ...added],
+          })),
+        };
+        echo(view);
+
+        return Promise.resolve({
+          attached: added.map((attachment) => attachment.id),
+          message: null,
+        });
+      }),
       newDrawingFor: logged("newDrawingFor", nothing),
       openAttachment: logged("openAttachment", nothing),
-      pasteImageTo: logged("pasteImageTo", ok),
+      pasteImageTo: logged(
+        "pasteImageTo",
+        resolved({ attached: [], message: null })
+      ),
       // A picture pasted in the list, as a new item; main's notice says how it went.
       pasteImage: logged("pasteImage", nothing),
       // Files dropped or pasted on the shelf, as new items.
