@@ -37,14 +37,19 @@ export const classifyAddedFile = (filePath: string): AddedFile => {
   };
 };
 
-/** What the notice says once files or pictures dropped or pasted on the shelf were added as items, or weren't. */
+export interface AddedNotice {
+  readonly message: string;
+  readonly tone: "done" | "failed";
+}
+
+/** What the notice says once files or pictures dropped or pasted on the shelf were added as items: done only when every one was. */
 export const addedNotice = (
   added: number,
   tried: number,
   problems: readonly string[],
   noun: "file" | "picture"
-): { readonly message: string; readonly tone: "done" | "failed" } => {
-  if (problems.length === 0) {
+): AddedNotice => {
+  if (added === tried && problems.length === 0) {
     return {
       message: added === 1 ? `Added 1 ${noun}` : `Added ${added} ${noun}s`,
       tone: "done",
@@ -54,5 +59,5 @@ export const addedNotice = (
   const lead =
     added === 0 ? "Nothing was added." : `Added ${added} of ${tried}.`;
 
-  return { message: `${lead} ${problems.join(" ")}`, tone: "failed" };
+  return { message: [lead, ...problems].join(" "), tone: "failed" };
 };
