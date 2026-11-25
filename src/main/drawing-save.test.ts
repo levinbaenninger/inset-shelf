@@ -1142,6 +1142,9 @@ describe("drawing on an item's attachments", () => {
     app.controller.apply({ id: note.id, type: "remove" });
     const deleted = await note.saves.save(marked);
 
+    // The removals' writes end before the folder is deleted.
+    await app.controller.flush();
+
     expect({ deleted, removed }).toStrictEqual({
       deleted: { message: "This item is no longer on the shelf.", ok: false },
       removed: {
@@ -1193,6 +1196,8 @@ describe("drawing on an item's attachments", () => {
 
     const saved = await note.saves.save(marked);
     const { items } = app.controller.view().doc;
+
+    await app.controller.flush();
 
     expect({
       attachments: items.map((item) => item.attachments.length),
