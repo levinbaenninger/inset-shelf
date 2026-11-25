@@ -816,11 +816,14 @@ const start = async (): Promise<void> => {
 
   /** What the card's Add to “…” names: the selected item while it has room; else nothing, and the card shows no such button. */
   const cardTarget = (): ScreenshotView["target"] => {
-    const item =
-      shelfSelection === null ? undefined : controller.item(shelfSelection);
+    // Once attached, the card keeps naming that item, so Retry after a failed save saves it there and never attaches twice.
+    const held = shot?.attachedTo ?? null;
+    const id = held ?? shelfSelection;
+    const item = id === null ? undefined : controller.item(id);
 
     cardItem =
-      item === undefined || item.attachments.length >= ATTACHMENTS_MAX
+      item === undefined ||
+      (held === null && item.attachments.length >= ATTACHMENTS_MAX)
         ? null
         : item.id;
 
@@ -2364,6 +2367,7 @@ const start = async (): Promise<void> => {
         }
 
         current.attachedTo = id;
+        retargetCard();
       }
 
       return { id, ok: true };
@@ -2382,7 +2386,7 @@ const start = async (): Promise<void> => {
     screenshotContract,
     {
       addToItem: (seq) => {
-        const id = cardItem;
+        const id = currentShot(seq)?.attachedTo ?? cardItem;
 
         if (id === null) {
           return;
