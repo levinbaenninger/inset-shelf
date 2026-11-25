@@ -70,8 +70,6 @@ export function CaptureChapters() {
     <section
       ref={sectionRef}
       id="capture"
-      data-moment="pinned-chapters"
-      data-moment-mounted=""
       aria-labelledby="capture-h"
       className="relative min-h-[200lvh] pt-24 pb-12 sm:h-svh sm:min-h-0 sm:pt-[120px] sm:pb-[72px] lg:motion-safe:h-[200svh] lg:motion-safe:p-0"
     >

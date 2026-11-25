@@ -132,19 +132,6 @@
   h3 {
     text-wrap: balance;
   }
-  /* The hero's words rise once on load; the class is set in the head, so without script nothing waits. */
-  html.m-enter [data-enter] .enter {
-    animation: var(--animate-rise);
-  }
-  html.m-enter [data-enter] .enter:nth-child(2) {
-    animation-delay: 80ms;
-  }
-  html.m-enter [data-enter] .enter:nth-child(3) {
-    animation-delay: 160ms;
-  }
-  html.m-enter [data-enter] .enter:nth-child(4) {
-    animation-delay: 240ms;
-  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

@@ -7,10 +7,7 @@ coverage/
 .DS_Store
 .env*
 
-# Landing page: checker output and browser profiles
-site/shots/
-site/.taste-skill/chrome-*
-site/.taste-skill/gate/
+# Landing page build output
 site/.wrangler/
 site/.next/
 site/out/

@@ -28,7 +28,7 @@ export function SiteFooter() {
     <footer
       id="contact"
       aria-labelledby="close-h"
-      className="closing flex min-h-lvh flex-col bg-muted pt-24 pb-12 sm:h-svh sm:min-h-0 sm:pt-[120px] sm:pb-[72px]"
+      className="flex min-h-lvh flex-col bg-muted pt-24 pb-12 sm:h-svh sm:min-h-0 sm:pt-[120px] sm:pb-[72px]"
     >
       <div className="wrap flex flex-1 flex-col justify-between gap-24">
         <div className="grid gap-6 sm:gap-10">

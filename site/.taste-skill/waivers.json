@@ -1,4 +1,0 @@
-[
-  { "check": "effect-kind", "target": "section#capture", "reason": "the dealt pinned-chapters moment is built as a React component (components/capture-chapters.tsx) and runs; the kit's moment.js is not shipped on this Next.js page, so the check sees no kit file load" },
-  { "check": "sparse", "target": "#capture section", "reason": "the pinned-chapters stage holds still through the second screen of scroll, so each screen shows the whole stage; the check measures the two-screen section at rest" }
-]

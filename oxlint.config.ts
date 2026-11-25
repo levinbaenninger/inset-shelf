@@ -12,7 +12,7 @@ export default defineConfig({
   ignorePatterns: [
     ...core.ignorePatterns,
     "src/renderer/components/ui/**",
-    // The landing page is plain HTML with the design kit's own files.
+    // The landing page installs and checks on its own (site/).
     "site/**",
   ],
   jsPlugins: shadcn.jsPlugins,

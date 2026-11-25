@@ -112,11 +112,9 @@ function Shelf() {
 }
 
 // A GitHub issue with a sentence selected, and the shelf docked beside it holding that sentence.
-// data-ui marks it as a drawn interface for the design checker.
 export function DeskMock() {
   return (
     <div
-      data-ui="desk"
       aria-hidden="true"
       className="grid grid-cols-1 items-start gap-3 text-left text-[13px] leading-[1.45] sm:grid-cols-[minmax(0,1fr)_280px] lg:grid-cols-[minmax(0,1fr)_300px]"
     >

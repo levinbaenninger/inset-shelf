@@ -29,8 +29,6 @@ export const metadata: Metadata = {
     images: ["/share.jpg"],
   },
   twitter: { card: "summary_large_image" },
-  // The page's kind, read by the design checker (tasteskill).
-  other: { "site-kind": "software", "page-type": "software" },
 };
 
 export const viewport: Viewport = {
@@ -40,15 +38,9 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
-// Set before the first paint, so the hero's entrance runs once and a page without script never waits for it.
-const ENTRANCE = "document.documentElement.classList.add('m-enter')";
-
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" data-type="software" className={inter.variable} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: ENTRANCE }} />
-      </head>
+    <html lang="en" className={inter.variable}>
       <body>{children}</body>
     </html>
   );

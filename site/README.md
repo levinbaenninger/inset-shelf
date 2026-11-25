@@ -11,4 +11,4 @@ pnpm preview   # serves out/ with wrangler, as Cloudflare will
 
 Cloudflare serves `out/` as Workers static assets (`wrangler.jsonc`, no Worker script). Workers Builds: root directory `site`, build command `pnpm install && pnpm build`, deploy command `pnpm exec wrangler deploy`.
 
-The screenshots in `public/img` are shots of the real renderer (`pnpm screens` at the repository root), set on the brand's light blue. `.taste-skill/` holds the design checker's history and waivers.
+The screenshots in `public/img` are shots of the real renderer (`pnpm screens` at the repository root), set on the brand's light blue.

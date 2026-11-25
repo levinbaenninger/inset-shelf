@@ -28,7 +28,7 @@ const CAPTURE_MENU = [
 // The fixed bar. From 1024px the words sit in the bar and Capture opens a menu; below that a button opens a sheet.
 export function SiteHeader() {
   return (
-    <header className="nav fixed inset-x-0 top-0 z-20 h-14 border-b bg-background sm:h-[72px]">
+    <header className="fixed inset-x-0 top-0 z-20 h-14 border-b bg-background sm:h-[72px]">
       <div className="wrap flex h-full items-center gap-3 lg:gap-10">
         <a
           href="#top"
