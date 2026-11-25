@@ -24,40 +24,29 @@ export const signature = (entry: Signed): string =>
 
 /**
  * The banners in the order they first showed, later is newer, after
- * `shown` came in: new ones join at the end. The same array when nothing
- * is new, so a render can compare it.
+ * `shown` came in: new ones join at the end, and cleared ones leave, so one
+ * that comes back is news again. The same array when nothing changed, so a
+ * render can compare it.
  */
 export const nextNews = (
   news: readonly string[],
   shown: readonly string[]
-): readonly string[] =>
-  shown.some((each) => !news.includes(each))
-    ? [
-        ...news.filter((each) => shown.includes(each)),
-        ...shown.filter((each) => !news.includes(each)),
-      ]
-    : news;
+): readonly string[] => {
+  const kept = news.filter((each) => shown.includes(each));
+  const arrived = shown.filter((each) => !news.includes(each));
 
-/** The banner that takes the open slot: the most severe, and of those the newest news. */
-export const openFirst = <T extends Signed>(
+  return kept.length === news.length && arrived.length === 0
+    ? news
+    : [...kept, ...arrived];
+};
+
+/** Every banner in the order they show opened: the most severe first, and of equals the newest. The first takes the open slot. */
+export const bySeverity = <T extends Signed>(
   entries: readonly T[],
   news: readonly string[]
-): T["id"] | null => {
-  let best: T | null = null;
-
-  for (const entry of entries) {
-    const newer =
-      best !== null &&
-      news.indexOf(signature(entry)) > news.indexOf(signature(best));
-
-    if (
-      best === null ||
-      SEVERITY[entry.id] > SEVERITY[best.id] ||
-      (SEVERITY[entry.id] === SEVERITY[best.id] && newer)
-    ) {
-      best = entry;
-    }
-  }
-
-  return best?.id ?? null;
-};
+): readonly T[] =>
+  entries.toSorted(
+    (a, b) =>
+      SEVERITY[b.id] - SEVERITY[a.id] ||
+      news.indexOf(signature(b)) - news.indexOf(signature(a))
+  );

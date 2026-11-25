@@ -4304,6 +4304,96 @@ const STRESS_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // Opened, the banners keep their order, unsaved data first; Show fewer folds them back.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).click();
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const titles = await page
+          .locator(
+            "[role=alert] > p:first-child, [role=status] > p:first-child"
+          )
+          .allTextContents();
+
+        if (
+          !isDeepStrictEqual(titles, [
+            "Not saved to disk",
+            "Needs your attention",
+            "Double Shift is off",
+          ])
+        ) {
+          return `opened, the banners read ${JSON.stringify(titles)}`;
+        }
+
+        await page.getByRole("button", { name: "Show fewer" }).click();
+
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        const more = await page
+          .getByRole("button", { name: /^2 more/u })
+          .count();
+
+        return open === 1 && more === 1
+          ? null
+          : `Show fewer left ${open} banners open and ${more} “2 more” lines`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-more-order",
+      width: NARROWEST,
+    },
+    {
+      // Show fewer from the keyboard leaves it on “2 more”.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("button", { name: "Show fewer" }).focus();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const on = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-expanded') ?? document.activeElement?.tagName"
+        );
+
+        return on === "false"
+          ? null
+          : `Show fewer from the keyboard left focus on ${String(on)}`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      keepPointer: true,
+      name: "stress-banners-fewer-key",
+      width: NARROWEST,
+    },
+    {
+      // A banner that cleared and comes back with the same words is news again: the others fold under it.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).click();
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(stressView(STRESS_DOC, { ...STRESS_STATUS, saveError: null }))})`
+        );
+        await page.waitForTimeout(100);
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(stressView(STRESS_DOC, STRESS_STATUS))})`
+        );
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        const more = await page
+          .getByRole("button", { name: /^2 more/u })
+          .count();
+
+        return open === 1 && more === 1
+          ? null
+          : `a banner back with the same words left ${open} open and ${more} “2 more” lines`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-return",
+      width: NARROWEST,
+    },
+    {
       // A banner whose words change shows them fresh, folded to its first lines again.
       act: async (page) => {
         await page.getByRole("button", { name: "Show full message" }).click();
