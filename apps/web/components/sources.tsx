@@ -76,7 +76,6 @@ const Loop = ({
     pauseOnHover
     fadeOut
     fadeOutColor="#ffffff"
-    fadeOutWidth={96}
     ariaLabel={label}
   />
 );
