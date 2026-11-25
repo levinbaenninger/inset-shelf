@@ -141,6 +141,11 @@ const pageAreas = async (
 export const frontWindow = async (
   options: {
     readonly page?: boolean;
+    /**
+     * False reads only the app, title and bounds: no Apple Event, so never a
+     * consent prompt. Recall's cheap read, src/main/front-watch.ts.
+     */
+    readonly address?: boolean;
     /** The page the copied selection came from, known once the copy is read. */
     readonly copiedFrom?: Promise<string | null>;
   } = {}
@@ -150,7 +155,7 @@ export const frontWindow = async (
       !isMac || systemPreferences.isTrustedAccessibilityClient(false);
 
     const front = await activeWindow({
-      accessibilityPermission: trusted,
+      accessibilityPermission: trusted && options.address !== false,
       screenRecordingPermission:
         !isMac ||
         systemPreferences.getMediaAccessStatus("screen") === "granted",

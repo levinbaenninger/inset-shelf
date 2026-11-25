@@ -243,7 +243,12 @@ export interface SearchQuery {
   readonly due: DueFilter | null;
   /** What follows a `due:` still being typed, which filters nothing yet. */
   readonly pendingDue: string | null;
+  /** `from:here`: only the open items from the window the shelf opened beside (src/shared/recall.ts). */
+  readonly here: boolean;
 }
+
+/** The search word for the items from the window in front. */
+export const FROM_HERE = "from:here";
 
 const SEARCH_TERM = /\s+/u;
 const DUE_TOKEN = /^due:(?<filter>\S*)$/u;
@@ -255,12 +260,15 @@ const DUE_TOKEN = /^due:(?<filter>\S*)$/u;
 export const parseSearch = (query: string): SearchQuery => {
   let due: DueFilter | null = null;
   let pendingDue: string | null = null;
+  let here = false;
   const terms: string[] = [];
 
   for (const word of query.toLocaleLowerCase().split(SEARCH_TERM)) {
     const filter = DUE_TOKEN.exec(word)?.groups?.filter;
 
-    if (filter !== undefined && isDueFilter(filter)) {
+    if (word === FROM_HERE) {
+      here = true;
+    } else if (filter !== undefined && isDueFilter(filter)) {
       due = filter;
     } else if (filter === undefined) {
       if (word !== "") {
@@ -271,7 +279,7 @@ export const parseSearch = (query: string): SearchQuery => {
     }
   }
 
-  return { due, pendingDue, terms };
+  return { due, here, pendingDue, terms };
 };
 
 /** The filters a `due:` being typed may become; all of them when none starts with it. */

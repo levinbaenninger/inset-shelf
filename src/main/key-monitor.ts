@@ -2,8 +2,13 @@ import { INITIAL_TAP_STATE, stepTap } from "@shared/double-tap";
 import type { TapKeyEvent } from "@shared/double-tap";
 import { uIOhook, UiohookKey } from "uiohook-napi";
 
+/** Input seen anywhere, by kind only: a pointer button let go, a key held with Cmd, Ctrl or Alt, or another key. */
+export type InputKind = "pointer" | "chord" | "key";
+
 export interface KeyMonitor {
   readonly onDoubleTap: (listener: () => void) => void;
+  /** Recall's watcher (src/main/front-watch.ts): no key code is passed on or kept. */
+  readonly onActivity: (listener: (kind: InputKind) => void) => void;
   readonly start: () => boolean;
   /** Sends Cmd+C (Ctrl+Insert on Windows) to the app in front. */
   readonly copy: () => void;
@@ -28,6 +33,7 @@ export const createKeyMonitor = (): KeyMonitor => {
   let state = INITIAL_TAP_STATE;
   let running = false;
   let onDoubleTap = ignore;
+  let onActivity: (kind: InputKind) => void = ignore;
 
   // The synthetic copy is seen by the hook as other keys, which only resets the detector.
   const handle =
@@ -47,8 +53,19 @@ export const createKeyMonitor = (): KeyMonitor => {
 
   uIOhook.on("keydown", handle("down"));
   uIOhook.on("keyup", handle("up"));
+  uIOhook.on("keydown", (event) => {
+    onActivity(
+      event.metaKey || event.ctrlKey || event.altKey ? "chord" : "key"
+    );
+  });
+  uIOhook.on("mouseup", () => {
+    onActivity("pointer");
+  });
 
   return {
+    onActivity: (listener) => {
+      onActivity = listener;
+    },
     onDoubleTap: (listener) => {
       onDoubleTap = listener;
     },

@@ -11,6 +11,8 @@ export const SettingsSchema = z.object({
   markDoneOnCopy: z.boolean(),
   /** A card with each new screenshot appears beside the shelf (macOS). */
   screenshotCards: z.boolean(),
+  /** A small pill says how many open items came from the window in front (src/shared/recall.ts). */
+  recall: z.boolean(),
 });
 
 export type Settings = z.output<typeof SettingsSchema>;
@@ -18,6 +20,8 @@ export type Settings = z.output<typeof SettingsSchema>;
 export const DEFAULT_SETTINGS: Settings = {
   iconIn: "dockAndMenuBar",
   markDoneOnCopy: false,
+  // Open decision 1: recall is on for a new install.
+  recall: true,
   screenshotCards: true,
 };
 

@@ -15,8 +15,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 
 import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
-import { ShelfDocSchema } from "../../src/shared/shelf.ts";
-import type { ShelfDoc } from "../../src/shared/shelf.ts";
 
 // Drives Inset Shelf on the real macOS desktop: real Shift taps, real clicks
 // and drags, the real clipboard. Keys are only sent while the test's own
@@ -25,7 +23,7 @@ import type { ShelfDoc } from "../../src/shared/shelf.ts";
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
 
-// `reopen` runs only the launch and the caret-on-reopen checks.
+/** `reopen`, `say-why` or `recall` runs only that trial (README.md, Testing). */
 const only = process.argv[3] ?? "";
 
 const packagedApp = path.join(
@@ -58,6 +56,7 @@ const EventSchema = z.object({
   itemId: z.string().optional(),
   kind: z.string().optional(),
   restored: z.boolean().optional(),
+  count: z.number().optional(),
   t: z.number(),
   text: z.string().optional(),
   via: z.string().optional(),
@@ -145,11 +144,39 @@ const waitFor = async (
   return await waitFor(name, after, deadline);
 };
 
+/**
+ * The parts of shelf.json the checks read. Its own schema: src/shared/shelf.ts
+ * imports its neighbours without a file extension, which Node can't load.
+ */
+const ShelfFileSchema = z.looseObject({
+  activeSectionId: z.string(),
+  items: z.array(
+    z.looseObject({
+      context: z
+        .looseObject({
+          app: z.string().nullable(),
+          title: z.string().nullable(),
+        })
+        .nullable()
+        .optional(),
+      description: z.string().optional(),
+      done: z.boolean(),
+      id: z.string(),
+      kind: z.string(),
+      text: z.string().optional(),
+      via: z.string().optional(),
+    })
+  ),
+  sections: z.array(z.looseObject({ id: z.string(), name: z.string() })),
+});
+
+type ShelfDoc = z.infer<typeof ShelfFileSchema>;
+
 const shelfDoc = (): ShelfDoc | null => {
   const file = path.join(userData, "shelf.json");
 
   return existsSync(file)
-    ? ShelfDocSchema.parse(JSON.parse(readFileSync(file, "utf-8")))
+    ? ShelfFileSchema.parse(JSON.parse(readFileSync(file, "utf-8")))
     : null;
 };
 
@@ -317,20 +344,26 @@ const stopSource = (): void => {
   source = undefined;
 };
 
-/** Opens the source app in front with this text, all of it selected or none. */
+/** Opens the source app in front with this text, all of it selected or none, in a window with this title, full screen if asked. */
 const showSource = async (
   text: string,
-  selection: "all" | "none"
+  selection: "all" | "none",
+  window: { readonly title?: string; readonly fullScreen?: boolean } = {}
 ): Promise<boolean> => {
   stopSource();
   source = spawn(
     path.join(sourceApp, "Contents/MacOS/source"),
-    [text, selection],
+    [
+      text,
+      selection,
+      window.title ?? "Source",
+      ...(window.fullScreen === true ? ["fullscreen"] : []),
+    ],
     {
       stdio: "ignore",
     }
   );
-  await delay(1200);
+  await delay(window.fullScreen === true ? 2500 : 1200);
   osa(`tell application id "${sourceBundleId}" to activate`);
   await delay(300);
 
@@ -686,6 +719,9 @@ const checkSelection = async (): Promise<void> => {
     pbpaste().slice(0, 40)
   );
 
+  // Once the capture notice has gone: while it shows, a Double Shift on the same text opens its why field.
+  await delay(3000);
+
   const right = events().length;
 
   guardedKeys(() => {
@@ -921,6 +957,390 @@ const checkFailedWrite = async (): Promise<void> => {
   );
 };
 
+// Say why (src/shared/pill.ts): a second Double Shift opens a field in the capture notice; Return saves it.
+
+/** What the source app's text view holds now. */
+const sourceText = (): string =>
+  jxa(`const area = Application("System Events").processes.byName("source").windows().flatMap((w) => w.entireContents()).find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } });
+    area ? String(area.value()) : "";`);
+
+const itemWith = (text: string) =>
+  items().filter((item) => item.kind === "text" && item.text === text);
+
+const RETURN = "36";
+const ESCAPE = "53";
+
+/**
+ * One say-why trial: capture, Double Shift again, type a why and Return,
+ * then type into the source. Passes only when the why reached the item and
+ * no key leaked either way: none into the source while the field had the
+ * keyboard, none into the field after it gave it back.
+ */
+const sayWhyTrial = async (
+  n: number,
+  window: { readonly fullScreen?: boolean } = {}
+): Promise<string | null> => {
+  const text = `Why trial ${n} sentence`;
+
+  if (!(await showSource(text, "all", window))) {
+    return `the source app is not in front (${frontmost()})`;
+  }
+
+  const mark = events().length;
+
+  guardedKeys(() => {
+    input("double-shift");
+  });
+
+  if ((await waitFor("itemAdded", mark)) === undefined) {
+    return "the capture added no item";
+  }
+
+  const second = events().length;
+
+  guardedKeys(() => {
+    input("double-shift");
+  });
+
+  const opened = await waitFor("whyOpened", second, Date.now() + 3000);
+
+  if (opened === undefined) {
+    const fellBack = events()
+      .slice(second)
+      .some((event) => event.event === "whyFallback");
+
+    return fellBack
+      ? "the field didn't get the keyboard: the shelf opened at the description"
+      : "the field never opened";
+  }
+
+  if (frontmost() !== "source") {
+    return `the app in front changed to ${frontmost()}`;
+  }
+
+  guardedKeys(() => {
+    input("type", "because");
+    input("key", RETURN);
+  });
+
+  if ((await waitFor("whySaved", second, Date.now() + 3000)) === undefined) {
+    return "Return saved nothing";
+  }
+
+  await delay(400);
+
+  const [saved, ...duplicates] = itemWith(text);
+
+  if (saved?.description !== "because" || duplicates.length > 0) {
+    return `the item holds ${JSON.stringify(saved?.description)}, ${duplicates.length} duplicates`;
+  }
+
+  if (sourceText() !== text) {
+    return `a key leaked into the source: ${JSON.stringify(sourceText())}`;
+  }
+
+  guardedKeys(() => {
+    input("type", "x");
+  });
+  await delay(400);
+
+  if (!sourceText().includes("x")) {
+    return `the keyboard didn't come back: the source holds ${JSON.stringify(sourceText())}`;
+  }
+
+  return itemWith(text)[0]?.description === "because"
+    ? null
+    : "a key after Return reached the field";
+};
+
+const SAY_WHY_TRIALS = 20;
+
+const checkSayWhy = async (): Promise<void> => {
+  const failures: string[] = [];
+
+  for (let n = 1; n <= SAY_WHY_TRIALS; n += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one trial at a time on the one desktop.
+    const failed = await sayWhyTrial(n);
+
+    if (failed !== null) {
+      failures.push(`${n}: ${failed}`);
+    }
+  }
+
+  record(
+    `say why: Return saves the why and gives the keyboard back, ${SAY_WHY_TRIALS - failures.length} of ${SAY_WHY_TRIALS}`,
+    failures.length === 0,
+    failures.join("; ")
+  );
+
+  // Esc: the capture stays, nothing is saved, the keyboard comes back.
+  const escText = "Why trial Esc sentence";
+
+  if (await showSource(escText, "all")) {
+    const mark = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("itemAdded", mark);
+
+    const second = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("whyOpened", second, Date.now() + 3000);
+    guardedKeys(() => {
+      input("type", "nope");
+      input("key", ESCAPE);
+    });
+    await delay(400);
+    guardedKeys(() => {
+      input("type", "x");
+    });
+    await delay(400);
+    record(
+      "say why: Esc saves nothing and gives the keyboard back",
+      itemWith(escText)[0]?.description === "" && sourceText().includes("x"),
+      JSON.stringify({
+        description: itemWith(escText)[0]?.description,
+        source: sourceText(),
+      })
+    );
+  }
+
+  // Unused: a capture with no second Double Shift costs nothing.
+  const plainText = "Why trial unused sentence";
+
+  if (await showSource(plainText, "all")) {
+    const mark = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("itemAdded", mark);
+    await delay(3000);
+    guardedKeys(() => {
+      input("type", "x");
+    });
+    await delay(400);
+    record(
+      "say why: an unused notice takes no key",
+      itemWith(plainText)[0]?.description === "" &&
+        sourceText().includes("x") &&
+        !events()
+          .slice(mark)
+          .some((event) => event.event === "whyOpened"),
+      sourceText()
+    );
+  }
+
+  // The shelf shown and hidden once leaves the whole app hidden.
+  showShelfFromTray();
+  await delay(800);
+  trayItem("Hide Inset Shelf");
+  await delay(800);
+
+  const hidden = await sayWhyTrial(SAY_WHY_TRIALS + 1);
+
+  record(
+    "say why: works after the shelf hid the app",
+    hidden === null,
+    hidden ?? ""
+  );
+
+  const fullScreen = await sayWhyTrial(SAY_WHY_TRIALS + 2, {
+    fullScreen: true,
+  });
+
+  record(
+    "say why: works over a full-screen app",
+    fullScreen === null,
+    fullScreen ?? ""
+  );
+};
+
+// Context recall (src/shared/recall.ts): a pill when open items came from the window in front.
+
+const RECALL_SECTION = "8d4c6a3e-2f1b-4c5d-9e8f-7a6b5c4d3e21";
+
+const recallItem = (n: number, title: string, done: boolean) => ({
+  color: null,
+  context: { app: "source", appLink: null, title, url: null },
+  createdAt: "2026-11-25T09:00:00.000Z",
+  description: "",
+  done,
+  due: null,
+  html: null,
+  id: `8d4c6a3e-2f1b-4c5d-9e8f-7a6b5c4d3e${String(30 + n)}`,
+  kind: "text",
+  links: [],
+  sectionId: RECALL_SECTION,
+  steps: [],
+  text: `${title} item ${n}`,
+  via: "selection",
+  windows: [],
+});
+
+/** One open and one done item from "Recall A", one open item each from "Recall B" and "Recall C". */
+const seedRecallShelf = (): void => {
+  writeFileSync(
+    path.join(userData, "shelf.json"),
+    `${JSON.stringify({
+      activeSectionId: RECALL_SECTION,
+      items: [
+        recallItem(1, "Recall A", false),
+        recallItem(2, "Recall A", true),
+        recallItem(3, "Recall B", false),
+        recallItem(4, "Recall C", false),
+      ],
+      schemaVersion: 3,
+      sections: [{ id: RECALL_SECTION, name: "Inbox" }],
+    })}\n`
+  );
+};
+
+const recallsSince = (mark: number) =>
+  events()
+    .slice(mark)
+    .filter((event) => event.event === "recallShown");
+
+/** The value of the shelf's search field, read through accessibility. */
+const searchValue = (): string =>
+  jxa(`const hit = ${processElements}.findLast((e) => {
+      try { return e.role() === "AXTextField" && (e.name() === "Search the shelf" || e.description() === "Search the shelf"); } catch { return false; }
+    });
+    hit ? String(hit.value()) : "";`);
+
+const hideShelf = async (): Promise<void> => {
+  if (
+    windows().some(
+      (window) => window.owner === processName && window.width >= 300
+    )
+  ) {
+    trayItem("Hide Inset Shelf");
+    await delay(800);
+  }
+};
+
+/** Front-window helper processes (get-windows) that start within `ms`. */
+const helpersWithin = async (ms: number): Promise<number> => {
+  let seen = 0;
+
+  for (let waited = 0; waited < ms; waited += 200) {
+    const found = spawnSync("pgrep", ["-f", "get-windows/main"], {
+      encoding: "utf-8",
+    }).stdout.trim();
+
+    seen += found === "" ? 0 : 1;
+    // oxlint-disable-next-line no-await-in-loop -- sampling the process list over time.
+    await delay(200);
+  }
+
+  return seen;
+};
+
+const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
+  await hideShelf();
+  await showSource("Somewhere else", "none", { title: "Elsewhere" });
+  await delay(2000);
+
+  const mark = events().length;
+
+  await showSource("Back where the items came from", "none", {
+    title: "Recall A",
+  });
+
+  const shown = await waitFor("recallShown", mark, Date.now() + 6000);
+
+  record(
+    "recall: bringing the window back shows the pill once, counting open items only",
+    shown?.count === 1 && recallsSince(mark).length === 1,
+    JSON.stringify(shown ?? null)
+  );
+  record(
+    "recall: the app in front stays in front",
+    frontmost() === "source",
+    frontmost()
+  );
+
+  const pill = ownWindow(260, 44);
+
+  if (pill === undefined) {
+    record("recall: the pill's window is on screen", false);
+  } else {
+    const opened = events().length;
+
+    input(
+      "click",
+      String(pill.x + pill.width - 80),
+      String(pill.y + pill.height / 2)
+    );
+
+    const shelf = await waitFor("shelfShown", opened, Date.now() + 4000);
+
+    enableWebAccessibility();
+    await delay(800);
+    record(
+      "recall: a click on the pill opens the shelf filtered to from:here",
+      shelf !== undefined && searchValue() === "from:here",
+      searchValue()
+    );
+    await hideShelf();
+  }
+
+  const back = events().length;
+
+  await showSource("Somewhere else", "none", { title: "Elsewhere" });
+  await delay(2000);
+  await showSource("Back again", "none", { title: "Recall A" });
+  await delay(3000);
+  record(
+    "recall: no second pill on a quick return",
+    recallsSince(back).length === 0
+  );
+
+  const open = events().length;
+
+  showShelfFromTray();
+  await delay(800);
+  await showSource("With the shelf open", "none", { title: "Recall B" });
+  await delay(3000);
+  record(
+    "recall: no pill while the shelf is open",
+    recallsSince(open).length === 0
+  );
+  await hideShelf();
+
+  // Recall off in the settings file: no pill, and no front-window reads at all.
+  trayItem(quitLabel);
+  await exited(app);
+  writeFileSync(
+    path.join(userData, "settings.json"),
+    `${JSON.stringify({ recall: false })}\n`
+  );
+
+  const next = launch();
+
+  await waitFor("launch", events().length, Date.now() + 15_000);
+  await delay(1500);
+  await hideShelf();
+
+  const off = events().length;
+
+  await showSource("Recall is off", "none", { title: "Recall C" });
+
+  const helpers = await helpersWithin(30_000);
+
+  record(
+    "recall: off in the settings, no pill and no front-window reads in 30 s",
+    recallsSince(off).length === 0 && helpers === 0,
+    `${helpers} samples saw a helper`
+  );
+
+  return next;
+};
+
 const main = async (): Promise<void> => {
   if (process.platform !== "darwin") {
     throw new Error("This test drives the macOS desktop.");
@@ -956,6 +1376,10 @@ const main = async (): Promise<void> => {
   );
   buildHelpers();
 
+  if (only === "recall") {
+    seedRecallShelf();
+  }
+
   const clipboardBefore = pbpaste();
   let app = launch();
 
@@ -965,10 +1389,15 @@ const main = async (): Promise<void> => {
     if (only === "reopen") {
       await showSource("", "none");
       await checkReopenCaret();
+    } else if (only === "say-why") {
+      await checkSayWhy();
+    } else if (only === "recall") {
+      app = await checkRecall(app);
     } else {
       await checkShelfStaysInFront();
       await checkComposer();
       await checkSelection();
+      await checkSayWhy();
       await checkNoFalseTaps();
       await checkToggle();
       await checkCopy();

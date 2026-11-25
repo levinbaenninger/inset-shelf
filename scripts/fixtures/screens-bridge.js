@@ -419,6 +419,17 @@ if (page === "toast") {
       hover: nothing,
       on,
       open: logged("open", nothing),
+      // Say why: main answers a ready field by showing its caret.
+      cancelWhy: logged("cancelWhy", nothing),
+      dismiss: logged("dismiss", nothing),
+      saveWhy: logged("saveWhy", nothing),
+      why: logged("why", nothing),
+      whyInput: logged("whyInput", nothing),
+      whyReady: logged("whyReady", (seq) => {
+        if (data.view?.kind === "why" && data.view.phase === "taking") {
+          globalThis.__emit("view", { ...data.view, phase: "typing", seq });
+        }
+      }),
     },
     nothing
   );

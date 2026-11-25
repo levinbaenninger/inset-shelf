@@ -4224,9 +4224,11 @@ const STRESS_SCENES: readonly Scene[] = (
       data: {
         view: {
           corner: "bottom-right",
+          kind: "notice",
           seq: 1,
           title: `Saved to ${SECTION_PHRASE}`,
           tone: "done",
+          why: false,
         },
       },
       name: "stress-notice-done",
@@ -4236,9 +4238,11 @@ const STRESS_SCENES: readonly Scene[] = (
       data: {
         view: {
           corner: "top-left",
+          kind: "notice",
           seq: 1,
           title: `Zwischenablage wiederhergestellt, aber die Bildschirmaufnahme und Systemaudio konnten nicht gespeichert werden, weil ${LONG_WORD} den Datenträger blockiert.`,
           tone: "failed",
+          why: false,
         },
       },
       height: 72,
@@ -4386,6 +4390,301 @@ const DRAWING_STRESS_SCENES: readonly Scene[] = (
     },
   ] satisfies readonly StressScene[]
 ).map((scene) => stress({ ...scene, ...DRAWING_MIN, page: "drawing" }));
+
+// Pill scenes: the notice window's say-why and recall states (src/shared/pill.ts), at its sizes in src/main/toast-window.ts,
+// and the shelf's from:here filter and chip (src/renderer/shelf/from-here.tsx).
+
+/** The why field's window: 320 wide. */
+const WHY_WIDTH = 320;
+
+const pillNotice = (title: string) => ({
+  corner: "bottom-right",
+  kind: "notice",
+  seq: 1,
+  title,
+  tone: "done",
+  why: true,
+});
+
+/** The calls named so, with what each was sent. */
+const callsTo = async (page: Page, names: readonly string[]) => {
+  const sent = await calls(page);
+
+  return sent.filter((each) => names.includes(each.call));
+};
+
+const recallView = (count: number, label: string) => ({
+  corner: "bottom-right",
+  count,
+  kind: "recall",
+  label,
+  seq: 3,
+});
+
+/** The recall pill is not the capture notice: no Why, a close button instead. */
+const recallChecks = async (page: Page): Promise<string | null> => {
+  if ((await page.getByRole("button", { name: /^Why/u }).count()) > 0) {
+    return "the recall pill must not offer Why";
+  }
+
+  await page.getByRole("button", { name: /from here/u }).click();
+  await page
+    .getByRole("button", { name: "Don’t show for this place again" })
+    .click();
+
+  const sent = await callsTo(page, ["open", "dismiss"]);
+
+  return isDeepStrictEqual(sent, [
+    { arg: 3, call: "open" },
+    { arg: 3, call: "dismiss" },
+  ])
+    ? null
+    : `a click must open the shelf and × dismiss: ${JSON.stringify(sent)}`;
+};
+
+/** The shelf opened beside the pull request item 14 came from; item 16 too when `both`. */
+const hereView = (
+  filter: boolean,
+  label = "GitHub · inset/shelf #482",
+  both = false
+) => ({
+  ...shelfView(),
+  here: {
+    filter,
+    ids: both ? [uuid(14), uuid(16)] : [uuid(14)],
+    label,
+    seq: 1,
+  },
+});
+
+const SEARCH_FIELD = "Search the shelf";
+
+/** The search, and the items the list shows. */
+const listed = async (page: Page) => {
+  const query = await page
+    .getByRole("textbox", { name: SEARCH_FIELD })
+    .inputValue();
+
+  const ids = await page
+    .locator("[data-item-id]")
+    .evaluateAll((rows) => rows.map((row) => row.dataset.itemId));
+
+  return { ids, query };
+};
+
+const whyView = (phase: "taking" | "typing" | "saved") => ({
+  corner: "top-left",
+  kind: "why",
+  phase,
+  seq: 2,
+});
+
+const WHY_LONG = `Weil die ${LONG_WORD} das Protokoll der Quartalsübersicht vor Freitag braucht`;
+
+const PILL_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) => {
+        await page.getByRole("button", { name: /Saved to Inbox/u }).click();
+        await page.getByRole("button", { name: /^Why/u }).click();
+
+        const sent = await callsTo(page, ["open", "why"]);
+
+        return isDeepStrictEqual(sent, [
+          { arg: 1, call: "open" },
+          { arg: 1, call: "why" },
+        ])
+          ? null
+          : `a click on the words must open the shelf and one on Why the field: ${JSON.stringify(sent)}`;
+      },
+      data: { view: pillNotice("Saved to Inbox") },
+      name: "pill-why-offer",
+    },
+    {
+      data: { view: pillNotice(`Saved to ${SECTION_PHRASE}`) },
+      name: "pill-why-offer-long-section",
+    },
+    {
+      data: { view: pillNotice(`Saved to ${SECTION_WORD}`) },
+      name: "pill-why-offer-long-word",
+    },
+    {
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: "Why this matters" });
+
+        const focusedField = await field.evaluate(
+          (element) => document.activeElement === element
+        );
+
+        if (!focusedField) {
+          return "the field must have the keyboard";
+        }
+
+        const ready = await callsTo(page, ["whyReady"]);
+
+        if (!isDeepStrictEqual(ready.at(0), { arg: 2, call: "whyReady" })) {
+          return `the page must say the field is ready: ${JSON.stringify(ready)}`;
+        }
+
+        await page.keyboard.type("because the API changes");
+        await page.keyboard.press("Enter");
+        await page.keyboard.press("Escape");
+
+        const sent = await callsTo(page, ["saveWhy", "cancelWhy"]);
+
+        return isDeepStrictEqual(sent, [
+          {
+            arg: { seq: 2, text: "because the API changes" },
+            call: "saveWhy",
+          },
+          { arg: 2, call: "cancelWhy" },
+        ])
+          ? null
+          : `Return must save the words and Esc cancel: ${JSON.stringify(sent)}`;
+      },
+      data: { view: whyView("taking") },
+      name: "pill-why-field",
+      width: WHY_WIDTH,
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.type(WHY_LONG);
+      },
+      check: async (page) => {
+        const typed = await callsTo(page, ["whyInput"]);
+
+        return typed.at(-1)?.arg !== undefined &&
+          isDeepStrictEqual(typed.at(-1)?.arg, { seq: 2, text: WHY_LONG })
+          ? null
+          : "every change must reach main, so a click away keeps the words";
+      },
+      data: { view: whyView("taking") },
+      keepPointer: true,
+      name: "pill-why-field-long-text",
+      width: WHY_WIDTH,
+    },
+    {
+      data: { view: whyView("saved") },
+      name: "pill-why-saved",
+      width: WHY_WIDTH,
+    },
+    {
+      check: recallChecks,
+      data: { view: recallView(3, "GitHub · acme/app #12") },
+      name: "pill-recall",
+    },
+    {
+      data: { view: recallView(1, "Notes · Standup") },
+      name: "pill-recall-one",
+    },
+    {
+      data: { view: recallView(128, `Code · ${LONG_WORD}`) },
+      name: "pill-recall-many",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: /from here/u }).hover();
+      },
+      data: { view: recallView(12, `Safari · ${LONG_TITLE}`) },
+      keepPointer: true,
+      name: "pill-recall-long-place",
+    },
+    {
+      check: async (page) => {
+        const shown = await listed(page);
+        const sections = await page.getByText("Inbox", { exact: true }).count();
+
+        return shown.query === "from:here" &&
+          isDeepStrictEqual(shown.ids, [uuid(14)]) &&
+          sections === 0
+          ? null
+          : `opened from the recall pill, the list must show only the item from here, without empty sections: ${JSON.stringify({ ...shown, sections })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here",
+      page: "shelf",
+    },
+    {
+      check: async (page) => {
+        const before = await listed(page);
+
+        await page
+          .getByRole("button", { name: "Show the 2 items from here" })
+          .click();
+
+        const after = await listed(page);
+
+        return before.ids.length > 2 &&
+          after.query === "from:here" &&
+          isDeepStrictEqual(after.ids, [uuid(14), uuid(16)])
+          ? null
+          : `the chip must filter the whole list to the items from here: ${JSON.stringify({ after, before })}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-chip",
+      page: "shelf",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: "Clear Search" }).click();
+      },
+      check: async (page) => {
+        const shown = await listed(page);
+
+        const chip = await page
+          .getByRole("button", { name: "Show the item from here" })
+          .count();
+
+        return shown.query === "" && shown.ids.length > 1 && chip === 1
+          ? null
+          : `clearing the search must bring every item back, and the chip: ${JSON.stringify({ ...shown, chip })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here-cleared",
+      page: "shelf",
+    },
+    {
+      data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
+      name: "shelf-from-here-chip-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: SEARCH_FIELD })
+          .fill(`from:here ${LONG_WORD}`);
+      },
+      data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
+      name: "shelf-from-here-no-matches-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      // The why field couldn't get the keyboard: the shelf opens at the item's description instead.
+      act: async (page) => {
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), focus: { field: "description", id: uuid(10), seq: 1 } })})`
+        );
+        await page.getByRole("button", { name: "Back to the list" }).waitFor();
+      },
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: "Description" });
+
+        const focusedField = await field.evaluate(
+          (element) => document.activeElement === element
+        );
+
+        return focusedField
+          ? null
+          : "the description field must have the keyboard";
+      },
+      data: { view: shelfView() },
+      name: "pill-why-fallback-shelf",
+      page: "shelf",
+    },
+  ] satisfies readonly StressScene[]
+).map((scene) => stress({ page: "toast", ...scene }));
 
 const SCENES: readonly Scene[] = [
   {
@@ -7156,6 +7455,7 @@ const SCENES: readonly Scene[] = [
   },
   ...STRESS_SCENES,
   ...DRAWING_STRESS_SCENES,
+  ...PILL_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {

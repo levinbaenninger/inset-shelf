@@ -5,6 +5,7 @@ import Foundation
 // System Events' "key down shift" posts none, so a key hook never sees it.
 //   input move <x> <y> | click <x> <y> | drag <x1> <y1> <x2> <y2>
 //   input double-shift [left|right] [hold-ms] [gap-ms] | capitals
+//   input type <text> | key <virtual-key-code>   (36 Return, 53 Esc)
 
 let source = CGEventSource(stateID: .hidSystemState)
 let args = Array(CommandLine.arguments.dropFirst())
@@ -69,6 +70,19 @@ case "double-shift":
   shift(code, down: true); usleep(hold); shift(code, down: false)
   usleep(gap)
   shift(code, down: true); usleep(hold); shift(code, down: false)
+case "type":
+  guard args.count > 1 else { fail() }
+  for character in args[1].utf16 {
+    for down in [true, false] {
+      let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
+      var unit = character
+      event.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unit)
+      event.post(tap: .cghidEventTap)
+    }
+    usleep(30_000)
+  }
+case "key":
+  key(CGKeyCode(number(1)), flags: [])
 case "capitals":
   for _ in 0..<2 {
     shift(56, down: true); usleep(20_000)

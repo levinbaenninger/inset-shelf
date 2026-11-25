@@ -53,6 +53,7 @@ import type { ConfirmRequest } from "./confirm-dialog";
 import { DetailsView } from "./details-view";
 import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
+import { useFromHere } from "./from-here";
 import { focusRow, ItemRow } from "./item-row";
 import { Markdown } from "./markdown";
 import { editorWithFocus } from "./markdown-field";
@@ -79,6 +80,7 @@ import {
 } from "./selection";
 import { ShortcutSheet } from "./shortcut-sheet";
 import { useDetails } from "./use-details";
+import type { Details } from "./use-details";
 import { useItemDrag } from "./use-item-drag";
 import { useSearchHighlight } from "./use-search-highlight";
 import { isTextField, useShelfKeys } from "./use-shelf-keys";
@@ -624,13 +626,26 @@ const DetailsNotSaved = ({
     />
   );
 
+/** A capture's focus closes details, unless it asks for them at a field: the why field's way in when the pill couldn't get the keyboard. */
+const showFocusDetails = (
+  details: Details,
+  focus: NonNullable<ShelfView["focus"]>
+): void => {
+  if (focus.field === undefined) {
+    details.close();
+  } else {
+    details.open(focus.id, focus.field);
+  }
+};
+
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
   const [query, setQuery] = useState("");
+  const fromHere = useFromHere(view.here, query, setQuery);
   const now = useNow();
   const [editingId, setEditingId] = useState<ItemId | null>(null);
   // The item being typed in stays shown while its words stop matching the search.
-  const groups = groupItems(doc, query, now, editingId);
+  const groups = fromHere(groupItems(doc, query, now, editingId));
   const { collapsed, setOpen } = useCollapsedSections();
   // A search shows its matches in folded sections too.
   const searching = query.trim() !== "";
@@ -817,7 +832,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     setHandledFocus(focus.seq);
     setSelectedId(focus.id);
     setEditingId(kind === "image" || focus.edit === true ? focus.id : null);
-    details.close();
+    showFocusDetails(details, focus);
   }
 
   useEffect(() => {
@@ -1734,6 +1749,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       <div className="flex min-h-0 flex-1 flex-col" hidden={inDetails}>
         <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
           <SearchBar
+            here={view.here}
             inputRef={searchRef}
             onChange={setQuery}
             onHide={() => {

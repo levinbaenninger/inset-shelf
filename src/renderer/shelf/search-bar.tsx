@@ -6,6 +6,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { ShelfHere } from "@shared/contracts";
 import {
   DUE_FILTER_LABEL,
   DUE_FILTERS,
@@ -39,6 +40,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { isMac } from "@/shared/platform";
+
+import { FromHereChip } from "./from-here";
 
 const DUE_WORD = /(?:^|\s)due:\S*/gu;
 
@@ -168,6 +171,7 @@ export const DueSuggestions = ({
  * calendar. Escape clears a search, and hides the shelf when there is none.
  */
 export const SearchBar = ({
+  here,
   inputRef,
   onChange,
   onHide,
@@ -177,6 +181,8 @@ export const SearchBar = ({
   readonly onChange: (query: string) => void;
   readonly onHide: () => void;
   readonly inputRef: RefObject<HTMLInputElement | null>;
+  /** Recall: the open items from the window the shelf opened beside. */
+  readonly here?: ShelfHere | null;
 }) => (
   <InputGroup brand>
     <InputGroupAddon>
@@ -216,6 +222,14 @@ export const SearchBar = ({
       value={query}
     />
     <InputGroupAddon align="inline-end">
+      <FromHereChip
+        here={here}
+        onChange={(next) => {
+          onChange(next);
+          inputRef.current?.focus();
+        }}
+        query={query}
+      />
       {query === "" ? null : (
         <InputGroupButton
           aria-label="Clear Search"
@@ -248,7 +262,11 @@ const NOTHING_DUE: Readonly<Record<DueFilter, string>> = {
 
 /** What an empty search says, so a filter reads as one. */
 const noMatchesText = (query: string): string => {
-  const { due, terms } = parseSearch(query);
+  const { due, here, terms } = parseSearch(query);
+
+  if (here && due === null && terms.length === 0) {
+    return "No open items came from the window in front";
+  }
 
   if (due !== null && terms.length === 0) {
     return NOTHING_DUE[due];
@@ -274,7 +292,7 @@ export const NoMatches = ({
       icon={parseSearch(query).due === null ? Search01Icon : Calendar03Icon}
       size={22}
     />
-    <p className="text-muted-foreground text-sm break-words">
+    <p className="text-muted-foreground max-w-full text-sm wrap-anywhere">
       {noMatchesText(query)}
     </p>
     <Button onClick={onClear} size="sm" variant="outline">

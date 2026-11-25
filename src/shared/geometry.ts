@@ -173,6 +173,66 @@ export const noticeBesidePointer = (
   );
 };
 
+/**
+ * A notice inside a window's bottom-right corner, kept inside the work area;
+ * the work area's own corner when there is no window. The recall pill sits
+ * there: it is unasked, so it stays away from the pointer and the next click.
+ */
+export const noticeInWindowCorner = (
+  target: Rect<"screen"> | null,
+  notice: Size<"screen">,
+  workArea: Rect<"screen">
+): Rect<"screen"> => {
+  const corner = target ?? workArea;
+  const right = workArea.x + workArea.width - notice.width;
+  const bottom = workArea.y + workArea.height - notice.height;
+
+  return rect(
+    clamp(
+      corner.x + corner.width - NOTICE_GAP_DIP - notice.width,
+      workArea.x,
+      right
+    ),
+    clamp(
+      corner.y + corner.height - NOTICE_GAP_DIP - notice.height,
+      workArea.y,
+      bottom
+    ),
+    notice.width,
+    notice.height
+  );
+};
+
+/** A window's corner, named as the notice window names where it draws. */
+export type Corner = `${"top" | "bottom"}-${"left" | "right"}`;
+
+/**
+ * A window given a new size around one of its corners, which stays where it
+ * was, then kept inside the work area: the notice turning into the why field
+ * grows away from the corner it is drawn in.
+ */
+export const resizeAtCorner = (
+  bounds: Rect<"screen">,
+  corner: Corner,
+  next: Size<"screen">,
+  workArea: Rect<"screen">
+): Rect<"screen"> => {
+  const x = corner.endsWith("left")
+    ? bounds.x
+    : bounds.x + bounds.width - next.width;
+
+  const y = corner.startsWith("top")
+    ? bounds.y
+    : bounds.y + bounds.height - next.height;
+
+  return rect(
+    clamp(x, workArea.x, workArea.x + workArea.width - next.width),
+    clamp(y, workArea.y, workArea.y + workArea.height - next.height),
+    next.width,
+    next.height
+  );
+};
+
 /** Room around an image on the drawing page; the bottom leaves space for the toolbar. */
 export const VIEWER_MARGIN = { bottom: 76, side: 24, top: 24 } as const;
 

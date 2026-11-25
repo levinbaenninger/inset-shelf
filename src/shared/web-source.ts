@@ -306,7 +306,8 @@ const HOST_SUFFIX: readonly (readonly [string, Service])[] = [
   ["linear.app", "linear"],
 ];
 
-const serviceOfHost = (host: string): Service | null => {
+/** The site a host belongs to, among the ones the shelf knows. */
+export const serviceOfHost = (host: string): Service | null => {
   const bare = host.replace(/^www\./u, "");
 
   if (bare === "github.com") {
