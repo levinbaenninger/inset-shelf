@@ -76,6 +76,7 @@ import type {
   WebContents,
 } from "electron";
 
+import { addedNotice } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachOutcome, DecodedImage } from "./attachments";
@@ -1245,16 +1246,9 @@ const start = async (): Promise<void> => {
       }
     }
 
-    if (problems.length === 0) {
-      notify(added === 1 ? `Added 1 ${noun}` : `Added ${added} ${noun}s`);
+    const { message, tone } = addedNotice(added, tried, problems, noun);
 
-      return;
-    }
-
-    const lead =
-      added === 0 ? "Nothing was added." : `Added ${added} of ${tried}.`;
-
-    notify(`${lead} ${problems.join(" ")}`, "failed");
+    notify(message, tone);
   };
 
   /** Adds files in the order given; the last one added is shown, and a notice says how it went. */
