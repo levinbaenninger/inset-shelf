@@ -289,13 +289,16 @@ const shelfOnScreen = (): boolean =>
     (window) => window.owner === processName && window.width >= 300
   );
 
-const trayItem = (item: string): void => {
+/** True when the tray took the click; false when the shelf was shown or hidden with the shortcut instead. */
+const trayItem = (item: string): boolean => {
   try {
     osa(
       `tell application "System Events" to tell process "${processName}" to click menu bar item 1 of menu bar 2`,
       "delay 0.4",
       `tell application "System Events" to tell process "${processName}" to click menu item "${item}" of menu 1 of menu bar item 1 of menu bar 2`
     );
+
+    return true;
   } catch (error) {
     const visible = SHELF_TOGGLES[item];
 
@@ -321,6 +324,8 @@ const trayItem = (item: string): void => {
         guardedKeys(toggleKeys, ["source", processName]);
       }
     }
+
+    return false;
   }
 };
 
@@ -552,12 +557,18 @@ const checkShelfStaysInFront = async (): Promise<void> => {
   const target = sourceBounds();
   const mark = events().length;
 
-  trayItem("Show Inset Shelf");
+  const viaTray = trayItem("Show Inset Shelf");
 
   const shown = await waitFor("shelfShown", mark);
   const bounds = shown?.bounds;
 
-  record("tray opens the shelf", shown !== undefined, JSON.stringify(bounds));
+  record(
+    "tray opens the shelf",
+    viaTray && shown !== undefined,
+    viaTray
+      ? JSON.stringify(bounds)
+      : "the tray is out of reach on this desktop; shown with the shortcut"
+  );
   const height = Math.min(target.height, SHELF_MAX_HEIGHT_DIP);
 
   record(
