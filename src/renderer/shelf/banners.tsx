@@ -5,8 +5,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-import { Clamp } from "./clamp";
+import { Clamp } from "@/shared/clamp";
 
 export interface BannersProps {
   readonly status: ShelfStatus;
@@ -194,7 +193,9 @@ const entriesOf = ({
     ? []
     : [
         {
-          actions: status.readOnly ? [] : [{ label: "Retry", run: onRetrySave }],
+          actions: status.readOnly
+            ? []
+            : [{ label: "Retry", run: onRetrySave }],
           id: "save" as const,
           text: status.saveError,
           title: "Not saved to disk",
@@ -248,7 +249,7 @@ export const Banners = (props: BannersProps) => {
   const [open, setOpen] = useState(ids.at(-1) ?? null);
 
   // A banner that wasn't there before is the newest: it opens.
-  if (ids.join() !== seen.join()) {
+  if (ids.join(",") !== seen.join(",")) {
     const arrived = ids.findLast((id) => !seen.includes(id));
 
     setSeen(ids);

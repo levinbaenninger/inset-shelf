@@ -55,11 +55,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Truncated } from "@/shared/clamp";
 import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
-import { Truncated } from "./clamp";
 import {
   dueLabel,
   DueMenu,
@@ -305,7 +305,7 @@ const AutoText = ({
   return multiline ? (
     <Textarea {...props} rows={rows} variant="quiet" />
   ) : (
-    <Textarea {...props} className="min-h-8 py-1.25" rows={1} variant="quiet" />
+    <Textarea {...props} rows={1} variant="quietLine" />
   );
 };
 

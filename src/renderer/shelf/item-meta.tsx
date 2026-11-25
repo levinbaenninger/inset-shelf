@@ -48,10 +48,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Truncated } from "@/shared/clamp";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
-import { Truncated } from "./clamp";
 import { filledSteps } from "./row-parts";
 import type { RowBadge } from "./row-parts";
 
@@ -328,9 +328,8 @@ export const WindowStrip = ({
       <li>
         <Button
           aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
-          className="h-8 px-1.5"
           onClick={onMore}
-          size="xs"
+          size="icon-sm"
           variant="quiet"
         >
           +{more}

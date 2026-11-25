@@ -8,6 +8,9 @@ const VARIANT = {
   /** An always-open field that reads as text: no border, a quiet tint on hover and while typing, the box's spacing so nothing moves. */
   quiet:
     "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 min-h-16 resize-none rounded-lg border border-transparent px-2.5 py-2 text-sm transition-colors",
+  /** `quiet` for a one-line text: an input's height while it fits, and it wraps as it grows instead of hiding its end. */
+  quietLine:
+    "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 min-h-8 resize-none rounded-lg border border-transparent px-2.5 py-1.25 text-sm transition-colors",
 } as const;
 
 function Textarea({

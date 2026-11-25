@@ -7,7 +7,9 @@ import { cn } from "@/lib/utils";
 const TOOLTIP_MAX = 300;
 
 export const tooltipText = (text: string): string =>
-  text.length > TOOLTIP_MAX ? `${text.slice(0, TOOLTIP_MAX - 1).trimEnd()}…` : text;
+  text.length > TOOLTIP_MAX
+    ? `${text.slice(0, TOOLTIP_MAX - 1).trimEnd()}…`
+    : text;
 
 /** Calls `measure` with the element now, and again whenever it changes size. */
 const useMeasure = (
@@ -19,16 +21,16 @@ const useMeasure = (
   useEffect(() => {
     const element = ref.current;
 
-    if (element === null || !enabled) {
-      return;
-    }
-
     const observer = new ResizeObserver(() => {
-      measure(element);
+      if (element !== null) {
+        measure(element);
+      }
     });
 
-    observer.observe(element);
-    measure(element);
+    if (element !== null && enabled) {
+      observer.observe(element);
+      measure(element);
+    }
 
     return () => {
       observer.disconnect();
@@ -112,13 +114,13 @@ export const Clamp = ({
         className={cn(
           className,
           // Only the lines below are cut: a space that hangs past a line's end isn't.
-          !open && "overflow-y-clip",
+          !open && "max-h-[calc(var(--lines)*1lh)] overflow-y-clip",
           !open &&
             cut &&
             "[mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]"
         )}
         ref={ref}
-        style={open ? undefined : { maxHeight: `${lines}lh` }}
+        style={{ "--lines": lines }}
       >
         {children}
       </div>

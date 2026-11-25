@@ -43,6 +43,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Clamp } from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -50,7 +51,6 @@ import { coach } from "@/tutorial/anchors";
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
 import { whenText } from "./format";
-import { Clamp } from "./clamp";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
@@ -665,8 +665,7 @@ const NoteText = ({
   readonly item: ImageItem | FileItem;
   readonly selected: boolean;
   readonly onEditAt: (offset: number | null) => void;
-} & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) =>
-{
+} & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) => {
   if (item.note === "") {
     return null;
   }
