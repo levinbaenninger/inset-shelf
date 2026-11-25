@@ -83,16 +83,31 @@ const ToolButton = ({
   </button>
 );
 
-// The drawing window over a screenshot: a click drops the next numbered pin where it lands, as the Pin tool does.
+const canvasLabel = (
+  tool: "select" | "pin",
+  count: number,
+  full: boolean
+): string => {
+  if (full) {
+    return "Six pins dropped. Undo removes the last one.";
+  }
+
+  return tool === "pin"
+    ? `Drop pin ${count + 1} on the screenshot`
+    : "Choose the Pin tool to drop a pin";
+};
+
+// The drawing window over a screenshot: with the Pin tool, a click drops the next numbered pin where it lands.
 export const DrawingTile = () => {
   const [pins, setPins] = useState<Pin[]>(START);
-  const [tool, setTool] = useState<"select" | "pin">("select");
+  const [tool, setTool] = useState<"select" | "pin">("pin");
   const shotRef = useRef<HTMLDivElement>(null);
   const next = NUMBERS[pins.length];
   const full = next === undefined || pins.length >= MAX_PINS;
+  const placing = tool === "pin" && !full;
 
   const drop = (event: MouseEvent<HTMLButtonElement>) => {
-    if (next === undefined) {
+    if (!placing || next === undefined) {
       return;
     }
 
@@ -114,7 +129,6 @@ export const DrawingTile = () => {
             y: (event.clientY - box.top) / scale,
           };
 
-    setTool("pin");
     setPins([...pins, { number: next, x: spot.x, y: spot.y }]);
   };
 
@@ -126,16 +140,14 @@ export const DrawingTile = () => {
       <div className="relative mx-3 mt-3 h-[178px] overflow-hidden border">
         <button
           type="button"
-          aria-label={
-            full
-              ? "Six pins dropped. Undo removes the last one."
-              : `Drop pin ${pins.length + 1} on the screenshot`
-          }
-          aria-disabled={full}
+          aria-label={canvasLabel(tool, pins.length, full)}
+          aria-disabled={!placing}
           onClick={drop}
           className={cn(
             "focus-visible:ring-ring/50 absolute inset-0 bg-[linear-gradient(135deg,#eef2f7,#dfe7f1)] outline-none focus-visible:ring-3 focus-visible:outline-none focus-visible:ring-inset",
-            full ? "cursor-not-allowed" : "cursor-crosshair"
+            full && "cursor-not-allowed",
+            tool === "select" && "cursor-default",
+            placing && "cursor-crosshair"
           )}
         >
           <span
