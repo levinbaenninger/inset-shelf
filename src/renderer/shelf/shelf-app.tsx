@@ -2089,7 +2089,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                         copied={copiedId === item.id}
                         attachments={attachmentHandlers(item.id)}
                         dragProps={drag.itemProps(item.id, itemText(item))}
-                        dropProps={attachDrop.rowProps(item)}
+                        dropProps={attachDrop.rowProps(
+                          item,
+                          selectedId === item.id
+                        )}
                         dropLook={dropLook(attachDrop.target, item.id)}
                         dragging={drag.draggingId === item.id}
                         example={examples.has(item.id)}

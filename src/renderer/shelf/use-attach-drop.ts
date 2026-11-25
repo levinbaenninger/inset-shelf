@@ -20,18 +20,23 @@ export interface RowDropProps {
 
 export interface AttachDrop {
   readonly target: AttachTarget;
-  /** On an item's card: files from outside dropped on it attach to it. */
-  readonly rowProps: (item: ShelfItem) => RowDropProps;
+  /** On an item's card: files from outside dropped on the open item attach to it; on any other they pass to the shelf. */
+  readonly rowProps: (item: ShelfItem, open: boolean) => Partial<RowDropProps>;
   /** One of an item's attachments leaves as a file: dropped back on the shelf, it adds nothing. */
   readonly startDragOut: () => void;
   readonly draggingOut: () => boolean;
 }
 
+/** A row that isn't open takes no part: files over it go to the shelf, as new items. */
+const PASS: Partial<RowDropProps> = {};
+
 /**
- * Files dropped on a row attach to that item; anywhere else on the shelf
- * they become new items (shelf-app.tsx). The row marks its drop as handled,
- * so the window's own drop leaves it alone. A full row refuses the drop
- * and `onFull` says why, while the files are over it.
+ * Files dropped on the open (selected) row attach to that item; anywhere
+ * else on the shelf, closed rows included, they become new items
+ * (shelf-app.tsx), so a crowded shelf never takes files meant as new items
+ * onto one. The row marks its drop as handled, so the window's own drop
+ * leaves it alone. A full row refuses the drop and `onFull` says why,
+ * while the files are over it.
  */
 export const useAttachDrop = ({
   ownDrag,
@@ -66,48 +71,53 @@ export const useAttachDrop = ({
 
   return {
     draggingOut: () => out.current,
-    rowProps: (item) => ({
-      onDragLeave: (event) => {
-        if (
-          !(event.relatedTarget instanceof Node) ||
-          !event.currentTarget.contains(event.relatedTarget)
-        ) {
-          setTarget((current) => (current?.id === item.id ? null : current));
-        }
-      },
-      onDragOver: (event) => {
-        if (!fromOutside(event)) {
-          return;
-        }
+    rowProps: (item, open) =>
+      open
+        ? {
+            onDragLeave: (event) => {
+              if (
+                !(event.relatedTarget instanceof Node) ||
+                !event.currentTarget.contains(event.relatedTarget)
+              ) {
+                setTarget((current) =>
+                  current?.id === item.id ? null : current
+                );
+              }
+            },
+            onDragOver: (event) => {
+              if (!fromOutside(event)) {
+                return;
+              }
 
-        event.preventDefault();
+              event.preventDefault();
 
-        const full = item.attachments.length >= ATTACHMENTS_MAX;
+              const full = item.attachments.length >= ATTACHMENTS_MAX;
 
-        event.dataTransfer.dropEffect = full ? "none" : "copy";
+              event.dataTransfer.dropEffect = full ? "none" : "copy";
 
-        if (target?.id !== item.id) {
-          setTarget({ full, id: item.id });
+              if (target?.id !== item.id) {
+                setTarget({ full, id: item.id });
 
-          if (full) {
-            onFull(item);
+                if (full) {
+                  onFull(item);
+                }
+              }
+            },
+            onDrop: (event) => {
+              if (!fromOutside(event)) {
+                return;
+              }
+
+              // Handled: the window's file drop sees it is, and adds no new item.
+              event.preventDefault();
+              setTarget(null);
+
+              if (item.attachments.length < ATTACHMENTS_MAX) {
+                onDrop(item, [...event.dataTransfer.files]);
+              }
+            },
           }
-        }
-      },
-      onDrop: (event) => {
-        if (!fromOutside(event)) {
-          return;
-        }
-
-        // Handled: the window's file drop sees it is, and adds no new item.
-        event.preventDefault();
-        setTarget(null);
-
-        if (item.attachments.length < ATTACHMENTS_MAX) {
-          onDrop(item, [...event.dataTransfer.files]);
-        }
-      },
-    }),
+        : PASS,
     startDragOut: () => {
       out.current = true;
     },
