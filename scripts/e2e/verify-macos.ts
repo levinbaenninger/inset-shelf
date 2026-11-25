@@ -278,12 +278,41 @@ const windowShows = async (text: string, attempts = 10): Promise<boolean> => {
   return await windowShows(text, attempts - 1);
 };
 
-const trayItem = (item: string): void => {
-  osa(
-    `tell application "System Events" to tell process "${processName}" to click menu bar item 1 of menu bar 2`,
-    "delay 0.4",
-    `tell application "System Events" to tell process "${processName}" to click menu item "${item}" of menu 1 of menu bar item 1 of menu bar 2`
+/** The tray items that only show or hide the shelf, and the state each leaves. */
+const SHELF_TOGGLES: Readonly<Record<string, boolean>> = {
+  "Hide Inset Shelf": false,
+  "Show Inset Shelf": true,
+};
+
+const shelfOnScreen = (): boolean =>
+  windows().some(
+    (window) => window.owner === processName && window.width >= 300
   );
+
+const trayItem = (item: string): void => {
+  try {
+    osa(
+      `tell application "System Events" to tell process "${processName}" to click menu bar item 1 of menu bar 2`,
+      "delay 0.4",
+      `tell application "System Events" to tell process "${processName}" to click menu item "${item}" of menu 1 of menu bar item 1 of menu bar 2`
+    );
+  } catch (error) {
+    const visible = SHELF_TOGGLES[item];
+
+    if (visible === undefined) {
+      throw error;
+    }
+
+    // A menu bar hider or a full menu bar leaves the tray out of reach: the global shortcut shows and hides the shelf too.
+    console.log(`  tray out of reach: "${item}" with the shortcut`);
+
+    if (
+      shelfOnScreen() !== visible &&
+      !guardedKeys(toggleKeys, ["source", processName])
+    ) {
+      throw error;
+    }
+  }
 };
 
 /** Opens the shelf from the tray unless it is on screen already. */
@@ -900,14 +929,25 @@ const checkSettings = async (): Promise<void> => {
 const checkRestart = async (app: ChildProcess): Promise<ChildProcess> => {
   const before = items().length;
 
-  trayItem(quitLabel);
+  let viaTray = true;
+
+  try {
+    trayItem(quitLabel);
+  } catch {
+    // The tray is out of reach: the check fails, and the app quits from its menu so the run goes on.
+    viaTray = false;
+    quitApp(app);
+  }
+
   const quit = await exited(app);
 
   record(
     "tray Quit exits",
-    quit,
+    viaTray && quit,
     quit
-      ? ""
+      ? viaTray
+        ? ""
+        : "the tray is out of reach on this desktop; quit from the app menu"
       : spawnSync("pgrep", ["-fl", "out/main/index.js|Inset Shelf.app"], {
           encoding: "utf-8",
         }).stdout.trim()
@@ -1537,7 +1577,7 @@ const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
   await hideShelf();
 
   // Recall off in the settings file: no pill, and no front-window reads at all.
-  trayItem(quitLabel);
+  quitApp(app);
   await exited(app);
   writeFileSync(
     path.join(userData, "settings.json"),
@@ -1625,8 +1665,11 @@ const main = async (): Promise<void> => {
       await showSource("", "none");
       await checkReopenCaret();
     } else if (only === "say-why") {
+      // The notice that offers the why field shows only while the shelf is hidden.
+      await hideShelf();
       await checkSayWhy();
     } else if (only === "say-why-failed") {
+      await hideShelf();
       await checkSayWhyFailed();
     } else if (only === "recall") {
       app = await checkRecall(app);
