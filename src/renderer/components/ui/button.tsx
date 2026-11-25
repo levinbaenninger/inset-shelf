@@ -53,6 +53,9 @@ const buttonVariants = cva(
         /** pill-xs on two lines: a failed Add to “…” says what Retry goes to under it. */
         "pill-xs-2": "gap-0 rounded-2xl px-2.5 py-1 text-xs",
         "icon-round": "size-8 rounded-full",
+        /** The screenshot card's Copy, pill-xs tall, beside its main action. */
+        "icon-round-xs":
+          "size-6 rounded-full [&_svg:not([class*='size-'])]:size-3.5",
         /** A badge on a tile's corner. */
         "icon-badge":
           "size-4.5 rounded-full [&_svg:not([class*='size-'])]:size-2.5",

@@ -1,5 +1,6 @@
 import {
   Cancel01Icon,
+  Copy01Icon,
   Download01Icon,
   PaintBrush01Icon,
   PinIcon,
@@ -189,49 +190,51 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
       <div className="relative min-h-0 flex-1">
         {/*
           First in the page, so Tab lands on Add to Shelf first, then Copy, then Add to “…”; drawn above the picture and its dimming.
-          Copy's slot is kept while it is hidden, so Add to Shelf never moves when it shows; Add to “…” sits under Add to Shelf, never wider.
+          Add to Shelf is in the card's middle, and Copy shows beside it without taking room in the row, so it never moves; Add to “…” sits under Add to Shelf, never wider.
         */}
         <div className="absolute inset-x-12 bottom-3 z-10 flex justify-center">
-          {/* With an item to name, Add to Shelf sits above the corners, centred, with Copy beside it; without, Copy's slot is kept in the row. */}
-          <div
-            className={cn(
-              "relative grid items-center gap-x-1.5 gap-y-1.5",
-              target === null ? "grid-cols-[auto_auto]" : "grid-cols-1"
-            )}
-          >
-            <Button
-              aria-disabled={saving ? true : undefined}
-              aria-label={shelfLabel}
-              // Wide enough, with an item to name, that the line under it reads a name and is never wider.
-              className={cn(target !== null && "min-w-36")}
-              onClick={() => {
-                if (!saving) {
-                  api.addToShelf(seq);
-                }
-              }}
-              size="pill-sm"
-              variant="overlay"
-            >
-              <Steady labels={SHELF_LABELS} shown={shelfLabel} />
-            </Button>
-            <span
-              className={cn(
-                "pointer-events-none flex",
-                target !== null && "absolute top-0 left-full ml-1.5",
-                REVEAL,
-                REVEAL_CLICKS
-              )}
-            >
+          <div className="grid grid-cols-1 gap-y-1.5">
+            <div className="relative flex">
               <Button
+                aria-disabled={saving ? true : undefined}
+                aria-label={shelfLabel}
+                // Wide enough, with an item to name, that the line under it reads a name and is never wider.
+                className={cn("flex-1", target !== null && "min-w-36")}
                 onClick={() => {
-                  api.copy(seq);
+                  if (!saving) {
+                    api.addToShelf(seq);
+                  }
                 }}
-                size="pill-xs"
+                size="pill-sm"
                 variant="overlay"
               >
-                Copy
+                <Steady labels={SHELF_LABELS} shown={shelfLabel} />
               </Button>
-            </span>
+              {/* An icon, not the word: beside Add to Shelf in the card's middle, the word would reach under the corner button. */}
+              <span
+                className={cn(
+                  "pointer-events-none absolute inset-y-0 left-full ml-1.5 flex items-center",
+                  REVEAL,
+                  REVEAL_CLICKS
+                )}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      aria-label="Copy"
+                      onClick={() => {
+                        api.copy(seq);
+                      }}
+                      size="icon-round-xs"
+                      variant="overlay"
+                    >
+                      <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Copy</TooltipContent>
+                </Tooltip>
+              </span>
+            </div>
             {target === null ? null : (
               <Button
                 aria-disabled={saving ? true : undefined}

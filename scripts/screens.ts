@@ -3732,6 +3732,18 @@ const cardButtonUsable = async (
 };
 
 /** The failed card: its message in two lines at most under the picture, every action in view without hover. */
+/** Add to Shelf sits in the middle of the 280-wide card, whatever shows beside it. */
+const cardMiddle = (add: {
+  readonly left: number;
+  readonly right: number;
+}): string | null => {
+  const at = (add.left + add.right) / 2;
+
+  return Math.abs(at - 140) > 0.5
+    ? `Add to Shelf sits off the card's middle (${at} ≠ 140)`
+    : null;
+};
+
 const failedCardCheck = (names: readonly string[]) =>
   async function check(page: Page): Promise<string | null> {
     const lines = z.object({ height: z.number(), line: z.number() }).parse(
@@ -4813,6 +4825,13 @@ const STRESS_SCENES: readonly Scene[] = (
       width: 360,
     },
     {
+      // At rest, with no item to name: Add to Shelf alone, in the card's middle.
+      check: async (page) =>
+        cardMiddle(
+          await boxOf(
+            page.getByRole("button", { exact: true, name: "Add to Shelf" })
+          )
+        ),
       data: { view: SCREENSHOT_VIEW },
       name: "stress-screenshot-card",
       page: "screenshot",
@@ -4861,11 +4880,15 @@ const STRESS_SCENES: readonly Scene[] = (
           return "Add to Shelf doesn't come first";
         }
 
-        const pair = (add.left + copy.right) / 2;
+        const corner = await boxOf(
+          page.getByRole("button", { name: "Save to Downloads" })
+        );
 
-        return Math.abs(pair - 140) > 1
-          ? `Add to Shelf and Copy sit off the card's middle (${pair} ≠ 140)`
-          : null;
+        if (copy.right > corner.left - 4) {
+          return `Copy reaches the corner button (${copy.right} against ${corner.left})`;
+        }
+
+        return cardMiddle(add);
       },
       data: { view: SCREENSHOT_VIEW },
       keepPointer: true,
