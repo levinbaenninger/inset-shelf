@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import type { ImageItem } from "@shared/shelf";
+import type { Picture } from "@shared/shelf";
 import { nativeImage } from "electron";
 import type { NativeImage } from "electron";
 
@@ -12,10 +12,28 @@ export interface ExportedImage {
   readonly png: Buffer;
 }
 
+/** The picture, scaled down to `longSideMax` pixels on its long side when it is larger. */
+const fitted = (image: NativeImage, longSideMax: number): ExportedImage => {
+  const { height, width } = image.getSize();
+
+  if (Math.max(width, height) <= longSideMax) {
+    return { image, png: image.toPNG() };
+  }
+
+  const smaller = image.resize(
+    width >= height
+      ? { quality: "best", width: longSideMax }
+      : { height: longSideMax, quality: "best" }
+  );
+
+  return { image: smaller, png: smaller.toPNG() };
+};
+
 /** The saved PNG, with its numbered pins drawn on it. */
 export const exportImage = (
-  item: ImageItem,
-  file: string
+  picture: Picture,
+  file: string,
+  longSideMax = Number.POSITIVE_INFINITY
 ): ExportedImage | null => {
   const saved = nativeImage.createFromPath(file);
 
@@ -23,8 +41,8 @@ export const exportImage = (
     return null;
   }
 
-  if (item.pins.length === 0) {
-    return { image: saved, png: saved.toPNG() };
+  if (picture.pins.length === 0) {
+    return fitted(saved, longSideMax);
   }
 
   const { height, width } = saved.getSize();
@@ -33,14 +51,14 @@ export const exportImage = (
     Buffer.from(
       drawPinMarks(
         { data: saved.toBitmap(), height, width },
-        item.pins,
-        item.image.pixelsPerDip
+        picture.pins,
+        picture.image.pixelsPerDip
       )
     ),
     { height, width }
   );
 
-  return { image: marked, png: marked.toPNG() };
+  return fitted(marked, longSideMax);
 };
 
 /** Dragged copies wait here for the drop, which can finish after startDrag returns. */

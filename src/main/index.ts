@@ -986,9 +986,11 @@ const start = async (): Promise<void> => {
   };
 
   const copies = createCopyCommands({
-    exportImage: (item) => {
-      const file = store.attachmentPath(item.image.file);
-      const exported = file === null ? null : exportImage(item, file);
+    exportImage: (picture, longSideMax) => {
+      const file = store.attachmentPath(picture.image.file);
+
+      const exported =
+        file === null ? null : exportImage(picture, file, longSideMax);
 
       return exported === null
         ? null

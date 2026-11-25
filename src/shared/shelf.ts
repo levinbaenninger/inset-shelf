@@ -1932,6 +1932,68 @@ const escapeHtml = (text: string): string =>
     isEscaped(char) ? HTML_ESCAPES[char] : char
   );
 
+/** A picture inside copied HTML, as PNG. `width` is in points, so a Retina capture pastes at its size on screen. */
+export interface InlinePicture {
+  readonly base64: string;
+  readonly width: number;
+  readonly alt: string;
+}
+
+/**
+ * The attached pictures a copy puts inside its HTML, by attachment. One that
+ * is absent goes by name alone; "missing" when its file can't be read.
+ */
+export type InlinePictures = ReadonlyMap<
+  AttachmentId,
+  InlinePicture | "missing"
+>;
+
+const pictureHtml = (picture: InlinePicture): string =>
+  `<img src="data:image/png;base64,${picture.base64}" width="${Math.round(picture.width)}" alt="${escapeHtml(picture.alt)}">`;
+
+const linesHtml = (text: string): string =>
+  escapeHtml(text).replaceAll("\n", "<br>");
+
+const MISSING_PICTURE = " (picture not found)";
+
+const namedPictureHtml = (
+  name: string,
+  picture: InlinePicture | "missing" | undefined
+): string => {
+  if (picture === undefined) {
+    return `<p>${escapeHtml(name)}</p>`;
+  }
+
+  return picture === "missing"
+    ? `<p>${escapeHtml(name)}${MISSING_PICTURE}</p>`
+    : `<p>${escapeHtml(name)}<br>${pictureHtml(picture)}</p>`;
+};
+
+/**
+ * Copy with Details as HTML, for an item with attachments: the same words,
+ * the image item's own picture, then each attachment by name, its picture
+ * inline under it when there is one.
+ */
+export const itemDetailsHtml = (
+  item: ShelfItem,
+  own: InlinePicture | "missing" | null,
+  attached: InlinePictures
+): string =>
+  [
+    `<p>${linesHtml(withDetails(withUrl(titled(item), item), detailLines(item, true)))}</p>`,
+    ...(own === null || item.kind !== "image"
+      ? []
+      : [
+          own === "missing"
+            ? `<p>${escapeHtml(itemText(item))}${MISSING_PICTURE}</p>`
+            : `<p>${pictureHtml(own)}</p>`,
+        ]),
+    "<p>Attachments:</p>",
+    ...item.attachments.map((attachment) =>
+      namedPictureHtml(attachmentName(attachment), attached.get(attachment.id))
+    ),
+  ].join("");
+
 export interface ItemList {
   /** "1. First" with following lines indented under the number, and each page link in brackets. */
   readonly text: string;
@@ -1943,9 +2005,14 @@ export interface ItemList {
 
 /**
  * Items as a numbered list, in the order given, each with its page link.
- * Images without a title, note or details add no line; they travel as the image itself.
+ * Images without a title, note, details or attachments add no line; they
+ * travel as the image itself. `pictures` are put in the HTML under the item
+ * they are attached to.
  */
-export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
+export const itemsAsList = (
+  items: readonly ShelfItem[],
+  pictures: InlinePictures = new Map()
+): ItemList => {
   const entries = items.flatMap((item) => {
     const text = listText(item);
 
@@ -1954,6 +2021,13 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
       : [
           {
             details: [...detailLines(item), ...attachmentsLine(item)],
+            inline: item.attachments.flatMap((attachment) => {
+              const picture = pictures.get(attachment.id);
+
+              return picture === undefined || picture === "missing"
+                ? []
+                : [picture];
+            }),
             text,
             url: item.context?.url ?? null,
           },
@@ -1976,7 +2050,7 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
   });
 
   const html = entries
-    .map(({ details, text, url }) => {
+    .map(({ details, inline, text, url }) => {
       const body = escapeHtml(text).replaceAll("\n", "<br>");
 
       const link =
@@ -1988,7 +2062,11 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
         .map((detail) => `<br>${escapeHtml(detail).replaceAll("\n", "<br>")}`)
         .join("");
 
-      return `<li>${body}${link}${more}</li>`;
+      const attached = inline
+        .map((picture) => `<br>${pictureHtml(picture)}`)
+        .join("");
+
+      return `<li>${body}${link}${more}${attached}</li>`;
     })
     .join("");
 
@@ -2005,12 +2083,5 @@ export const itemsAsList = (items: readonly ShelfItem[]): ItemList => {
  * would not help, since apps that take files (T3 Code) take it in place of
  * the words.
  */
-export const listHtmlWithImage = (
-  html: string,
-  image: {
-    readonly base64: string;
-    readonly width: number;
-    readonly alt: string;
-  }
-): string =>
-  `${html}<p><img src="data:image/png;base64,${image.base64}" width="${Math.round(image.width)}" alt="${escapeHtml(image.alt)}"></p>`;
+export const listHtmlWithImage = (html: string, image: InlinePicture): string =>
+  `${html}<p>${pictureHtml(image)}</p>`;
