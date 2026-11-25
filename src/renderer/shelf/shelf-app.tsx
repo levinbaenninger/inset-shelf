@@ -1044,29 +1044,23 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   }, [focus]);
 
   const hasChecklist = tutorial.checklist !== null;
-  const checklistUp = useRef(hasChecklist);
-
-  useEffect(() => {
-    checklistUp.current = hasChecklist;
-  }, [hasChecklist]);
-
-  // New items arrive at the bottom: keep the newest in view. The shelf
-  // opens on the checklist while it shows, though: the first newest item
-  // is passed over then, whichever of the shelf and the tutorial loads first.
-  const opened = useRef(false);
+  // New items arrive at the bottom: one made now comes into view. The newest
+  // item the shelf opens with is not new, so the first paint leaves the list
+  // where it starts (on the checklist while it shows); an item brought
+  // forward by main comes into view through `focus` above.
+  const loaded = useRef(false);
 
   useEffect(() => {
     if (newest === undefined) {
       return;
     }
 
-    const first = !opened.current;
-
-    opened.current = true;
-
-    if (!(first && checklistUp.current)) {
+    // The first newest is the shelf as it loads, whenever its view arrives.
+    if (loaded.current) {
       reveal(newest);
     }
+
+    loaded.current = true;
   }, [newest]);
 
   // The checklist coming up, at launch or from Getting Started, brings the list back to it.
