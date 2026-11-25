@@ -323,8 +323,10 @@ if (page === "shelf") {
       newDrawingFor: logged("newDrawingFor", nothing),
       openAttachment: logged("openAttachment", nothing),
       pasteImageTo: logged("pasteImageTo", ok),
-      // A picture pasted in the list, as a new item.
-      pasteImage: logged("pasteImage", ok),
+      // A picture pasted in the list, as a new item; main's notice says how it went.
+      pasteImage: logged("pasteImage", nothing),
+      // Files dropped or pasted on the shelf, as new items.
+      addFiles: logged("addFiles", nothing),
       pickFilesFor: logged("pickFilesFor", nothing),
       // A report, not an action: kept apart, so scenes that compare what the page asked for stay exact.
       selection: (id) => {
@@ -334,7 +336,11 @@ if (page === "shelf") {
     },
     nothing
   );
-  globalThis.insetFiles = { pathFor: () => "" };
+  // A scene's `filePaths` gives dropped files a path, as Finder's have; otherwise they have none, as a picture copied from a page.
+  globalThis.insetFiles = {
+    pathFor: (file) =>
+      data.filePaths === true ? `/Users/anna/Desktop/${file.name}` : "",
+  };
 }
 
 if (page === "picker") {

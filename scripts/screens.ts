@@ -188,7 +188,13 @@ const renderFixtures = async (browser: Browser): Promise<void> => {
 
 // The shelf's sample document
 
-const now = new Date();
+/** Every scene runs at this moment, in this time zone, so two runs draw the same pixels: the fixtures' dates and the page's clock agree. */
+const TIME_ZONE = "Europe/Zurich";
+
+// The fixtures' days (isoDay) are counted in the same zone as the page's.
+process.env.TZ = TIME_ZONE;
+
+const now = new Date("2026-11-25T15:15:00+01:00");
 
 const isoDay = (offset: number): string => {
   const day = new Date(
@@ -3808,6 +3814,25 @@ const NINE_DOC = {
   ],
 };
 
+/** An item linked to 25 windows: its open row shows three and “+22”. */
+const MANY_WINDOWS_DOC = {
+  ...NINE_DOC,
+  items: [
+    {
+      ...base(724, 5, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Every window of the office move",
+      via: "typed",
+      windows: Array.from({ length: 25 }, (_, index) => ({
+        ...longWindow(index % 5),
+        id: uuid(1000 + index),
+      })),
+    },
+  ],
+};
+
 const OpenShareSchema = z.object({
   after: z.boolean(),
   before: z.boolean(),
@@ -3916,6 +3941,23 @@ const STRESS_SCENES: readonly Scene[] = (
       },
       data: { view: stressView() },
       name: "stress-list-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 724);
+      },
+      check: async (page) => {
+        const more = page.getByRole("button", {
+          name: "22 more windows in details",
+        });
+
+        return (await more.textContent()) === "+22"
+          ? null
+          : "the open row doesn't offer “+22” for the other windows";
+      },
+      data: { view: shelfView(MANY_WINDOWS_DOC) },
+      name: "stress-open-windows-many",
       width: NARROWEST,
     },
     {
@@ -4140,21 +4182,94 @@ const STRESS_SCENES: readonly Scene[] = (
     },
     {
       check: async (page) => {
-        const open = await page.locator("[role=alert], [role=status]").count();
+        const open = page.locator("[role=alert], [role=status]");
+        const count = await open.count();
 
-        return open === 1
+        if (count !== 1) {
+          return `${count} banners show open; only the most severe should, the others one line`;
+        }
+
+        if (
+          !((await open.textContent()) ?? "").startsWith("Not saved to disk")
+        ) {
+          return "a newer banner took the open slot from Not saved to disk";
+        }
+
+        return (await page
+          .getByRole("button", { name: /^2 more/u })
+          .count()) === 1
           ? null
-          : `${open} banners show open; only the newest should, the others one line each`;
+          : "the folded banners don't share one “2 more” line";
       },
       data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
       name: "stress-banners",
       width: NARROWEST,
     },
     {
-      // The keyboard opens a folded banner and reads the whole of its message.
+      // Enter on “2 more” opens the others and keeps the keyboard there: on the most severe one's title, then its Show full message.
       act: async (page) => {
-        await page.getByRole("button", { name: "Not saved to disk" }).focus();
+        await page.getByRole("button", { name: /^2 more/u }).focus();
         await page.keyboard.press("Enter");
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        const on = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        if (open !== 3) {
+          return `“2 more” opened ${open - 1} banners, not 2`;
+        }
+
+        if (on !== "Needs your attention") {
+          return `Enter on “2 more” left the keyboard on “${String(on)}”`;
+        }
+
+        await page.keyboard.press("Tab");
+
+        const next = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        return next === "Show full message"
+          ? null
+          : `the next Tab went to “${String(next)}”, not Show full message`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      keepPointer: true,
+      name: "stress-banners-more",
+      width: NARROWEST,
+    },
+    {
+      // A banner whose words change shows them fresh, folded to its first lines again.
+      act: async (page) => {
+        await page.getByRole("button", { name: "Show full message" }).click();
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(stressView(STRESS_DOC, { ...STRESS_STATUS, saveError: `${STRESS_STATUS.saveError} Der Datenträger ist voll.` }))})`
+        );
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const open = page.getByRole("alert");
+        const text = (await open.textContent()) ?? "";
+
+        const more = await open
+          .locator("[aria-expanded]")
+          .getAttribute("aria-expanded");
+
+        return text.includes("Der Datenträger ist voll.") && more === "false"
+          ? null
+          : "a banner whose words changed didn't show them fresh";
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-new-text",
+      width: NARROWEST,
+    },
+    {
+      // The keyboard reads the whole of the open banner's message.
+      act: async (page) => {
         await page.getByRole("button", { name: "Show full message" }).focus();
         await page.keyboard.press("Enter");
         await page.waitForTimeout(200);
@@ -4714,6 +4829,42 @@ const DRAWING_STRESS_SCENES: readonly Scene[] = (
       data: { view: BLANK_DRAWING },
       keepPointer: true,
       name: "stress-drawing-text",
+    },
+    {
+      // A click near the right edge: the field moves left to stay readable, and keeps 12 px from the edge.
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Text" }).click();
+
+        const canvas = await boxOf(page.locator("canvas").first());
+
+        await page
+          .locator("canvas")
+          .first()
+          .click({ position: { x: canvas.right - canvas.left - 30, y: 120 } });
+        await page
+          .getByRole("textbox", { exact: true, name: "Text" })
+          .fill(`${LONG_WORD} ${LONG_STEP}`);
+      },
+      check: async (page) => {
+        const field = await boxOf(
+          page.getByRole("textbox", { exact: true, name: "Text" })
+        );
+
+        const width = await page.evaluate(
+          "document.documentElement.clientWidth"
+        );
+
+        if (field.right - field.left < 150) {
+          return `near the edge the field is ${Math.round(field.right - field.left)} px wide`;
+        }
+
+        return field.right > Number(width) - 11
+          ? "the field runs into the window's edge"
+          : null;
+      },
+      data: { view: BLANK_DRAWING },
+      keepPointer: true,
+      name: "stress-drawing-text-edge",
     },
     {
       act: async (page) => {
@@ -5298,6 +5449,28 @@ const dragFilesOver = async (page: Page, selector: string) =>
     }, selector)
   );
 
+/** Drops a PDF on an element as Finder does: dragover, then drop, with the file in a DataTransfer. */
+const dropFilesOn = async (page: Page, selector: string): Promise<void> => {
+  await page.evaluate((target) => {
+    const element = document.querySelector(target);
+    const files = new DataTransfer();
+
+    files.items.add(
+      new File(["%PDF"], "offer.pdf", { type: "application/pdf" })
+    );
+
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      element?.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: files,
+        })
+      );
+    }
+  }, selector);
+};
+
 /** Details' Add menu, opened once the last one has gone, and one of its entries chosen. */
 const chooseInAdd = async (page: Page, name: RegExp): Promise<void> => {
   await page.getByRole("menu").waitFor({ state: "detached" });
@@ -5426,26 +5599,88 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
     },
     {
       act: async (page) => {
+        await select(page, 906);
         await dragFilesOver(page, `[data-item-id="${uuid(906)}"]`);
       },
       check: async (page) => {
         const lit = await ringed(page, `[data-item-id="${uuid(906)}"]`);
         const panel = await ringed(page, ".shelf-panel");
 
+        if (!lit || panel) {
+          return "files over the open row must light the row and not the window";
+        }
+
+        await select(page, 901);
+
         const full = await dragFilesOver(page, `[data-item-id="${uuid(901)}"]`);
 
-        const said = await page.getByText(/the most it can/u).isVisible();
-
-        if (!lit || panel) {
-          return "files over a row must light the row and not the window";
-        }
+        const said = await page
+          .getByText(/the most it can/u)
+          .waitFor({ timeout: 2000 })
+          .then(() => true)
+          .catch(() => false);
 
         return full === "none" && said
           ? null
-          : `a full row must refuse files and say why (${full}, ${String(said)})`;
+          : `a full open row must refuse files and say why (${full}, ${String(said)})`;
       },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-row-drop-target",
+    },
+    {
+      // Files over a closed row are for the shelf: the window lights, the row doesn't, and a full one refuses nothing.
+      act: async (page) => {
+        await dragFilesOver(page, `[data-item-id="${uuid(906)}"]`);
+      },
+      check: async (page) => {
+        const lit = await ringed(page, `[data-item-id="${uuid(906)}"]`);
+        const panel = await ringed(page, ".shelf-panel");
+
+        await dragFilesOver(page, `[data-item-id="${uuid(901)}"]`);
+        await page.waitForTimeout(300);
+
+        const fullLit = await ringed(page, `[data-item-id="${uuid(901)}"]`);
+        const refused = await page.getByText(/the most it can/u).count();
+
+        if (lit || fullLit || !panel) {
+          return "files over a closed row must light the window, not the row";
+        }
+
+        return refused > 0
+          ? "a closed full row refused files meant as new items"
+          : null;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-closed",
+    },
+    {
+      // A real drop: on the open row it attaches (addFilesTo), on a closed row it makes new items (addFiles).
+      check: async (page) => {
+        await select(page, 906);
+        await dropFilesOn(page, `[data-item-id="${uuid(906)}"]`);
+        await dropFilesOn(page, `[data-item-id="${uuid(901)}"]`);
+        await page.waitForTimeout(100);
+
+        const all = await calls(page);
+
+        const sent = all.filter(
+          (each) => each.call === "addFilesTo" || each.call === "addFiles"
+        );
+
+        const expected = [
+          {
+            arg: { id: uuid(906), paths: ["/Users/anna/Desktop/offer.pdf"] },
+            call: "addFilesTo",
+          },
+          { arg: ["/Users/anna/Desktop/offer.pdf"], call: "addFiles" },
+        ];
+
+        return isDeepStrictEqual(sent, expected)
+          ? null
+          : `the drops sent ${JSON.stringify(sent)}`;
+      },
+      data: { filePaths: true, view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-real",
     },
     {
       act: async (page) => {
@@ -8880,6 +9115,7 @@ const shoot = async (
     deviceScaleFactor: 2,
     locale: "en-US",
     reducedMotion: scene.reducedMotion === true ? "reduce" : "no-preference",
+    timezoneId: TIME_ZONE,
     userAgent: USER_AGENT[platform],
     viewport: size,
   });
@@ -8889,6 +9125,9 @@ const shoot = async (
 
   const page = await context.newPage();
   const errors: string[] = [];
+
+  // The page's clock stands still at the fixtures' moment; its timers still run.
+  await page.clock.setFixedTime(now);
 
   page.on("pageerror", (error) => {
     errors.push(error.message);

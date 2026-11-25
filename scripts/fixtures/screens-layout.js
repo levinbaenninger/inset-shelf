@@ -356,6 +356,18 @@ const narrowColumns = (elements) => {
   return problems;
 };
 
+/** A native tooltip is there to finish a line, not to be read like a page (src/renderer/shared/clamp.tsx). */
+const TOOLTIP_MAX = 300;
+
+const longTooltips = () =>
+  [...document.querySelectorAll("[title]")].flatMap((element) => {
+    const title = element.getAttribute("title") ?? "";
+
+    return title.length > TOOLTIP_MAX
+      ? [`${nameOf(element)} has a ${title.length}-character tooltip`]
+      : [];
+  });
+
 globalThis.__strictProblems = () => {
   const elements = shown();
 
@@ -367,6 +379,7 @@ globalThis.__strictProblems = () => {
       ...cutFields(elements),
       ...narrowColumns(elements),
       ...overlaps(elements),
+      ...longTooltips(),
     ]),
   ];
 };
