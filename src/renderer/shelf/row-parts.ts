@@ -35,12 +35,17 @@ export interface RowParts {
   readonly badgesOn: "source" | "file";
   /** Null while the row is closed. */
   readonly extras: RowExtras | null;
+  /** The first attachments as tiles, open or closed, and how many more only details show; null when the item has none. */
+  readonly strip: RowList | null;
 }
 
 const MAX_BADGES = 3;
 
 /** How much of each list an open row shows, so one item never fills the shelf; details show all of it. */
 const ROW_LIST_MAX = { pins: 3, steps: 5, windows: 6 } as const;
+
+/** How many attachments a row shows as tiles; the rest are a "+N" that opens details. */
+export const ROW_STRIP_MAX = 3;
 
 const rowList = (count: number, max: number): RowList | null =>
   count === 0
@@ -97,6 +102,7 @@ export const rowParts = (item: ShelfItem, open: boolean): RowParts => ({
   badges: badgesOf(item, open),
   badgesOn: item.kind === "file" && item.context === null ? "file" : "source",
   extras: open ? extrasOf(item) : null,
+  strip: rowList(item.attachments.length, ROW_STRIP_MAX),
 });
 
 const MORE_NAMES = [

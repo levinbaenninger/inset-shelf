@@ -83,13 +83,45 @@ const FULL = {
   windows: [windowRef(1), windowRef(2)],
 };
 
+/** A note with this many attached files. */
+const attached = (count: number) =>
+  text({
+    attachments: Array.from({ length: count }, (_, n) => ({
+      addedAt: "2026-11-20T10:00:00.000Z",
+      file: {
+        bytes: 3,
+        name: `File ${n}.pdf`,
+        stored: `${uuid(300 + n)}.pdf`,
+      },
+      id: uuid(400 + n),
+      kind: "file",
+    })),
+  });
+
 describe(rowParts, () => {
   it("shows a plain note's words alone: no badges, nothing to open", () => {
     expect(rowParts(text(), false)).toStrictEqual({
       badges: [],
       badgesOn: "source",
       extras: null,
+      strip: null,
     });
+  });
+
+  it("shows the first three attachments as tiles, open or closed, and counts the rest for details", () => {
+    expect(
+      [attached(0), attached(2), attached(12)].flatMap((item) => [
+        rowParts(item, false).strip,
+        rowParts(item, true).strip,
+      ])
+    ).toStrictEqual([
+      null,
+      null,
+      { more: 0, shown: 2 },
+      { more: 0, shown: 2 },
+      { more: 9, shown: 3 },
+      { more: 9, shown: 3 },
+    ]);
   });
 
   it("puts what is set on the quiet line, most telling first, three at most", () => {
