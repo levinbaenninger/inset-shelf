@@ -49,7 +49,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-# Writes latest*.yml and the app's feed; CI uploads them to the rolling preview release.
+# Writes latest*.yml and the app's feed. CI pins the yml's files to their versioned release.
 publish:
   provider: generic
-  url: https://github.com/levinbaenninger/inset-shelf/releases/download/preview
+  url: https://github.com/levinbaenninger/inset-shelf/releases/latest/download

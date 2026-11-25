@@ -51,7 +51,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: test "v$(node -p 'require("./apps/desktop/package.json").version')" = "$GITHUB_REF_NAME"
-      - name: Stamp the preview version
+      - name: Stamp the build version
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
         run: |
@@ -67,7 +67,7 @@ jobs:
           echo "INSET_SIGN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
       - shell: bash
         working-directory: apps/desktop
-        run: vp run ${{ matrix.script }} $VERSION_ARGS
+        run: vp run ${{ matrix.script }} ${VERSION_ARGS:+"$VERSION_ARGS"}
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
@@ -87,28 +87,63 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Publish versioned release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Inset Shelf $GITHUB_REF_NAME" \
-            --notes-file .github/release-notes.md \
-            --verify-tag
-      # Installed apps read latest*.yml from this release, so it is updated in
-      # place: new files first, then the feed files. The files the previous feed
-      # named stay one more build, for apps that read it just before the switch.
-      - name: Publish rolling preview from main
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Pin the feed and add the stable installer names
         run: |
           set -euo pipefail
-          title="Preview build (main, ${GITHUB_SHA::7})"
+          version="$(sed -n 's/^version: //p' dist/latest-mac.yml)"
+          test "$(sed -n 's/^version: //p' dist/latest.yml)" = "$version"
+          tag="v$version"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            test "$tag" = "$GITHUB_REF_NAME"
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
 
+          .github/scripts/pin-feed-urls.sh \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag" \
+            dist/latest-mac.yml dist/latest.yml
+          # The site links these names under /releases/latest/download. The feed doesn't name them.
+          for target in mac-arm64.dmg mac-x64.dmg win-x64.exe; do
+            cp "dist/inset-shelf-$version-$target" "dist/Inset-Shelf-$target"
+          done
+      # Installed apps read latest*.yml from /releases/latest/download, so the
+      # release stays a draft until every file is up. A tag build is never Latest:
+      # main already built that commit under a higher <major>.<minor>.<run number>.
+      - name: Publish the versioned release
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            create=(--verify-tag)
+            latest=false
+          else
+            create=(--target "$GITHUB_SHA")
+            latest=true
+          fi
+
+          draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null || echo missing)"
+          case "$draft" in
+            false)
+              echo "$TAG is already published."
+              exit 0
+              ;;
+            missing)
+              gh release create "$TAG" "${create[@]}" \
+                --draft \
+                --title "Inset Shelf $TAG" \
+                --notes-file .github/release-notes.md
+              ;;
+          esac
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false --latest="$latest"
+      # Apps installed from a preview build read latest*.yml from this release.
+      # It now carries only those files, pinned to the versioned release published
+      # above. The files the previous feed named by bare name stay one more build,
+      # for apps that read it just before the switch.
+      - name: Point the legacy preview feed at the release
+        if: github.ref_type != 'tag'
+        run: |
+          set -euo pipefail
           if ! gh release view preview > /dev/null 2>&1; then
-            gh release create preview dist/* \
-              --target "$GITHUB_SHA" \
-              --title "$title" \
-              --notes-file .github/release-notes.md \
-              --prerelease
+            echo "No preview release, so no app reads the legacy feed."
             exit 0
           fi
 
@@ -119,15 +154,16 @@ jobs:
 
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/preview" \
             -f sha="$GITHUB_SHA" -F force=true > /dev/null
-          find dist -type f ! -name 'latest*.yml' -print0 \
-            | xargs -0 gh release upload preview --clobber
           gh release upload preview dist/latest*.yml --clobber
           gh release view preview --json assets --jq '.assets[].name' \
             | while read -r name; do
-                [ -e "dist/$name" ] || grep -qxF "${name%.blockmap}" "$previous" \
+                case "$name" in
+                  latest*.yml) continue ;;
+                esac
+                grep -qxF "${name%.blockmap}" "$previous" \
                   || gh release delete-asset preview "$name" --yes
               done
           gh release edit preview \
-            --title "$title" \
-            --notes-file .github/release-notes.md \
+            --title "Legacy update feed (main, ${GITHUB_SHA::7})" \
+            --notes-file .github/preview-notes.md \
             --prerelease
