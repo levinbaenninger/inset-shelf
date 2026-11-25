@@ -3269,7 +3269,11 @@ const STRESS_STATUS = {
 };
 
 const stressView = (
-  doc: typeof STRESS_DOC | typeof EMPTY_DOC | typeof CROWDED_DOC = STRESS_DOC,
+  doc:
+    | typeof STRESS_DOC
+    | typeof EMPTY_DOC
+    | typeof CROWDED_DOC
+    | typeof EDIT_DOC = STRESS_DOC,
   status: typeof STRESS_STATUS | typeof STATUS = STATUS
 ) => ({
   ...shelfView(),
@@ -3388,6 +3392,202 @@ const focusedOpacity = async (page: Page) =>
       };
     })
   );
+
+// Editing in place: the words stay where they are read, and the caret lands on the word clicked.
+
+const EDIT_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(720, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Book the movers for Monday morning",
+      via: "typed",
+    },
+    {
+      ...base(721, 25, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Pack the office before the move:\n\n- Desks and **chairs**\n- Lamps from the `storage` room\n- The [floor plan](https://rieder-moebel.ch/plan) for the movers",
+      via: "typed",
+    },
+    {
+      ...IMAGE,
+      ...base(722, 20, STRESS_A),
+      image: LOGIN,
+      kind: "image",
+      note: "Spacing, the button and the error text all need work before the release build goes out",
+      pins: [],
+      source: null,
+      title: null,
+      via: "screenshot",
+    },
+  ],
+};
+
+const EditBoxSchema = z.object({
+  height: z.number(),
+  left: z.number(),
+  top: z.number(),
+});
+
+const EditStartSchema = z.object({
+  box: EditBoxSchema,
+  /** An editor or the note's field shows, not the words as they are read. */
+  editing: z.boolean(),
+  x: z.number(),
+  y: z.number(),
+});
+
+/**
+ * The words of item `id` as they show: the union of their glyphs, read or in
+ * the editor, or the note's field. And, read, the middle of `word` in them.
+ */
+const wordsBox = async (page: Page, id: string, word: string | null) =>
+  await page.evaluate(
+    ({ id: itemId, word: target }) => {
+      const row = document.querySelector(`[data-item-id="${itemId}"]`);
+      const field = row?.querySelector("textarea");
+
+      if (field instanceof HTMLTextAreaElement) {
+        const { height, left, top } = field.getBoundingClientRect();
+
+        return { box: { height, left, top }, editing: true, x: 0, y: 0 };
+      }
+
+      const editor = row?.querySelector("[aria-label='Edit item']") ?? null;
+
+      // The open item's words: its text, or the note under its picture.
+      const words =
+        editor ?? row?.querySelector("[data-row-keys]:not(:has(img))") ?? null;
+
+      if (words === null) {
+        return null;
+      }
+
+      const all = document.createRange();
+
+      all.selectNodeContents(words);
+
+      const { height, left, top } = all.getBoundingClientRect();
+      const walker = document.createTreeWalker(words, NodeFilter.SHOW_TEXT);
+
+      for (
+        let node = walker.nextNode();
+        node !== null;
+        node = walker.nextNode()
+      ) {
+        const at =
+          target === null ? -1 : (node.textContent ?? "").indexOf(target);
+
+        if (target !== null && at !== -1) {
+          const range = document.createRange();
+
+          range.setStart(node, at);
+          range.setEnd(node, at + target.length);
+
+          const rect = range.getBoundingClientRect();
+
+          return {
+            box: { height, left, top },
+            editing: editor !== null,
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          };
+        }
+      }
+
+      return {
+        box: { height, left, top },
+        editing: editor !== null,
+        x: 0,
+        y: 0,
+      };
+    },
+    { id, word }
+  );
+
+/** The word the caret is in, in the editor or the note's field. */
+const caretWord = async (page: Page): Promise<string> =>
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    let text = "";
+    let at = 0;
+
+    if (active instanceof HTMLTextAreaElement) {
+      text = active.value;
+      at = active.selectionStart;
+    } else {
+      const selection = window.getSelection();
+
+      text = selection?.anchorNode?.textContent ?? "";
+      at = selection?.anchorOffset ?? 0;
+    }
+
+    const letter = /[\p{L}\p{N}]/u;
+    let start = at;
+    let end = at;
+
+    while (start > 0 && letter.test(text[start - 1] ?? "")) {
+      start -= 1;
+    }
+
+    while (end < text.length && letter.test(text[end] ?? "")) {
+      end += 1;
+    }
+
+    return text.slice(start, end);
+  });
+
+/** Opens item `n`, notes where its words are, and clicks `word` in them to start editing there. */
+const clickToEdit = async (
+  page: Page,
+  n: number,
+  word: string
+): Promise<void> => {
+  await select(page, n);
+  await page.waitForTimeout(200);
+
+  const start = EditStartSchema.parse(await wordsBox(page, uuid(n), word));
+
+  await page.evaluate((box) => {
+    Object.assign(globalThis, { __readBox: box });
+  }, start.box);
+  await page.mouse.click(start.x, start.y);
+  await page.waitForTimeout(300);
+};
+
+/** The words didn't move or change height by more than a pixel once editing started, and the caret is in `word`. */
+const editedInPlace = async (
+  page: Page,
+  n: number,
+  word: string
+): Promise<string | null> => {
+  const read = EditBoxSchema.parse(await page.evaluate("globalThis.__readBox"));
+
+  const edited = EditStartSchema.safeParse(await wordsBox(page, uuid(n), null));
+
+  if (!edited.success || !edited.data.editing) {
+    return "clicking the open item's words started no edit";
+  }
+
+  const moved = (["top", "left", "height"] as const).filter(
+    (side) => Math.abs(edited.data.box[side] - read[side]) > 1
+  );
+
+  if (moved.length > 0) {
+    return `starting the edit moved the words: ${moved.map((side) => `${side} ${read[side].toFixed(1)} → ${edited.data.box[side].toFixed(1)}`).join(", ")}`;
+  }
+
+  const at = await caretWord(page);
+
+  return at === word
+    ? null
+    : `the caret landed in “${at}”, not in “${word}”, the word clicked`;
+};
 
 const SCREENSHOT_VIEW = {
   heightPx: LOGIN.heightPx,
@@ -3744,6 +3944,33 @@ const STRESS_SCENES: readonly Scene[] = (
       data: { view: stressView() },
       name: "stress-open-keeps-details",
       width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 720, "movers");
+      },
+      check: async (page) => await editedInPlace(page, 720, "movers"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-line",
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 721, "Lamps");
+      },
+      check: async (page) => await editedInPlace(page, 721, "Lamps"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-list",
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 722, "button");
+      },
+      check: async (page) => await editedInPlace(page, 722, "button"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-note",
     },
     {
       data: {
