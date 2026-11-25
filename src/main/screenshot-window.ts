@@ -24,6 +24,8 @@ export interface ScreenshotWindow {
   /** Keeps the card until it is used or dismissed. */
   readonly hold: () => void;
   readonly view: () => ScreenshotView | null;
+  /** The card names another item for Add to “…”, or none, where it is and for as long as it had. */
+  readonly retarget: (target: ScreenshotView["target"]) => void;
   readonly onView: (listener: (view: ScreenshotView | null) => void) => void;
   readonly allowClose: () => void;
 }
@@ -166,6 +168,12 @@ export const createScreenshotWindow = (options: {
 
       if (!hovered) {
         hideLater();
+      }
+    },
+    retarget: (target) => {
+      if (current !== null) {
+        current = { ...current, target };
+        listener(current);
       }
     },
     view: () => current,

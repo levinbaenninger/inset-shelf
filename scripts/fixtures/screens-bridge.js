@@ -448,6 +448,7 @@ if (page === "screenshot") {
   globalThis.__hover = [];
   globalThis.insetScreenshot = withFallback(
     {
+      addToItem: logged("addToItem", nothing),
       addToShelf: logged("addToShelf", nothing),
       annotate: logged("annotate", nothing),
       copy: logged("copy", nothing),

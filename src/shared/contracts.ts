@@ -323,6 +323,8 @@ export interface ScreenshotView {
   readonly imageUrl: string;
   readonly widthPx: number;
   readonly heightPx: number;
+  /** The item Add to “…” attaches it to, named by its first words; null when none is selected, or it holds all it can. */
+  readonly target: { readonly label: string } | null;
 }
 
 const Seq = z.number().int().min(0);
@@ -369,6 +371,8 @@ export const screenshotContract = defineContract({
   methods: {
     ...tutorialMethods,
     addToShelf: send(Seq),
+    /** Attaches it to the item the card names. */
+    addToItem: send(Seq),
     /** Adds it to the shelf and opens it to draw on. */
     annotate: send(Seq),
     copy: send(Seq),

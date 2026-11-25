@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { screenshotBridge } from "@/shared/bridge";
+import { Truncated } from "@/shared/clamp";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
@@ -89,13 +90,18 @@ const useAddFailure = (seq: number) => {
 
 /**
  * A screenshot card beside the shelf. Add to Shelf shows at once and is the
- * first key stop; on hover or keyboard focus the picture dims behind the
+ * first key stop, with Add to “…” under it while an item is selected; on hover or keyboard focus the picture dims behind the
  * other actions. Dragging it into another app drops it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { seq } = view;
   const [held, setHeld] = useState(false);
   const [failure, setFailure] = useAddFailure(seq);
+  // Which add was pressed last: after a failed save, that one reads Retry.
+  const [adding, setAdding] = useState<"shelf" | "item">("shelf");
+
+  const retry = (which: "shelf" | "item"): boolean =>
+    failure !== null && adding === which;
 
   return (
     <main
@@ -115,13 +121,35 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
         <Button
           onClick={() => {
             setFailure(null);
+            setAdding("shelf");
             api.addToShelf(seq);
           }}
           size="pill-xs"
           variant="overlay"
         >
-          {failure === null ? "Add to Shelf" : "Retry"}
+          {retry("shelf") ? "Retry" : "Add to Shelf"}
         </Button>
+        {view.target === null ? null : (
+          <Button
+            className="max-w-full"
+            onClick={() => {
+              setFailure(null);
+              setAdding("item");
+              api.addToItem(seq);
+            }}
+            size="pill-xs"
+            variant="overlay"
+          >
+            {retry("item") ? (
+              "Retry"
+            ) : (
+              <Truncated
+                className="min-w-0"
+                text={`Add to “${view.target.label}”`}
+              />
+            )}
+          </Button>
+        )}
       </div>
       <button
         aria-label="Drag the screenshot into another app"

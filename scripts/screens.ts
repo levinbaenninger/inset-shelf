@@ -3631,6 +3631,7 @@ const SCREENSHOT_VIEW = {
   heightPx: LOGIN.heightPx,
   imageUrl: `/.fixtures/${LOGIN.file}`,
   seq: 1,
+  target: null,
   widthPx: LOGIN.widthPx,
 };
 
@@ -4939,6 +4940,9 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
   }, selector);
 };
 
+/** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
+const CARD_LABEL = `${LONG_TITLE.slice(0, 39)}…`;
+
 const ATTACHMENT_SCENES: readonly Scene[] = (
   [
     {
@@ -5371,6 +5375,98 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-details-paste",
+    },
+    {
+      check: async (page) => {
+        const add = page.getByRole("button", { name: /^Add to “/u });
+        const box = await add.boundingBox();
+
+        const corners = await page
+          .getByRole("button", {
+            name: /Dismiss|Keep on Screen|Annotate|Save to Downloads/u,
+          })
+          .evaluateAll((buttons) =>
+            buttons.map((button) => {
+              const rect = button.getBoundingClientRect();
+
+              return {
+                bottom: rect.bottom,
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+              };
+            })
+          );
+
+        if (box === null) {
+          return "the card shows no Add to “…” while an item is selected";
+        }
+
+        const covers = corners.some(
+          (corner) =>
+            box.x < corner.right &&
+            box.x + box.width > corner.left &&
+            box.y < corner.bottom &&
+            box.y + box.height > corner.top
+        );
+
+        const before = await callCount(page);
+
+        await add.click();
+
+        const sent = await calls(page, before);
+
+        if (covers) {
+          return "Add to “…” covers a corner button";
+        }
+
+        return sent.some((each) => each.call === "addToItem" && each.arg === 1)
+          ? null
+          : `Add to “…” sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
+      name: "screenshot-card-attach",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: /^Add to “/u }).click();
+        await page.evaluate(
+          `globalThis.__emit("addFailed", ${JSON.stringify({
+            message: "Nothing was attached. An item holds up to 12.",
+            seq: SCREENSHOT_VIEW.seq,
+          })})`
+        );
+        await page.getByRole("button", { name: "Retry" }).waitFor();
+      },
+      check: async (page) =>
+        (await page
+          .getByRole("button", { name: "Add to Shelf" })
+          .isVisible()) && (await page.getByRole("alert").isVisible())
+          ? null
+          : "a failed Add to “…” must say why, offer Retry in its place, and keep Add to Shelf",
+      data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
+      name: "screenshot-card-attach-failed",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Tab");
+      },
+      check: async (page) => {
+        const on = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        return String(on).startsWith("Add to “")
+          ? null
+          : `the second Tab stop is “${String(on)}”, not Add to “…”`;
+      },
+      data: { view: { ...SCREENSHOT_VIEW, target: { label: CARD_LABEL } } },
+      keepPointer: true,
+      name: "screenshot-card-attach-focus",
+      page: "screenshot",
     },
   ] satisfies readonly StressScene[]
 ).map(stress);
