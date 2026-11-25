@@ -257,6 +257,21 @@ const noticeToast = (message: string): void => {
   toast.success(message, { duration: NOTICE_MS });
 };
 
+/**
+ * Hides the shelf. A control that held the keyboard (an item, the ×) lets
+ * go of it first, so the shelf opens again with the caret in the note
+ * field; a field being typed in keeps it.
+ */
+const hideShelf = (): void => {
+  const active = document.activeElement;
+
+  if (active instanceof HTMLElement && !isTextField(active)) {
+    active.blur();
+  }
+
+  api.hide();
+};
+
 const ignoreLink = (): void => undefined;
 
 /** An item's words for a toast: a note formatted as on its card, cut to one line. */
@@ -1129,7 +1144,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       } else if (picked.length > 0) {
         unpick();
       } else {
-        api.hide();
+        hideShelf();
       }
     },
     move: (offset: 1 | -1) => {
@@ -1663,7 +1678,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             setEditingId(detailsItem.id);
           }}
           onHide={() => {
-            api.hide();
+            hideShelf();
           }}
           onLinkWindow={() => {
             api.linkWindows(detailsItem.id);
@@ -1714,7 +1729,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             inputRef={searchRef}
             onChange={setQuery}
             onHide={() => {
-              api.hide();
+              hideShelf();
             }}
             query={query}
           />
@@ -1729,7 +1744,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             icon={Cancel01Icon}
             label="Hide Shelf"
             onClick={() => {
-              api.hide();
+              hideShelf();
             }}
           />
         </header>
@@ -1884,7 +1899,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                           api.openLink({ id: item.id, url });
                         }}
                         onHide={() => {
-                          api.hide();
+                          hideShelf();
                         }}
                         onEditText={(text) => {
                           apply({ id: item.id, text, type: "editText" });
@@ -2003,7 +2018,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         hidden={inDetails}
         sectionNames={doc.sections.map((section) => section.name)}
         onEscape={() => {
-          api.hide();
+          hideShelf();
         }}
         onLeaveUp={() => {
           // The item just above the note field: the last one shown, past folded sections.
