@@ -29,7 +29,7 @@ const PLACE: Readonly<Record<NoticeCorner, string>> = {
 export const ToastApp = () => {
   const view = usePushedView(load, subscribe, null);
 
-  if (view === null) {
+  if (view?.kind !== "notice") {
     return null;
   }
 

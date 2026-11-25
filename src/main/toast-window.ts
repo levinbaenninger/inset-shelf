@@ -16,8 +16,13 @@ import type { WebContents } from "electron";
 import { harden, secureWebPreferences } from "./window-security";
 
 /** The window is clear; the pill is drawn inside it, hugging the corner nearest the pointer, with room for its shadow. */
-const sizeOf = (view: PillBody): Size<"screen"> =>
-  view.tone === "failed" ? size(360, 72) : size(260, 44);
+const sizeOf = (view: PillBody): Size<"screen"> => {
+  if (view.kind === "why") {
+    return size(320, 44);
+  }
+
+  return view.tone === "failed" ? size(360, 72) : size(260, 44);
+};
 
 export interface ToastWindow {
   readonly webContents: WebContents;
@@ -144,6 +149,13 @@ export const createToastWindow = (options: {
 
       case "openShelf": {
         options.openShelf(effect.item);
+        break;
+      }
+
+      // Nothing asks for the why field yet.
+      case "takeKeys":
+      case "giveKeys":
+      case "saveWhy": {
         break;
       }
 
