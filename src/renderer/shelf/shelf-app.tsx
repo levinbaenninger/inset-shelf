@@ -297,7 +297,7 @@ const Excerpt = ({ item }: { readonly item: ShelfItem }) =>
 
 const deletedToast = (id: ItemId): string => `deleted-${id}`;
 
-/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). */
+/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). Main's notice says how it went once they are on disk. */
 const addDataFiles = async (files: readonly File[]): Promise<void> => {
   const paths = files.flatMap((file) => {
     const found = filePath(file);
@@ -306,13 +306,7 @@ const addDataFiles = async (files: readonly File[]): Promise<void> => {
   });
 
   if (paths.length > 0) {
-    const result = await api.addFiles(paths);
-
-    if (result.ok) {
-      noticeToast(
-        paths.length === 1 ? "Added 1 file" : `Added ${paths.length} files`
-      );
-    }
+    api.addFiles(paths);
 
     return;
   }
@@ -321,7 +315,7 @@ const addDataFiles = async (files: readonly File[]): Promise<void> => {
 
   await Promise.all(
     images.map(async (file) => {
-      await api.pasteImage(new Uint8Array(await file.arrayBuffer()));
+      api.pasteImage(new Uint8Array(await file.arrayBuffer()));
     })
   );
 };

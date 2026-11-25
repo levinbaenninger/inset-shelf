@@ -121,7 +121,7 @@ import {
   nativeDialog,
   withinWait,
 } from "./quit-hold";
-import { causeText, FsErrorSchema } from "./save-error";
+import { causeText, FsErrorSchema, reportSaveError } from "./save-error";
 import { createShotSaves } from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
 import { createScreenshotWatcher } from "./screenshot-watcher";
@@ -1210,16 +1210,57 @@ const start = async (): Promise<void> => {
       : { context: null, file: upload.file, type: "addFile" };
   };
 
-  /** Adds files in the order given; the last one added is shown. */
-  const addFiles = async (paths: readonly string[]): Promise<ActionResult> => {
+  /**
+   * Says how adding went, as Double Shift does: once the disk holds what was
+   * added, and naming each file that couldn't be added and why.
+   */
+  const noticeAdded = async (
+    added: number,
+    tried: number,
+    problems: readonly string[],
+    noun: "file" | "picture" = "file"
+  ): Promise<void> => {
+    if (added > 0) {
+      const written = await withinWait(
+        controller.persisted(controller.snapshot().rev),
+        setTimer
+      );
+
+      if (!written.ok) {
+        notify(written.message, "failed");
+
+        return;
+      }
+    }
+
+    if (problems.length === 0) {
+      notify(added === 1 ? `Added 1 ${noun}` : `Added ${added} ${noun}s`);
+
+      return;
+    }
+
+    const lead =
+      added === 0 ? "Nothing was added." : `Added ${added} of ${tried}.`;
+
+    notify(`${lead} ${problems.join(" ")}`, "failed");
+  };
+
+  /** Adds files in the order given; the last one added is shown, and a notice says how it went. */
+  const addFiles = async (paths: readonly string[]): Promise<void> => {
     // A file dragged out of the shelf and dropped back in is already there.
     const outside = paths.filter((filePath) => !staging.contains(filePath));
     const prepared = await Promise.all(outside.map(prepareFile));
     let lastId: ItemId | null = null;
+    let added = 0;
 
     for (const op of prepared) {
       if (!("problem" in op)) {
-        lastId = controller.apply(op) ?? lastId;
+        const id = controller.apply(op);
+
+        if (id !== null) {
+          lastId = id;
+          added += 1;
+        }
       }
     }
 
@@ -1228,13 +1269,60 @@ const start = async (): Promise<void> => {
       controller.focus(lastId);
     }
 
-    const problems = prepared.flatMap((op) =>
-      "problem" in op ? [op.problem] : []
-    );
+    if (outside.length > 0) {
+      await noticeAdded(
+        added,
+        outside.length,
+        prepared.flatMap((op) => ("problem" in op ? [op.problem] : []))
+      );
+    }
+  };
 
-    return problems.length === 0
-      ? { ok: true }
-      : { message: problems.join(" "), ok: false };
+  /** A picture pasted or dropped in without a file (copied from a page) becomes an image item. */
+  const pasteImage = async (bytes: Uint8Array): Promise<void> => {
+    const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+
+    if (image.isEmpty()) {
+      await noticeAdded(0, 1, [
+        "The pasted data is not an image Inset can read.",
+      ]);
+
+      return;
+    }
+
+    const { height, width } = image.getSize();
+
+    const written = await reportSaveError(async () => ({
+      file: await store.writeAttachment(image.toPNG()),
+      ok: true as const,
+    }));
+
+    if (!written.ok) {
+      notify(written.message, "failed");
+
+      return;
+    }
+
+    const id = controller.apply({
+      image: {
+        file: written.file,
+        heightPx: height,
+        pixelsPerDip: 1,
+        widthPx: width,
+      },
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "paste",
+      context: null,
+    });
+
+    if (id !== null) {
+      e2eLog("itemAdded", { itemId: id, kind: "image", via: "paste" });
+      controller.focus(id);
+    }
+
+    await noticeAdded(id === null ? 0 : 1, 1, [], "picture");
   };
 
   /** Drags an image (with its pin drawn in) or a file out of the shelf as a named file. */
@@ -1277,15 +1365,7 @@ const start = async (): Promise<void> => {
     });
 
     if (!picked.canceled && picked.filePaths.length > 0) {
-      const result = await addFiles(picked.filePaths);
-
-      if (result.ok) {
-        const count = picked.filePaths.length;
-
-        notify(count === 1 ? "Added 1 file" : `Added ${count} files`);
-      } else {
-        controller.setStatus({ problem: result.message });
-      }
+      await addFiles(picked.filePaths);
     }
   };
 
@@ -2100,7 +2180,9 @@ const start = async (): Promise<void> => {
     shelfContract,
     {
       ...attachmentHandlers,
-      addFiles: async (paths) => await addFiles(paths),
+      addFiles: (paths) => {
+        void addFiles(paths);
+      },
       apply: (op) => {
         controller.apply(op);
 
@@ -2202,34 +2284,8 @@ const start = async (): Promise<void> => {
       openSettings: () => {
         settingsWindow.open();
       },
-      pasteImage: async (bytes) => {
-        const image = nativeImage.createFromBuffer(Buffer.from(bytes));
-
-        if (image.isEmpty()) {
-          return {
-            message: "The pasted data is not an image Inset can read.",
-            ok: false,
-          };
-        }
-
-        const { height, width } = image.getSize();
-        const file = await store.writeAttachment(image.toPNG());
-
-        const id = controller.apply({
-          image: { file, heightPx: height, pixelsPerDip: 1, widthPx: width },
-          pins: [],
-          source: null,
-          type: "addImage",
-          via: "paste",
-          context: null,
-        });
-
-        if (id !== null) {
-          e2eLog("itemAdded", { itemId: id, kind: "image", via: "paste" });
-          controller.focus(id);
-        }
-
-        return { ok: true };
+      pasteImage: (bytes) => {
+        void pasteImage(bytes);
       },
       setFloatOnTop,
       showMeAround: () => {

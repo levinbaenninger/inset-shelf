@@ -230,11 +230,8 @@ export const shelfContract = defineContract({
      * the menu takes every key, so main holds back the menu bar's keys.
      */
     menuOpen: send(z.boolean()),
-    /** Files dropped or pasted into the shelf, by path; main reads them. */
-    addFiles: invoke(
-      z.array(z.string().min(1).max(4096)).min(1).max(50),
-      out<ActionResult>()
-    ),
+    /** Files dropped or pasted into the shelf, by path; main reads them, and its notice says how it went once they are on disk. */
+    addFiles: send(z.array(z.string().min(1).max(4096)).min(1).max(50)),
     apply: send(ShelfOpSchema),
     /** The file dialog, from the "+" in the note field. */
     attachFiles: send(z.void()),
@@ -290,11 +287,10 @@ export const shelfContract = defineContract({
     openSettings: send(z.void()),
     /** Window › Float on Top. */
     setFloatOnTop: send(z.boolean()),
-    pasteImage: invoke(
+    pasteImage: send(
       z
         .instanceof(Uint8Array)
-        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES),
-      out<ActionResult>()
+        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES)
     ),
     startDrag: send(ItemIdSchema),
   },
