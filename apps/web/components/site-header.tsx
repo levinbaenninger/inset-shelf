@@ -13,8 +13,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { DOWNLOADS, NAV_LINKS, REPO_URL } from "@/lib/site";
-import { useBrowserValue } from "@/lib/use-browser-value";
+import { NAV_LINKS, REPO_URL } from "@/lib/site";
 
 import { DownloadButtons } from "./download-buttons";
 import { Logo } from "./logo";
@@ -37,14 +36,6 @@ const useScrolled = () => {
   return scrolled;
 };
 
-// The header's one button fetches the build for the visitor's system: Windows when the browser says so, else the Mac.
-const useDownloadUrl = () =>
-  useBrowserValue(
-    () =>
-      /Win/u.test(navigator.userAgent) ? DOWNLOADS.windows : DOWNLOADS.mac,
-    DOWNLOADS.mac
-  );
-
 const LINK =
   "text-foreground/75 hover:text-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/5";
 
@@ -52,7 +43,6 @@ const LINK =
 // white bar with a hairline at the top of the window.
 export const SiteHeader = () => {
   const scrolled = useScrolled();
-  const download = useDownloadUrl();
 
   return (
     <header
@@ -109,7 +99,8 @@ export const SiteHeader = () => {
           asChild
           className="ml-2 hidden h-9 rounded-[9px] px-4 sm:inline-flex"
         >
-          <a href={download}>Download</a>
+          {/* A browser can't tell an Intel Mac from Apple silicon, so this leads to the buttons for each build. */}
+          <a href="#download">Download</a>
         </Button>
 
         <Sheet>

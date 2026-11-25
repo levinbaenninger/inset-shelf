@@ -2,7 +2,7 @@ import { DownloadButtons } from "./download-buttons";
 import { SkyFrame } from "./sky-frame";
 
 export const Closing = () => (
-  <section aria-labelledby="closing-h" className="px-3 sm:px-4">
+  <section id="download" aria-labelledby="closing-h" className="px-3 sm:px-4">
     <SkyFrame className="flex flex-col items-center px-5 py-24 text-center md:py-32">
       <h2 id="closing-h" className="text-title max-w-[16ch]">
         Try Inset Shelf beside your work.

@@ -24,7 +24,8 @@ const Layout = ({ children }: { children: ReactNode }) => (
       githubUrl={REPO_URL}
       links={[
         { text: "Home", url: "/" },
-        { text: "Download for macOS", url: DOWNLOADS.mac },
+        { text: "Download for Apple silicon", url: DOWNLOADS.mac },
+        { text: "Download for Intel Mac", url: DOWNLOADS.macIntel },
         { text: "Download for Windows", url: DOWNLOADS.windows },
       ]}
       themeSwitch={{ enabled: false }}
