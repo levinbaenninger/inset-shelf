@@ -6,6 +6,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
+import { tooltipText } from "@/shared/clamp";
 
 /** GitHub's Markdown (lists, tasks, tables, strikethrough), with a line break wherever one was typed. */
 const PLUGINS = [remarkGfm, remarkBreaks];
@@ -53,7 +54,7 @@ const Link = ({ children, href }: Children & { readonly href?: string }) => {
         event.preventDefault();
         onOpenLink(href);
       }}
-      title={href}
+      title={tooltipText(href)}
     >
       {children}
     </a>

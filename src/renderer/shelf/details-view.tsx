@@ -837,9 +837,7 @@ const FileLine = ({ item }: { readonly item: FileItem }) => (
       icon={File01Icon}
       size={16}
     />
-    <span className="truncate" title={item.file.name}>
-      {item.file.name}
-    </span>
+    <Truncated text={item.file.name} />
   </p>
 );
 

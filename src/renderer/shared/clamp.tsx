@@ -38,6 +38,26 @@ const useMeasure = (
   });
 };
 
+/** Whether a box, or a box in it that clips, hides some of its words: an ellipsis, or a part wrapped out of sight. */
+const hidesWords = (element: Element): boolean =>
+  [element, ...element.querySelectorAll("*")].some(
+    (box) =>
+      getComputedStyle(box).overflow !== "visible" &&
+      (box.scrollWidth > box.clientWidth + 1 ||
+        box.scrollHeight > box.clientHeight + 1)
+  );
+
+/** Whether the words in `ref` show cut now, kept up as they and the box change. */
+export const useCut = (ref: RefObject<HTMLElement | null>): boolean => {
+  const [cut, setCut] = useState(false);
+
+  useMeasure(ref, (element) => {
+    setCut(hidesWords(element));
+  });
+
+  return cut;
+};
+
 const CUT = { 1: "truncate", 2: "line-clamp-2" } as const;
 
 /**
@@ -57,14 +77,7 @@ export const Truncated = ({
   readonly className?: string;
 }) => {
   const ref = useRef<HTMLSpanElement>(null);
-  const [cut, setCut] = useState(false);
-
-  useMeasure(ref, (element) => {
-    setCut(
-      element.scrollWidth > element.clientWidth + 1 ||
-        element.scrollHeight > element.clientHeight + 1
-    );
-  });
+  const cut = useCut(ref);
 
   return (
     <span

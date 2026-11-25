@@ -43,7 +43,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Clamp } from "@/shared/clamp";
+import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -126,9 +126,19 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** The source line's tooltip: the whole line, which may end in an ellipsis, then where a click goes. */
-const sourceTitle = (shown: string, opens: string | null): string =>
-  opens === null || opens === shown ? shown : `${shown}\n${opens}`;
+/** The source line's tooltip: the whole line when it shows cut, then where a click goes; null when it would only repeat what shows. */
+const sourceTitle = (
+  shown: string,
+  opens: string | null,
+  cut = true
+): string | undefined => {
+  const lines = [
+    ...(cut ? [shown] : []),
+    ...(opens === null || opens === shown ? [] : [opens]),
+  ];
+
+  return lines.length === 0 ? undefined : lines.map(tooltipText).join("\n");
+};
 
 /**
  * Where an item came from, in one quiet line: the site and what on it for
@@ -147,12 +157,17 @@ export const SourceLine = ({
   // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
   const app = openingApp(context, isMac);
   const shown = label === "" ? (context.url ?? "") : label;
+  const plain = useRef<HTMLParagraphElement>(null);
+  const link = useRef<HTMLButtonElement>(null);
+  const plainCut = useCut(plain);
+  const linkCut = useCut(link);
 
   if (context.url === null && app === null) {
     return label === "" ? null : (
       <p
         className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
-        title={label}
+        ref={plain}
+        title={plainCut ? tooltipText(label) : undefined}
       >
         {service === null ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -167,7 +182,12 @@ export const SourceLine = ({
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
       {...coach("item-source")}
       onClick={onOpenLink}
-      title={sourceTitle(shown, app === null ? context.url : `Open ${app}`)}
+      ref={link}
+      title={sourceTitle(
+        shown,
+        app === null ? context.url : `Open ${app}`,
+        linkCut
+      )}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -195,7 +215,7 @@ export const LinkList = ({
         onClick={() => {
           onOpenLink(link.url);
         }}
-        title={link.text === link.url ? link.url : `${link.text}\n${link.url}`}
+        title={sourceTitle(link.text, link.url)}
         type="button"
       >
         <HugeiconsIcon
@@ -238,7 +258,7 @@ const FileName = ({
       event.stopPropagation();
       onDragImage();
     }}
-    title={`${item.file.name}\nDrag into another app`}
+    title={`${tooltipText(item.file.name)}\nDrag into another app`}
     type="button"
   >
     <HugeiconsIcon
@@ -1174,10 +1194,9 @@ const Expansion = ({
           className="-ml-2 max-w-full self-start"
           onClick={onShowDetails}
           size="xs"
-          title={more}
           variant="quiet"
         >
-          <span className="min-w-0 truncate">{more}</span>
+          <Truncated className="min-w-0" text={more} />
           <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
         </Button>
       )}
@@ -1249,12 +1268,10 @@ const OpenFooter = ({
 }) => (
   // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
   <div className="-mr-9 flex min-h-6 items-center gap-2">
-    <p
-      className="text-muted-foreground min-w-0 flex-1 truncate text-xs"
-      title={metaText(item)}
-    >
-      {metaText(item)}
-    </p>
+    <Truncated
+      className="text-muted-foreground min-w-0 flex-1 text-xs"
+      text={metaText(item)}
+    />
     <Button
       aria-label="Show details"
       className="-mr-2.75 shrink-0"

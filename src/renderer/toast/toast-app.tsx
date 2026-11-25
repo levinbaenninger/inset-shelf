@@ -9,6 +9,7 @@ import type { NoticeCorner, ToastView } from "@shared/contracts";
 import { NOTICE_CLASS, NOTICE_ICON_CLASS } from "@/components/ui/notice";
 import { cn } from "@/lib/utils";
 import { toastBridge } from "@/shared/bridge";
+import { tooltipText } from "@/shared/clamp";
 import { usePushedView } from "@/shared/use-pushed-view";
 
 const api = toastBridge();
@@ -55,7 +56,7 @@ export const ToastApp = () => {
         onMouseLeave={() => {
           api.hover(false);
         }}
-        title={`${view.title}\nClick to open the shelf`}
+        title={`${tooltipText(view.title)}\nClick to open the shelf`}
         type="button"
       >
         <HugeiconsIcon
