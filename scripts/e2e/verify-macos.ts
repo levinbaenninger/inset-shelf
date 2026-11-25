@@ -1019,7 +1019,7 @@ const checkFailedWrite = async (): Promise<void> => {
 
 // Files pasted onto the shelf (src/main/index.ts noticeAdded): the notice comes once the disk holds them and names what was refused.
 
-/** A file and a folder on the clipboard, as Finder's Copy puts them there. */
+/** A file and a folder on the clipboard, as Finder's Copy puts them there: a file URL each, and the path list beside them. */
 const copyFileAndFolder = () => {
   const file = path.join(work, "Offer 2026-114.pdf");
   const folder = path.join(work, "Quotes");
@@ -1030,6 +1030,7 @@ const copyFileAndFolder = () => {
     const board = $.NSPasteboard.generalPasteboard;
     board.clearContents;
     board.writeObjects($([$.NSURL.fileURLWithPath(${JSON.stringify(file)}), $.NSURL.fileURLWithPath(${JSON.stringify(folder)})]));
+    board.setPropertyListForType($([${JSON.stringify(file)}, ${JSON.stringify(folder)}]), "NSFilenamesPboardType");
     "";`);
 
   return { folder: path.basename(folder) };
