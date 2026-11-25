@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import { cn } from "@/lib/utils";
@@ -11,31 +11,49 @@ export const tooltipText = (text: string): string =>
     ? `${text.slice(0, TOOLTIP_MAX - 1).trimEnd()}…`
     : text;
 
-/** Calls `measure` with the element now, and again whenever it changes size. */
+/**
+ * Calls `measure` with the element now, and again whenever what decides the
+ * measurement changes: the box's size, or the words and classes inside it.
+ * Nothing else re-measures, so a render that changes neither (a keystroke in
+ * the composer above a long list) costs no layout reads.
+ */
 const useMeasure = (
   ref: RefObject<HTMLElement | null>,
   measure: (element: HTMLElement) => void,
   enabled = true
 ): void => {
-  // Every render, as BadgeLine's observer: the words may have changed without the box changing size.
+  const run = useEffectEvent((element: HTMLElement) => {
+    measure(element);
+  });
+
   useEffect(() => {
     const element = ref.current;
 
-    const observer = new ResizeObserver(() => {
+    const again = (): void => {
       if (element !== null) {
-        measure(element);
+        run(element);
       }
-    });
+    };
+
+    const resized = new ResizeObserver(again);
+    const changed = new MutationObserver(again);
 
     if (element !== null && enabled) {
-      observer.observe(element);
-      measure(element);
+      resized.observe(element);
+      changed.observe(element, {
+        attributeFilter: ["class", "style"],
+        characterData: true,
+        childList: true,
+        subtree: true,
+      });
+      run(element);
     }
 
     return () => {
-      observer.disconnect();
+      resized.disconnect();
+      changed.disconnect();
     };
-  });
+  }, [ref, enabled]);
 };
 
 /** Whether a box, or a box in it that clips, hides some of its words: an ellipsis, or a part wrapped out of sight. */
