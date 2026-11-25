@@ -48,7 +48,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -282,8 +281,13 @@ const AutoText = ({
       }
     },
     onChange: (event: { readonly target: { readonly value: string } }) => {
-      setText(event.target.value);
-      onSave(event.target.value);
+      // A one-line text stays one line, even when a pasted text has breaks.
+      const typed = multiline
+        ? event.target.value
+        : event.target.value.replaceAll(/\s*\n\s*/gu, " ");
+
+      setText(typed);
+      onSave(typed);
     },
     onFocus: () => {
       before.current = text;
@@ -295,11 +299,12 @@ const AutoText = ({
     value: text,
   };
 
-  // Read as text until typed in: no border, a quiet tint on hover and focus (src/renderer/components/ui/input.tsx).
+  // Read as text until typed in: no border, a quiet tint on hover and focus. A
+  // one-line text wraps as it grows, an input's height while it fits, so a long title shows whole.
   return multiline ? (
     <Textarea {...props} rows={rows} variant="quiet" />
   ) : (
-    <Input {...props} variant="quiet" />
+    <Textarea {...props} className="min-h-8 py-1.25" rows={1} variant="quiet" />
   );
 };
 
@@ -786,11 +791,14 @@ const PinLabels = ({
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
       {item.pins.map((pin, index) => (
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
+        // The pin sits beside a label's first line (h-8, a one-line field's height), however many lines it wraps to.
         <li
-          className="flex items-center gap-2"
+          className="flex items-start gap-2"
           key={`${index}:${pin.x}:${pin.y}`}
         >
-          <PinGlyph height={18} number={index + 1} />
+          <span className="flex h-8 shrink-0 items-center">
+            <PinGlyph height={18} number={index + 1} />
+          </span>
           <AutoText
             label={`Label for pin ${index + 1}`}
             max={PIN_LABEL_MAX}
