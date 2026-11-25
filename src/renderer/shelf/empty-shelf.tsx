@@ -1,6 +1,6 @@
 import { InboxIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { shortcutLabels } from "@shared/shortcut";
+import { keyText, shortcutLabels } from "@shared/shortcut";
 
 import {
   Empty,
@@ -21,6 +21,7 @@ const shot = isMac || isWindows ? keys.screenshot : null;
 const STEPS = [
   { keys: keys.doubleShift, text: "Save selected text" },
   ...(shot === null ? [] : [{ keys: shot, text: "Take a screenshot" }]),
+  { keys: keyText("CommandOrControl+V", isMac), text: "Drop or paste a file" },
 ];
 
 /** A first-run guide in place of an empty list. */
