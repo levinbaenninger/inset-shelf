@@ -819,7 +819,21 @@ const start = async (): Promise<void> => {
               candidate.id === controller.view().doc.activeSectionId
           );
 
-        toast.show(`Saved to ${section?.name ?? "the shelf"}`, "done", id);
+        // The notice says saved only once the disk holds it, and why not when it doesn't.
+        void (async () => {
+          const written = await withinWait(
+            controller.persisted(controller.snapshot().rev),
+            setTimer
+          );
+
+          toast.show(
+            written.ok
+              ? `Saved to ${section?.name ?? "the shelf"}`
+              : written.message,
+            written.ok ? "done" : "failed",
+            id
+          );
+        })();
       }
     } finally {
       capturingSelection = false;
