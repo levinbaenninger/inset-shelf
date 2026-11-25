@@ -44,6 +44,10 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
           keys: [labels.doubleShift],
           label: "Save the selected text, or show the shelf",
         },
+        {
+          keys: [`${labels.doubleShift} again`],
+          label: "Say why, while its notice shows",
+        },
         { keys: [k("CommandOrControl+N")], label: "New note" },
         { keys: [k("Shift+CommandOrControl+N")], label: "New section" },
         { keys: [k("Alt+CommandOrControl+N")], label: "New drawing" },
