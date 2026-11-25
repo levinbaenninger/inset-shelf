@@ -60,12 +60,26 @@ export const attachmentLabel = (attachment: Attachment): string => {
     : `${name} · ${what}, ${pinCount(attachment.pins.length)}`;
 };
 
-/** A file's extension, shown in capitals, or "file" when it has none. */
-const extensionOf = (name: string): string => {
+/** A file's name and its extension apart; the extension is "" when it has none. */
+const splitName = (
+  name: string
+): { readonly base: string; readonly extension: string } => {
   const dot = name.lastIndexOf(".");
 
-  return dot <= 0 || dot === name.length - 1 ? "file" : name.slice(dot + 1);
+  return dot <= 0 || dot === name.length - 1
+    ? { base: name, extension: "" }
+    : { base: name.slice(0, dot), extension: name.slice(dot + 1) };
 };
+
+/** What a row's small tile calls a file, in capitals: its extension up to four letters, else "file". */
+const extensionOf = (name: string): string => {
+  const { extension } = splitName(name);
+
+  return extension.length > 0 && extension.length <= 4 ? extension : "file";
+};
+
+/** About how many letters of a name fit on one line of a details tile. */
+const TILE_LINE = 10;
 
 const TILE =
   "bg-muted after:ring-foreground/10 relative flex shrink-0 flex-col items-center justify-center overflow-hidden rounded-md after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset";
@@ -86,12 +100,24 @@ const TileWords = ({
     ) : null;
   }
 
+  const { base, extension } = splitName(name);
+
+  // A name that fits shows on one line; a longer one cuts its own name and keeps the extension whole, on a line of its own.
+  if (large && (name.length <= TILE_LINE || extension === "")) {
+    return (
+      <Truncated
+        className="w-full text-center text-xs leading-tight break-words"
+        lines={2}
+        text={name}
+      />
+    );
+  }
+
   return large ? (
-    <Truncated
-      className="w-full text-center text-xs leading-tight wrap-anywhere"
-      lines={2}
-      text={name}
-    />
+    <span className="flex w-full min-w-0 flex-col items-center text-xs leading-tight">
+      <Truncated className="max-w-full" text={base} tooltip={name} />
+      <Truncated className="max-w-full" text={`.${extension}`} tooltip={name} />
+    </span>
   ) : (
     <Truncated
       className="w-full text-center text-xs leading-tight font-medium uppercase"
@@ -264,7 +290,8 @@ export const AttachmentGrid = ({
     readonly remove: (attachment: Attachment) => void;
   };
 }) => (
-  <ul className="flex flex-wrap gap-1.5" data-attachment-grid>
+  // Each tile keeps a 4 px margin inside its button, where its remove badge sits on the corner.
+  <ul className="-m-1 flex flex-wrap" data-attachment-grid>
     {attachments.map((attachment) => {
       const label = attachmentLabel(attachment);
 
@@ -279,7 +306,7 @@ export const AttachmentGrid = ({
           <button
             aria-label={label}
             className={cn(
-              "focus-visible:ring-ring/50 block rounded-md outline-none focus-visible:ring-3",
+              "focus-visible:ring-ring/50 block rounded-lg p-1 outline-none focus-visible:ring-3",
               attachment.id === active && "ring-primary ring-2",
               attachment.kind === "image"
                 ? "cursor-pointer hover:opacity-85"
@@ -309,12 +336,13 @@ export const AttachmentGrid = ({
           >
             <AttachmentTile attachment={attachment} large />
           </button>
-          <span className="absolute top-1 right-1 opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
+          {/* On the tile's corner, clear of a file's icon and a picture's middle. */}
+          <span className="absolute top-0 right-0 flex opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
             <Button
               aria-label={`Remove ${tooltipText(attachmentName(attachment))}`}
               onClick={remove}
-              size="icon-xs"
-              variant="overlay"
+              size="icon-badge"
+              variant="overlay-badge"
             >
               <HugeiconsIcon icon={Cancel01Icon} />
             </Button>
