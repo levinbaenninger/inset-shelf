@@ -218,20 +218,23 @@ const TargetDot = ({
     );
   }
 
+  // Like the ⋯, the ring takes no room until the pointer is on the heading or it has focus, so the hairline runs on.
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          aria-label={`Add new items to ${name}`}
-          className="group/dot focus-visible:ring-ring/50 flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 outline-none group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:ring-3"
-          onClick={onMakeActive}
-          type="button"
-        >
-          <span className="border-muted-foreground/60 group-hover/dot:border-pin group-hover/dot:bg-pin/30 size-2 rounded-full border transition-colors" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="left">Add new items here</TooltipContent>
-    </Tooltip>
+    <span className="w-0 shrink-0 overflow-hidden group-hover/section:w-7 focus-within:w-7">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={`Add new items to ${name}`}
+            className="group/dot focus-visible:ring-ring/50 flex size-7 shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-3"
+            onClick={onMakeActive}
+            type="button"
+          >
+            <span className="border-muted-foreground/60 group-hover/dot:border-pin group-hover/dot:bg-pin/30 size-2 rounded-full border transition-colors" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left">Add new items here</TooltipContent>
+      </Tooltip>
+    </span>
   );
 };
 
@@ -305,10 +308,10 @@ export const SectionHeader = ({
             size={14}
           />
           <span className="truncate">{section.name}</span>
-          {/* A hairline runs from the name to the dot, so each section reads as its own group. */}
+          {/* A hairline runs from the name to the dot, or to the edge without one, so each section reads as its own group. */}
           <span
             aria-hidden="true"
-            className="bg-foreground/10 ml-1 h-px min-w-4 flex-1"
+            className="bg-foreground/10 -mr-1.5 ml-1 h-px min-w-4 flex-1"
           />
         </button>
         {/* The ⋯ takes no room until the pointer is on the heading or the button has focus. */}
