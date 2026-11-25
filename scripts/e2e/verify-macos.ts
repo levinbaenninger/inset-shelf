@@ -1652,7 +1652,12 @@ const main = async (): Promise<void> => {
     stopSource();
     quitApp(app);
     await exited(app);
-    pbcopy(clipboardBefore);
+    // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
+    if (clipboardBefore === "") {
+      jxa('ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""');
+    } else {
+      pbcopy(clipboardBefore);
+    }
   }
 
   writeFileSync(
