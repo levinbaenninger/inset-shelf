@@ -852,13 +852,16 @@ const TextContent = ({
   readonly item: TextItem;
 }) =>
   editing ? (
-    <TextEditor
-      item={item}
-      onDone={onStopEditing}
-      onSave={(text) => {
-        onApply({ id: item.id, text, type: "editText" });
-      }}
-    />
+    // The same card as the words read in, so starting an edit moves nothing.
+    <div className={cn(SURFACE, "px-3 py-2.5")}>
+      <TextEditor
+        item={item}
+        onDone={onStopEditing}
+        onSave={(text) => {
+          onApply({ id: item.id, text, type: "editText" });
+        }}
+      />
+    </div>
   ) : (
     <div className={cn(SURFACE, "px-3 py-2.5")} onDoubleClick={onEdit}>
       <Markdown
