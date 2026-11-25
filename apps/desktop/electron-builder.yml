@@ -1,6 +1,9 @@
 appId: ch.inset.prototype.shelf
 productName: Inset Shelf
 artifactName: inset-shelf-${version}-${os}-${arch}.${ext}
+# The workspace calls the package @inset/desktop; the packaged app and its update cache keep this name.
+extraMetadata:
+  name: inset-shelf
 directories:
   buildResources: build
   output: release

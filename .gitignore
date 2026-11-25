@@ -7,9 +7,8 @@ coverage/
 .DS_Store
 .env*
 
-# Landing page build output
-site/.wrangler/
-site/.next/
-site/out/
-site/next-env.d.ts
-site/*.tsbuildinfo
+# The web app's build output
+.next/
+.wrangler/
+next-env.d.ts
+*.tsbuildinfo

@@ -3,6 +3,6 @@ import ultracite from "ultracite/oxfmt";
 
 export default defineConfig({
   ...ultracite,
-  // The landing page is plain HTML with the design kit's own files.
-  ignorePatterns: [...(ultracite.ignorePatterns ?? []), "site/**"],
+  // apps/web joins the checks once it follows the same rules.
+  ignorePatterns: [...(ultracite.ignorePatterns ?? []), "apps/web/**"],
 });

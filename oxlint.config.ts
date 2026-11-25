@@ -11,16 +11,15 @@ export default defineConfig({
   extends: [core, react, tanstack, vitest, shadcn, antiSlop],
   ignorePatterns: [
     ...core.ignorePatterns,
-    "src/renderer/components/ui/**",
-    // The landing page installs and checks on its own (site/).
-    "site/**",
+    "apps/desktop/src/renderer/components/ui/**",
+    "apps/web/**",
   ],
   jsPlugins: shadcn.jsPlugins,
   options: { typeAware: true },
   overrides: [
     {
       // Plain JavaScript the screens harness injects into a page: untyped by nature.
-      files: ["scripts/fixtures/**"],
+      files: ["apps/desktop/scripts/fixtures/**"],
       rules: {
         "typescript/no-unsafe-argument": "off",
         "typescript/no-unsafe-assignment": "off",
@@ -32,7 +31,7 @@ export default defineConfig({
       },
     },
     {
-      files: ["src/shared/**"],
+      files: ["apps/desktop/src/shared/**"],
       rules: {
         "no-restricted-imports": [
           "error",
