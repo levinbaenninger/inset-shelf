@@ -1,13 +1,14 @@
 /**
- * What everyday keys cost on a full shelf, in three actions: 40 characters
- * typed into the composer, 11 typed into the search field, and ↓ pressed ten
- * times to move the selection down the list. For each it reports the time
+ * What everyday keys cost on a full shelf, in four actions: 40 characters
+ * typed into the composer, 11 typed into the search field, ↓ pressed ten
+ * times to move the selection down the list, and Space pressed ten times to check the open row off and on. For each it reports the time
  * Chromium takes, how many item rows React rendered per key (a row whose
  * `<li data-item-id>` got new props in a commit, counted through React's
  * DevTools hook, so the app carries no counter), and how often the shelf
  * measured whether its words show cut (`hidesWords` in
  * src/renderer/shared/clamp.tsx, the renderer's only `querySelectorAll("*")`).
- * Runs the built renderer with the screens bridge, on a 200-item shelf and on
+ * Every view reaches the page as a copy, as main's do over IPC. Runs the
+ * built renderer with the screens bridge, on a 200-item shelf and on
  * an empty one: the empty shelf is the floor, what Playwright and the
  * composer cost by themselves.
  *
@@ -172,16 +173,19 @@ const RunSchema = z.object({
   measures: z.number(),
   ms: z.number(),
   rows: z.number(),
+  /** Rows in the list afterwards, to see search really filtered. */
+  shown: z.number(),
 });
 
 type Run = z.infer<typeof RunSchema>;
 
-type Action = "compose" | "search" | "move";
+type Action = "compose" | "search" | "move" | "toggle";
 
 const KEYS: Readonly<Record<Action, number>> = {
   compose: TYPED.length,
   move: MOVES,
   search: SEARCHED.length,
+  toggle: MOVES,
 };
 
 const measure = async (
@@ -198,7 +202,8 @@ const measure = async (
   const page = await context.newPage();
 
   await page.addInitScript(
-    `globalThis.__screens = ${JSON.stringify({ data: { view: view(count) }, page: "shelf" })};`
+    // Every view comes as a copy, as main's do over IPC.
+    `globalThis.__screens = ${JSON.stringify({ data: { ipc: true, view: view(count) }, page: "shelf" })};`
   );
   await page.addInitScript(COUNT_ROWS);
   await page.addInitScript({ path: BRIDGE });
@@ -212,6 +217,7 @@ const measure = async (
   } else if (action === "search") {
     await page.getByRole("textbox", { name: "Search the shelf" }).click();
   } else if (count > 0) {
+    // move and toggle: the first row selected, the keys left to the list.
     // A click on the first row selects it and leaves the keys to the list.
     await page.locator("li[data-item-id]").first().click();
   }
@@ -222,10 +228,10 @@ const measure = async (
   const started = await page.evaluate("performance.now()");
 
   // One key at a time, each waiting for the page to take it, as a person types.
-  if (action === "move") {
+  if (action === "move" || action === "toggle") {
     for (let key = 0; key < MOVES; key += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one key at a time, as a person presses them.
-      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press(action === "move" ? "ArrowDown" : "Space");
     }
   } else {
     await page.keyboard.type(action === "compose" ? TYPED : SEARCHED);
@@ -238,7 +244,7 @@ const measure = async (
 
   const run = RunSchema.parse(
     await page.evaluate(
-      `({ measures: globalThis.__measures, ms: performance.now() - ${String(started)}, rows: globalThis.__rows })`
+      `({ measures: globalThis.__measures, ms: performance.now() - ${String(started)}, rows: globalThis.__rows, shown: document.querySelectorAll("li[data-item-id]").length })`
     )
   );
 
@@ -265,13 +271,14 @@ const LABEL: Readonly<Record<Action, string>> = {
   compose: `${TYPED.length} characters typed in the composer`,
   move: `${MOVES} presses of ↓`,
   search: `${SEARCHED.length} characters typed in search`,
+  toggle: `${MOVES} presses of Space on the open row (checks it off and on)`,
 };
 
 const main = async (): Promise<void> => {
   const browser = await chromium.launch();
   const { origin, server } = await serve();
 
-  for (const action of ["compose", "search", "move"] as const) {
+  for (const action of ["compose", "search", "move", "toggle"] as const) {
     for (const count of [200, 0]) {
       const runs: Run[] = [];
 
@@ -283,7 +290,7 @@ const main = async (): Promise<void> => {
       const rows = runs.map((each) => each.rows / KEYS[action]);
 
       console.log(
-        `${count} items, ${RUNS} runs, ${LABEL[action]}: ${median(runs.map((each) => each.ms)).toFixed(0)} ms (median; ${runs.map((each) => each.ms.toFixed(0)).join(", ")}), ${median(rows).toFixed(1)} rows rendered per key (median; ${rows.map((each) => each.toFixed(1)).join(", ")}), hidesWords ${median(runs.map((each) => each.measures))} calls (median; ${runs.map((each) => each.measures).join(", ")})`
+        `${count} items, ${RUNS} runs, ${LABEL[action]}: ${median(runs.map((each) => each.ms)).toFixed(0)} ms (median; ${runs.map((each) => each.ms.toFixed(0)).join(", ")}), ${median(rows).toFixed(1)} rows rendered per key (median; ${rows.map((each) => each.toFixed(1)).join(", ")}), hidesWords ${median(runs.map((each) => each.measures))} calls (median; ${runs.map((each) => each.measures).join(", ")}), ${median(runs.map((each) => each.shown))} rows in the list after`
       );
     }
   }

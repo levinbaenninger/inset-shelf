@@ -249,8 +249,10 @@ if (page === "shelf") {
       : [...view.notSaved, { id: op.id, undo: known ? "discard" : "delete" }];
   };
 
-  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC.
-  const echo = (next) => {
+  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC; `ipc: true` sends a copy, as IPC's structured clone does.
+  const echo = (shown) => {
+    const next = data.ipc === true ? structuredClone(shown) : shown;
+
     if (data.echo === "later") {
       setTimeout(() => {
         globalThis.__emit("view", next);
