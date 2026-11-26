@@ -959,6 +959,11 @@ const start = async (): Promise<void> => {
     onWrite: controller.onWrite,
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
+    refusal: (id) => {
+      const state = controller.copyState([id], controller.snapshot().doc);
+
+      return state.kind === "failed" ? state.message : null;
+    },
     saved: shotAdded,
     selection: () => shelfSelection,
     setTimer,

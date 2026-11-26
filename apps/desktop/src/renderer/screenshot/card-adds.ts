@@ -1,4 +1,5 @@
-import type { ScreenshotView, ShotSaveTo } from "@shared/contracts";
+import type { ScreenshotView } from "@shared/contracts";
+import type { ItemId } from "@shared/shelf";
 
 /** What the pill reads: its add, Saving… while it writes, Retry once it failed. */
 export const PILL_LABEL = {
@@ -26,13 +27,14 @@ export type AddLine =
   /** Add to “…”, or Retry adding to “…” with the name on a second line: a press adds to the item. */
   | {
       readonly add: AddId;
+      readonly item: ItemId;
       readonly kind: "add";
       readonly lead: string;
       readonly name: string;
       readonly stacked: boolean;
     }
   /** That add while it writes. */
-  | { readonly add: AddId; readonly kind: "saving" }
+  | { readonly add: AddId; readonly item: ItemId; readonly kind: "saving" }
   /** Only names the item the pill's Retry adds to: not a button. */
   | { readonly kind: "caption"; readonly lead: string; readonly name: string };
 
@@ -44,8 +46,8 @@ export interface CardAdds {
     readonly label: string;
     /** Its whole name, for a screen reader. */
     readonly name: string;
-    /** Where a press adds the screenshot. */
-    readonly to: ShotSaveTo;
+    /** The item a press adds the screenshot to; null for the shelf. */
+    readonly item: ItemId | null;
   };
   readonly line: AddLine | null;
   /**
@@ -55,65 +57,70 @@ export interface CardAdds {
   readonly sole: boolean;
 }
 
-const stateOf = (
-  save: ScreenshotView["save"],
-  to: ShotSaveTo
-): "idle" | "saving" | "failed" =>
-  save.state === "idle" || save.to !== to ? "idle" : save.state;
+const shelfPill = (state: keyof typeof PILL_LABEL): CardAdds["pill"] => ({
+  add: "shelf",
+  item: null,
+  label: PILL_LABEL[state],
+  name: PILL_LABEL[state],
+});
 
 /**
- * Which adds the card offers. `wasSole` is what this said of the view before:
- * a save says `only` when it fails, so while its Retry writes, the card
- * remembers that no other add came back.
+ * Which adds the card offers. While the shelf holds the screenshot
+ * (`save.placed`), the add for that place is the only one. Else Add to Shelf
+ * is the pill, and Add to “…” the line under it when an item can be named.
  */
-export const cardAdds = (
-  { save, target }: Pick<ScreenshotView, "save" | "target">,
-  wasSole: boolean
-): CardAdds => {
-  const shelf = PILL_LABEL[stateOf(save, "shelf")];
+export const cardAdds = ({
+  save,
+  target,
+}: Pick<ScreenshotView, "save" | "target">): CardAdds => {
+  if (save.state !== "idle" && save.placed !== null) {
+    const { placed, state } = save;
 
-  const toShelf = {
-    add: "shelf",
-    label: shelf,
-    name: shelf,
-    to: "shelf",
-  } as const;
+    if (placed.to === "shelf") {
+      return { line: null, pill: shelfPill(state), sole: false };
+    }
 
-  if (target === null) {
-    return { line: null, pill: toShelf, sole: false };
-  }
-
-  const item = stateOf(save, "item");
-  const toItem: AddId = `item:${target.id}`;
-
-  if (item !== "idle" && (save.state === "failed" ? save.only : wasSole)) {
     return {
-      line: { kind: "caption", lead: SOLE_LEAD, name: target.label },
+      line: { kind: "caption", lead: SOLE_LEAD, name: placed.label },
       pill: {
-        add: toItem,
-        label: PILL_LABEL[item],
+        add: `item:${placed.id}`,
+        item: placed.id,
+        label: PILL_LABEL[state],
         name:
-          item === "failed"
-            ? `${ITEM_LEAD.failed} “${target.label}”`
-            : PILL_LABEL[item],
-        to: "item",
+          state === "failed"
+            ? `${ITEM_LEAD.failed} “${placed.label}”`
+            : PILL_LABEL[state],
       },
       sole: true,
     };
   }
 
+  const pill = shelfPill(
+    save.state !== "idle" && save.to === "shelf" ? save.state : "idle"
+  );
+
+  if (target === null) {
+    return { line: null, pill, sole: false };
+  }
+
+  const item =
+    save.state !== "idle" && save.to === "item" ? save.state : "idle";
+
+  const add: AddId = `item:${target.id}`;
+
   return {
     line:
       item === "saving"
-        ? { add: toItem, kind: "saving" }
+        ? { add, item: target.id, kind: "saving" }
         : {
-            add: toItem,
+            add,
+            item: target.id,
             kind: "add",
             lead: ITEM_LEAD[item],
             name: target.label,
             stacked: item === "failed",
           },
-    pill: toShelf,
+    pill,
     sole: false,
   };
 };

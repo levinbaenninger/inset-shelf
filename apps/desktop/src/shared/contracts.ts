@@ -325,7 +325,7 @@ export interface ScreenshotView {
   readonly imageUrl: string;
   readonly widthPx: number;
   readonly heightPx: number;
-  /** The item Add to “…” attaches it to, and its name on the button; null when there is none the user can know, or it holds all it can. */
+  /** The item Add to “…” attaches it to, and its name on the button; null when there is none the user can know, it holds all it can, or the shelf holds the screenshot already (`save.placed`). */
   readonly target: { readonly id: ItemId; readonly label: string } | null;
   /** Where its save stands. */
   readonly save: ShotSave;
@@ -334,21 +334,42 @@ export interface ScreenshotView {
 /** Which add saves the screenshot: Add to Shelf, or Add to “…”. */
 export type ShotSaveTo = "shelf" | "item";
 
-/** A screenshot card's save: none yet, writing (its button reads Saving…), or failed (the card says why, and the button pressed reads Retry while it still goes where it went). */
+/**
+ * Where the shelf shows the card's screenshot right now, not saved: as a row
+ * of its own, or attached to an item, with the name the card shows for it.
+ * The shelf owns it there. Retry for that place is the card's only add,
+ * until the user takes the screenshot off the shelf.
+ */
+export type ShotPlaced =
+  | { readonly to: "shelf" }
+  | { readonly to: "item"; readonly id: ItemId; readonly label: string };
+
+/**
+ * A screenshot card's save: none yet, writing (its button reads Saving…), or
+ * failed (the card says why). `placed` is read from the shelf each time the
+ * view is sent. While it is null, nothing holds the screenshot and the card
+ * offers both adds.
+ */
 export type ShotSave =
   | { readonly state: "idle" }
-  | { readonly state: "saving"; readonly to: ShotSaveTo }
+  | { readonly state: "saving"; readonly placed: ShotPlaced }
+  | {
+      readonly state: "saving";
+      readonly placed: null;
+      /** The add that writes. */
+      readonly to: ShotSaveTo;
+    }
   | {
       readonly state: "failed";
-      /** The button that offers Retry; null when none does (the item it went to is gone or full, or the card names another now). */
-      readonly to: ShotSaveTo | null;
       readonly message: string;
-      /**
-       * Retry is the only add left: the screenshot is on the shelf where `to`
-       * put it, not saved, and the shelf owns it there. To add it elsewhere
-       * the user takes it off the shelf first, and both adds come back.
-       */
-      readonly only: boolean;
+      readonly placed: ShotPlaced;
+    }
+  | {
+      readonly state: "failed";
+      readonly message: string;
+      readonly placed: null;
+      /** The add that reads Retry; null when none does (the item it went to is gone or full, or the card names another now). */
+      readonly to: ShotSaveTo | null;
     };
 
 const Seq = z.number().int().min(0);

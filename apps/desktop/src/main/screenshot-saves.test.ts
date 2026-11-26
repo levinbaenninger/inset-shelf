@@ -20,7 +20,6 @@ import {
   CARD_TARGET_GONE,
   cardLabel,
   createShotSaves,
-  ITEM_GONE,
   RECENT_ITEM_MS,
   SHOT_STAYS,
 } from "./screenshot-saves";
@@ -208,6 +207,12 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     onWrite: (listener) => controller.onWrite(listener),
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
+    // As index.ts wires it: the reason the shelf gives for an item its last write was refused.
+    refusal: (id) => {
+      const state = controller.copyState([id], controller.snapshot().doc);
+
+      return state.kind === "failed" ? state.message : null;
+    },
     saved: (to) => {
       saved.push(to);
     },
@@ -319,7 +324,11 @@ describe("the screenshot card's save path", () => {
 
     const saving = card.saves.addToShelf(1);
 
-    expect(card.view()?.save).toStrictEqual({ state: "saving", to: "shelf" });
+    expect(card.view()?.save).toStrictEqual({
+      placed: null,
+      state: "saving",
+      to: "shelf",
+    });
     expect(card.held()).toBeTruthy();
 
     const id = await saving;
@@ -338,7 +347,7 @@ describe("the screenshot card's save path", () => {
     await expect(card.saves.addToShelf(1)).resolves.toBeNull();
     expect(card.view()?.save).toStrictEqual({
       message: "The disk is full.",
-      only: false,
+      placed: null,
       state: "failed",
       to: "shelf",
     });
@@ -368,7 +377,10 @@ describe("the screenshot card's save path", () => {
     card.failWrites({ message: "The disk is full.", ok: false });
 
     await expect(card.saves.addToShelf(1)).resolves.toBeNull();
-    expect(card.view()?.save).toMatchObject({ state: "failed", to: "shelf" });
+    expect(card.view()?.save).toMatchObject({
+      placed: { to: "shelf" },
+      state: "failed",
+    });
 
     card.failWrites({ ok: true });
 
@@ -498,7 +510,10 @@ describe("Add to “…” on the screenshot card", () => {
     card.failWrites({ message: "The disk is full.", ok: false });
 
     await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
-    expect(card.view()?.save).toMatchObject({ state: "failed", to: "item" });
+    expect(card.view()?.save).toMatchObject({
+      placed: { id: card.note, to: "item" },
+      state: "failed",
+    });
 
     card.failWrites({ ok: true });
 
@@ -573,7 +588,7 @@ describe("Add to “…” on the screenshot card", () => {
     expect(card.view()).toBeNull();
   });
 
-  it("says the item is gone when it was deleted before Retry, and never reports it added", async () => {
+  it("refuses a Retry that names the item once it was deleted, with one notice, and attaches nothing", async () => {
     const card = setup();
 
     card.select(card.note, true);
@@ -584,11 +599,10 @@ describe("Add to “…” on the screenshot card", () => {
     card.failWrites({ ok: true });
 
     await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
-    expect(card.view()?.save).toStrictEqual({
-      message: ITEM_GONE,
-      only: false,
-      state: "failed",
-      to: null,
+    expect(card.notices).toStrictEqual([CARD_TARGET_GONE]);
+    expect(card.view()).toMatchObject({
+      save: { placed: null, state: "failed", to: null },
+      target: null,
     });
     // Once, by the refused save; the Retry attached nothing.
     expect(card.attached).toStrictEqual([card.note]);
@@ -624,11 +638,15 @@ describe("Add to “…” on the screenshot card", () => {
     card.failWrites({ ok: true });
     card.fill(card.note);
 
-    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
     expect(card.view()).toMatchObject({
-      save: { message: ITEM_FULL, state: "failed", to: null },
+      save: { placed: null, state: "failed", to: null },
       target: null,
     });
+
+    // A press that left the card while it still named the note.
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect(card.notices).toStrictEqual([CARD_CLEARED]);
+    expect(card.attachmentsOn(card.note)).toBe(ATTACHMENTS_MAX);
   });
 
   it("still offers Retry adding to the item when the disk refused the screenshot", async () => {
@@ -730,8 +748,11 @@ const rowOf = (card: ReturnType<typeof setup>) =>
 
 /** The card after a failed save when Retry alone is offered: for the place the shelf holds the screenshot, the note or a row of its own. */
 const retryOnly = (card: ReturnType<typeof setup>, to: "item" | "shelf") => ({
-  save: { only: true, state: "failed", to },
-  target: to === "item" ? { id: card.note } : null,
+  save: {
+    placed: to === "item" ? { id: card.note, to } : { to },
+    state: "failed",
+  },
+  target: null,
 });
 
 /** Where the last shelf written to disk holds screenshots, and every written shelf that held one twice. */
@@ -785,7 +806,7 @@ describe("a screenshot a refused save put on the shelf", () => {
     card.controller.apply({ id: rowOf(card), type: "remove" });
 
     expect(card.view()).toMatchObject({
-      save: { only: false, state: "failed", to: "shelf" },
+      save: { placed: null, state: "failed", to: "shelf" },
       target: { id: card.note },
     });
 
@@ -806,7 +827,7 @@ describe("a screenshot a refused save put on the shelf", () => {
     card.controller.discard(card.note);
 
     expect(card.view()).toMatchObject({
-      save: { only: false, state: "failed", to: "item" },
+      save: { placed: null, state: "failed", to: "item" },
       target: { id: card.note },
     });
 
@@ -1061,15 +1082,18 @@ describe("a save that gave up waiting while its write was still on its way", () 
     const onShelf = await waitedOut("shelf");
 
     expect(onItem.card.view()).toMatchObject({
-      save: { message: SAVE_TOO_SLOW, only: true, state: "failed", to: "item" },
-      target: { id: onItem.card.note },
+      save: {
+        message: SAVE_TOO_SLOW,
+        placed: { id: onItem.card.note, to: "item" },
+        state: "failed",
+      },
+      target: null,
     });
     expect(onShelf.card.view()).toMatchObject({
       save: {
         message: SAVE_TOO_SLOW,
-        only: true,
+        placed: { to: "shelf" },
         state: "failed",
-        to: "shelf",
       },
       target: null,
     });
@@ -1131,9 +1155,8 @@ describe("a save that gave up waiting while its write was still on its way", () 
 
     expect(card.view()?.save).toStrictEqual({
       message: "The disk is full.",
-      only: true,
+      placed: { id: card.note, label: "Quote from the movers", to: "item" },
       state: "failed",
-      to: "item",
     });
 
     await expect(card.saves.addToItem(1, card.note)).resolves.toBe(card.note);
@@ -1193,12 +1216,20 @@ describe("a save that gave up waiting while its write was still on its way", () 
     await turn();
 
     expect(onItem.card.view()).toMatchObject({
-      ...retryOnly(onItem.card, "item"),
-      save: { message: "The disk is full.", only: true, to: "item" },
+      save: {
+        message: "The disk is full.",
+        placed: { id: onItem.card.note, to: "item" },
+        state: "failed",
+      },
+      target: null,
     });
     expect(onShelf.card.view()).toMatchObject({
-      ...retryOnly(onShelf.card, "shelf"),
-      save: { message: "The disk is full.", only: true, to: "shelf" },
+      save: {
+        message: "The disk is full.",
+        placed: { to: "shelf" },
+        state: "failed",
+      },
+      target: null,
     });
   });
 
@@ -1247,7 +1278,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
     await settled(card);
 
     expect(card.view()).toMatchObject({
-      save: { only: false, state: "failed", to: "shelf" },
+      save: { placed: null, state: "failed", to: "shelf" },
       target: { id: card.note },
     });
     expect(card.saved).toStrictEqual([]);
@@ -1285,7 +1316,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
 
     expect(card.view()?.save).toStrictEqual({
       message: "The disk is full.",
-      only: false,
+      placed: null,
       state: "failed",
       to: "item",
     });
@@ -1320,9 +1351,8 @@ describe("a save that gave up waiting while its write was still on its way", () 
 
     expect(card.view()?.save).toStrictEqual({
       message: SAVE_TOO_SLOW,
-      only: true,
+      placed: { to: "shelf" },
       state: "failed",
-      to: "shelf",
     });
 
     end({ ok: true });
@@ -1357,7 +1387,10 @@ describe("a save that gave up waiting while its write was still on its way", () 
     await turn();
 
     // Retry waits for every change so far: its own answer comes with the later write, or with its limit.
-    expect(card.view()?.save).toStrictEqual({ state: "saving", to: "shelf" });
+    expect(card.view()?.save).toStrictEqual({
+      placed: { to: "shelf" },
+      state: "saving",
+    });
 
     await card.giveUpWaiting();
     await retrying;
@@ -1386,7 +1419,7 @@ const offers = (card: ReturnType<typeof setup>) => {
     return null;
   }
 
-  const { line, pill, sole } = cardAdds(view, false);
+  const { line, pill, sole } = cardAdds(view);
 
   return {
     adds: [
@@ -1517,6 +1550,30 @@ describe("the adds the card shows after the shelf changed under it", () => {
       adds: ["Add to Shelf", `Add to “${NOTE}”`],
       annotate: true,
     });
+  });
+
+  it("offers only Retry again once Undo brings that deleted row back and the disk refuses it", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+
+    await placedOnShelf(card);
+    card.controller.apply({ id: rowOf(card), type: "remove" });
+    end({ ok: true });
+    await adding;
+    // The write of the delete lands too: the disk holds no screenshot.
+    await settled(card);
+    card.failWrites(DISK_REFUSES);
+    card.controller.apply({ type: "undoRemove" });
+    await settled(card);
+
+    expect(card.shown()).toStrictEqual({ attached: 0, items: 1 });
+    expect(card.view()?.save).toMatchObject({ message: "The disk is full." });
+    expect(offers(card)).toStrictEqual({ adds: ["Retry"], annotate: true });
   });
 
   it("doesn't say added, stays, and offers both adds when its tile is removed before the write of it lands", async () => {

@@ -9,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
 import type { ScreenshotView } from "@shared/contracts";
+import type { ItemId } from "@shared/shelf";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, RefObject } from "react";
@@ -308,7 +309,7 @@ const FootLine = ({
 }: {
   readonly carried: Carried;
   readonly line: AddLine;
-  readonly onAdd: () => void;
+  readonly onAdd: (item: ItemId) => void;
   readonly saving: boolean;
 }) =>
   line.kind === "caption" ? (
@@ -326,7 +327,9 @@ const FootLine = ({
       carried={carried}
       className="w-full"
       key={line.add}
-      onClick={onAdd}
+      onClick={() => {
+        onAdd(line.item);
+      }}
       size="line"
       variant="overlay-text"
     >
@@ -350,31 +353,27 @@ const FootLine = ({
  * it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
-  const { save, seq, target } = view;
+  const { save, seq } = view;
   const [held, setHeld] = useState(false);
-  const [wasSole, setWasSole] = useState(false);
   const carried = useRef<AddId | null>(null);
   const saving = save.state === "saving";
-  const { line, pill, sole } = cardAdds(view, wasSole);
-
-  if (sole !== wasSole) {
-    setWasSole(sole);
-  }
+  const { line, pill, sole } = cardAdds(view);
 
   // After the add buttons drawn in this change had their turn: an add that left and wasn't drawn again hands the keyboard to no later button.
   useLayoutEffect(() => {
     carried.current = null;
   });
 
-  const addToItem = (): void => {
-    if (!saving && target !== null) {
-      api.addToItem({ id: target.id, seq });
+  /** A press of an add: to the item its button named, or to the shelf. */
+  const add = (item: ItemId | null): void => {
+    if (saving) {
+      return;
     }
-  };
 
-  const addToShelf = (): void => {
-    if (!saving) {
+    if (item === null) {
       api.addToShelf(seq);
+    } else {
+      api.addToItem({ id: item, seq });
     }
   };
 
@@ -397,7 +396,9 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
               aria-label={pill.name}
               carried={carried}
               key={pill.add}
-              onClick={pill.to === "item" ? addToItem : addToShelf}
+              onClick={() => {
+                add(pill.item);
+              }}
               size="pill-sm"
               variant="overlay"
             >
@@ -432,7 +433,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             <FootLine
               carried={carried}
               line={line}
-              onAdd={addToItem}
+              onAdd={add}
               saving={saving}
             />
           )}

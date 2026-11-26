@@ -3720,16 +3720,27 @@ const CARD_REASON = "Datenträger voll";
 /** Main's reason a card's save failed: a sentence of its own, here a long one. It says what went wrong first, as main's own sentences do (save-error.ts), so a long name after it can't push that out of the card's two lines. */
 const CARD_FAILURE = `${CARD_REASON}: „${LONG_WORD}“.`;
 
-/** The card as main shows it once a save failed. */
+/** The card as main shows it once a save failed and the shelf holds the screenshot nowhere: `to` reads Retry. */
 const failedCard = (
   to: "shelf" | "item" | null,
   message = CARD_FAILURE,
-  target: { readonly id: string; readonly label: string } | null = null,
-  only = false
+  target: { readonly id: string; readonly label: string } | null = null
 ) => ({
   ...SCREENSHOT_VIEW,
-  save: { message, only, state: "failed", to },
+  save: { message, placed: null, state: "failed", to },
   target,
+});
+
+/** The card as main shows it once a save failed and left the screenshot on the shelf, not saved (`placed`, src/shared/contracts.ts): Retry for that place is the only add. */
+const placedCard = (
+  placed:
+    | { readonly to: "shelf" }
+    | { readonly to: "item"; readonly id: string; readonly label: string },
+  message = CARD_FAILURE
+) => ({
+  ...SCREENSHOT_VIEW,
+  save: { message, placed, state: "failed" },
+  target: null,
 });
 
 const CardButtonSchema = z.object({
@@ -5375,7 +5386,10 @@ const STRESS_SCENES: readonly Scene[] = (
           : `Saving… is not the size of Add to Shelf: ${JSON.stringify({ idle, savingBox })}`;
       },
       data: {
-        view: { ...SCREENSHOT_VIEW, save: { state: "saving", to: "shelf" } },
+        view: {
+          ...SCREENSHOT_VIEW,
+          save: { placed: null, state: "saving", to: "shelf" },
+        },
       },
       keepPointer: true,
       name: "stress-screenshot-saving",
@@ -6503,7 +6517,7 @@ const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
 /** What the failure message says of Annotate while Retry is the only add: the words of the dimmed button's hover, as a sentence. */
 const ANNOTATE_NEXT = "Annotate it on its item, once Retry has saved it.";
 
-/** The failed card once Retry adding to “…” is the only add left (`only`, screenshot-saves.ts): one pill, in Add to Shelf's place, and the item named under it. */
+/** The failed card once Retry adding to “…” is the only add left (`placed`, src/shared/contracts.ts): one pill, in Add to Shelf's place, and the item named under it. */
 const retryOnly = (
   name: string,
   message: string,
@@ -6595,8 +6609,10 @@ const retryOnly = (
     await page.evaluate(
       `globalThis.__emit("view", ${JSON.stringify({
         ...SCREENSHOT_VIEW,
-        save: { state: "saving", to: "item" },
-        target: { id: uuid(12), label },
+        save: {
+          placed: { id: uuid(12), label, to: "item" },
+          state: "saving",
+        },
       })})`
     );
 
@@ -6616,7 +6632,7 @@ const retryOnly = (
       : `the pill changed size when it read Saving…: ${JSON.stringify({ pillBox, savingBox })}`;
   },
   data: {
-    view: failedCard("item", message, { id: uuid(12), label }, true),
+    view: placedCard({ id: uuid(12), label, to: "item" }, message),
   },
   name,
   page: "screenshot",
@@ -6625,7 +6641,7 @@ const retryOnly = (
 const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
 
 /** A failed Add to “…” whose Retry is the only add: the screenshot is on its item, not saved. */
-const CARD_SOLE = failedCard("item", "The disk is full.", CARD_ITEM, true);
+const CARD_SOLE = placedCard({ ...CARD_ITEM, to: "item" }, "The disk is full.");
 
 /** The same card once the user took the screenshot off its item (Discard changes): both adds are back. */
 const CARD_BOTH = failedCard(
