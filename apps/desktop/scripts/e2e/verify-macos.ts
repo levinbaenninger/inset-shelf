@@ -2000,58 +2000,133 @@ const checkAnnotate = async (): Promise<void> => {
 
 // Finder, driven only through `open` and System Events: an Apple Event to Finder itself asks for Automation access.
 
-/** The name of Finder's front window, or "" when it has none. */
-const finderFront = (): string =>
-  jxa(
-    `const ws = Application("System Events").processes.byName("Finder").windows(); ws.length > 0 ? String(ws[0].name()) : ""`
-  );
+/** A folder for one trial's Finder window, named for this run: no window of another run or of the user is titled so. The trial still never goes by the title. */
+const finderFolder = (name: string): string =>
+  path.join(work, `${name} ${path.basename(work)}`);
 
-/** The front Finder window's frame. */
-const finderFrame = (): Box => {
-  const [x = 0, y = 0, width = 0, height = 0] = jxa(
-    `const w = Application("System Events").processes.byName("Finder").windows()[0]; [...w.position(), ...w.size()].join(" ")`
-  )
-    .split(" ")
-    .map(Number);
+/** The trial's Finder window, as it stood when it was last looked at; or why Finder's front window is not that window. */
+type FinderLook =
+  | { readonly ok: true; readonly frame: Box; readonly out: string }
+  | { readonly ok: false; readonly why: string };
 
-  return { height, width, x, y };
+const FinderAnswerSchema = z.union([
+  z.object({
+    frame: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+    out: z.string(),
+  }),
+  z.object({ refused: z.string() }),
+]);
+
+/**
+ * Looks at Finder's front window and runs `then` only when it is the trial's
+ * own: Finder is the app in front, and the folder that window shows, read as
+ * a full path from the window itself (its AXDocument), is `folder`. A window
+ * that only carries the folder's title never passes, nor does one that shows
+ * no folder. The look and `then` are one script: milliseconds lie between
+ * them, where two scripts would leave a window time to come in front.
+ *
+ * `then` is the body of a JXA function with the window as `w` and System
+ * Events as `se`; what it returns is `out`.
+ */
+const inFinderWindow = (folder: string, then = ""): FinderLook => {
+  try {
+    // `open` is given the path under /var; Finder may name the same folder under /private/var.
+    const own = [folder, realpathSync(folder)];
+
+    const answer = FinderAnswerSchema.parse(
+      JSON.parse(
+        jxa(`const se = Application("System Events");
+    const finder = se.processes.byName("Finder");
+    const own = ${JSON.stringify(own)};
+    const shows = (w) => {
+      try {
+        const url = String(w.attributes.byName("AXDocument").value());
+        const at = url.startsWith("file:///") ? decodeURIComponent(url.slice(7)) : "";
+        return at.endsWith("/") ? at.slice(0, -1) : at;
+      } catch { return ""; }
+    };
+    const [w] = finder.windows();
+    const at = w === undefined ? "" : shows(w);
+    JSON.stringify(
+      !finder.frontmost() ? { refused: "Finder is not in front" }
+      : w === undefined ? { refused: "Finder has no window" }
+      : !own.includes(at) ? { refused: "Finder's front window shows " + (at === "" ? "no folder" : at) }
+      : { frame: [...w.position(), ...w.size()], out: String((() => { ${then} })() ?? "") }
+    )`)
+      )
+    );
+
+    if ("refused" in answer) {
+      return { ok: false, why: answer.refused };
+    }
+
+    const [x, y, width, height] = answer.frame;
+
+    return { frame: { height, width, x, y }, ok: true, out: answer.out };
+  } catch (error) {
+    return {
+      ok: false,
+      why: `Finder's windows can't be read: ${String(error)}`,
+    };
+  }
 };
 
-/** Opens a folder in a Finder window, in front, and gives that window's frame. */
-const finderWindow = async (folder: string): Promise<Box | undefined> => {
-  execFileSync("open", [folder]);
+/** ⌘ and a key, for `inFinderWindow`: it goes out in the script that saw the trial's window in front. */
+const finderCommand = (key: string): string =>
+  `se.keystroke(${JSON.stringify(key)}, { using: "command down" });`;
 
-  const shown = await waitUntil(
-    () => frontmost() === "Finder" && finderFront() === path.basename(folder),
-    6000
-  );
-
-  return shown ? finderFrame() : undefined;
-};
-
-/** The centres of the entries selected in the front Finder window, as list rows or icons; the sidebar's rows are never selected here. */
-const finderEntries = (): string[] =>
-  jxa(`const w = Application("System Events").processes.byName("Finder").windows()[0];
-    const all = w.entireContents();
+/** The centres of the entries selected in the window, as list rows or icons, for `inFinderWindow`; the sidebar's rows are never selected here. */
+const FINDER_SELECTED = `const all = w.entireContents();
     const rows = all.filter((e) => { try { return e.role() === "AXRow" && e.selected(); } catch { return false; } });
     const icons = all.filter((e) => { try { return e.role() === "AXImage" && e.size()[0] >= 32 && e.selected(); } catch { return false; } });
-    (rows.length > 0 ? rows : icons).map((e) => { const [x, y] = e.position(); const [ww, h] = e.size(); return Math.round(x + Math.min(ww / 2, 120)) + " " + Math.round(y + h / 2); }).join("\\n")`)
-    .split("\n")
-    .filter(Boolean);
+    return (rows.length > 0 ? rows : icons).map((e) => { const [x, y] = e.position(); const [ww, h] = e.size(); return Math.round(x + Math.min(ww / 2, 120)) + " " + Math.round(y + h / 2); }).join("\\n");`;
 
-/** Closes the front Finder window, if it shows `folder`. */
-const closeFinderWindow = async (folder: string): Promise<void> => {
-  if (finderFront() !== path.basename(folder)) {
-    return;
+/** Opens the trial's folder in a Finder window and waits until that window is in front. When `open` fails or the window never comes, it says why. */
+const finderWindow = async (folder: string): Promise<FinderLook> => {
+  const opened = spawnSync("open", [folder], { encoding: "utf-8" });
+
+  if (opened.status !== 0) {
+    return {
+      ok: false,
+      why: `open failed: ${String(opened.error ?? opened.stderr).trim()}`,
+    };
   }
 
-  osa(
-    `tell application "System Events" to tell process "Finder" to perform action "AXRaise" of window 1`
-  );
-  await delay(300);
-  guardedKeys(() => {
-    osa('tell application "System Events" to keystroke "w" using command down');
-  }, ["Finder"]);
+  let look = inFinderWindow(folder);
+
+  await waitUntil(() => {
+    look = inFinderWindow(folder);
+
+    return look.ok;
+  }, 6000);
+
+  return look;
+};
+
+/**
+ * Closes the trial's Finder window: ⌘W goes out only in the script that sees
+ * that window in front. When another window is in front, no key is sent, the
+ * window stays open and `trial` fails with what was in front.
+ */
+const closeFinderWindow = async (
+  folder: string,
+  trial: string
+): Promise<void> => {
+  let look = inFinderWindow(folder, `w.actions.byName("AXRaise").perform();`);
+
+  if (look.ok) {
+    await delay(300);
+    look = inFinderWindow(folder, finderCommand("w"));
+  }
+
+  if (!look.ok) {
+    record(
+      `${trial}: its Finder window closes`,
+      false,
+      `${look.why}; no key was sent`
+    );
+  }
+
   await delay(500);
 };
 
@@ -2061,7 +2136,7 @@ const closeFinderWindow = async (folder: string): Promise<void> => {
  * new item is made.
  */
 const checkFinderDrop = async (): Promise<void> => {
-  const folder = path.join(work, "Drop here");
+  const folder = finderFolder("Drop here");
 
   mkdirSync(path.join(folder, "Quotes"), { recursive: true });
   writeFileSync(path.join(folder, "Quotes", "inside.txt"), "inside\n");
@@ -2089,35 +2164,46 @@ const checkFinderDrop = async (): Promise<void> => {
 
   const finder = await finderWindow(folder);
 
-  if (finder === undefined) {
-    record("drop: a Finder window shows the folder", false);
+  if (!finder.ok) {
+    record("drop: a Finder window shows the folder", false, finder.why);
 
     return;
   }
 
-  guardedKeys(() => {
-    osa('tell application "System Events" to keystroke "a" using command down');
-  }, ["Finder"]);
-  await delay(500);
+  // ⌘A, and then the read of what it selected, each go only to the window that shows the trial's folder.
+  let selected = inFinderWindow(folder, finderCommand("a"));
 
-  const entries = finderEntries();
+  if (selected.ok) {
+    await delay(500);
+    selected = inFinderWindow(folder, FINDER_SELECTED);
+  }
+
+  const entries = selected.ok ? selected.out.split("\n").filter(Boolean) : [];
 
   record(
     "drop: Finder shows and selects the file and the folder",
     entries.length === 2,
-    `${entries.length} entries`
+    selected.ok
+      ? `${entries.length} entries`
+      : `${selected.why}; no key or drag was sent since`
   );
+
+  // Not the trial's window any more: nothing is dragged from it and nothing is closed.
+  if (!selected.ok) {
+    return;
+  }
 
   const [from] = entries;
   const before = items().length;
   const mark = events().length;
 
   if (from === undefined || row === "") {
-    await closeFinderWindow(folder);
+    await closeFinderWindow(folder, "drop");
 
     return;
   }
 
+  // The drag starts where the trial's window showed its entries a moment ago, in the script that saw it in front.
   input("drag", ...from.split(" "), ...row.split(" "));
 
   const attached = await waitUntil(
@@ -2155,7 +2241,7 @@ const checkFinderDrop = async (): Promise<void> => {
     /Quotes is a folder[^.]*\./u.exec(notice)?.[0] ?? "no notice"
   );
   shelfShot("finder-drop");
-  await closeFinderWindow(folder);
+  await closeFinderWindow(folder, "drop");
 };
 
 /** A PNG's width and height, as sips reads them. */
@@ -2173,7 +2259,7 @@ const pictureSize = (file: string): string =>
  * there as a file named after it.
  */
 const checkDragOut = async (): Promise<void> => {
-  const folder = path.join(work, "Dragged out");
+  const folder = finderFolder("Dragged out");
 
   mkdirSync(folder, { recursive: true });
   record("drag out: details open from the open row", await openTargetDetails());
@@ -2183,21 +2269,20 @@ const checkDragOut = async (): Promise<void> => {
 
   record(
     "drag out: the tile and a Finder window are on screen",
-    tile !== "" && finder !== undefined,
-    `${tile} ${JSON.stringify(finder ?? null)}`
+    tile !== "" && finder.ok,
+    `${tile} ${finder.ok ? JSON.stringify(finder.frame) : finder.why}`
   );
 
-  if (tile === "" || finder === undefined) {
-    await closeFinderWindow(folder);
-
+  // No window of the trial's is in front: there is none to drop on or to close.
+  if (!finder.ok) {
     return;
   }
 
-  // The drop goes to the Finder window's lower half, clear of the shelf.
-  const to = [
-    String(Math.round(finder.x + finder.width / 2)),
-    String(Math.round(finder.y + finder.height * 0.7)),
-  ];
+  if (tile === "") {
+    await closeFinderWindow(folder, "drag out");
+
+    return;
+  }
 
   const landed = (): string[] =>
     spawnSync("ls", [folder], { encoding: "utf-8" })
@@ -2205,6 +2290,25 @@ const checkDragOut = async (): Promise<void> => {
       .filter(Boolean);
 
   for (const how of ["drag", "drag-hold"]) {
+    // Looked at anew before each drag: the drop only ever goes to the window that shows the trial's folder.
+    const now = inFinderWindow(folder);
+
+    if (!now.ok) {
+      record(
+        "drag out: its Finder window is in front for the drop",
+        false,
+        `${now.why}; nothing was dragged since`
+      );
+
+      break;
+    }
+
+    // The drop goes to the Finder window's lower half, clear of the shelf.
+    const to = [
+      String(Math.round(now.frame.x + now.frame.width / 2)),
+      String(Math.round(now.frame.y + now.frame.height * 0.7)),
+    ];
+
     input(how, ...tile.split(" "), ...to);
 
     // oxlint-disable-next-line no-await-in-loop -- one drag, then the next only if the first dropped nothing.
@@ -2233,7 +2337,7 @@ const checkDragOut = async (): Promise<void> => {
         pictureSize(path.join(attachmentsDir(), attachedPicture())),
     droppedSize
   );
-  await closeFinderWindow(folder);
+  await closeFinderWindow(folder, "drag out");
 };
 
 // Copy with Details (src/main/copy-commands.ts): read back from the pasteboard, then pasted into a document of the test's own under the run's temp folder.
