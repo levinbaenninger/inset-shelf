@@ -8,7 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
-import type { ScreenshotView } from "@shared/contracts";
+import type { ScreenshotView, ShotPlaced } from "@shared/contracts";
 import type { ItemId } from "@shared/shelf";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -121,7 +121,7 @@ const Steady = ({
 
 const PILL_LABELS = Object.values(PILL_LABEL);
 
-/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. The dimmed button says it on hover. The keyboard never reaches a button that is off, so the failure message ends with it too. */
+/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. The dimmed button says it on hover; the failure message says it for the keyboard (ELSEWHERE). */
 const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
 
 /**
@@ -239,6 +239,16 @@ const FOOT_CAPTION =
 
 /** Shown after the reason a save failed: what it means for the screenshot. */
 const NOT_KEPT = "The screenshot isn’t saved yet.";
+
+/** While the shelf holds the screenshot, Retry is the only add: what the user does on the shelf to get the other add back. For an attachment it names the tile's own removal in details, not Discard changes, which would put back the item's other changes too; and it says when Annotate works again, since the keyboard never reaches a button that is off. */
+const ELSEWHERE = {
+  item: "To add it elsewhere, remove it in its item’s details. Annotate it there once Retry has saved it.",
+  shelf: "Delete it on the shelf to add it elsewhere.",
+} as const;
+
+/** What follows the reason a save failed: the screenshot isn't saved, and where the shelf holds it, how to add it elsewhere. */
+const afterFailure = (placed: ShotPlaced | null): string =>
+  placed === null ? NOT_KEPT : `${NOT_KEPT} ${ELSEWHERE[placed.to]}`;
 
 /** Why the save failed, reason first, then what `after` says it means for the screenshot, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
 const FailureBar = ({
@@ -516,10 +526,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
         </div>
       </div>
       {save.state === "failed" ? (
-        <FailureBar
-          after={sole ? `${NOT_KEPT} ${ANNOTATE_OFF}.` : NOT_KEPT}
-          message={save.message}
-        />
+        <FailureBar after={afterFailure(save.placed)} message={save.message} />
       ) : null}
     </main>
   );
