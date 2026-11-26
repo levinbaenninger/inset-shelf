@@ -3903,6 +3903,28 @@ const NINE_DOC = {
   ],
 };
 
+/** An image whose title takes one line more than its cap at 300 wide (four, not three), and whose description takes one more than its own (eleven, not ten). */
+const ONE_OVER_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(726, 30, STRESS_A),
+      description: Array.from(
+        { length: 11 },
+        (_, line) => `Zeile ${line + 1} der Beschreibung`
+      ).join("\n"),
+      image: LOGIN,
+      kind: "image",
+      note: "",
+      pins: [],
+      source: null,
+      title:
+        "Bildschirmaufnahme und Systemaudio für die Quartalsübersicht aufnehmen, die",
+      via: "screenshot",
+    },
+  ],
+};
+
 /** An item linked to 25 windows: its open row shows three and “+22”. */
 const MANY_WINDOWS_DOC = {
   ...NINE_DOC,
@@ -4258,6 +4280,66 @@ const STRESS_SCENES: readonly Scene[] = (
       },
       data: { view: shelfView(MANY_WINDOWS_DOC) },
       name: "stress-open-windows-many",
+      width: NARROWEST,
+    },
+    {
+      // One line over each cap: the title shows three lines and the description ten, each with its Show more.
+      act: async (page) => {
+        await select(page, 726);
+      },
+      check: async (page) => {
+        const caps = z
+          .array(
+            z.object({ cap: z.number(), shown: z.number(), whole: z.number() })
+          )
+          .parse(
+            await item(page, 726).evaluate((row) =>
+              [...row.querySelectorAll<HTMLElement>("[style*='--lines']")].map(
+                (words) => {
+                  const line =
+                    Number(
+                      getComputedStyle(words).lineHeight.replace("px", "")
+                    ) || 20;
+
+                  return {
+                    cap: Number(words.style.getPropertyValue("--lines")),
+                    shown: Math.round(
+                      words.getBoundingClientRect().height / line
+                    ),
+                    whole: Math.round(words.scrollHeight / line),
+                  };
+                }
+              )
+            )
+          );
+
+        if (
+          !isDeepStrictEqual(
+            caps.map((each) => [each.cap, each.whole]),
+            [
+              [3, 4],
+              [10, 11],
+            ]
+          )
+        ) {
+          return `the scene must hold a title one line over its cap of 3 and a description one over its cap of 10: ${JSON.stringify(caps)}`;
+        }
+
+        if (caps.some((each) => each.shown !== each.cap)) {
+          return `words one line over their cap must be cut to it: ${JSON.stringify(caps)}`;
+        }
+
+        const more = await item(page, 726)
+          .getByRole("button", { name: /^Show more of the/u })
+          .count();
+
+        return more === 2
+          ? null
+          : `the title and the description must each offer Show more: ${more}`;
+      },
+      data: { view: shelfView(ONE_OVER_DOC) },
+      height: 720,
+      name: "stress-open-one-line-over",
       width: NARROWEST,
     },
     {
@@ -10295,6 +10377,32 @@ const ProblemsSchema = z.array(z.string());
 const strictProblems = async (page: Page): Promise<readonly string[]> =>
   ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));
 
+/** Words under a line cap (clamp.tsx Clamp) show no more lines than it says, until Show more opens them. */
+const capProblems = async (page: Page): Promise<readonly string[]> =>
+  z.array(z.string()).parse(
+    await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("[style*='--lines']")].flatMap(
+        (words) => {
+          const cap = Number(words.style.getPropertyValue("--lines"));
+
+          const line =
+            Number(getComputedStyle(words).lineHeight.replace("px", "")) || 20;
+
+          const shown = Math.round(words.getBoundingClientRect().height / line);
+
+          const opened =
+            words.nextElementSibling?.getAttribute("aria-expanded") === "true";
+
+          return opened || shown <= cap
+            ? []
+            : [
+                `words capped at ${cap} lines show ${shown}: “${(words.textContent ?? "").slice(0, 30)}”`,
+              ];
+        }
+      )
+    )
+  );
+
 const shoot = async (
   browser: Browser,
   origin: string,
@@ -10376,6 +10484,7 @@ const shoot = async (
           ...(await layoutProblems(page)),
           ...(await cutBadges(page)),
           ...(STRICT_PAGES.has(scene.page) ? await strictProblems(page) : []),
+          ...(await capProblems(page)),
         ]
       : [];
 

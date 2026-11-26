@@ -166,10 +166,10 @@ export const CUT_LINES =
 /**
  * Words cut to `lines` lines, the last one fading, with a quiet button
  * under them that shows the rest in place; no ellipsis, so a sentence's
- * own full stop never meets one. Words that fit show whole, with no button,
- * and so do words that would hide a single line: a button that costs a line
- * to save one is worse than none. `what` names the words for the button's
- * accessible name ("Show more of the description").
+ * own full stop never meets one. Words that fit in `lines` lines show whole,
+ * with no button; one line more and they are cut, so the cap is the number
+ * it says. `what` names the words for the button's accessible name ("Show
+ * more of the description").
  */
 export const Clamp = ({
   children,
@@ -194,14 +194,14 @@ export const Clamp = ({
   // The first control Show more brought into reach, until the keyboard has gone to it or left the button.
   const revealed = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
-  // At least two lines would hide: the words are cut until Show more opens them.
+  // At least one line would hide: the words are cut until Show more opens them.
   const [long, setLong] = useState(false);
   const cut = long && !open;
 
   useMeasure(ref, (element) => {
     // The words' whole height, whether or not they are cut now.
     const hidden = element.scrollHeight - lines * lineHeight(element);
-    const isLong = hidden >= 2 * lineHeight(element) - 1;
+    const isLong = hidden >= lineHeight(element) - 1;
 
     setLong(isLong);
     hideCutControls(element, isLong && !open);
