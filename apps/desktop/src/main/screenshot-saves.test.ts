@@ -13,7 +13,6 @@ import type { AttachmentId, ItemId, ShelfDoc } from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createCardClock } from "./card-clock";
-import { withinWait } from "./quit-hold";
 import {
   CARD_CLEARED,
   CARD_RETARGETED,
@@ -23,15 +22,13 @@ import {
   ITEM_GONE,
   RECENT_ITEM_MS,
   SHOT_CHANGED,
+  SHOT_LANDING,
 } from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
 import { createShelfController } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
 
 const SAVE_TOO_SLOW = "Saving didn’t finish in time.";
-
-const STILL_SAVING =
-  "The screenshot is still being saved where it is, so it stays there for now.";
 
 const uuid = (n: number) =>
   `5b2d8f4e-1c3a-4e6b-9d0f-2a3b4c5d6e${String(n).padStart(2, "0")}`;
@@ -218,22 +215,20 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       notices.push(message);
     },
     now: () => clock,
-    // As index.ts wires it: the card's wait has a limit, the write has none.
+    onItsWay: (id) => controller.onItsWay(id),
     persisted: async () =>
-      await withinWait(
-        controller.persisted(controller.snapshot().rev),
-        (run) => {
-          waits.add(run);
-
-          return () => {
-            waits.delete(run);
-          };
-        }
-      ),
+      await controller.persisted(controller.snapshot().rev),
     saved: (to) => {
       saved.push(to);
     },
     selection: () => selection,
+    setTimer: (run) => {
+      waits.add(run);
+
+      return () => {
+        waits.delete(run);
+      };
+    },
     shelfVisible: () => shelfVisible,
     stored: (id) => controller.stored(id),
   });
@@ -1122,7 +1117,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
     expect(card.disk().at(-1)).toStrictEqual({ attached: 1, items: 0 });
     expect(card.view()).toBeNull();
     expect(card.saved).toStrictEqual(["item"]);
-    expect(card.notices).toStrictEqual([STILL_SAVING]);
+    expect(card.notices).toStrictEqual([SHOT_LANDING]);
   });
 
   it("holds the screenshot once when Add to “…” is pressed before a waited-out Add to Shelf lands", async () => {
@@ -1140,7 +1135,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
     expect(card.disk().at(-1)).toStrictEqual({ attached: 0, items: 1 });
     expect(card.view()).toBeNull();
     expect(card.saved).toStrictEqual(["shelf"]);
-    expect(card.notices).toStrictEqual([STILL_SAVING]);
+    expect(card.notices).toStrictEqual([SHOT_LANDING]);
   });
 
   it("says why once that write is refused, and Retry then saves the screenshot once", async () => {
@@ -1211,7 +1206,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
     expect(card.shown()).toStrictEqual({ attached: 1, items: 0 });
     expect(card.view()).toBeNull();
     expect(card.saved).toStrictEqual(["item"]);
-    expect(card.notices).toStrictEqual([STILL_SAVING]);
+    expect(card.notices).toStrictEqual([SHOT_LANDING]);
   });
 
   it("still moves a screenshot whose write hasn't started: the write ahead of it doesn't hold it", async () => {

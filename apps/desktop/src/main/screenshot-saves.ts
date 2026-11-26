@@ -11,6 +11,7 @@ import type {
   ShelfItem,
 } from "@shared/shelf";
 
+import { withinWait } from "./quit-hold";
 import { reportSaveError } from "./save-error";
 import type { WriteResult } from "./shelf-store";
 
@@ -46,6 +47,10 @@ const missedNotice = (named: ItemId | null, exists: boolean): string => {
 /** A press of the other add that reached main after the user changed the screenshot where the first add put it. */
 export const SHOT_CHANGED =
   "The screenshot was changed where it is, so it stays there. Retry saves it.";
+
+/** A press of the other add that reached main while a write holding the screenshot where the first add put it was still on its way. */
+export const SHOT_LANDING =
+  "The screenshot is still being saved where it is, so it stays there for now.";
 
 /** A screenshot the card shows, held in memory: the file may be moved or deleted meanwhile. */
 export interface Shot {
@@ -85,10 +90,14 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly dropItem: (id: ItemId) => void;
   /** Takes the screenshot off an item for good, the same way. */
   readonly detach: (id: ItemId, attachment: AttachmentId) => void;
-  /** Waits until the disk holds every change so far. */
+  /** The write of every change so far, however long the disk takes: how it ended. The card's wait for it has a limit, the write has none. */
   readonly persisted: () => Promise<WriteResult>;
+  /** Runs `run` after `ms`, unless the function it returns is called first. */
+  readonly setTimer: (run: () => void, ms: number) => () => void;
   /** The item as the disk holds it; undefined while no write of it has landed. */
   readonly stored: (id: ItemId) => ShelfItem | undefined;
+  /** The item as the write now on the disk's way holds it; undefined while none holds it. */
+  readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
   /** A write other than the card's own save landed its screenshot where it was: the card went, and the user hears where it is. */
   readonly saved: (to: ShotSaveTo, id: ItemId) => void;
   readonly notify: (message: string, tone: "failed") => void;
@@ -112,14 +121,20 @@ type Placement =
 
 /**
  * How the screenshot stands in its place. The card may move it only while it
- * is `placed`: as the card made it, and in no write that landed. `saved`
- * ends the card's part, since the disk holds the screenshot there. `changed`
- * leaves Retry for that place alone, since moving it would lose the change.
+ * is `placed`: as the card made it, in no write that landed and in none that
+ * still can. `saved` ends the card's part, since the disk holds the
+ * screenshot there. `landing` and `changed` leave Retry for that place
+ * alone: a write on its way holds the screenshot there and would land it
+ * beside the new place, or moving it would lose the change.
  */
 interface Standing {
   readonly placed: Placement;
-  readonly state: "placed" | "changed" | "saved";
+  readonly state: "placed" | "landing" | "changed" | "saved";
 }
+
+/** The screenshot stays where it is: Retry there is the only add. */
+const stays = (at: Standing | null): boolean =>
+  at?.state === "landing" || at?.state === "changed";
 
 /** The card's screenshot in an item: the row itself, or its attachment there. */
 const within = (
@@ -143,6 +158,8 @@ interface Held<S extends Shot> {
   saving: boolean;
   /** The item Add to “…” last tried: its Retry stands only while the card still names it. */
   tried: ItemId | null;
+  /** The write the last save waited for and didn't see land: the card follows it to its end, until a newer save starts. */
+  write: Promise<WriteResult> | null;
 }
 
 type Placed =
@@ -259,20 +276,24 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return { placed, state: "saved" };
     }
 
+    if (within(deps.onItsWay(placed.item), placed) !== undefined) {
+      return { placed, state: "landing" };
+    }
+
     return { placed, state: shown === placed.as ? "placed" : "changed" };
   };
 
-  /** The screenshot's own row holds a change made since: Add to “…” would drop the row, so it names nothing. */
-  const rowChanged = (): boolean => {
+  /** The screenshot's own row stays: Add to “…” would drop the row, so it names nothing. */
+  const rowStays = (): boolean => {
     const at = held === null ? null : standing(held);
 
-    return at?.placed.to === "shelf" && at.state === "changed";
+    return at?.placed.to === "shelf" && stays(at);
   };
 
   const target = (): ScreenshotView["target"] => {
     // Once attached, the card keeps naming that item, so Retry after a failed save saves it there and never attaches twice.
     const attached = held?.placed?.to === "item" ? held.placed.item : null;
-    const id = attached ?? (rowChanged() ? null : candidate());
+    const id = attached ?? (rowStays() ? null : candidate());
     const item = id === null ? undefined : deps.item(id);
 
     cardItem =
@@ -332,7 +353,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         ? null
         : shown.to;
 
-    const only = at?.state === "changed";
+    const only = stays(at);
 
     if (to !== shown.to || only !== shown.only) {
       card.update({ save: { ...shown, only, to } });
@@ -342,8 +363,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   /**
    * Whether the card's screenshot may go to `to`: it is nowhere, already
    * there, or in the other place as the card put it. Saved in the other
-   * place, the card is done and goes; changed there, it stays and the user
-   * hears why.
+   * place, the card is done and goes; changed there, or in a write on its
+   * way, it stays and the user hears why.
    */
   const free = (now: Held<S>, to: ShotSaveTo): boolean => {
     const at = standing(now);
@@ -355,7 +376,10 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     if (at.state === "saved") {
       finish(at.placed);
     } else {
-      deps.notify(SHOT_CHANGED, "failed");
+      deps.notify(
+        at.state === "landing" ? SHOT_LANDING : SHOT_CHANGED,
+        "failed"
+      );
     }
 
     return false;
@@ -375,8 +399,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   /**
    * The screenshot leaves its place before it goes to the other destination,
    * so no shelf, shown or written, holds it twice. It removes only what
-   * stands as the card made it, never a row or an attachment the disk holds
-   * or the user changed; `free` turned those presses away in this same turn.
+   * stands as the card made it, never a row or an attachment the disk
+   * holds, a write on its way holds or the user changed; `free` turned those
+   * presses away in this same turn.
    */
   const takeBack = (now: Held<S>, at: Standing | null): void => {
     if (at?.state !== "placed") {
@@ -407,12 +432,46 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     return now === null || now.saving || !free(now, to) ? null : now;
   };
 
+  /**
+   * A save that gave up waiting left its write on the disk's way. The card
+   * follows that write to its end, with nothing else to tell it: landed, the
+   * card goes as after any write that saved its screenshot; refused, the
+   * card says why instead of that it took too long.
+   */
+  const follow = async (now: Held<S>): Promise<void> => {
+    const { write } = now;
+
+    if (write === null) {
+      return;
+    }
+
+    const ended = await reportSaveError(async () => await write);
+
+    // A newer screenshot, or a newer save of this one, says how it went.
+    if (held !== now || now.write !== write) {
+      return;
+    }
+
+    const shown = card.view()?.save;
+
+    if (
+      !ended.ok &&
+      shown?.state === "failed" &&
+      shown.message !== ended.message
+    ) {
+      card.update({ save: { ...shown, message: ended.message } });
+    }
+
+    retarget();
+  };
+
   const save = async (
     now: Held<S>,
     to: ShotSaveTo,
     place: () => Promise<Placed>
   ): Promise<ItemId | null> => {
     now.saving = true;
+    now.write = null;
     // The card stays while its screenshot is written, however slow the disk.
     card.hold();
     card.update({ save: { state: "saving", to } });
@@ -427,8 +486,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       }
 
       placed = result.id;
+      now.write = deps.persisted();
 
-      return await deps.persisted();
+      return await withinWait(now.write, deps.setTimer);
     });
 
     now.saving = false;
@@ -449,6 +509,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           },
         });
         retarget();
+        void follow(now);
       } else {
         deps.notify(written.message, "failed");
       }
@@ -579,7 +640,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     /** A new screenshot: the card shows it, and the last one is forgotten. */
     show: (shot: S): void => {
-      held = { placed: null, saving: false, shot, tried: null };
+      held = { placed: null, saving: false, shot, tried: null, write: null };
       card.show({
         heightPx: shot.heightPx,
         imageUrl: deps.imageUrl(shot),

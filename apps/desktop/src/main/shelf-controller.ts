@@ -88,6 +88,8 @@ export interface ShelfController {
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
   /** The item as the disk holds it; undefined for one no write has landed yet. */
   readonly stored: (id: ItemId) => ShelfItem | undefined;
+  /** The item as the write now on the disk's way holds it, which can still land; undefined when no write is, or it doesn't hold the item. */
+  readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
 }
 
 /** Typing saves after a pause; everything else at once. */
@@ -165,8 +167,8 @@ export const createShelfController = (
   let saved = 0;
   // A save is on its way that hasn't read the document yet.
   let queued = false;
-  // The revision the write now on the disk's way holds, if one is.
-  let writing: number | null = null;
+  // The shelf the write now on the disk's way holds, if one is.
+  let writing: Revision | null = null;
   // Items a failed write held a change to. They stay failed, edited or not, until a write holding them succeeds or Discard changes.
   let failed: ReadonlySet<ItemId> = new Set();
   let discarded: ShelfView["discarded"] = null;
@@ -254,7 +256,7 @@ export const createShelfController = (
       changes.every(([id, epoch]) => epochOf(id) === epoch);
 
     toDelete = [];
-    writing = snapshotVersion;
+    writing = { doc: snapshot, rev: snapshotVersion };
 
     const result = await deps.save(snapshot, current);
 
@@ -495,7 +497,7 @@ export const createShelfController = (
 
   const persisted = async (rev: number): Promise<WriteResult> => {
     // A typed edit waiting for its pause, or a change a failed save left unwritten.
-    if (saved < rev && !queued && (writing ?? 0) < rev) {
+    if (saved < rev && !queued && (writing?.rev ?? 0) < rev) {
       saveNow();
     }
 
@@ -662,6 +664,7 @@ export const createShelfController = (
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),
+    onItsWay: (id) => writing?.doc.items.find((item) => item.id === id),
     persisted,
     setStatus,
     snapshot: () => ({ doc, rev: version }),

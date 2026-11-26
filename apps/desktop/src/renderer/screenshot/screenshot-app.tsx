@@ -267,7 +267,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const shelfLabel = SHELF_LABEL[saveState(save, "shelf")];
   const itemState = saveState(save, "item");
 
-  // The screenshot is on the item, changed there since: Retry adding to it is the only add, so Add to Shelf keeps its room and can't be seen, pressed or reached.
+  // The screenshot is on the item, changed there since or in a write still on its way: Retry adding to it is the only add, so Add to Shelf keeps its room and can't be seen, pressed or reached.
   const itemOnly = save.state === "failed" && save.only && save.to === "item";
 
   return (

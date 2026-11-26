@@ -959,13 +959,12 @@ const start = async (): Promise<void> => {
       notify(message, tone);
     },
     now: () => Date.now(),
+    onItsWay: controller.onItsWay,
     persisted: async () =>
-      await withinWait(
-        controller.persisted(controller.snapshot().rev),
-        setTimer
-      ),
+      await controller.persisted(controller.snapshot().rev),
     saved: shotAdded,
     selection: () => shelfSelection,
+    setTimer,
     shelfVisible: () => shelf.isVisible(),
     stored: controller.stored,
   });
