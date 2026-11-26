@@ -5639,6 +5639,66 @@ const listed = async (page: Page) => {
   return { ids, query };
 };
 
+/** The search field as it stands: the chip's words in view, the placeholder, and whether anything in it is cut (the chip, or what the field shows of its search or placeholder). */
+const fieldAtWidth = async (page: Page) =>
+  z
+    .object({ cut: z.string(), label: z.string(), placeholder: z.string() })
+    .parse(
+      await page.evaluate(() => {
+        const group = document.querySelector("[data-slot=input-group]");
+        const input = group?.querySelector("input");
+        const chip = group?.querySelector("button[aria-pressed]");
+
+        if (
+          !(group instanceof HTMLElement) ||
+          !(input instanceof HTMLInputElement) ||
+          !(chip instanceof HTMLElement)
+        ) {
+          return { cut: "no field", label: "", placeholder: "" };
+        }
+
+        const style = getComputedStyle(input);
+        const pen = document.createElement("canvas").getContext("2d");
+
+        if (pen !== null) {
+          pen.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        }
+
+        const words = input.value === "" ? input.placeholder : input.value;
+        const needs = pen?.measureText(words).width ?? Infinity;
+
+        const room =
+          input.clientWidth -
+          Number(style.paddingLeft.replace("px", "")) -
+          Number(style.paddingRight.replace("px", ""));
+
+        const cut = [
+          ...(needs > room + 0.5
+            ? [`“${words}” needs ${Math.round(needs)} of ${Math.round(room)}`]
+            : []),
+          ...(chip.scrollWidth > chip.clientWidth ? ["the chip"] : []),
+          ...([...group.querySelectorAll("button")].some(
+            (button) =>
+              button.getClientRects().length > 0 &&
+              button.getBoundingClientRect().right >
+                group.getBoundingClientRect().right + 0.5
+          )
+            ? ["a button runs out of the field"]
+            : []),
+        ];
+
+        return {
+          cut: cut.join(", "),
+          label: [...chip.querySelectorAll("span")]
+            .flatMap((part) =>
+              part.getClientRects().length > 0 ? [part.textContent ?? ""] : []
+            )
+            .join(""),
+          placeholder: input.placeholder,
+        };
+      })
+    );
+
 const whyView = (phase: "taking" | "typing" | "saved") => ({
   corner: "top-left",
   kind: "why",
@@ -5945,6 +6005,78 @@ const PILL_SCENES: readonly Scene[] = (
       name: "shelf-from-here-chip-narrow",
       page: "shelf",
       width: NARROWEST,
+    },
+    {
+      // The chip's words, the placeholder and Clear Search follow the field's own width. Swept from the narrowest shelf to a wide one, with the filter off and on, nothing in the field is cut, and the decided looks hold at 300, 340 and 440.
+      check: async (page) => {
+        const sweep = async (on: boolean) => {
+          const seen: {
+            readonly cut: string;
+            readonly label: string;
+            readonly placeholder: string;
+            readonly width: number;
+          }[] = [];
+
+          for (let width = NARROWEST; width <= 440; width += 10) {
+            // oxlint-disable-next-line no-await-in-loop -- one width after another.
+            await page.setViewportSize({ height: 600, width });
+            // oxlint-disable-next-line no-await-in-loop -- the field is measured once it has settled at this width.
+            await page.waitForTimeout(60);
+
+            seen.push({
+              // oxlint-disable-next-line no-await-in-loop -- read at this width.
+              ...(await fieldAtWidth(page)),
+              width,
+            });
+          }
+
+          return seen.map((each) => ({ ...each, on }));
+        };
+
+        const off = await sweep(false);
+
+        await page
+          .getByRole("button", { name: "Show the 2 items from here" })
+          .click();
+
+        const on = await sweep(true);
+        const cut = [...off, ...on].filter((each) => each.cut !== "");
+
+        if (cut.length > 0) {
+          return `the search field cuts its words at ${JSON.stringify(cut)}`;
+        }
+
+        const at = (list: typeof off, width: number) => {
+          const found = list.find((each) => each.width === width);
+
+          return found === undefined
+            ? ""
+            : `${found.label} | ${found.placeholder}`;
+        };
+
+        const looks = {
+          off300: at(off, 300),
+          off340: at(off, 340),
+          off440: at(off, 440),
+          on300: at(on, 300),
+          on340: at(on, 340),
+          on440: at(on, 440),
+        };
+
+        return isDeepStrictEqual(looks, {
+          off300: "Here · 2 | Search",
+          off340: "2 from here | Search",
+          off440: "2 from here | Search or due:today",
+          on300: "Here | Search",
+          on340: "Here | Search",
+          on440: "2 from here | Search or due:today",
+        })
+          ? null
+          : `the field's words at 300, 340 and 440 changed: ${JSON.stringify(looks)}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-widths",
+      page: "shelf",
     },
     {
       // With the filter on the chip stays, pressed; Return on it takes the filter off again, which is what the picture shows.

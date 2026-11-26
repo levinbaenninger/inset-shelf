@@ -66,9 +66,12 @@ export const useFromHere = (
  * the width the shelf opens at, "2 from here" where the field has room for
  * both. It keeps the keyboard, so Return on it again takes the filter off.
  *
- * Its words change under 330 px (not pressed) and under 380 px (pressed),
- * never at the width the shelf opens at (SHELF_WIDTH_DIP): there the field
- * keeps the 77 px from:here needs and the 59 px "Search" needs.
+ * Its words follow the search field's own width (search-bar.tsx names the
+ * field `search`), not the window's: they change in a field under 240 px
+ * (not pressed) and under 290 px (pressed), never at the 250 px the field
+ * has when the shelf opens. There it keeps the 77 px from:here needs and
+ * the 59 px "Search" needs. A scene sweeps the widths between and fails
+ * when any of these words is cut (screens.ts shelf-from-here-widths).
  * Open decision 3; main leaves `here` out to drop it.
  */
 export const FromHereChip = ({
@@ -101,14 +104,18 @@ export const FromHereChip = ({
     >
       {/* Pressed, its tint marks it and the field says from:here: the words keep their room without the mark. */}
       {on ? null : <HugeiconsIcon icon={AppWindowMacIcon} />}
-      <span className={on ? "max-[380px]:hidden" : "max-[330px]:hidden"}>
+      <span
+        className={
+          on ? "@max-[290px]/search:hidden" : "@max-[240px]/search:hidden"
+        }
+      >
         {count} from here
       </span>
       {/* Pressed, "Here" leaves the field room for from:here and the search's ×; the list shows the count. */}
       <span
         className={cn(
           "hidden",
-          on ? "max-[380px]:inline" : "max-[330px]:inline"
+          on ? "@max-[290px]/search:inline" : "@max-[240px]/search:inline"
         )}
       >
         {on ? "Here" : `Here · ${count}`}
