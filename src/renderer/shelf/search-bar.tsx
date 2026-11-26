@@ -292,11 +292,11 @@ export const SearchBar = ({
         {query === "" ? null : (
           <InputGroupButton
             aria-label="Clear Search"
-            // Searching only from:here at the shelf's narrowest, the pressed chip clears it the same way and the field keeps the room to show it.
+            // Searching only from:here in a shelf dragged narrower, the pressed chip clears it the same way and the field keeps the room to show it.
             className={cn(
               query === FROM_HERE &&
                 (here?.ids.length ?? 0) > 0 &&
-                "max-[340px]:hidden"
+                "max-[330px]:hidden"
             )}
             onClick={() => {
               onChange("");

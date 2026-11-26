@@ -7,6 +7,7 @@ import type { ItemGroup, ItemId } from "@shared/shelf";
 import { useMemo, useState } from "react";
 
 import { InputGroupButton } from "@/components/ui/input-group";
+import { cn } from "@/lib/utils";
 import { tooltipText } from "@/shared/clamp";
 
 /** The search with `from:here` added, once. */
@@ -59,11 +60,15 @@ export const useFromHere = (
 
 /**
  * In the search field, when the shelf opened beside a window open items came
- * from: "2 from here" ("Here · 2" at the shelf's narrowest), with the window
- * mark the recall pill has too. It puts `from:here` into the search and
- * stays, pressed and tinted, in words ("2 from here", "Here"), while the
- * filter is on; it keeps the keyboard, so Return on it again takes the
- * filter off.
+ * from: "2 from here" ("Here · 2" in a shelf dragged narrower), with the
+ * window mark the recall pill has too. It puts `from:here` into the search
+ * and stays, pressed and tinted, in words while the filter is on: "Here" at
+ * the width the shelf opens at, "2 from here" where the field has room for
+ * both. It keeps the keyboard, so Return on it again takes the filter off.
+ *
+ * Its words change under 330 px (not pressed) and under 380 px (pressed),
+ * never at the width the shelf opens at (SHELF_WIDTH_DIP): there the field
+ * keeps the 77 px from:here needs and the 59 px "Search" needs.
  * Open decision 3; main leaves `here` out to drop it.
  */
 export const FromHereChip = ({
@@ -96,9 +101,16 @@ export const FromHereChip = ({
     >
       {/* Pressed, its tint marks it and the field says from:here: the words keep their room without the mark. */}
       {on ? null : <HugeiconsIcon icon={AppWindowMacIcon} />}
-      <span className="max-[340px]:hidden">{count} from here</span>
-      {/* Pressed at the shelf's narrowest, "Here" leaves the field room for from:here; the list shows the count. */}
-      <span className="hidden max-[340px]:inline">
+      <span className={on ? "max-[380px]:hidden" : "max-[330px]:hidden"}>
+        {count} from here
+      </span>
+      {/* Pressed, "Here" leaves the field room for from:here and the search's ×; the list shows the count. */}
+      <span
+        className={cn(
+          "hidden",
+          on ? "max-[380px]:inline" : "max-[330px]:inline"
+        )}
+      >
         {on ? "Here" : `Here · ${count}`}
       </span>
     </InputGroupButton>

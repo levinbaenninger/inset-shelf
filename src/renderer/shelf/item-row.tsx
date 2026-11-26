@@ -608,9 +608,9 @@ const Picture = ({
     aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
-      // A third of the row, and 4rem in a shelf under 340 px, so the words beside it keep room to read; open, as
+      // A third of the row, and 4rem in a shelf under 330 px, so the words beside it keep room to read; open, as
       // wide as the picture shows (12rem tall at most), so its pins stay on what they mark.
-      compact ? "w-[clamp(4rem,32%,6rem)] max-[340px]:w-16" : "w-fit max-w-full"
+      compact ? "w-[clamp(4rem,32%,6rem)] max-[330px]:w-16" : "w-fit max-w-full"
     )}
     draggable
     data-row-keys
