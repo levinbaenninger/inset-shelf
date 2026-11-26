@@ -70,7 +70,12 @@ import { Note } from "./note";
 import { bindRow } from "./row-actions";
 import type { RowActions } from "./row-actions";
 import { contextMenuAt, DONE, EDITING, WORDS } from "./row-look";
-import { checkedSteps, ROW_CAPS, rowParts } from "./row-parts";
+import {
+  checkedSteps,
+  LINKS_FOLD_AFTER,
+  ROW_CAPS,
+  rowParts,
+} from "./row-parts";
 import type { RowOpen } from "./row-parts";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
@@ -208,10 +213,13 @@ const sameHost = (a: string, b: string): boolean => {
 
 /** One link of a copied selection: its words, and its site under them when both don't fit on one line. */
 const LinkRow = ({
+  fold,
   link,
   onOpenLink,
   siteShown,
 }: {
+  /** On one line, its site cut short, where the row is long already. */
+  readonly fold: boolean;
   readonly link: TextItem["links"][number];
   readonly onOpenLink: (url: string) => void;
   /** The site already shows on the source line above: it isn't named again. */
@@ -235,8 +243,13 @@ const LinkRow = ({
         icon={Link01Icon}
         size={12}
       />
-      {/* The site goes under the words when both don't fit on one line, so it stays readable. */}
-      <span className="flex min-w-0 flex-wrap gap-x-1.5">
+      {/* The site goes under the words when both don't fit on one line, so it stays readable, unless the row folds it. */}
+      <span
+        className={cn(
+          "flex min-w-0 gap-x-1.5",
+          fold ? "flex-nowrap" : "flex-wrap"
+        )}
+      >
         <span className="max-w-full truncate">{link.text}</span>
         {link.text === link.url || siteShown ? null : (
           <span className="text-muted-foreground max-w-full truncate">
@@ -250,10 +263,13 @@ const LinkRow = ({
 
 /** The links in a copied selection, listed while the item is open; each opens in the browser. */
 export const LinkList = ({
+  fold = false,
   links,
   onOpenLink,
   sourceUrl = null,
 }: {
+  /** Each link on one line. */
+  readonly fold?: boolean;
   readonly links: TextItem["links"];
   readonly onOpenLink: (url: string) => void;
   /** The page the source line above names: a link on the same site doesn't name it again. */
@@ -262,6 +278,7 @@ export const LinkList = ({
   <div className="flex flex-col gap-0.5">
     {links.map((link) => (
       <LinkRow
+        fold={fold}
         key={link.url}
         link={link}
         onOpenLink={onOpenLink}
@@ -864,8 +881,8 @@ const TextBody = ({
   readonly item: TextItem;
   readonly selected: boolean;
   readonly editing: boolean;
-  /** The open row lists the links its words held. */
-  readonly links: boolean;
+  /** The links its words held, which the open row lists: each folded to one line when its description is long. */
+  readonly links: "none" | "listed" | "folded";
 } & Pick<
   RowHandlers,
   | "onContextMenu"
@@ -939,7 +956,13 @@ const TextBody = ({
           />
         </button>
       )}
-      {links ? <LinkList links={item.links} onOpenLink={onOpenLink} /> : null}
+      {links === "none" ? null : (
+        <LinkList
+          fold={links === "folded"}
+          links={item.links}
+          onOpenLink={onOpenLink}
+        />
+      )}
     </>
   );
 };
@@ -995,6 +1018,7 @@ const moreSteps = ({ more, moreDone }: { more: number; moreDone: number }) =>
  */
 const Expansion = ({
   item,
+  onDescriptionLines,
   onReopenWindow,
   onShowDetails,
   onToggleStep,
@@ -1002,6 +1026,8 @@ const Expansion = ({
 }: {
   readonly open: RowOpen;
   readonly item: ShelfItem;
+  /** How many lines the description takes whole. */
+  readonly onDescriptionLines: (lines: number) => void;
   readonly onToggleStep: (step: Step) => void;
   readonly onReopenWindow: (window: WindowRef) => void;
   readonly onShowDetails: () => void;
@@ -1034,6 +1060,7 @@ const Expansion = ({
         <Clamp
           className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
           lines={ROW_CAPS.description}
+          onLines={onDescriptionLines}
           what="the description"
         >
           {item.description.trim()}
@@ -1147,6 +1174,20 @@ const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
   open: "bg-pin/10 ring-pin ring-2 ring-inset",
 };
 
+/** How an open text row lists its links: on one line each once its description passes LINKS_FOLD_AFTER lines. */
+const linksOf = (
+  open: RowOpen | null,
+  descriptionLines: number
+): "none" | "listed" | "folded" => {
+  if (open?.links !== true) {
+    return "none";
+  }
+
+  return open.description && descriptionLines > LINKS_FOLD_AFTER
+    ? "folded"
+    : "listed";
+};
+
 /**
  * The steps checked when the row opened, which it lists last until it opens
  * again (row-parts.ts rowSteps): a step ticked there stays under the pointer.
@@ -1195,6 +1236,7 @@ const RowView = (props: RowViewProps) => {
 
   const badges = badgeNodes(parts.badges, props.now);
   const rowRef = useRef<HTMLLIElement>(null);
+  const [descriptionLines, setDescriptionLines] = useState(0);
 
   useRevealOnOpen(rowRef, selected && !editing);
 
@@ -1264,7 +1306,7 @@ const RowView = (props: RowViewProps) => {
           <TextBody
             editing={editing}
             item={item}
-            links={parts.open?.links === true}
+            links={linksOf(parts.open, descriptionLines)}
             onContextMenu={props.onContextMenu}
             onEdit={props.onEdit}
             onEditText={props.onEditText}
@@ -1314,6 +1356,7 @@ const RowView = (props: RowViewProps) => {
         {parts.open === null ? null : (
           <Expansion
             item={item}
+            onDescriptionLines={setDescriptionLines}
             onReopenWindow={props.onReopenWindow}
             onShowDetails={props.onShowDetails}
             onToggleStep={props.onToggleStep}

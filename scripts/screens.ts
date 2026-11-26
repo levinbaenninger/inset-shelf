@@ -4125,7 +4125,18 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 710);
       },
-      check: reachedDetails(710),
+      // Its description passes three lines, so its link takes one line.
+      check: async (page) => {
+        const link = await boxOf(
+          item(page, 710)
+            .getByRole("button", { name: /^Angebot 2026-114/u })
+            .first()
+        );
+
+        return link.bottom - link.top > 24
+          ? `the link must fold to one line beside a long description: ${link.bottom - link.top}px`
+          : await reachedDetails(710)(page);
+      },
       data: { view: stressView() },
       height: 620,
       name: "stress-open-text",

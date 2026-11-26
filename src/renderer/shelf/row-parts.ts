@@ -63,6 +63,9 @@ export const ROW_CAPS = {
 
 const MAX_BADGES = 3;
 
+/** An open text row's links take one line each once its description passes this many lines. */
+export const LINKS_FOLD_AFTER = 3;
+
 /** A window's thumbnail with the gap after it, and the "+N" after the last one with its gap, in pixels (item-meta.tsx WindowStrip). */
 const WINDOW_STEP = 48 + 6;
 const WINDOW_MORE = 44 + 6;

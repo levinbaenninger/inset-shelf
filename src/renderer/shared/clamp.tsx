@@ -178,10 +178,13 @@ export const Clamp = ({
   less = "Show less",
   lines,
   more = "Show more",
+  onLines,
   what,
 }: {
   readonly children: ReactNode;
   readonly lines: number;
+  /** Told how many lines the words take whole, whether or not they are cut, each time they are measured. */
+  readonly onLines?: (lines: number) => void;
   /** Takes the line-height of the words, which `lines` counts in. */
   readonly className?: string;
   readonly more?: string;
@@ -201,6 +204,7 @@ export const Clamp = ({
 
     setLong(isLong);
     hideCutControls(element, isLong && !open);
+    onLines?.(Math.round(element.scrollHeight / lineHeight(element)));
   });
 
   const label = open ? less : more;
