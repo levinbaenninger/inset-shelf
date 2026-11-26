@@ -3070,6 +3070,17 @@ const openStepsFirst = async (page: Page): Promise<string | null> => {
     return `the open row must list its 5 steps and 3 windows: ${done.length} steps, ${windows} windows`;
   }
 
+  // A box is named by its step alone; checked or not says the rest.
+  const ticked = FULL.steps.find((entry) => entry.done)?.text ?? "";
+
+  const named = await row
+    .getByRole("checkbox", { checked: true, exact: true, name: ticked })
+    .count();
+
+  if (named !== 1) {
+    return `a done step's checkbox must be named by its words, “${ticked}”: ${named} found`;
+  }
+
   return done.at(0) === false &&
     (firstDone === -1 || !done.slice(firstDone).includes(false))
     ? null
@@ -6944,7 +6955,8 @@ const SCENES: readonly Scene[] = [
     act: async (page) => {
       await select(page, 10);
       await item(page, 10)
-        .getByRole("checkbox", { name: /^(?:Done|Not done): /u })
+        .getByRole("list", { name: "Next steps" })
+        .getByRole("checkbox")
         .first()
         .focus();
     },
@@ -6982,7 +6994,10 @@ const SCENES: readonly Scene[] = [
       const controls = new Map([
         [
           "a step's checkbox",
-          row.getByRole("checkbox", { name: /^(?:Done|Not done): /u }).first(),
+          row
+            .getByRole("list", { name: "Next steps" })
+            .getByRole("checkbox")
+            .first(),
         ],
         [
           "a window",

@@ -194,9 +194,7 @@ export const StepChecklist = ({
         key={step.id}
       >
         <Checkbox
-          aria-label={
-            step.done ? `Not done: ${step.text}` : `Done: ${step.text}`
-          }
+          aria-label={step.text}
           checked={step.done}
           className="mt-0.5 size-3.5"
           onCheckedChange={() => {
