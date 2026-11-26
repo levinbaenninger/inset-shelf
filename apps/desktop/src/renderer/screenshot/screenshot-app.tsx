@@ -120,7 +120,7 @@ const Steady = ({
 
 const PILL_LABELS = Object.values(PILL_LABEL);
 
-/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and it stays on its item. */
+/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and it stays on its item. The dimmed button says it on hover. The keyboard never reaches a button that is off, so the failure message ends with it too. */
 const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
 
 /**
@@ -239,8 +239,14 @@ const FOOT_CAPTION =
 /** Shown after the reason a save failed: what it means for the screenshot. */
 const NOT_KEPT = "The screenshot isn’t saved yet.";
 
-/** Why the save failed, reason first, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
-const FailureBar = ({ message }: { readonly message: string }) => (
+/** Why the save failed, reason first, then what `after` says it means for the screenshot, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
+const FailureBar = ({
+  after,
+  message,
+}: {
+  readonly after: string;
+  readonly message: string;
+}) => (
   <div className="shrink-0 bg-black/80 px-3 py-1.5 text-white">
     <p
       className="-mx-1 line-clamp-2 max-h-16 rounded-sm px-1 text-xs leading-4 wrap-break-word outline-none focus-visible:line-clamp-none focus-visible:overflow-y-auto focus-visible:ring-2 focus-visible:ring-white"
@@ -248,10 +254,10 @@ const FailureBar = ({ message }: { readonly message: string }) => (
       // The keyboard reaches the whole message: on focus it unclamps and scrolls.
       // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a clamped message the keyboard must be able to read whole.
       tabIndex={0}
-      title={tooltipText(`${message} ${NOT_KEPT}`)}
+      title={tooltipText(`${message} ${after}`)}
     >
       <span className="font-semibold">{message}</span>{" "}
-      <span className="text-white/75">{NOT_KEPT}</span>
+      <span className="text-white/75">{after}</span>
     </p>
   </div>
 );
@@ -508,7 +514,12 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
           />
         </div>
       </div>
-      {save.state === "failed" ? <FailureBar message={save.message} /> : null}
+      {save.state === "failed" ? (
+        <FailureBar
+          after={sole ? `${NOT_KEPT} ${ANNOTATE_OFF}.` : NOT_KEPT}
+          message={save.message}
+        />
+      ) : null}
     </main>
   );
 };
