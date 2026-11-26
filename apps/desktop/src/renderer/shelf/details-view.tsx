@@ -463,9 +463,10 @@ const StepsEditor = ({
       {steps.map((step, index) => (
         <li className="group/step flex items-start gap-2" key={step.id}>
           <span className="flex h-7 shrink-0 items-center">
+            {/* Named by its words, as in the open row, and checked or not says the rest; a step not typed yet goes by its number. */}
             <Checkbox
               aria-label={
-                step.done ? "Mark step as not done" : "Mark step as done"
+                step.text.trim() === "" ? `Step ${index + 1}` : step.text
               }
               checked={step.done}
               onCheckedChange={() => {

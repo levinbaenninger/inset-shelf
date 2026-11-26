@@ -7165,6 +7165,19 @@ const SCENES: readonly Scene[] = [
     act: async (page) => {
       await details(page, 10);
     },
+    check: async (page) => {
+      // A box is named by its step alone, as in the open row; checked or not says the rest.
+      const ticked = FULL.steps.find((entry) => entry.done)?.text ?? "";
+
+      const named = await page
+        .locator("[data-details]")
+        .getByRole("checkbox", { checked: true, exact: true, name: ticked })
+        .count();
+
+      return named === 1
+        ? null
+        : `in details a done step's checkbox must be named by its words, “${ticked}”: ${named} found`;
+    },
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-details",
