@@ -22,12 +22,22 @@ const window = (
 
 const PR_IN_CHROME = window(
   "Google Chrome",
-  "Fix the build · Pull Request #12"
+  "Fix the build · Pull Request #12",
+  "https://github.com/acme/app/pull/12"
 );
+
+/** Two pages of one web app whose title never changes. */
+const BOARD = "https://tracker.example/board/7";
+const INBOX = "https://tracker.example/inbox";
+
+const tracker = (url: string): FrontRead =>
+  window("Google Chrome", "Tracker", url);
+
+const inChrome = (app: string | null): boolean => app === "Google Chrome";
 
 const NOTES = window("Notes", "Standup");
 
-/** A watcher over a front window the test changes, and everything it read and reported. */
+/** A watcher over a front window the test changes, and everything it read and reported. Only a read that asks for the address learns it. */
 const watched = (options: Partial<FrontWatchDeps> = {}) => {
   let front: FrontRead | null = NOTES;
   let idle = 0;
@@ -44,15 +54,9 @@ const watched = (options: Partial<FrontWatchDeps> = {}) => {
       reads.push(address);
 
       return await Promise.resolve(
-        front === null || !address
+        front === null || address
           ? front
-          : {
-              ...front,
-              source: {
-                ...front.source,
-                url: "https://github.com/acme/app/pull/12",
-              },
-            }
+          : { ...front, source: { ...front.source, url: null } }
       );
     },
     setTimer: (run, ms) => {
@@ -164,22 +168,89 @@ describe(createFrontWatch, () => {
     expect(reads).toStrictEqual([]);
   });
 
-  it("asks for the page address only for an app the shelf holds a page from, and only when the window changed", async () => {
+  it("asks for the page address only for an app the shelf holds a page from, on each read of its window", async () => {
     const { arrived, reads, set, watch } = watched({
-      wantsAddress: (app) => app === "Google Chrome",
+      wantsAddress: inChrome,
     });
 
     watch.start();
 
-    for (const next of [NOTES, PR_IN_CHROME, PR_IN_CHROME]) {
+    for (const next of [NOTES, NOTES, PR_IN_CHROME, PR_IN_CHROME]) {
       set(next);
       watch.activity("pointer");
       // oxlint-disable-next-line no-await-in-loop -- one settled read after each click, in order.
       await vi.advanceTimersByTimeAsync(SETTLE_MS);
     }
 
-    expect(reads).toStrictEqual([false, false, true, false]);
-    expect(arrived.at(-1)?.url).toBe("https://github.com/acme/app/pull/12");
+    expect(reads).toStrictEqual([false, false, false, true, false, true]);
+    expect(arrived).toStrictEqual([NOTES.source, PR_IN_CHROME.source]);
+  });
+
+  it("reports two pages of one app with one title, each by its address, and the return to the first", async () => {
+    const { arrived, set, watch } = watched({ wantsAddress: inChrome });
+
+    watch.start();
+
+    for (const url of [BOARD, INBOX, BOARD]) {
+      set(tracker(url));
+      watch.activity("pointer");
+      // oxlint-disable-next-line no-await-in-loop -- one settled read after each click, in order.
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    }
+
+    expect(arrived.map((source) => source.url)).toStrictEqual([
+      BOARD,
+      INBOX,
+      BOARD,
+    ]);
+  });
+
+  it("reports a page once while its address stays, however often it is read", async () => {
+    const { arrived, set, watch } = watched({ wantsAddress: inChrome });
+
+    watch.start();
+
+    for (const url of [BOARD, BOARD, BOARD]) {
+      set(tracker(url));
+      watch.activity("pointer");
+      // oxlint-disable-next-line no-await-in-loop -- one settled read after each click, in order.
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    }
+
+    expect(arrived.map((source) => source.url)).toStrictEqual([BOARD]);
+  });
+
+  it("notices a new address under one title by the slow poll, with no click", async () => {
+    const { arrived, set, watch } = watched({ wantsAddress: inChrome });
+
+    watch.start();
+    set(tracker(BOARD));
+    await vi.advanceTimersByTimeAsync(POLL_MS + SETTLE_MS);
+    set(tracker(INBOX));
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+
+    expect(arrived.map((source) => source.url)).toStrictEqual([BOARD, INBOX]);
+  });
+
+  it("never reads on the poll while the user types: it waits for a pause", async () => {
+    const { reads, set, watch } = watched({ wantsAddress: inChrome });
+
+    watch.start();
+    set(tracker(BOARD));
+    await vi.advanceTimersByTimeAsync(POLL_MS - 100);
+
+    // Typing through the moment the poll comes due, a key every 400 ms.
+    for (let key = 0; key < 6; key += 1) {
+      watch.activity("key");
+      // oxlint-disable-next-line no-await-in-loop -- keys one after another, as typed.
+      await vi.advanceTimersByTimeAsync(400);
+    }
+
+    expect(reads).toStrictEqual([]);
+
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+
+    expect(reads).toStrictEqual([false, true]);
   });
 
   it("polls only while the machine is in use", async () => {
@@ -193,7 +264,7 @@ describe(createFrontWatch, () => {
 
     setIdle(3);
     set(PR_IN_CHROME);
-    await vi.advanceTimersByTimeAsync(POLL_MS);
+    await vi.advanceTimersByTimeAsync(POLL_MS + SETTLE_MS);
 
     expect(reads).toStrictEqual([false]);
   });
