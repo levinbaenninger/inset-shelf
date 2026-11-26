@@ -85,6 +85,7 @@ const Banner = ({
         less="Show less"
         lines={BANNER_LINES}
         more="Show full message"
+        spare
       >
         {text}
       </Clamp>

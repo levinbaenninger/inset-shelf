@@ -168,8 +168,10 @@ export const CUT_LINES =
  * under them that shows the rest in place; no ellipsis, so a sentence's
  * own full stop never meets one. Words that fit in `lines` lines show whole,
  * with no button; one line more and they are cut, so the cap is the number
- * it says. `what` names the words for the button's accessible name ("Show
- * more of the description").
+ * it says. A message passes `spare`: there a button that costs a line to
+ * save one is worse than none, so one line over still shows whole. `what`
+ * names the words for the button's accessible name ("Show more of the
+ * description").
  */
 export const Clamp = ({
   children,
@@ -178,10 +180,13 @@ export const Clamp = ({
   lines,
   more = "Show more",
   onLines,
+  spare = false,
   what,
 }: {
   readonly children: ReactNode;
   readonly lines: number;
+  /** One line over `lines` still shows whole: for a message, never for a part of a row with a stated cap. */
+  readonly spare?: boolean;
   /** Told how many lines the words take whole, whether or not they are cut, each time they are measured. */
   readonly onLines?: (lines: number) => void;
   /** Takes the line-height of the words, which `lines` counts in. */
@@ -194,14 +199,14 @@ export const Clamp = ({
   // The first control Show more brought into reach, until the keyboard has gone to it or left the button.
   const revealed = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
-  // At least one line would hide: the words are cut until Show more opens them.
+  // More lines would hide than are spared: the words are cut until Show more opens them.
   const [long, setLong] = useState(false);
   const cut = long && !open;
 
   useMeasure(ref, (element) => {
     // The words' whole height, whether or not they are cut now.
     const hidden = element.scrollHeight - lines * lineHeight(element);
-    const isLong = hidden >= lineHeight(element) - 1;
+    const isLong = hidden >= (spare ? 2 : 1) * lineHeight(element) - 1;
 
     setLong(isLong);
     hideCutControls(element, isLong && !open);
@@ -214,6 +219,7 @@ export const Clamp = ({
     <>
       <div
         className={cn(className, cut && CUT_LINES)}
+        data-spare={spare ? "" : undefined}
         ref={ref}
         style={{ "--lines": lines }}
       >

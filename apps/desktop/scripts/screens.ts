@@ -10509,13 +10509,15 @@ const ProblemsSchema = z.array(z.string());
 const strictProblems = async (page: Page): Promise<readonly string[]> =>
   ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));
 
-/** Words under a line cap (clamp.tsx Clamp) show no more lines than it says, until Show more opens them. */
+/** Words under a line cap (clamp.tsx Clamp) show no more lines than it says, until Show more opens them. A message may show one more (its `spare`). */
 const capProblems = async (page: Page): Promise<readonly string[]> =>
   z.array(z.string()).parse(
     await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>("[style*='--lines']")].flatMap(
         (words) => {
-          const cap = Number(words.style.getPropertyValue("--lines"));
+          const cap =
+            Number(words.style.getPropertyValue("--lines")) +
+            (words.dataset.spare === undefined ? 0 : 1);
 
           const line =
             Number(getComputedStyle(words).lineHeight.replace("px", "")) || 20;
