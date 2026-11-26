@@ -407,10 +407,15 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return;
     }
 
-    await reportSaveError(async () => await write);
+    const ended = await reportSaveError(async () => await write);
 
     if (now.write === write) {
       now.write = null;
+
+      // The save gave up waiting and said so; the write has now said why. That reason stands wherever the screenshot is, on the shelf or off it.
+      if (!ended.ok && now.failed !== null) {
+        now.failed = { ...now.failed, message: ended.message };
+      }
 
       if (held === now) {
         retarget();
