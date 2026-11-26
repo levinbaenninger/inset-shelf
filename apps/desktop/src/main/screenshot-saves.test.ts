@@ -1640,6 +1640,22 @@ describe("the adds the card shows after the shelf changed under it", () => {
     expect(offers(card)).toStrictEqual(RETRY_ON_NOTE);
   });
 
+  it("keeps the reason the disk gave, not that saving took too long, once the screenshot is taken off the shelf", async () => {
+    const { card, end } = await waitedOut("shelf");
+
+    end(DISK_REFUSES);
+    await turn();
+    card.controller.apply({ id: rowOf(card), type: "remove" });
+    await turn();
+
+    expect(card.view()?.save).toStrictEqual({
+      message: "The disk is full.",
+      placed: null,
+      state: "failed",
+      to: "shelf",
+    });
+  });
+
   it("attaches once when Add to “…” is pressed twice while the first save runs", async () => {
     const card = setup();
 
