@@ -344,10 +344,9 @@ export type ShotSave =
       readonly to: ShotSaveTo | null;
       readonly message: string;
       /**
-       * Retry is the only add left: the screenshot is in the shelf where
-       * `to` put it, not saved. The user has changed it there since, so the
-       * other add would lose that change; or a write that holds it there is
-       * still on its way, so the other add would leave it in both places.
+       * Retry is the only add left: the screenshot is on the shelf where `to`
+       * put it, not saved, and the shelf owns it there. To add it elsewhere
+       * the user takes it off the shelf first, and both adds come back.
        */
       readonly only: boolean;
     };

@@ -49,8 +49,8 @@ export interface CardAdds {
   };
   readonly line: AddLine | null;
   /**
-   * The screenshot stays on its item, changed there since or held by a write
-   * still on its way: Retry adding to it is the only add, so it is the pill.
+   * The screenshot is on its item, not saved: Retry adding to it is the only
+   * add, so it is the pill.
    */
   readonly sole: boolean;
 }

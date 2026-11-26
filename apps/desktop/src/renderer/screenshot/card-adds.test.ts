@@ -44,7 +44,7 @@ describe(cardAdds, () => {
     });
   });
 
-  it("makes Retry the pill once the screenshot must stay on its item, and only names the item under it", () => {
+  it("makes Retry the pill once the screenshot is on its item, not saved, and only names the item under it", () => {
     expect(
       cardAdds({ save: failed("item", true), target }, false)
     ).toStrictEqual({
@@ -74,7 +74,7 @@ describe(cardAdds, () => {
     });
   });
 
-  it("offers both adds again once a Retry that was the only one fails for another reason", () => {
+  it("offers both adds again once a Retry that was the only one fails with the screenshot off its item", () => {
     expect(
       cardAdds({ save: failed("item", false), target }, true)
     ).toMatchObject({

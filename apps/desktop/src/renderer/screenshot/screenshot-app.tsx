@@ -120,7 +120,7 @@ const Steady = ({
 
 const PILL_LABELS = Object.values(PILL_LABEL);
 
-/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and it stays on its item. The dimmed button says it on hover. The keyboard never reaches a button that is off, so the failure message ends with it too. */
+/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. The dimmed button says it on hover. The keyboard never reaches a button that is off, so the failure message ends with it too. */
 const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
 
 /**
@@ -345,9 +345,9 @@ const FootLine = ({
  * picture dims, Copy shows beside Add to Shelf, and the corner actions show.
  * While a save runs its button reads Saving…; a failed save keeps every
  * action in view, says why under the picture, and offers Retry. Once the
- * screenshot must stay on its item, Retry is the one pill and the line under
- * it only names the item. Dragging the picture into another app drops it as
- * a file.
+ * screenshot is on its item, not saved, Retry is the one pill and the line
+ * under it only names the item. Dragging the picture into another app drops
+ * it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { save, seq, target } = view;

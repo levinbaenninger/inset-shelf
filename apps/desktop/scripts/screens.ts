@@ -6624,10 +6624,10 @@ const retryOnly = (
 
 const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
 
-/** A failed Add to “…” whose Retry is the only add: the screenshot stays on its item. */
+/** A failed Add to “…” whose Retry is the only add: the screenshot is on its item, not saved. */
 const CARD_SOLE = failedCard("item", "The disk is full.", CARD_ITEM, true);
 
-/** The same card once the write that held the screenshot on its item failed too: both adds are back. */
+/** The same card once the user took the screenshot off its item (Discard changes): both adds are back. */
 const CARD_BOTH = failedCard(
   "item",
   "Saving didn’t finish in time.",
@@ -7425,7 +7425,7 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           ? null
           : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
       },
-      // The disk refused the screenshot: trying again can work, so the line offers it.
+      // The disk refused the screenshot's picture file, so nothing is on the shelf: trying again can work, so the line offers it, and Add to Shelf stays.
       data: {
         view: failedCard("item", "The disk is full.", {
           id: uuid(12),
@@ -7463,11 +7463,11 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       name: "screenshot-card-attach-full",
       page: "screenshot",
     },
-    // The screenshot was changed on its item after a failed Add to “…”: it stays there, so Retry is the one add and the one pill.
+    // A failed Add to “…” left the screenshot on its item, not saved: the shelf owns it there, so Retry is the one add and the one pill.
     retryOnly("screenshot-card-retry-only", "The disk is full.", CARD_LABEL),
-    // A write that holds it on its item is still on its way: the same card, for the other reason.
+    // The save gave up waiting for the disk: the same card, for the other reason.
     retryOnly(
-      "screenshot-card-retry-only-landing",
+      "screenshot-card-retry-only-slow",
       "Saving didn’t finish in time.",
       CARD_LABEL
     ),
@@ -7504,7 +7504,7 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       page: "screenshot",
     },
     {
-      // The keyboard is on the only Retry when a late failed write gives both adds back: the picture shows it on Retry adding to “…”, now the line.
+      // The keyboard is on the only Retry when the user takes the screenshot off its item and both adds come back: the picture shows it on Retry adding to “…”, now the line.
       act: async (page) => {
         await page.keyboard.press("Tab");
         await pushCard(page, CARD_BOTH);
