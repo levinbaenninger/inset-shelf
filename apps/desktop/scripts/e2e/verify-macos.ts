@@ -1321,6 +1321,26 @@ const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
   return test();
 };
 
+/** A picture as the shelf file holds it: an image item, or an attached image. */
+const StoredPictureSchema = z.looseObject({
+  image: z.looseObject({ file: z.string() }),
+  kind: z.literal("image"),
+});
+
+/** For each picture file the shelf file names: whether the data folder holds it. */
+const picturesOnDisk = (): boolean[] =>
+  items()
+    .flatMap((item) => [
+      item,
+      ...z.array(z.unknown()).catch([]).parse(item.attachments),
+    ])
+    .flatMap((each) => {
+      const picture = StoredPictureSchema.safeParse(each);
+
+      return picture.success ? [picture.data.image.file] : [];
+    })
+    .map((file) => existsSync(path.join(userData, "attachments", file)));
+
 const SWITCH_TARGET = "Card target note";
 
 /**
@@ -1398,6 +1418,15 @@ const switchDirection = async (
   record(
     `${label}: the card goes once it is saved`,
     await waitUntil(() => !windowText().includes(failedButton), 4000)
+  );
+
+  // The screenshot took its picture file along when it changed place: the file the shelf names is the one written for the first add.
+  const pictures = picturesOnDisk();
+
+  record(
+    `${label}: the picture file the shelf file names is on disk`,
+    pictures.length === 1 && pictures.every(Boolean),
+    `${pictures.length} named, on disk: ${pictures.join(", ")}`
   );
 
   showShelfFromTray();
