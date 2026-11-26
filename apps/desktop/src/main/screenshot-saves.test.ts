@@ -177,6 +177,13 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
 
       return { attached: [attachment], message: null };
     },
+    attachmentToRow: (id, attachmentId) =>
+      controller.apply({
+        attachmentId,
+        id,
+        type: "attachmentToItem",
+        via: "screenshot",
+      }),
     card: {
       hide: () => {
         view = null;
@@ -198,12 +205,6 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       },
       view: () => view,
     },
-    detach: (id, attachmentId) => {
-      controller.apply({ attachmentId, id, type: "dropAttachment" });
-    },
-    dropItem: (id) => {
-      controller.apply({ id, type: "dropItem" });
-    },
     imageUrl: (each) => `inset://shot/${each.seq}`,
     item: controller.item,
     items: () => controller.snapshot().doc.items,
@@ -215,6 +216,19 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     onWrite: (listener) => controller.onWrite(listener),
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
+    rowToAttachment: (from, id) => {
+      const attachmentId = AttachmentIdSchema.parse(uuid((next += 1)));
+
+      controller.apply({
+        attachmentId,
+        from,
+        id,
+        name: "Screenshot",
+        type: "itemToAttachment",
+      });
+
+      return { attached: [attachmentId], message: null };
+    },
     saved: (to) => {
       saved.push(to);
     },
@@ -1368,6 +1382,8 @@ describe("a save that gave up waiting while its write was still on its way", () 
 
     await card.giveUpWaiting();
     await adding;
+    // The user deletes the row, so the screenshot is nowhere and the next add writes its file anew.
+    card.controller.apply({ id: rowOf(card), type: "remove" });
     // The newer save: Add to “…”, and the screenshot's file can't be written.
     card.failAttachments(DISK_FULL);
     await card.saves.addToItem(1, card.note);

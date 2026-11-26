@@ -52,6 +52,9 @@ export const SHOT_CHANGED =
 export const SHOT_LANDING =
   "The screenshot is still being saved where it is, so it stays there for now.";
 
+/** What a move to an item that took nothing says, as `attach` does. */
+const NOT_ATTACHED: AttachResult = { attached: [], message: null };
+
 /** A screenshot the card shows, held in memory: the file may be moved or deleted meanwhile. */
 export interface Shot {
   /** Changes with every screenshot; the card's actions name it, so they never reach a newer one. */
@@ -86,10 +89,18 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly addItem: (shot: S) => Promise<ItemId | null>;
   /** Attaches the screenshot to an item. Throws when its file can't be written. */
   readonly attach: (shot: S, id: ItemId) => Promise<AttachResult>;
-  /** Takes the screenshot's own item off the shelf for good: Undo brings nothing back. */
-  readonly dropItem: (id: ItemId) => void;
-  /** Takes the screenshot off an item for good, the same way. */
-  readonly detach: (id: ItemId, attachment: AttachmentId) => void;
+  /**
+   * Makes the screenshot's own row an attachment of `id`, with the picture
+   * file it has. One step of the shelf, so no shelf, shown or written, holds
+   * the screenshot twice or not at all, and Undo brings nothing back. Attaches
+   * nothing, and leaves the row, when the item can't take it.
+   */
+  readonly rowToAttachment: (row: ItemId, id: ItemId) => AttachResult;
+  /** Makes the screenshot attached to `id` an item of its own, the same way; null when the shelf refuses it, and the attachment stays. */
+  readonly attachmentToRow: (
+    id: ItemId,
+    attachment: AttachmentId
+  ) => ItemId | null;
   /** The write of every change so far, however long the disk takes: how it ended. The card's wait for it has a limit, the write has none. */
   readonly persisted: () => Promise<WriteResult>;
   /** Runs `run` after `ms`, unless the function it returns is called first. */
@@ -151,9 +162,9 @@ interface Held<S extends Shot> {
   readonly shot: S;
   /**
    * The one place a save put it. Retry after a failed save finds it there
-   * and doesn't place it twice; the other destination takes it from there
-   * first, so the shelf never holds it twice, and only while it stands
-   * there as the card placed it (`Standing`).
+   * and doesn't place it twice; the other destination moves it from there
+   * in one step of the shelf, so the shelf never holds it twice or not at
+   * all, and only while it stands there as the card placed it (`Standing`).
    */
   placed: Placement | null;
   /** A save is under way: a second click waits for it. */
@@ -388,25 +399,23 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   };
 
   /**
-   * The screenshot leaves its place before it goes to the other destination,
-   * so no shelf, shown or written, holds it twice. It removes only what
-   * stands as the card made it, never a row or an attachment the disk
+   * The screenshot attached to an item becomes a row of its own, in one step
+   * of the shelf: no shelf, shown or written, holds it twice or not at all,
+   * and a shelf that can't take it leaves it where it was. It moves only
+   * what stands as the card made it, never a row or an attachment the disk
    * holds, a write on its way holds or the user changed; `free` turned those
    * presses away in this same turn.
    */
-  const takeBack = (now: Held<S>, at: Standing | null): void => {
-    if (at?.state !== "placed") {
-      return;
-    }
+  const toRow = (at: Standing): ItemId | null =>
+    at.state === "placed" && at.placed.to === "item"
+      ? deps.attachmentToRow(at.placed.item, at.placed.attachment)
+      : null;
 
-    now.placed = null;
-
-    if (at.placed.to === "shelf") {
-      deps.dropItem(at.placed.item);
-    } else {
-      deps.detach(at.placed.item, at.placed.attachment);
-    }
-  };
+  /** The same move the other way: the screenshot's own row becomes an attachment of `id`. */
+  const toAttachment = (at: Standing, id: ItemId): AttachResult =>
+    at.state === "placed" && at.placed.to === "shelf"
+      ? deps.rowToAttachment(at.placed.item, id)
+      : NOT_ATTACHED;
 
   // Whichever write lands the screenshot or starts to hold it, the card says so at once.
   deps.onWrite(retarget);
@@ -529,9 +538,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { id: at.placed.item, ok: true };
         }
 
-        takeBack(now, at);
-
-        const id = await deps.addItem(now.shot);
+        // Nowhere yet, its picture is written and it is added; on an item, it moves from there.
+        const id = at === null ? await deps.addItem(now.shot) : toRow(at);
         const row = id === null ? undefined : deps.item(id);
 
         if (row === undefined) {
@@ -582,10 +590,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { id, ok: true };
         }
 
-        // No item holds it now, so the card names this one only while it could take it.
-        takeBack(now, at);
-
-        const result = await deps.attach(now.shot, id);
+        // Nowhere yet, its picture is written and attached; on its own row, it moves from there.
+        const result =
+          at === null ? await deps.attach(now.shot, id) : toAttachment(at, id);
 
         const tile = deps
           .item(id)
