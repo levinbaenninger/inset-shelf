@@ -13,23 +13,33 @@ const ITEM_LEAD = { failed: "Retry adding to", idle: "Add to" } as const;
 /** Under Retry, once it is the only add: where it adds to. After the pill's word it reads as ITEM_LEAD.failed does. */
 const SOLE_LEAD = "adding to";
 
+/**
+ * Where an add puts the screenshot, as one word: the shelf, or one item. The
+ * card keeps one button for each, whether it is drawn as the pill or as the
+ * line. So a button the keyboard is on never comes to add somewhere else, and
+ * when its add moves between the line and the pill, the keyboard moves with it.
+ */
+export type AddId = "shelf" | `item:${string}`;
+
 /** The line of words under the pill. */
 export type AddLine =
   /** Add to “…”, or Retry adding to “…” with the name on a second line: a press adds to the item. */
   | {
+      readonly add: AddId;
       readonly kind: "add";
       readonly lead: string;
       readonly name: string;
       readonly stacked: boolean;
     }
   /** That add while it writes. */
-  | { readonly kind: "saving" }
+  | { readonly add: AddId; readonly kind: "saving" }
   /** Only names the item the pill's Retry adds to: not a button. */
   | { readonly kind: "caption"; readonly lead: string; readonly name: string };
 
 /** The card's adds: the white pill, and the line under it when an item can be named. */
 export interface CardAdds {
   readonly pill: {
+    readonly add: AddId;
     /** The word on it. */
     readonly label: string;
     /** Its whole name, for a screen reader. */
@@ -61,18 +71,26 @@ export const cardAdds = (
   wasSole: boolean
 ): CardAdds => {
   const shelf = PILL_LABEL[stateOf(save, "shelf")];
-  const toShelf = { label: shelf, name: shelf, to: "shelf" } as const;
+
+  const toShelf = {
+    add: "shelf",
+    label: shelf,
+    name: shelf,
+    to: "shelf",
+  } as const;
 
   if (target === null) {
     return { line: null, pill: toShelf, sole: false };
   }
 
   const item = stateOf(save, "item");
+  const toItem: AddId = `item:${target.id}`;
 
   if (item !== "idle" && (save.state === "failed" ? save.only : wasSole)) {
     return {
       line: { kind: "caption", lead: SOLE_LEAD, name: target.label },
       pill: {
+        add: toItem,
         label: PILL_LABEL[item],
         name:
           item === "failed"
@@ -87,8 +105,9 @@ export const cardAdds = (
   return {
     line:
       item === "saving"
-        ? { kind: "saving" }
+        ? { add: toItem, kind: "saving" }
         : {
+            add: toItem,
             kind: "add",
             lead: ITEM_LEAD[item],
             name: target.label,

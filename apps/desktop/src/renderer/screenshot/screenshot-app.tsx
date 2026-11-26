@@ -11,6 +11,7 @@ import { cn } from "@inset/ui/lib/utils";
 import type { ScreenshotView } from "@shared/contracts";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ComponentProps, RefObject } from "react";
 
 import {
   Tooltip,
@@ -24,7 +25,7 @@ import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
 
 import { cardAdds, PILL_LABEL } from "./card-adds";
-import type { AddLine } from "./card-adds";
+import type { AddId, AddLine } from "./card-adds";
 import { fitName } from "./fit-name";
 
 const api = screenshotBridge();
@@ -255,12 +256,51 @@ const FailureBar = ({ message }: { readonly message: string }) => (
   </div>
 );
 
+/** The add whose button left the card with the keyboard on it, until the card has drawn what replaces it. */
+type Carried = RefObject<AddId | null>;
+
+/**
+ * The button of one add, drawn as the pill or as the line. Its add is its
+ * `key` at both places, so React never turns it into the button of another
+ * add: a press goes where the button said when the keyboard came to it. When
+ * it leaves with the keyboard on it and the same add is drawn at the other
+ * place in the same change, that button takes the keyboard.
+ */
+const AddButton = ({
+  add,
+  carried,
+  ...props
+}: ComponentProps<typeof Button> & {
+  readonly add: AddId;
+  readonly carried: Carried;
+}) => {
+  const button = useRef<HTMLButtonElement>(null);
+
+  useLayoutEffect(() => {
+    const { current } = button;
+
+    if (carried.current === add) {
+      current?.focus();
+    }
+
+    return () => {
+      if (current !== null && current === document.activeElement) {
+        carried.current = add;
+      }
+    };
+  }, [add, carried]);
+
+  return <Button ref={button} {...props} />;
+};
+
 /** The line of words under the pill, between the bottom corner buttons. */
 const FootLine = ({
+  carried,
   line,
   onAdd,
   saving,
 }: {
+  readonly carried: Carried;
   readonly line: AddLine;
   readonly onAdd: () => void;
   readonly saving: boolean;
@@ -271,12 +311,15 @@ const FootLine = ({
       <Quoted lead={line.lead} name={line.name} />
     </p>
   ) : (
-    <Button
+    <AddButton
+      add={line.add}
       aria-disabled={saving ? true : undefined}
       aria-label={
         line.kind === "saving" ? "Saving…" : `${line.lead} “${line.name}”`
       }
+      carried={carried}
       className="w-full"
+      key={line.add}
       onClick={onAdd}
       size="line"
       variant="overlay-text"
@@ -286,7 +329,7 @@ const FootLine = ({
       ) : (
         <Quoted lead={line.lead} name={line.name} stacked={line.stacked} />
       )}
-    </Button>
+    </AddButton>
   );
 
 /**
@@ -304,12 +347,18 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { save, seq, target } = view;
   const [held, setHeld] = useState(false);
   const [wasSole, setWasSole] = useState(false);
+  const carried = useRef<AddId | null>(null);
   const saving = save.state === "saving";
   const { line, pill, sole } = cardAdds(view, wasSole);
 
   if (sole !== wasSole) {
     setWasSole(sole);
   }
+
+  // After the add buttons drawn in this change had their turn: an add that left and wasn't drawn again hands the keyboard to no later button.
+  useLayoutEffect(() => {
+    carried.current = null;
+  });
 
   const addToItem = (): void => {
     if (!saving && target !== null) {
@@ -336,15 +385,18 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
         */}
         <div className="absolute inset-x-12 bottom-3 z-10 flex flex-col items-center gap-y-1">
           <div className="relative flex">
-            <Button
+            <AddButton
+              add={pill.add}
               aria-disabled={saving ? true : undefined}
               aria-label={pill.name}
+              carried={carried}
+              key={pill.add}
               onClick={pill.to === "item" ? addToItem : addToShelf}
               size="pill-sm"
               variant="overlay"
             >
               <Steady labels={PILL_LABELS} shown={pill.label} />
-            </Button>
+            </AddButton>
             {/* An icon, not the word: beside Add to Shelf in the card's middle, the word would reach under the corner button. */}
             <span
               className={cn(
@@ -371,7 +423,12 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             </span>
           </div>
           {line === null ? null : (
-            <FootLine line={line} onAdd={addToItem} saving={saving} />
+            <FootLine
+              carried={carried}
+              line={line}
+              onAdd={addToItem}
+              saving={saving}
+            />
           )}
         </div>
         <button

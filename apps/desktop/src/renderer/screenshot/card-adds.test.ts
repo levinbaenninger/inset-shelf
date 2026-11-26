@@ -17,7 +17,12 @@ describe(cardAdds, () => {
       cardAdds({ save: { state: "idle" }, target: null }, false)
     ).toStrictEqual({
       line: null,
-      pill: { label: "Add to Shelf", name: "Add to Shelf", to: "shelf" },
+      pill: {
+        add: "shelf",
+        label: "Add to Shelf",
+        name: "Add to Shelf",
+        to: "shelf",
+      },
       sole: false,
     });
   });
@@ -45,6 +50,7 @@ describe(cardAdds, () => {
     ).toStrictEqual({
       line: { kind: "caption", lead: "adding to", name: target.label },
       pill: {
+        add: `item:${target.id}`,
         label: "Retry",
         name: "Retry adding to “Quote from the movers”",
         to: "item",
@@ -82,6 +88,7 @@ describe(cardAdds, () => {
     expect(
       cardAdds({ save: failed("shelf", true), target: null }, false).pill
     ).toStrictEqual({
+      add: "shelf",
       label: "Retry",
       name: "Retry",
       to: "shelf",
@@ -92,5 +99,38 @@ describe(cardAdds, () => {
       line: { kind: "add", lead: "Add to" },
       pill: { label: "Retry", to: "shelf" },
     });
+  });
+
+  it("gives Retry on the item one add, as the line and as the only pill, so the card keeps one button for it", () => {
+    const line = cardAdds({ save: failed("item", false), target }, true);
+    const pill = cardAdds({ save: failed("item", true), target }, false);
+
+    expect(line.line).toMatchObject({ add: `item:${target.id}`, kind: "add" });
+    expect(pill.pill.add).toBe(`item:${target.id}`);
+    // Add to Shelf is another add: its button is never the one Retry had.
+    expect(line.pill.add).toBe("shelf");
+  });
+
+  it("keeps that add while it writes, in either place", () => {
+    const saving = { save: { state: "saving", to: "item" }, target } as const;
+
+    expect(cardAdds(saving, true).pill.add).toBe(`item:${target.id}`);
+    expect(cardAdds(saving, false).line).toStrictEqual({
+      add: `item:${target.id}`,
+      kind: "saving",
+    });
+  });
+
+  it("makes adding to another item another add", () => {
+    const other = {
+      id: ItemIdSchema.parse("7b2d4c1a-9e3f-4d55-8a6b-1c0f2e3d4b5a"),
+      label: target.label,
+    };
+
+    const add = (to: typeof target) =>
+      cardAdds({ save: { state: "idle" }, target: to }, false).line;
+
+    expect(add(target)).toMatchObject({ add: `item:${target.id}` });
+    expect(add(other)).toMatchObject({ add: `item:${other.id}` });
   });
 });
