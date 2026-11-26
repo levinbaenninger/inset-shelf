@@ -45,7 +45,7 @@ const missedNotice = (named: ItemId | null, exists: boolean): string => {
   return named === null ? CARD_CLEARED : CARD_RETARGETED;
 };
 
-/** A press of the other add that reached main after the first add put the screenshot on the shelf: it stays there, and the shelf owns it. */
+/** A press of an add that found the screenshot on the shelf in another place, when it reached main or once its picture file was written: it stays there, and the shelf owns it. */
 export const SHOT_STAYS =
   "The screenshot stays where it was added. Retry saves it there.";
 
@@ -79,10 +79,14 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly selection: () => ItemId | null;
   readonly shelfVisible: () => boolean;
   readonly now: () => number;
-  /** Makes the screenshot an item in the section new items go to; null when the shelf refuses it. Throws when its file can't be written. */
-  readonly addItem: (shot: S) => Promise<ItemId | null>;
-  /** Attaches the screenshot to an item. Throws when its file can't be written. */
-  readonly attach: (shot: S, id: ItemId) => Promise<AttachResult>;
+  /** Writes the screenshot's picture file into the data folder, for a place still to be made, and returns its name there. Throws when it can't be written. */
+  readonly writePicture: (shot: S) => Promise<string>;
+  /** A picture file written for a place that was then not made: it goes. */
+  readonly dropPicture: (file: string) => void;
+  /** Makes the screenshot, with its picture file written, an item in the section new items go to; null when the shelf refuses it. Awaits nothing, so what the card read of the shelf just before still holds. */
+  readonly addItem: (shot: S, file: string) => ItemId | null;
+  /** Attaches the screenshot, with its picture file written, to an item, and deletes the file when the item doesn't take it. Awaits nothing, as `addItem`. */
+  readonly attach: (shot: S, file: string, id: ItemId) => AttachResult;
   /** The write of every change so far, however long the disk takes: how it ended. The card's wait for it has a limit, the write has none. */
   readonly persisted: () => Promise<WriteResult>;
   /** Runs `run` after `ms`, unless the function it returns is called first. */
@@ -130,8 +134,8 @@ interface Shown {
 
 interface Held<S extends Shot> {
   readonly shot: S;
-  /** Where the last add put it. Only an add that places it anew replaces this: the user's Undo can bring a place back. */
-  placed: Placement | null;
+  /** Every place an add put it, newest first. None is forgotten: the user's Undo can bring any of them back. */
+  places: readonly Placement[];
   /** The add a save of it runs for: a second click waits for it. */
   saving: ShotSaveTo | null;
   /** How its last save failed, and the add that reads Retry for it; null before one failed, and while one runs. */
@@ -144,12 +148,16 @@ interface Held<S extends Shot> {
 
 type Placed =
   | { readonly ok: true; readonly id: ItemId }
+  /** Nothing was placed: by the time the picture file was written, the user's Undo had the screenshot back on the shelf. */
+  | { readonly ok: false; readonly message: string; readonly stays: true }
   | {
       readonly ok: false;
       readonly message: string;
       /** False when trying again can't help: the item holds all it can. */
       readonly retry?: false;
     };
+
+const STAYS: Placed = { message: SHOT_STAYS, ok: false, stays: true };
 
 const isFull = (item: ShelfItem | undefined): boolean =>
   item !== undefined && item.attachments.length >= ATTACHMENTS_MAX;
@@ -202,19 +210,12 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   // The item Add to “…” adds to, as the card's view last said: a press that names another is refused.
   let cardItem: ItemId | null = null;
 
-  /** The item Add to Shelf made of the card's screenshot: Add to “…” never names it, a screenshot isn't attached to itself. */
-  const ownItem = (): ItemId | null =>
-    held?.placed?.to === "shelf" ? held.placed.item : null;
-
   /** The newest item, while the user can still know it is the one just made. */
   const recentItem = (): ItemId | null => {
     let newest: ShelfItem | null = null;
 
     for (const each of deps.items()) {
-      if (
-        each.id !== ownItem() &&
-        (newest === null || each.createdAt > newest.createdAt)
-      ) {
+      if (newest === null || each.createdAt > newest.createdAt) {
         newest = each;
       }
     }
@@ -228,26 +229,46 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   /**
    * What Add to “…” names: an item the user can know. That is the item open
    * on the visible shelf, else the item made in the last two minutes; never a
-   * selection on a hidden shelf, which may be hours old.
+   * selection on a hidden shelf, which may be hours old. Asked only while
+   * the shelf shows the screenshot nowhere, so it never names the
+   * screenshot's own row.
    */
-  const candidate = (): ItemId | null => {
-    const selected = deps.shelfVisible() ? deps.selection() : null;
+  const candidate = (): ItemId | null =>
+    (deps.shelfVisible() ? deps.selection() : null) ?? recentItem();
 
-    return selected === null || selected === ownItem()
-      ? recentItem()
-      : selected;
+  /**
+   * Where the shelf shows the screenshot now: the newest place an add made
+   * that is still there, or that the user's Undo brought back. Null before
+   * an add placed it, and while the user has it off every one of them.
+   */
+  const shown = (now: Held<S>): Shown | null => {
+    for (const at of now.places) {
+      const holder = deps.item(at.item);
+
+      if (holder !== undefined && within(holder, at) !== undefined) {
+        return { at, holder };
+      }
+    }
+
+    return null;
   };
 
-  /** Where the shelf shows the screenshot now; null before an add placed it, and once the user took it off. */
-  const shown = (now: Held<S>): Shown | null => {
-    const at = now.placed;
-    const holder = at === null ? undefined : deps.item(at.item);
+  /**
+   * The screenshot's picture file, written for a place still to be made.
+   * Null when the shelf shows the screenshot by then, since the user can
+   * Undo a delete while the file is written: nothing is placed, and the file
+   * is gone again. The caller awaits nothing between this and placing.
+   */
+  const pictureFor = async (now: Held<S>): Promise<string | null> => {
+    const file = await deps.writePicture(now.shot);
 
-    return at === null ||
-      holder === undefined ||
-      within(holder, at) === undefined
-      ? null
-      : { at, holder };
+    if (shown(now) === null) {
+      return file;
+    }
+
+    deps.dropPicture(file);
+
+    return null;
   };
 
   /** A write landed the screenshot where it is. */
@@ -477,6 +498,14 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return placed;
     }
 
+    // Nothing failed: the screenshot is where the user's Undo put it back, and the card says how it stands there.
+    if ("stays" in written) {
+      deps.notify(written.message, "failed");
+      retarget();
+
+      return null;
+    }
+
     if (!mine) {
       deps.notify(written.message, "failed");
 
@@ -510,16 +539,24 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { id: at.item, ok: true };
         }
 
-        const id = await deps.addItem(now.shot);
+        const file = await pictureFor(now);
+
+        if (file === null) {
+          return STAYS;
+        }
+
+        const id = deps.addItem(now.shot, file);
 
         if (id === null) {
+          deps.dropPicture(file);
+
           return {
             message: "The shelf couldn’t take the screenshot.",
             ok: false,
           };
         }
 
-        now.placed = { item: id, to: "shelf" };
+        now.places = [{ item: id, to: "shelf" }, ...now.places];
 
         return { id, ok: true };
       });
@@ -556,7 +593,13 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { id, ok: true };
         }
 
-        const result = await deps.attach(now.shot, id);
+        const file = await pictureFor(now);
+
+        if (file === null) {
+          return STAYS;
+        }
+
+        const result = deps.attach(now.shot, file, id);
 
         const tile = deps
           .item(id)
@@ -572,7 +615,10 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
             : { message, ok: false };
         }
 
-        now.placed = { attachment: tile.id, item: id, to: "item" };
+        now.places = [
+          { attachment: tile.id, item: id, to: "item" },
+          ...now.places,
+        ];
 
         return { id, ok: true };
       });
@@ -595,7 +641,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     show: (shot: S): void => {
       const now: Held<S> = {
         failed: null,
-        placed: null,
+        places: [],
         saving: null,
         shot,
         tried: null,

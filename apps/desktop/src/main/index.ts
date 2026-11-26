@@ -850,20 +850,20 @@ const start = async (): Promise<void> => {
     writeAttachment: async (png) => await store.writeAttachment(png),
   });
 
-  /** Makes the card's screenshot an item in the section new items go to; the trials' log and the tutorial's screenshot step hear of it. */
-  const addShotItem = async (current: CardShot) => {
-    const { scaleFactor } = screen.getDisplayNearestPoint(
-      screen.getCursorScreenPoint()
-    );
+  /** The card's screenshot as the shelf keeps a picture, once its file is written, at the scale of the display the pointer is on. */
+  const shotImage = (current: CardShot, file: string) => ({
+    file,
+    heightPx: current.heightPx,
+    pixelsPerDip: screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+      .scaleFactor,
+    widthPx: current.widthPx,
+  });
 
+  /** Makes the card's screenshot an item in the section new items go to; the trials' log and the tutorial's screenshot step hear of it. */
+  const addShotItem = (current: CardShot, file: string) => {
     const id = controller.apply({
       context: null,
-      image: {
-        file: await store.writeAttachment(current.png),
-        heightPx: current.heightPx,
-        pixelsPerDip: scaleFactor,
-        widthPx: current.widthPx,
-      },
+      image: shotImage(current, file),
       pins: [],
       source: null,
       type: "addImage",
@@ -879,25 +879,12 @@ const start = async (): Promise<void> => {
   };
 
   /** The screenshot attached to an item, named as the system names a screenshot. */
-  const attachShotTo = async (current: CardShot, id: ItemId) => {
-    const { scaleFactor } = screen.getDisplayNearestPoint(
-      screen.getCursorScreenPoint()
-    );
-
-    return attachResult(
+  const attachShotTo = (current: CardShot, file: string, id: ItemId) =>
+    attachResult(
       attachments.attachTo(id, [
-        await attachments.storePicture(
-          {
-            heightPx: current.heightPx,
-            png: current.png,
-            widthPx: current.widthPx,
-          },
-          shotName(),
-          scaleFactor
-        ),
+        { image: shotImage(current, file), kind: "image", name: shotName() },
       ])
     );
-  };
 
   /** The item selected or open in details in the shelf, or null; the page reports it. */
   let shelfSelection: ItemId | null = null;
@@ -949,6 +936,9 @@ const start = async (): Promise<void> => {
       update: screenshotCard.update,
       view: screenshotCard.view,
     },
+    dropPicture: (file) => {
+      void store.deleteAttachment(file);
+    },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
     items: () => controller.snapshot().doc.items,
@@ -969,6 +959,7 @@ const start = async (): Promise<void> => {
     setTimer,
     shelfVisible: () => shelf.isVisible(),
     stored: controller.stored,
+    writePicture: async (current) => await store.writeAttachment(current.png),
   });
 
   let shotSeq = 0;

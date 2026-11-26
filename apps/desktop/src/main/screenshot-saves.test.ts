@@ -43,11 +43,15 @@ const shot = (seq: number): Shot => ({
 
 const ITEM_FULL = `Nothing was attached. An item holds up to ${ATTACHMENTS_MAX}.`;
 
-const pictureAttachment = (id: AttachmentId, each: Shot) => ({
+const pictureAttachment = (
+  id: AttachmentId,
+  each: Shot,
+  file = `${id}.png`
+) => ({
   addedAt: new Date(NOW).toISOString(),
   id,
   image: {
-    file: `${id}.png`,
+    file,
     heightPx: each.heightPx,
     pixelsPerDip: 2,
     widthPx: each.widthPx,
@@ -134,17 +138,11 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   clock = NOW;
 
   const saves = createShotSaves<Shot>({
-    addItem: async (each) => {
-      await turn();
-
-      if (attachmentWrites !== null) {
-        throw attachmentWrites;
-      }
-
-      return controller.apply({
+    addItem: (each, file) =>
+      controller.apply({
         context: null,
         image: {
-          file: `${uuid(90 + each.seq)}.png`,
+          file,
           heightPx: each.heightPx,
           pixelsPerDip: 2,
           widthPx: each.widthPx,
@@ -153,15 +151,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
         source: null,
         type: "addImage",
         via: "screenshot",
-      });
-    },
-    attach: async (each, id) => {
-      await turn();
-
-      if (attachmentWrites !== null) {
-        throw attachmentWrites;
-      }
-
+      }),
+    attach: (each, file, id) => {
       // A full item takes nothing, as attachResult in attachments.ts says it.
       if ((controller.item(id)?.attachments.length ?? 0) >= ATTACHMENTS_MAX) {
         return { attached: [], message: ITEM_FULL };
@@ -171,12 +162,15 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
 
       attached.push(id);
       controller.apply({
-        attachments: [pictureAttachment(attachment, each)],
+        attachments: [pictureAttachment(attachment, each, file)],
         id,
         type: "attach",
       });
 
       return { attached: [attachment], message: null };
+    },
+    dropPicture: (file) => {
+      dropped.push(file);
     },
     card: {
       hide: () => {
@@ -228,6 +222,15 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     shelfVisible: () => shelfVisible,
     stored: (id) => controller.stored(id),
+    writePicture: async () => {
+      await turn();
+
+      if (attachmentWrites !== null) {
+        throw attachmentWrites;
+      }
+
+      return `${uuid((next += 1))}.png`;
+    },
   });
 
   // As index.ts wires it: the card looks again after every change to the shelf or its save.
