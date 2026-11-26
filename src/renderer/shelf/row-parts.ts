@@ -176,6 +176,23 @@ const openOf = (
   windows: item.windows.length,
 });
 
+/** How an open text row lists the links its words held, if it has any. */
+export type RowLinks = "none" | "listed" | "folded";
+
+/** The links on one line each once the description takes more than LINKS_FOLD_AFTER lines whole (its own Clamp counts them). */
+export const linksOf = (
+  open: RowOpen | null,
+  descriptionLines: number
+): RowLinks => {
+  if (open?.links !== true) {
+    return "none";
+  }
+
+  return open.description && descriptionLines > LINKS_FOLD_AFTER
+    ? "folded"
+    : "listed";
+};
+
 /** `checkedAtOpen`: the steps checked when the row opened (checkedSteps), which the row lists last. */
 export const rowParts = (
   item: ShelfItem,

@@ -4,6 +4,7 @@ import type { z } from "zod";
 
 import {
   checkedSteps,
+  linksOf,
   ROW_CAPS,
   rowParts,
   rowSteps,
@@ -247,6 +248,22 @@ describe("an open row's caps", () => {
       steps: { more: 15, moreDone: 0 },
       windows: 10,
     });
+  });
+
+  it("folds an open text row's links to one line each once its description passes three lines", () => {
+    const { open } = rowParts(
+      text({
+        description: "Why",
+        links: [{ text: "Quote", url: "https://example.com/quote" }],
+      }),
+      true
+    );
+
+    expect([linksOf(open, 3), linksOf(open, 4)]).toStrictEqual([
+      "listed",
+      "folded",
+    ]);
+    expect(linksOf(rowParts(text(), true).open, 9)).toBe("none");
   });
 
   it("puts as many windows on one line as fit, with room for +N when some don't", () => {

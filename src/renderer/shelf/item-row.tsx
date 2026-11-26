@@ -70,13 +70,8 @@ import { Note } from "./note";
 import { bindRow } from "./row-actions";
 import type { RowActions } from "./row-actions";
 import { contextMenuAt, DONE, EDITING, WORDS } from "./row-look";
-import {
-  checkedSteps,
-  LINKS_FOLD_AFTER,
-  ROW_CAPS,
-  rowParts,
-} from "./row-parts";
-import type { RowOpen } from "./row-parts";
+import { checkedSteps, linksOf, ROW_CAPS, rowParts } from "./row-parts";
+import type { RowLinks, RowOpen } from "./row-parts";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
@@ -882,7 +877,7 @@ const TextBody = ({
   readonly selected: boolean;
   readonly editing: boolean;
   /** The links its words held, which the open row lists: each folded to one line when its description is long. */
-  readonly links: "none" | "listed" | "folded";
+  readonly links: RowLinks;
 } & Pick<
   RowHandlers,
   | "onContextMenu"
@@ -1172,20 +1167,6 @@ const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
   full: "ring-destructive/50 ring-2 ring-inset",
   none: null,
   open: "bg-pin/10 ring-pin ring-2 ring-inset",
-};
-
-/** How an open text row lists its links: on one line each once its description passes LINKS_FOLD_AFTER lines. */
-const linksOf = (
-  open: RowOpen | null,
-  descriptionLines: number
-): "none" | "listed" | "folded" => {
-  if (open?.links !== true) {
-    return "none";
-  }
-
-  return open.description && descriptionLines > LINKS_FOLD_AFTER
-    ? "folded"
-    : "listed";
 };
 
 /**
