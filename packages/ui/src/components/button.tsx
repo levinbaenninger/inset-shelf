@@ -30,9 +30,9 @@ const buttonVariants = cva(
         /** A remove badge on a tile's corner: dark glass with a light rim, which shows on a white picture and in the dark theme alike. */
         "overlay-badge":
           "bg-black/70 text-white ring-1 ring-white/80 hover:bg-black/85 focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900",
-        /** The screenshot card's secondary line: dark glass with a light rim, quieter than the white pill, readable on light and dark pictures. */
-        "overlay-quiet":
-          "bg-black/55 text-white ring-1 ring-white/30 backdrop-blur-sm hover:bg-black/70 focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900",
+        /** The screenshot card's second line: small white words on the picture's darkened foot, underlined under the pointer, with no pill of their own. */
+        "overlay-text":
+          "font-normal tracking-tight text-white/90 text-shadow-black/60 text-shadow-xs hover:text-white hover:underline hover:underline-offset-2 focus-visible:border-transparent focus-visible:text-white focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900",
         /** Translucent white over a coloured surface, beside a default button: the web page's sky frames and tiles. */
         light:
           "text-foreground bg-white/80 shadow-[0_1px_2px_rgb(0_0_0/0.05)] ring-1 ring-black/8 backdrop-blur-sm hover:bg-white",
@@ -54,12 +54,10 @@ const buttonVariants = cva(
         /** The screenshot card's main action, a step larger than its others. */
         "pill-sm":
           "h-7 gap-1 rounded-full px-3.5 text-[0.8125rem] font-semibold",
-        /** A small pill: the screenshot card's other actions. */
-        "pill-xs": "h-6 gap-1 rounded-full px-2.5 text-xs",
-        /** pill-xs on two lines: a failed Add to “…” says what Retry goes to under it. */
-        "pill-xs-2": "gap-0 rounded-2xl px-2.5 py-1 text-xs",
+        /** A line of words, as tall as its text, on one line or two: the screenshot card's second line. */
+        line: "h-auto gap-0 rounded-md px-0.5 py-0.5 text-xs leading-4",
         "icon-round": "size-8 rounded-full",
-        /** The screenshot card's Copy, pill-xs tall, beside its main action. */
+        /** The screenshot card's Copy, beside its main action and smaller. */
         "icon-round-xs":
           "size-6 rounded-full [&_svg:not([class*='size-'])]:size-3.5",
         /** A badge on a tile's corner. */

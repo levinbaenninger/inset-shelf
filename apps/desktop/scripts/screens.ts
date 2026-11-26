@@ -3721,10 +3721,11 @@ const CARD_FAILURE = `Der Datenträger „${LONG_WORD}“ ist voll.`;
 const failedCard = (
   to: "shelf" | "item" | null,
   message = CARD_FAILURE,
-  target: { readonly id: string; readonly label: string } | null = null
+  target: { readonly id: string; readonly label: string } | null = null,
+  only = false
 ) => ({
   ...SCREENSHOT_VIEW,
-  save: { message, only: false, state: "failed", to },
+  save: { message, only, state: "failed", to },
   target,
 });
 
@@ -6079,6 +6080,107 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
 /** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
 const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
 
+/** The failed card once Retry adding to “…” is the only add left (`only`, screenshot-saves.ts): one pill, in Add to Shelf's place, and the item named under it. */
+const retryOnly = (
+  name: string,
+  message: string,
+  label: string
+): StressScene => ({
+  check: async (page) => {
+    const retry = `Retry adding to “${label}”`;
+
+    const problem = await failedCardCheck([
+      retry,
+      "Copy",
+      "Save to Downloads",
+      "Dismiss",
+      "Keep on Screen",
+    ])(page);
+
+    if (problem !== null) {
+      return problem;
+    }
+
+    const pill = page.getByRole("button", { exact: true, name: retry });
+
+    // No empty slot above it: Retry is where Add to Shelf was, and no other add is on the card.
+    if (
+      (await page.getByRole("button", { name: /Add to/u }).count()) !== 0 ||
+      (await page.getByRole("button", { name: /Retry/u }).count()) !== 1
+    ) {
+      return "Retry adding to “…” must be the card's only add";
+    }
+
+    const off = cardMiddle(await boxOf(pill));
+
+    if (off !== null) {
+      return off;
+    }
+
+    // The name under it shows whole or cut, inside the card.
+    const closing = await boxOf(page.getByText("”", { exact: true }));
+
+    if (closing.right > 280 - 48 || closing.left < 48) {
+      return "the item's name under Retry reaches a corner button";
+    }
+
+    // Annotate would add it to the shelf: it stays in its corner, off.
+    const annotate = page.getByRole("button", { name: "Annotate" });
+    const before = await callCount(page);
+
+    await annotate.click({ force: true });
+
+    if ((await annotate.isEnabled()) || (await callCount(page)) > before) {
+      return "Annotate can still be pressed while Retry is the only add";
+    }
+
+    const pillBox = await boxOf(pill);
+
+    await pill.click();
+
+    const sent = await calls(page, before);
+
+    if (
+      !sent.some(
+        (each) =>
+          each.call === "addToItem" &&
+          isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+      )
+    ) {
+      return `Retry sent ${JSON.stringify(sent)}`;
+    }
+
+    // While that Retry saves, the pill reads Saving… and Add to Shelf doesn't come back.
+    await page.evaluate(
+      `globalThis.__emit("view", ${JSON.stringify({
+        ...SCREENSHOT_VIEW,
+        save: { state: "saving", to: "item" },
+        target: { id: uuid(12), label },
+      })})`
+    );
+
+    const saving = page.getByRole("button", { name: "Saving…" });
+
+    await saving.waitFor();
+
+    if ((await page.getByRole("button", { name: /Add to/u }).count()) > 0) {
+      return "Add to Shelf came back while the only Retry saves";
+    }
+
+    // The reason under the picture went, so the pill is lower; it is no wider and no further left or right.
+    const savingBox = await boxOf(saving);
+
+    return savingBox.left === pillBox.left && savingBox.right === pillBox.right
+      ? null
+      : `the pill changed size when it read Saving…: ${JSON.stringify({ pillBox, savingBox })}`;
+  },
+  data: {
+    view: failedCard("item", message, { id: uuid(12), label }, true),
+  },
+  name,
+  page: "screenshot",
+});
+
 const ATTACHMENT_SCENES: readonly Scene[] = (
   [
     {
@@ -6706,14 +6808,30 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
 
         const itemBox = await boxOf(add);
 
-        // Add to Shelf leads: Add to “…” is a quieter line under it, no taller and never wider.
-        if (
-          itemBox.top < shelfBox.bottom ||
-          itemBox.left < shelfBox.left - 0.5 ||
-          itemBox.right > shelfBox.right + 0.5 ||
-          tall(itemBox) >= tall(shelfBox)
-        ) {
+        // Add to Shelf leads: Add to “…” is a line of words under it, lower than the pill and with no fill of its own.
+        if (itemBox.top < shelfBox.bottom || tall(itemBox) >= tall(shelfBox)) {
           return `Add to “…” must sit under Add to Shelf, smaller: ${JSON.stringify({ itemBox, shelfBox })}`;
+        }
+
+        const fill = await add.evaluate(
+          (button) => getComputedStyle(button).backgroundColor
+        );
+
+        if (fill !== "rgba(0, 0, 0, 0)") {
+          return `Add to “…” is a second pill (${fill}), not a line of words`;
+        }
+
+        // The line names the item: about twenty characters of its name, not nine.
+        const named = await add.evaluate(
+          (button) =>
+            ([...button.querySelectorAll("span")]
+              .map((part) => part.firstChild?.nodeValue ?? "")
+              .find((text) => text.endsWith("…") && text.length > 1)?.length ??
+              1) - 1
+        );
+
+        if (named < 18) {
+          return `Add to “…” shows ${named} characters of the item's name, not about 20`;
         }
 
         // The name is cut inside the quotes: the closing one shows.
@@ -6857,6 +6975,20 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       name: "screenshot-card-attach-full",
       page: "screenshot",
     },
+    // The screenshot was changed on its item after a failed Add to “…”: it stays there, so Retry is the one add and the one pill.
+    retryOnly("screenshot-card-retry-only", "The disk is full.", CARD_LABEL),
+    // A write that holds it on its item is still on its way: the same card, for the other reason.
+    retryOnly(
+      "screenshot-card-retry-only-landing",
+      "Saving didn’t finish in time.",
+      CARD_LABEL
+    ),
+    // One unbroken word for the item, and the longest reason.
+    retryOnly(
+      "stress-screenshot-retry-only",
+      CARD_FAILURE,
+      `${LONG_WORD.slice(0, 39)}…`
+    ),
     {
       act: async (page) => {
         await page.keyboard.press("Tab");

@@ -8,7 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
-import type { ScreenshotView, ShotSaveTo } from "@shared/contracts";
+import type { ScreenshotView } from "@shared/contracts";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -23,6 +23,8 @@ import { usePushedView } from "@/shared/use-pushed-view";
 import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
 
+import { cardAdds, PILL_LABEL } from "./card-adds";
+import type { AddLine } from "./card-adds";
 import { fitName } from "./fit-name";
 
 const api = screenshotBridge();
@@ -42,37 +44,47 @@ const load = async (): Promise<ScreenshotView | null> => await api.getView();
 const subscribe = (listener: (view: ScreenshotView | null) => void) =>
   api.on("view", listener);
 
-/** A round white button in a corner of the card, named on hover. */
+/** A round white button in a corner of the card, named on hover. With `off` it stays in its corner, dimmed, can't be pressed, and says that reason on hover. */
 const CornerButton = ({
   className,
   icon,
   label,
+  off,
   onClick,
   pressed,
 }: {
   readonly className: string;
   readonly icon: typeof Cancel01Icon;
   readonly label: string;
+  readonly off?: string;
   readonly onClick: () => void;
   readonly pressed?: boolean;
-}) => (
-  <div className={cn("absolute", className)}>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          aria-label={label}
-          aria-pressed={pressed}
-          onClick={onClick}
-          size="icon-round"
-          variant="overlay"
-        >
-          <HugeiconsIcon icon={icon} strokeWidth={pressed === true ? 2.5 : 2} />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  </div>
-);
+}) => {
+  const button = (
+    <Button
+      aria-label={label}
+      aria-pressed={pressed}
+      disabled={off !== undefined}
+      onClick={onClick}
+      size="icon-round"
+      variant="overlay"
+    >
+      <HugeiconsIcon icon={icon} strokeWidth={pressed === true ? 2.5 : 2} />
+    </Button>
+  );
+
+  return (
+    <div className={cn("absolute", className)}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* A disabled button takes no pointer: the span around it still says why it is off. */}
+          {off === undefined ? button : <span className="flex">{button}</span>}
+        </TooltipTrigger>
+        <TooltipContent>{off ?? label}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+};
 
 /** Shows with the card's other actions: while the pointer or the keyboard is on the card, and while a failed save keeps it open. */
 const REVEAL =
@@ -105,23 +117,10 @@ const Steady = ({
   </span>
 );
 
-/** What a save button reads: its label, Saving… while it writes, Retry once it failed. */
-const saveState = (
-  save: ScreenshotView["save"],
-  to: ShotSaveTo
-): "idle" | "saving" | "failed" =>
-  save.state === "idle" || save.to !== to ? "idle" : save.state;
+const PILL_LABELS = Object.values(PILL_LABEL);
 
-const SHELF_LABEL = {
-  failed: "Retry",
-  idle: "Add to Shelf",
-  saving: "Saving…",
-} as const;
-
-const SHELF_LABELS = Object.values(SHELF_LABEL);
-
-/** What Add to “…” reads before the item's name. */
-const ITEM_LEAD = { failed: "Retry adding to", idle: "Add to" } as const;
+/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and it stays on its item. */
+const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
 
 /**
  * “Name”, cut inside the quotes so the closing one always shows, right after
@@ -232,6 +231,10 @@ const Quoted = ({
   );
 };
 
+/** The words under Retry that only name the item: the look of the Add to “…” line (Button's overlay-text and line), without being a button. */
+const FOOT_CAPTION =
+  "w-full px-0.5 py-0.5 text-xs leading-4 tracking-tight text-white/90 text-shadow-xs text-shadow-black/60";
+
 /** Shown after the reason a save failed: what it means for the screenshot. */
 const NOT_KEPT = "The screenshot isn’t saved yet.";
 
@@ -252,23 +255,73 @@ const FailureBar = ({ message }: { readonly message: string }) => (
   </div>
 );
 
+/** The line of words under the pill, between the bottom corner buttons. */
+const FootLine = ({
+  line,
+  onAdd,
+  saving,
+}: {
+  readonly line: AddLine;
+  readonly onAdd: () => void;
+  readonly saving: boolean;
+}) =>
+  line.kind === "caption" ? (
+    // The pill's name already says it all to a screen reader.
+    <p aria-hidden="true" className={FOOT_CAPTION}>
+      <Quoted lead={line.lead} name={line.name} />
+    </p>
+  ) : (
+    <Button
+      aria-disabled={saving ? true : undefined}
+      aria-label={
+        line.kind === "saving" ? "Saving…" : `${line.lead} “${line.name}”`
+      }
+      className="w-full"
+      onClick={onAdd}
+      size="line"
+      variant="overlay-text"
+    >
+      {line.kind === "saving" ? (
+        "Saving…"
+      ) : (
+        <Quoted lead={line.lead} name={line.name} stacked={line.stacked} />
+      )}
+    </Button>
+  );
+
 /**
  * A screenshot card beside the shelf. Add to Shelf shows at once and is the
- * first key stop, with Add to “…” over it when an item can be named; on
- * hover or keyboard focus the picture dims, Copy shows beside Add to Shelf,
- * and the corner actions show. While a save runs its button reads Saving…;
- * a failed save keeps every action in view, says why under the picture, and
- * offers Retry. Dragging the picture into another app drops it as a file.
+ * first key stop. When an item can be named, Add to “…” is a line of words
+ * under it, on the picture's darkened foot. On hover or keyboard focus the
+ * picture dims, Copy shows beside Add to Shelf, and the corner actions show.
+ * While a save runs its button reads Saving…; a failed save keeps every
+ * action in view, says why under the picture, and offers Retry. Once the
+ * screenshot must stay on its item, Retry is the one pill and the line under
+ * it only names the item. Dragging the picture into another app drops it as
+ * a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { save, seq, target } = view;
   const [held, setHeld] = useState(false);
+  const [wasSole, setWasSole] = useState(false);
   const saving = save.state === "saving";
-  const shelfLabel = SHELF_LABEL[saveState(save, "shelf")];
-  const itemState = saveState(save, "item");
+  const { line, pill, sole } = cardAdds(view, wasSole);
 
-  // The screenshot is on the item, changed there since or in a write still on its way: Retry adding to it is the only add, so Add to Shelf keeps its room and can't be seen, pressed or reached.
-  const itemOnly = save.state === "failed" && save.only && save.to === "item";
+  if (sole !== wasSole) {
+    setWasSole(sole);
+  }
+
+  const addToItem = (): void => {
+    if (!saving && target !== null) {
+      api.addToItem({ id: target.id, seq });
+    }
+  };
+
+  const addToShelf = (): void => {
+    if (!saving) {
+      api.addToShelf(seq);
+    }
+  };
 
   return (
     <main
@@ -279,84 +332,47 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
       <div className="relative min-h-0 flex-1">
         {/*
           First in the page, so Tab lands on Add to Shelf first, then Copy, then Add to “…”; drawn above the picture and its dimming.
-          Add to Shelf is in the card's middle, and Copy shows beside it without taking room in the row, so it never moves; Add to “…” sits under Add to Shelf, never wider.
+          Add to Shelf is in the card's middle, and Copy shows beside it without taking room in the row, so it never moves; Add to “…” is a line under it, between the corner buttons.
         */}
-        <div className="absolute inset-x-12 bottom-3 z-10 flex justify-center">
-          <div className="grid grid-cols-1 gap-y-1.5">
-            <div className="relative flex">
-              <Button
-                aria-disabled={saving ? true : undefined}
-                aria-label={shelfLabel}
-                // Wide enough, with an item to name, that the line under it reads a name and is never wider.
-                className={cn(
-                  "flex-1",
-                  target !== null && "min-w-36",
-                  itemOnly && "invisible"
-                )}
-                onClick={() => {
-                  if (!saving) {
-                    api.addToShelf(seq);
-                  }
-                }}
-                size="pill-sm"
-                variant="overlay"
-              >
-                <Steady labels={SHELF_LABELS} shown={shelfLabel} />
-              </Button>
-              {/* An icon, not the word: beside Add to Shelf in the card's middle, the word would reach under the corner button. */}
-              <span
-                className={cn(
-                  "pointer-events-none absolute inset-y-0 left-full ml-1.5 flex items-center",
-                  REVEAL,
-                  REVEAL_CLICKS
-                )}
-              >
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      aria-label="Copy"
-                      onClick={() => {
-                        api.copy(seq);
-                      }}
-                      size="icon-round-xs"
-                      variant="overlay"
-                    >
-                      <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copy</TooltipContent>
-                </Tooltip>
-              </span>
-            </div>
-            {target === null ? null : (
-              <Button
-                aria-disabled={saving ? true : undefined}
-                aria-label={
-                  itemState === "saving"
-                    ? "Saving…"
-                    : `${ITEM_LEAD[itemState]} “${target.label}”`
-                }
-                className="w-0 min-w-full"
-                onClick={() => {
-                  if (!saving) {
-                    api.addToItem({ id: target.id, seq });
-                  }
-                }}
-                size={itemState === "failed" ? "pill-xs-2" : "pill-xs"}
-                variant="overlay-quiet"
-              >
-                {itemState === "saving" ? (
-                  "Saving…"
-                ) : (
-                  <Quoted
-                    lead={ITEM_LEAD[itemState]}
-                    name={target.label}
-                    stacked={itemState === "failed"}
-                  />
-                )}
-              </Button>
-            )}
+        <div className="absolute inset-x-12 bottom-3 z-10 flex flex-col items-center gap-y-1">
+          <div className="relative flex">
+            <Button
+              aria-disabled={saving ? true : undefined}
+              aria-label={pill.name}
+              onClick={pill.to === "item" ? addToItem : addToShelf}
+              size="pill-sm"
+              variant="overlay"
+            >
+              <Steady labels={PILL_LABELS} shown={pill.label} />
+            </Button>
+            {/* An icon, not the word: beside Add to Shelf in the card's middle, the word would reach under the corner button. */}
+            <span
+              className={cn(
+                "pointer-events-none absolute inset-y-0 left-full ml-1.5 flex items-center",
+                REVEAL,
+                REVEAL_CLICKS
+              )}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label="Copy"
+                    onClick={() => {
+                      api.copy(seq);
+                    }}
+                    size="icon-round-xs"
+                    variant="overlay"
+                  >
+                    <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Copy</TooltipContent>
+              </Tooltip>
+            </span>
           </div>
+          {line === null ? null : (
+            <FootLine line={line} onAdd={addToItem} saving={saving} />
+          )}
         </div>
         <button
           aria-label="Drag the screenshot into another app"
@@ -375,6 +391,16 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             src={view.imageUrl}
           />
         </button>
+        {/* The line under the pill is white words with no pill of their own: the picture's foot darkens under them, so they read on a white picture too. */}
+        {line === null ? null : (
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 via-black/60 to-transparent",
+              // Two lines of words when a failed Add to “…” names its item under Retry adding to.
+              line.kind === "add" && line.stacked ? "h-20" : "h-14"
+            )}
+          />
+        )}
         {/* The other actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
         <div
           className={cn(
@@ -410,6 +436,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             className="bottom-2.5 left-2.5"
             icon={PaintBrush01Icon}
             label="Annotate"
+            off={sole ? ANNOTATE_OFF : undefined}
             onClick={() => {
               api.annotate(seq);
             }}
