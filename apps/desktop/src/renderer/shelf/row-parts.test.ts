@@ -193,6 +193,20 @@ describe(rowParts, () => {
       ).badgesOn
     ).toBe("source");
   });
+
+  it("carries the badges of an open row without a source on its foot line, and on its source line otherwise", () => {
+    const sourced = text({
+      context: { app: "Safari", appLink: null, title: "plan", url: null },
+      due: "2026-11-01",
+    });
+
+    expect(rowParts(text({ due: "2026-11-01" }), true).badgesOn).toBe("foot");
+    expect(rowParts(text({ due: "2026-11-01" }), false).badgesOn).toBe(
+      "source"
+    );
+    expect(rowParts(sourced, true).badgesOn).toBe("source");
+    expect(rowParts(file({ due: "2026-11-01" }), true).badgesOn).toBe("file");
+  });
 });
 
 /** An image with this many labelled pins. */

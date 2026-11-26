@@ -4108,6 +4108,27 @@ const moreGapProblem = async (strip: Locator): Promise<string | null> => {
     : `“+N” starts ${gaps.toMore} px after the last tile, and the tiles are ${gaps.between} px apart`;
 };
 
+/** An open row without a source: its badges sit on its foot line, after the words and before Details, and take no line of their own. */
+const badgesOnFoot = (n: number) =>
+  async function check(page: Page): Promise<string | null> {
+    const row = item(page, n);
+    const lines = row.locator("[data-badges]");
+    const count = await lines.count();
+
+    if (count !== 1) {
+      return `the open row has ${count} badge lines, not the one on its foot`;
+    }
+
+    const badge = await boxOf(lines.locator("> *").first());
+    const more = await boxOf(row.locator("[data-details-button]"));
+
+    return badge.right <= more.left &&
+      middle(badge) < more.bottom &&
+      middle(badge) > more.top
+      ? null
+      : `the badge isn't on the foot line before Details: ${JSON.stringify({ badge, more })}`;
+  };
+
 /** The site beside each link of an open row that names one: whether it is in view, and whether it is cut short there. */
 const linkSites = async (page: Page, n: number) =>
   z.array(z.object({ cut: z.boolean(), shown: z.boolean() })).parse(
@@ -4387,6 +4408,7 @@ const STRESS_SCENES: readonly Scene[] = (
           .getByRole("button", { name: "Show details" })
           .focus();
       },
+      check: badgesOnFoot(711),
       data: { view: stressView(CROWDED_DOC) },
       height: 620,
       name: "stress-open-crowded-end",
@@ -7393,6 +7415,7 @@ const SCENES: readonly Scene[] = [
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },
+    check: badgesOnFoot(11),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-image-pins",
@@ -7403,6 +7426,7 @@ const SCENES: readonly Scene[] = [
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },
+    check: badgesOnFoot(11),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-image-pins-narrow",

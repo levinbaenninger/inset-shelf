@@ -1137,20 +1137,30 @@ const MoreButton = ({
   </span>
 );
 
-/** The open row's foot: when and how it was captured, and Details (→). */
+/**
+ * The open row's foot: when and how it was captured, and Details (→). A row
+ * without a source has its badges here too, before Details, under the rules
+ * of every badge line: the words give way, and the Due chip always shows.
+ */
 const OpenFooter = ({
+  badges,
   item,
   onShowDetails,
 }: {
+  readonly badges: readonly ReactNode[];
   readonly item: ShelfItem;
   readonly onShowDetails: () => void;
 }) => (
   // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
   <div className="-mr-9 flex min-h-6 items-center gap-2">
-    <Truncated
-      className="text-muted-foreground min-w-0 flex-1 text-xs"
-      text={metaText(item)}
-    />
+    <div className="min-w-0 flex-1">
+      <BadgeLine badges={badges} reach={false}>
+        <Truncated
+          className="text-muted-foreground min-w-0 flex-1 text-xs"
+          text={metaText(item)}
+        />
+      </BadgeLine>
+    </div>
     <Button
       aria-label="Show details"
       className="-mr-2.75 shrink-0"
@@ -1363,7 +1373,11 @@ const RowView = (props: RowViewProps) => {
           />
         )}
         {selected ? (
-          <OpenFooter item={item} onShowDetails={props.onShowDetails} />
+          <OpenFooter
+            badges={parts.badgesOn === "foot" ? badges : []}
+            item={item}
+            onShowDetails={props.onShowDetails}
+          />
         ) : null}
       </div>
       <MoreButton
