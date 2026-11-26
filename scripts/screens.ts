@@ -5542,6 +5542,14 @@ const PILL_SCENES: readonly Scene[] = (
       page: "shelf",
     },
     {
+      // On, at the shelf's narrowest: the chip keeps its words, tinted, and the field its room.
+      data: { view: hereView(true, `Safari · ${LONG_TITLE}`) },
+      layoutCheck: true,
+      name: "shelf-from-here-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
       check: async (page) => {
         const before = await listed(page);
 
@@ -5551,11 +5559,22 @@ const PILL_SCENES: readonly Scene[] = (
 
         const after = await listed(page);
 
-        return before.ids.length > 2 &&
-          after.query === "from:here" &&
-          isDeepStrictEqual(after.ids, [uuid(14), uuid(16)])
+        if (
+          before.ids.length <= 2 ||
+          after.query !== "from:here" ||
+          !isDeepStrictEqual(after.ids, [uuid(14), uuid(16)])
+        ) {
+          return `the chip must filter the whole list to the items from here: ${JSON.stringify({ after, before })}`;
+        }
+
+        // The chip keeps the keyboard: Return on it takes the filter off again.
+        await page.keyboard.press("Enter");
+
+        const off = await listed(page);
+
+        return off.query === ""
           ? null
-          : `the chip must filter the whole list to the items from here: ${JSON.stringify({ after, before })}`;
+          : `Return right after the click must take the filter off: ${JSON.stringify(off)}`;
       },
       data: { view: hereView(false, undefined, true) },
       name: "shelf-from-here-chip",

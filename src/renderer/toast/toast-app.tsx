@@ -1,8 +1,8 @@
 import {
   Alert02Icon,
+  AppWindowMacIcon,
   ArrowRight01Icon,
   Cancel01Icon,
-  Location01Icon,
   TextAlignLeftIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -269,13 +269,15 @@ const RecallPill = ({ view }: { readonly view: RecallView }) => (
   <div
     className={cn(
       NOTICE_CLASS,
-      "animate-in fade-in-0 gap-0 p-0 font-medium duration-300"
+      "animate-in fade-in-0 gap-0 p-0 font-medium duration-300",
+      // Pointing at the words tints the whole pill, × included: × has no fill of its own.
+      "has-[>button:first-child:hover]:bg-accent"
     )}
     key={view.seq}
     {...hover}
   >
     <button
-      className="hover:bg-accent flex min-w-0 flex-1 cursor-default items-center gap-2 rounded-l-2xl py-1.5 pr-2 pl-3 text-left"
+      className="flex min-w-0 flex-1 cursor-default items-center gap-2 rounded-l-2xl py-1.5 pr-2 pl-3 text-left"
       // Names the place, as the tooltip does: "12 items from Figma – Login".
       aria-label={fromPlace(view)}
       onClick={() => {
@@ -286,7 +288,7 @@ const RecallPill = ({ view }: { readonly view: RecallView }) => (
     >
       <HugeiconsIcon
         className={cn(NOTICE_ICON_CLASS, "text-muted-foreground")}
-        icon={Location01Icon}
+        icon={AppWindowMacIcon}
         size={14}
       />
       <span className="truncate">{fromHere(view.count)}</span>

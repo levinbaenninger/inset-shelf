@@ -15,6 +15,9 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground aria-expanded:bg-secondary aria-expanded:text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+        /** A toggle that is on, tinted in both themes: the search's "from here" chip while its filter is on. */
+        pressed:
+          "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary dark:bg-primary/30 dark:text-foreground dark:hover:bg-primary/40 dark:hover:text-foreground",
         /** A ghost button in the secondary text colour: actions beside a field's label, Details in an open row. */
         quiet:
           "text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",

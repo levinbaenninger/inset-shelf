@@ -287,17 +287,17 @@ export const SearchBar = ({
         value={query}
       />
       <InputGroupAddon align="inline-end">
-        <FromHereChip
-          here={here}
-          onChange={(next) => {
-            onChange(next);
-            inputRef.current?.focus();
-          }}
-          query={query}
-        />
+        {/* The chip keeps the keyboard, so Return on it turns the filter off again. */}
+        <FromHereChip here={here} onChange={onChange} query={query} />
         {query === "" ? null : (
           <InputGroupButton
             aria-label="Clear Search"
+            // Searching only from:here at the shelf's narrowest, the pressed chip clears it the same way and the field keeps the room to show it.
+            className={cn(
+              query === FROM_HERE &&
+                (here?.ids.length ?? 0) > 0 &&
+                "max-[340px]:hidden"
+            )}
             onClick={() => {
               onChange("");
               inputRef.current?.focus();

@@ -59,10 +59,11 @@ export const useFromHere = (
 
 /**
  * In the search field, when the shelf opened beside a window open items came
- * from: "2 from here" ("Here · 2" at the shelf's narrowest), with a window
- * mark, not a pin's. It puts `from:here` into the search and stays, pressed
- * and down to its mark and count, while the filter is on; a click or Return
- * on it again takes the filter off.
+ * from: "2 from here" ("Here · 2" at the shelf's narrowest), with the window
+ * mark the recall pill has too. It puts `from:here` into the search and
+ * stays, pressed and tinted, in words ("2 from here", "Here"), while the
+ * filter is on; it keeps the keyboard, so Return on it again takes the
+ * filter off.
  * Open decision 3; main leaves `here` out to drop it.
  */
 export const FromHereChip = ({
@@ -91,19 +92,15 @@ export const FromHereChip = ({
       }}
       size="xs"
       title={hereText(here)}
-      // Pressed while the filter is on, as a toggle is.
-      variant={on ? "secondary" : "ghost"}
+      variant={on ? "pressed" : "ghost"}
     >
-      <HugeiconsIcon icon={AppWindowMacIcon} />
-      {/* On, the field's `from:here` says it in words, so the chip leaves the field its room. */}
-      {on ? (
-        count
-      ) : (
-        <>
-          <span className="max-[340px]:hidden">{count} from here</span>
-          <span className="hidden max-[340px]:inline">Here · {count}</span>
-        </>
-      )}
+      {/* Pressed, its tint marks it and the field says from:here: the words keep their room without the mark. */}
+      {on ? null : <HugeiconsIcon icon={AppWindowMacIcon} />}
+      <span className="max-[340px]:hidden">{count} from here</span>
+      {/* Pressed at the shelf's narrowest, "Here" leaves the field room for from:here; the list shows the count. */}
+      <span className="hidden max-[340px]:inline">
+        {on ? "Here" : `Here · ${count}`}
+      </span>
     </InputGroupButton>
   );
 };
