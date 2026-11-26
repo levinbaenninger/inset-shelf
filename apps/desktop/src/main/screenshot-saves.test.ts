@@ -689,6 +689,21 @@ const refused = async (first: "item" | "shelf") => {
   return card;
 };
 
+/** Each first destination, with where the shelf holds the screenshot once the other one took it. */
+const SWITCHES = [
+  { first: "item", moved: { attached: 0, items: 1 } },
+  { first: "shelf", moved: { attached: 1, items: 0 } },
+] as const;
+
+/** A press of the destination the first save didn't go to. */
+const pressOther = async (
+  card: Awaited<ReturnType<typeof refused>>,
+  first: "item" | "shelf"
+) =>
+  await (first === "item"
+    ? card.saves.addToShelf(1)
+    : card.saves.addToItem(1, card.note));
+
 describe("another destination after a failed save", () => {
   it("shows the screenshot where the refused save put it, not saved, until the next choice", async () => {
     const onItem = await refused("item");
@@ -732,39 +747,119 @@ describe("another destination after a failed save", () => {
     });
   });
 
-  it("deletes the picture file of the row the screenshot left", async () => {
+  it("takes its picture file along from its row: the item's tile names that file, and none is deleted", async () => {
     const card = await refused("shelf");
 
     card.failWrites({ ok: true });
     await card.saves.addToItem(1, card.note);
 
-    expect(card.deleted).toStrictEqual([`${uuid(91)}.png`]);
+    expect(card.controller.item(card.note)?.attachments).toMatchObject([
+      { image: { file: `${uuid(91)}.png` } },
+    ]);
+    expect(card.deleted).toStrictEqual([]);
   });
 
-  it("deletes the picture file of the attachment the screenshot left", async () => {
+  it("takes its picture file along from the item: the new row names that file, and none is deleted", async () => {
     const card = await refused("item");
     const [left] = card.controller.item(card.note)?.attachments ?? [];
 
     card.failWrites({ ok: true });
     await card.saves.addToShelf(1);
 
-    expect(card.deleted).toStrictEqual([`${left?.id}.png`]);
+    expect(card.images()).toMatchObject([
+      { image: { file: `${left?.id}.png` } },
+    ]);
+    expect(card.deleted).toStrictEqual([]);
   });
 
-  it("leaves the screenshot on the card alone when the other destination can't take it, and Retry places it once", async () => {
-    const card = await refused("item");
+  it.each(SWITCHES)(
+    "keeps the screenshot on the shelf, not saved, when the other destination follows a refused add to the $first and the disk takes no new picture file",
+    async ({ first, moved }) => {
+      const card = await refused(first);
 
-    card.failAttachments(DISK_FULL);
+      // The disk takes nothing: no new picture file, and no shelf.
+      card.failAttachments(DISK_FULL);
 
-    await expect(card.saves.addToShelf(1)).resolves.toBeNull();
-    expect(card.shown()).toStrictEqual({ attached: 0, items: 0 });
-    expect(card.view()?.save).toMatchObject({ state: "failed", to: "shelf" });
+      await expect(pressOther(card, first)).resolves.toBeNull();
+      // It is in the place the press chose, and both the card and the shelf offer Retry there.
+      expect(card.shown()).toStrictEqual(moved);
+      expect(card.view()?.save).toMatchObject({
+        message: "The disk is full.",
+        state: "failed",
+        to: first === "item" ? "shelf" : "item",
+      });
+      expect(card.controller.view().notSaved).not.toStrictEqual([]);
+    }
+  );
+
+  it.each(SWITCHES)(
+    "holds the screenshot once, with the one picture file, when Retry saves it after such a switch from the $first",
+    async ({ first, moved }) => {
+      const card = await refused(first);
+
+      card.failAttachments(DISK_FULL);
+      await pressOther(card, first);
+      card.failWrites({ ok: true });
+
+      await expect(pressOther(card, first)).resolves.not.toBeNull();
+      expect(card.shown()).toStrictEqual(moved);
+      expect(card.disk().at(-1)).toStrictEqual(moved);
+      expect(
+        card.disk().filter((each) => each.attached + each.items > 1)
+      ).toStrictEqual([]);
+      expect(card.deleted).toStrictEqual([]);
+    }
+  );
+
+  it("leaves the row exactly as it was when the item it would go to has filled up, and Retry saves it", async () => {
+    const card = await refused("shelf");
+    const [row] = card.images();
+
+    card.fill(card.note);
+
+    // A press of Add to “…” that left the card before it stopped naming the item.
+    await card.saves.addToItem(1, card.note);
+
+    expect(card.notices).toStrictEqual([CARD_CLEARED]);
+    expect(card.images().at(0)).toBe(row);
+    expect(card.view()).toMatchObject({
+      save: { state: "failed", to: "shelf" },
+      target: null,
+    });
 
     card.failWrites({ ok: true });
-    card.failAttachments(null);
 
-    await expect(card.saves.addToShelf(1)).resolves.not.toBeNull();
-    expect(card.disk().at(-1)).toStrictEqual({ attached: 0, items: 1 });
+    await expect(card.saves.addToShelf(1)).resolves.toBe(row?.id);
+    expect(card.disk().at(-1)).toStrictEqual({
+      attached: ATTACHMENTS_MAX,
+      items: 1,
+    });
+  });
+
+  it("keeps the picture of a tile the user took off after the move and put back with Undo", async () => {
+    const card = await refused("shelf");
+
+    await card.saves.addToItem(1, card.note);
+
+    const [tile] = card.controller.item(card.note)?.attachments ?? [];
+
+    card.controller.apply({
+      attachmentId: AttachmentIdSchema.parse(tile?.id),
+      id: card.note,
+      type: "removeAttachment",
+    });
+    card.failWrites({ ok: true });
+    await card.controller.flush();
+    card.controller.apply({
+      attachmentId: AttachmentIdSchema.parse(tile?.id),
+      id: card.note,
+      type: "restoreAttachment",
+    });
+
+    expect(card.controller.item(card.note)?.attachments).toStrictEqual([tile]);
+    expect(card.deleted).not.toContain(
+      tile?.kind === "image" ? tile.image.file : ""
+    );
   });
 
   it("never names the screenshot's own unsaved row as the item to add it to", async () => {
