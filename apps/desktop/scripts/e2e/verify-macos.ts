@@ -2000,7 +2000,7 @@ const checkAnnotate = async (): Promise<void> => {
 
 // Finder, driven only through `open` and System Events: an Apple Event to Finder itself asks for Automation access.
 
-/** A folder for one trial's Finder window, named for this run: no window of another run or of the user is titled so. The trial still never goes by the title. */
+/** A folder for one trial's Finder window, named for this run with its random token: no window of another run or of the user is titled so, which is what `inFinderWindow` goes by. */
 const finderFolder = (name: string): string =>
   path.join(work, `${name} ${path.basename(work)}`);
 
@@ -2019,38 +2019,35 @@ const FinderAnswerSchema = z.union([
 
 /**
  * Looks at Finder's front window and runs `then` only when it is the trial's
- * own: Finder is the app in front, and the folder that window shows, read as
- * a full path from the window itself (its AXDocument), is `folder`. A window
- * that only carries the folder's title never passes, nor does one that shows
- * no folder. The look and `then` are one script: milliseconds lie between
- * them, where two scripts would leave a window time to come in front.
+ * own: Finder is the app in front, and that window's title is the folder's
+ * name. The name carries this run's random token (`finderFolder`), so no
+ * other window has it. A Finder window gives accessibility no path (its
+ * AXDocument and AXProxy are null on macOS 27), and asking Finder itself
+ * would need Automation access, which raises a prompt. The look and `then`
+ * are one script: milliseconds lie between them, where two scripts would
+ * leave a window time to come in front.
  *
  * `then` is the body of a JXA function with the window as `w` and System
  * Events as `se`; what it returns is `out`.
  */
 const inFinderWindow = (folder: string, then = ""): FinderLook => {
   try {
-    // `open` is given the path under /var; Finder may name the same folder under /private/var.
-    const own = [folder, realpathSync(folder)];
+    const own = path.basename(folder);
 
     const answer = FinderAnswerSchema.parse(
       JSON.parse(
         jxa(`const se = Application("System Events");
     const finder = se.processes.byName("Finder");
     const own = ${JSON.stringify(own)};
-    const shows = (w) => {
-      try {
-        const url = String(w.attributes.byName("AXDocument").value());
-        const at = url.startsWith("file:///") ? decodeURIComponent(url.slice(7)) : "";
-        return at.endsWith("/") ? at.slice(0, -1) : at;
-      } catch { return ""; }
+    const titled = (w) => {
+      try { return String(w.name() ?? ""); } catch { return ""; }
     };
     const [w] = finder.windows();
-    const at = w === undefined ? "" : shows(w);
+    const at = w === undefined ? "" : titled(w);
     JSON.stringify(
       !finder.frontmost() ? { refused: "Finder is not in front" }
       : w === undefined ? { refused: "Finder has no window" }
-      : !own.includes(at) ? { refused: "Finder's front window shows " + (at === "" ? "no folder" : at) }
+      : at !== own ? { refused: "Finder's front window is " + (at === "" ? "untitled" : "“" + at + "”") }
       : { frame: [...w.position(), ...w.size()], out: String((() => { ${then} })() ?? "") }
     )`)
       )
