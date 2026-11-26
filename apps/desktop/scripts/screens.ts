@@ -4203,17 +4203,28 @@ const STRESS_SCENES: readonly Scene[] = (
           return `the first Tab from the open row's words went to “${String(first)}”, not Show more`;
         }
 
+        // As a user meets it: Enter on Show more, then Tab, with the keyboard left where it is.
         await page.keyboard.press("Enter");
-        await words.focus();
         await page.keyboard.press("Tab");
 
         const next = await page.evaluate(
           "document.activeElement?.textContent ?? ''"
         );
 
-        return next === "das Protokoll"
+        if (next !== "das Protokoll") {
+          return `after Enter on Show more, Tab went to “${String(next)}”, not the link it revealed`;
+        }
+
+        // From the link the keyboard goes on: Show less is the next stop, so nothing is skipped and nothing traps it.
+        await page.keyboard.press("Tab");
+
+        const after = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-label') ?? ''"
+        );
+
+        return after === "Show less of the text"
           ? null
-          : `once open, Tab went to “${String(next)}”, not the link`;
+          : `from the revealed link, Tab went to “${String(after)}”, not Show less`;
       },
       data: { view: shelfView(LINK_BELOW_DOC) },
       keepPointer: true,

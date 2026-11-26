@@ -191,6 +191,8 @@ export const Clamp = ({
   readonly what?: string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+  // The first control Show more brought into reach, until the keyboard has gone to it or left the button.
+  const revealed = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   // At least two lines would hide: the words are cut until Show more opens them.
   const [long, setLong] = useState(false);
@@ -222,9 +224,28 @@ export const Clamp = ({
           aria-expanded={open}
           aria-label={what === undefined ? undefined : `${label} of ${what}`}
           className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -mx-0.5 -mt-0.5 self-start rounded-sm px-0.5 text-xs font-medium outline-none focus-visible:ring-3"
+          onBlur={() => {
+            revealed.current = null;
+          }}
           onClick={(event) => {
             event.stopPropagation();
+            // What the cut kept the keyboard off comes before this button in the page: the next Tab goes there, not past it.
+            revealed.current = open
+              ? null
+              : (ref.current?.querySelector<HTMLElement>(
+                  `[${HIDDEN_BY_CLAMP}]`
+                ) ?? null);
             setOpen(!open);
+          }}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Tab" &&
+              !event.shiftKey &&
+              revealed.current?.isConnected === true
+            ) {
+              event.preventDefault();
+              revealed.current.focus();
+            }
           }}
           type="button"
         >
