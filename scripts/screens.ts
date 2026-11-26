@@ -4268,6 +4268,22 @@ const STRESS_SCENES: readonly Scene[] = (
     },
     {
       act: async (page) => {
+        await select(page, 711);
+      },
+      check: openCrowdedCheck,
+      data: { view: stressView(CROWDED_DOC) },
+      name: "stress-open-crowded-wide",
+    },
+    {
+      act: async (page) => {
+        await select(page, 710);
+      },
+      check: reachedDetails(710),
+      data: { view: stressView() },
+      name: "stress-open-text-wide",
+    },
+    {
+      act: async (page) => {
         await details(page, 711);
         await page
           .getByRole("region", { exact: true, name: "Pins" })
@@ -6883,6 +6899,17 @@ const SCENES: readonly Scene[] = [
   {
     act: async (page) => {
       await select(page, 10);
+    },
+    check: openStepsFirst,
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-expanded-full-item-narrow",
+    page: "shelf",
+    width: 300,
+  },
+  {
+    act: async (page) => {
+      await select(page, 10);
       await item(page, 10)
         .getByRole("checkbox", { name: /^(?:Done|Not done): /u })
         .first()
@@ -7034,6 +7061,17 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "shelf-expanded-image-pins",
     page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await select(page, 11);
+      await item(page, 11).scrollIntoViewIfNeeded();
+    },
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-expanded-image-pins-narrow",
+    page: "shelf",
+    width: 300,
   },
   {
     act: async (page) => {
