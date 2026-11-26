@@ -4868,7 +4868,23 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await clickToEdit(page, 722, "button");
       },
-      check: async (page) => await editedInPlace(page, 722, "button"),
+      check: async (page) => {
+        // The field's tint is as wide as the text column: it ends where the picture over it does. Read first: finding the caret's word ends the edit.
+        const field = await boxOf(
+          item(page, 722).locator("div:has(> textarea)")
+        );
+
+        const picture = await boxOf(item(page, 722).locator("img").first());
+
+        if (
+          Math.abs(field.left - picture.left) > 0.5 ||
+          Math.abs(field.right - picture.right) > 0.5
+        ) {
+          return `the edit field runs from ${field.left} to ${field.right}, the picture over it from ${picture.left} to ${picture.right}`;
+        }
+
+        return await editedInPlace(page, 722, "button");
+      },
       data: { view: stressView(EDIT_DOC) },
       keepPointer: true,
       name: "stress-edit-in-place-note",
