@@ -6475,6 +6475,40 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
         await page.keyboard.press("Backspace");
         await page.getByText(/Removed “/u).waitFor();
       },
+      check: async (page) => {
+        const tile = page.locator("[data-attachment-grid] [data-tile]").first();
+        const tips = page.getByRole("tooltip");
+
+        if (!(await tile.evaluate((each) => each === document.activeElement))) {
+          return "⌫ on a tile must leave the keyboard on the next one";
+        }
+
+        // The app moved the keyboard there, not the user: no name opens over Details and Add.
+        if ((await tips.count()) > 0) {
+          return `⌫ on a tile opened the next tile's name by itself: ${String(await tips.first().textContent())}`;
+        }
+
+        // The whole name stays a key away: the user leaving and coming back with Tab shows it.
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+
+        // A name past the tooltip's 300 letters is cut there: its start is enough to know it.
+        const name = ((await tile.getAttribute("aria-label")) ?? "").slice(
+          0,
+          40
+        );
+
+        const shown = await tips
+          .filter({ hasText: name })
+          .first()
+          .waitFor({ timeout: 2000 })
+          .then(() => true)
+          .catch(() => false);
+
+        return shown && name !== ""
+          ? null
+          : "Tab back onto the tile must show its whole name";
+      },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-long-names-toast",
       width: NARROWEST,

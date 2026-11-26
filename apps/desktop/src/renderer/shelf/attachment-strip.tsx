@@ -271,12 +271,24 @@ export const AttachmentStrip = ({
     </ul>
   );
 
+/** The tile the app is moving the keyboard to itself: its name stays closed, since the user didn't go there. */
+const movedByApp = new WeakSet<HTMLElement>();
+
 /** After ⌫ the keyboard goes to the next tile, or the one before when the last went. */
 const focusAfterRemoval = (tile: HTMLElement): void => {
   const entry = tile.closest("li");
-  const next = entry?.nextElementSibling ?? entry?.previousElementSibling;
 
-  next?.querySelector<HTMLElement>("[data-tile]")?.focus();
+  const next = (
+    entry?.nextElementSibling ?? entry?.previousElementSibling
+  )?.querySelector<HTMLElement>("[data-tile]");
+
+  if (next === null || next === undefined) {
+    return;
+  }
+
+  movedByApp.add(next);
+  next.focus();
+  movedByApp.delete(next);
 };
 
 /**
@@ -312,7 +324,7 @@ export const AttachmentGrid = ({
 
       return (
         <li className="group/tile relative shrink-0" key={attachment.id}>
-          {/* The whole name shows on hover and once the keyboard is on the tile. */}
+          {/* The whole name shows on hover and once the user moves the keyboard onto the tile. */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -332,8 +344,13 @@ export const AttachmentGrid = ({
                   }
                 }}
                 onDragStart={dragOutOf(attachment, handlers)}
-                onFocus={() => {
+                onFocus={(event) => {
                   onPick(attachment);
+
+                  // The tooltip opens on every focus unless the event is prevented: after ⌫ it would cover Details and Add, unasked.
+                  if (movedByApp.has(event.currentTarget)) {
+                    event.preventDefault();
+                  }
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Backspace" || event.key === "Delete") {
