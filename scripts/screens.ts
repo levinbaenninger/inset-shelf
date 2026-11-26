@@ -3030,15 +3030,26 @@ const detailsButtonCheck = async (page: Page): Promise<string | null> => {
     : null;
 };
 
-/** The open row lists its steps still to do before the checked ones: item 10 holds both, and fewer fit than it has. */
+/** The open row lists all five of item 10's steps, those still to do first, and its three windows as buttons. */
 const openStepsFirst = async (page: Page): Promise<string | null> => {
-  const done = await item(page, 10)
+  const row = item(page, 10);
+
+  const done = await row
     .locator("[data-step-id] [role=checkbox]")
     .evaluateAll((boxes) =>
       boxes.map((box) => box.getAttribute("aria-checked") === "true")
     );
 
   const firstDone = done.indexOf(true);
+
+  const windows = await row
+    .getByRole("list", { name: "Linked windows" })
+    .getByRole("button")
+    .count();
+
+  if (done.length !== 5 || windows !== 3) {
+    return `the open row must list its 5 steps and 3 windows: ${done.length} steps, ${windows} windows`;
+  }
 
   return done.at(0) === false &&
     (firstDone === -1 || !done.slice(firstDone).includes(false))
@@ -3321,7 +3332,7 @@ const MANY_PINS = Array.from({ length: 30 }, (_, index) => ({
   y: 150 + ((index * 97) % 900),
 }));
 
-/** The image with thirty labelled pins, twenty steps and ten linked windows: lists an open row and details must hold. */
+/** The image with thirty labelled pins, twenty steps and ten linked windows, and a plain note beside it: lists an open row and details must hold. */
 const CROWDED_DOC = {
   ...STRESS_DOC,
   items: [
@@ -3334,6 +3345,15 @@ const CROWDED_DOC = {
       windows: Array.from({ length: 10 }, (_, index) =>
         longWindow(index % 5, index === 0 ? LONG_DESCRIPTION : "")
       ).map((window, index) => ({ ...window, id: uuid(760 + index) })),
+    },
+    // A neighbour, so the scene shows the crowded row among others.
+    {
+      ...base(719, 50, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Book the lift for the delivery day",
+      via: "typed",
     },
   ],
 };
@@ -3877,43 +3897,30 @@ const LINK_BELOW_DOC = {
   ],
 };
 
-const OpenShareSchema = z.object({
+const OpenRowSchema = z.object({
   after: z.boolean(),
   before: z.boolean(),
   details: z.boolean(),
-  line: z.number(),
-  list: z.number(),
-  row: z.number(),
+  last: z.boolean(),
 });
 
 /**
- * The open row takes at most about 60% of the list (a line of slack), its
- * Details line in view and the rows around it showing. `share: false` for a
- * row whose fixed parts (picture, steps, windows) alone pass 60%: there its
- * words, description and title are at their floors, and only Details and
- * the next row are checked.
+ * An open row shows each part under its own cap. Its Details line is its
+ * last line and in view; with `neighbours`, the rows around it show too.
  */
-const openShareCheck = (n: number, neighbours: boolean, share = true) =>
+const openRowCheck = (n: number, neighbours: boolean) =>
   async function check(page: Page): Promise<string | null> {
-    const measured = OpenShareSchema.parse(
+    const measured = OpenRowSchema.parse(
       await page.evaluate((id) => {
         const list = document.querySelector(".shelf-list");
         const row = document.querySelector(`[data-item-id="${id}"]`);
-        const words = row?.querySelector("[data-row-part]");
+        const detailsLine = row?.querySelector("[data-details-button]");
 
-        if (list === null || row === null) {
-          return {
-            after: false,
-            before: false,
-            details: false,
-            line: 0,
-            list: 0,
-            row: 0,
-          };
+        if (list === null || row === null || detailsLine === null) {
+          return { after: false, before: false, details: false, last: false };
         }
 
         const view = list.getBoundingClientRect();
-        const box = row.getBoundingClientRect();
 
         const inView = (element: Element | null | undefined): boolean => {
           const inner = element?.getBoundingClientRect();
@@ -3925,8 +3932,10 @@ const openShareCheck = (n: number, neighbours: boolean, share = true) =>
           );
         };
 
-        const detailsButton = [...row.querySelectorAll("button")].find(
-          (button) => button.textContent?.trim().startsWith("Details")
+        const box = detailsLine?.getBoundingClientRect();
+
+        const lines = [...row.querySelectorAll("button, [role=checkbox]")].map(
+          (each) => each.getBoundingClientRect().bottom
         );
 
         return {
@@ -3936,30 +3945,72 @@ const openShareCheck = (n: number, neighbours: boolean, share = true) =>
             row.previousElementSibling === null ||
             inView(row.previousElementSibling),
           details:
-            detailsButton !== undefined &&
-            detailsButton.getBoundingClientRect().bottom <= view.bottom,
-          line:
-            words === null || words === undefined
-              ? 20
-              : Number(getComputedStyle(words).lineHeight.replace("px", "")),
-          list: list.clientHeight,
-          row: box.height,
+            box !== undefined &&
+            box.top >= view.top &&
+            box.bottom <= view.bottom,
+          last: box !== undefined && Math.max(...lines) <= box.bottom + 1,
         };
       }, uuid(n))
     );
 
-    if (share && measured.row > 0.6 * measured.list + measured.line) {
-      return `the open row takes ${Math.round((100 * measured.row) / measured.list)}% of the list`;
-    }
-
     if (!measured.details) {
       return "the open row's Details line is out of view";
+    }
+
+    if (!measured.last) {
+      return "the open row's Details line isn't its last line";
     }
 
     return !neighbours || (measured.before && measured.after)
       ? null
       : "the rows around the open one are out of view";
   };
+
+/** An open row taller than the list: the keyboard reaches its Details line, which comes into view. */
+const reachedDetails = (n: number) =>
+  async function check(page: Page): Promise<string | null> {
+    await item(page, n).getByRole("button", { name: "Show details" }).focus();
+
+    return await openRowCheck(n, false)(page);
+  };
+
+/**
+ * Item 711 with 30 labelled pins, 20 steps and 10 windows, open: three pin
+ * labels, five steps, a line of windows, each list with its own more line,
+ * and Details, its last line, reached by the keyboard although the row is
+ * taller than the list.
+ */
+const openCrowdedCheck = async (page: Page): Promise<string | null> => {
+  const row = item(page, 711);
+
+  const shown = {
+    morePins: await row.getByRole("button", { name: "27 more pins" }).count(),
+    moreSteps: await row.getByRole("button", { name: "15 more steps" }).count(),
+    moreWindows: await row
+      .getByRole("button", { name: /^\d+ more windows in details$/u })
+      .count(),
+    pins: await row
+      .getByRole("list", { name: "Pin labels" })
+      .locator("li")
+      .count(),
+    steps: await row.locator("[data-step-id]").count(),
+    windows: await row
+      .getByRole("list", { name: "Linked windows" })
+      .getByRole("button", { name: /^(?:Open|Bring)/u })
+      .count(),
+  };
+
+  if (
+    shown.pins !== 3 ||
+    shown.steps !== 5 ||
+    shown.windows === 0 ||
+    shown.morePins + shown.moreSteps + shown.moreWindows !== 3
+  ) {
+    return `the crowded row must show every part under its cap: ${JSON.stringify(shown)}`;
+  }
+
+  return await reachedDetails(711)(page);
+};
 
 /** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
 type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
@@ -4037,13 +4088,23 @@ const STRESS_SCENES: readonly Scene[] = (
         await select(page, 724);
       },
       check: async (page) => {
-        const more = page.getByRole("button", {
-          name: "22 more windows in details",
+        const strip = item(page, 724).getByRole("list", {
+          name: "Linked windows",
         });
 
-        return (await more.textContent()) === "+22"
+        const shown = await strip
+          .getByRole("button", { name: /^(?:Open|Bring)/u })
+          .count();
+
+        const more = await strip
+          .getByRole("button", {
+            name: `${25 - shown} more windows in details`,
+          })
+          .textContent();
+
+        return shown > 0 && more === `+${25 - shown}`
           ? null
-          : "the open row doesn't offer “+22” for the other windows";
+          : `the open row must show the windows that fit and “+N” for the other ${25 - shown}: ${String(more)}`;
       },
       data: { view: shelfView(MANY_WINDOWS_DOC) },
       name: "stress-open-windows-many",
@@ -4054,7 +4115,7 @@ const STRESS_SCENES: readonly Scene[] = (
         await select(page, 721);
         await item(page, 721).scrollIntoViewIfNeeded();
       },
-      check: openShareCheck(721, true),
+      check: openRowCheck(721, true),
       data: { view: shelfView(NINE_DOC) },
       height: 620,
       name: "stress-open-nine-lines",
@@ -4064,7 +4125,7 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 710);
       },
-      check: openShareCheck(710, true, false),
+      check: reachedDetails(710),
       data: { view: stressView() },
       height: 620,
       name: "stress-open-text",
@@ -4174,11 +4235,24 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 711);
       },
-      // 30 pins, 20 steps, 10 windows, a long title and caption: taller than the list at its floors, it keeps its Details line in view at the list's edge.
-      check: openShareCheck(711, false, false),
+      // 30 pins, 20 steps, 10 windows, a long title and caption: each part under its cap, taller than the list, which scrolls; Details is its last line, and the keyboard reaches it.
+      check: openCrowdedCheck,
       data: { view: stressView(CROWDED_DOC) },
       height: 620,
       name: "stress-open-crowded",
+      width: NARROWEST,
+    },
+    {
+      // Its lower half: the keyboard on Details, the row's last line.
+      act: async (page) => {
+        await select(page, 711);
+        await item(page, 711)
+          .getByRole("button", { name: "Show details" })
+          .focus();
+      },
+      data: { view: stressView(CROWDED_DOC) },
+      height: 620,
+      name: "stress-open-crowded-end",
       width: NARROWEST,
     },
     {
@@ -4550,7 +4624,7 @@ const STRESS_SCENES: readonly Scene[] = (
           return `opening the shelf again left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
         }
 
-        return await openShareCheck(710, true, false)(page);
+        return await reachedDetails(710)(page);
       },
       data: { view: stressView() },
       height: 620,
@@ -6807,8 +6881,13 @@ const SCENES: readonly Scene[] = [
           "a step's checkbox",
           row.getByRole("checkbox", { name: /^(?:Done|Not done): /u }).first(),
         ],
-        // At 60% of the list its windows give way to the line that counts them.
-        ["the more line", row.getByRole("button", { name: /more steps/u })],
+        [
+          "a window",
+          row
+            .getByRole("list", { name: "Linked windows" })
+            .getByRole("button")
+            .first(),
+        ],
         ["Details", row.getByRole("button", { name: "Show details" })],
         ["⋯", row.getByRole("button", { exact: true, name: "More" })],
       ]);
