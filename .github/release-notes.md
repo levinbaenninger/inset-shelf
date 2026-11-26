@@ -9,4 +9,4 @@ Test build of Inset Shelf, without a developer certificate. See the README secti
 
 The installers are also attached under their versioned names, `inset-shelf-<version>-mac-arm64.dmg`, `-mac-x64.dmg` and `-win-x64.exe`.
 
-Capture behaviour is verified only on the platforms named in IMPLEMENTATION_REPORT.md. A build for another platform is not evidence that capture works there.
+Capture has been run on macOS and on Windows 11. A build for another platform is not evidence that capture works there.
