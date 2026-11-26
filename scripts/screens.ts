@@ -4009,6 +4009,20 @@ const openCrowdedCheck = async (page: Page): Promise<string | null> => {
     return `the crowded row must show every part under its cap: ${JSON.stringify(shown)}`;
   }
 
+  // ⌫ and Delete on a more line open nothing and delete nothing: they belong to the row only.
+  for (const name of ["27 more pins", "15 more steps"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one control after another, on purpose.
+    await row.getByRole("button", { name }).focus();
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    await page.keyboard.press("Backspace");
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    await page.keyboard.press("Delete");
+  }
+
+  if ((await removes(page)) > 0) {
+    return "⌫ or Delete on a more line deleted the item";
+  }
+
   return await reachedDetails(711)(page);
 };
 
