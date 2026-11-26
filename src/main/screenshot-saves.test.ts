@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { createCardClock } from "./card-clock";
 import {
   CARD_RETARGETED,
+  CARD_TARGET_GONE,
   cardLabel,
   createShotSaves,
   ITEM_GONE,
@@ -442,6 +443,20 @@ describe("Add to “…” on the screenshot card", () => {
       id: other,
       label: "Book the lift",
     });
+  });
+
+  it("says so in one notice when the item the card showed was deleted before the click arrived", async () => {
+    const card = setup();
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    // The click left the card while it named the note; the note was deleted before it reached main.
+    card.controller.apply({ id: card.note, type: "remove" });
+    card.select(null, true);
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect(card.attached).toStrictEqual([]);
+    expect(card.notices).toStrictEqual([CARD_TARGET_GONE]);
   });
 
   it("attaches again on Retry when Discard changes took the unsaved screenshot off the item", async () => {
