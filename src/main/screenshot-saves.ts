@@ -25,6 +25,19 @@ export const CARD_RETARGETED =
 export const CARD_TARGET_GONE =
   "The item the card named was deleted, so nothing was added.";
 
+/** A press of Add to “…” that reached main after the card stopped naming any item (it filled up, or the shelf went). */
+export const CARD_CLEARED =
+  "The card no longer names that item, so nothing was added.";
+
+/** What a press of Add to “…” that missed its item says: the card named another, none, or the item is gone. */
+const missedNotice = (named: ItemId | null, exists: boolean): string => {
+  if (!exists) {
+    return CARD_TARGET_GONE;
+  }
+
+  return named === null ? CARD_CLEARED : CARD_RETARGETED;
+};
+
 /** A screenshot the card shows, held in memory: the file may be moved or deleted meanwhile. */
 export interface Shot {
   /** Changes with every screenshot; the card's actions name it, so they never reach a newer one. */
@@ -304,10 +317,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
       // The card changed under the press: the screenshot never goes somewhere the user didn't see, and the user hears why.
       if (named !== id) {
-        deps.notify(
-          deps.item(id) === undefined ? CARD_TARGET_GONE : CARD_RETARGETED,
-          "failed"
-        );
+        deps.notify(missedNotice(named, deps.item(id) !== undefined), "failed");
 
         return null;
       }

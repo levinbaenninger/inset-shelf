@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { createCardClock } from "./card-clock";
 import {
+  CARD_CLEARED,
   CARD_RETARGETED,
   CARD_TARGET_GONE,
   cardLabel,
@@ -457,6 +458,19 @@ describe("Add to “…” on the screenshot card", () => {
     await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
     expect(card.attached).toStrictEqual([]);
     expect(card.notices).toStrictEqual([CARD_TARGET_GONE]);
+  });
+
+  it("says the card names no item any more when it stopped naming one before the click arrived", async () => {
+    const card = setup();
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    // The note filled up and the card let go of it before the click reached main.
+    card.fill(card.note);
+    card.select(card.note, true);
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect(card.notices).toStrictEqual([CARD_CLEARED]);
   });
 
   it("attaches again on Retry when Discard changes took the unsaved screenshot off the item", async () => {
