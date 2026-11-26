@@ -76,8 +76,10 @@ export const createToastWindow = (options: {
   ) => void;
   /** Return in the why field, or a click away from it: the item's description gets the words, and how the write ended comes back. */
   readonly saveWhy: (item: ItemId, text: string) => Promise<WhyOutcome>;
-  /** A click on the recall pill: the shelf opens filtered to the items from here. */
-  readonly openRecall: (place: PlaceKey, ids: readonly ItemId[]) => void;
+  /** A click on the recall pill: the shelf opens beside the window the pill was shown for, filtered to its items. */
+  readonly openRecall: (
+    recalled: Omit<Extract<PillEffect, { type: "openRecall" }>, "type">
+  ) => void;
   /** The recall pill went: clicked, closed or left alone. */
   readonly recallEnded: (
     place: PlaceKey,
@@ -303,7 +305,7 @@ export const createToastWindow = (options: {
       }
 
       case "openRecall": {
-        options.openRecall(effect.place, effect.ids);
+        options.openRecall(effect);
         break;
       }
 

@@ -162,6 +162,8 @@ export type Shown =
       readonly place: PlaceKey;
       readonly ids: readonly ItemId[];
       readonly label: string;
+      /** The window it was shown for, where a click docks the shelf; null when it couldn't be read. */
+      readonly window: Rect<"screen"> | null;
       readonly hovered: boolean;
     };
 
@@ -264,11 +266,12 @@ export type PillEffect =
       /** The field to open in the item's details. */
       readonly field: "description" | null;
     }
-  /** The shelf opens filtered to the items from here. */
+  /** The shelf opens beside the window the pill was shown for, filtered to its items: the click itself changes the window in front. */
   | {
       readonly type: "openRecall";
-      readonly place: PlaceKey;
       readonly ids: readonly ItemId[];
+      readonly label: string;
+      readonly window: Rect<"screen"> | null;
     }
   /** The recall pill went, and how, for when to show the next one. */
   | {
@@ -369,6 +372,7 @@ const showRecall = (
         kind: "recall",
         label: event.label,
         place: event.place,
+        window: event.window,
       },
     },
   };
@@ -749,7 +753,12 @@ const HANDLERS: Handlers = {
       return {
         effects: [
           ...closed.effects,
-          { ids: shown.ids, place: shown.place, type: "openRecall" },
+          {
+            ids: shown.ids,
+            label: shown.label,
+            type: "openRecall",
+            window: shown.window,
+          },
         ],
         state: closed.state,
       };

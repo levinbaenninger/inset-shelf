@@ -677,17 +677,14 @@ const start = async (): Promise<void> => {
 
   const viewWithHere = () => ({ ...controller.view(), here: shelfHere });
 
-  const setHere = (
-    front: Awaited<ReturnType<typeof frontWindow>>,
-    filter: boolean
-  ): void => {
-    const found =
-      HERE_CHIP || filter
-        ? hereOf(controller.view().doc, front.own ? null : front.context)
-        : null;
+  const setHere = (front: Awaited<ReturnType<typeof frontWindow>>): void => {
+    const found = HERE_CHIP
+      ? hereOf(controller.view().doc, front.own ? null : front.context)
+      : null;
 
     hereSeq += 1;
-    shelfHere = found === null ? null : { ...found, filter, seq: hereSeq };
+    shelfHere =
+      found === null ? null : { ...found, filter: false, seq: hereSeq };
     emitShelfView();
   };
 
@@ -697,11 +694,7 @@ const start = async (): Promise<void> => {
    * goes back beside the window it was docked to.
    */
   const showShelf = async (
-    options: {
-      readonly dock?: boolean;
-      /** From the recall pill: the list starts filtered to the items from the window in front. */
-      readonly filterHere?: boolean;
-    } = {}
+    options: { readonly dock?: boolean } = {}
   ): Promise<void> => {
     // From the notification area, the window in front is a part of the taskbar.
     if (options.dock === false) {
@@ -712,7 +705,7 @@ const start = async (): Promise<void> => {
 
     const front = await frontWindow();
 
-    setHere(front, options.filterHere === true);
+    setHere(front);
 
     if (front.bounds !== null) {
       lastTarget = front.bounds;
@@ -767,8 +760,17 @@ const start = async (): Promise<void> => {
         }
       })();
     },
-    openRecall: () => {
-      void showShelf({ filterHere: true });
+    // The click made the pill, or nothing, the window in front: the shelf opens at the place the pill was shown for.
+    openRecall: ({ ids, label, window }) => {
+      hereSeq += 1;
+      shelfHere = { filter: true, ids, label, seq: hereSeq };
+      emitShelfView();
+
+      if (window !== null) {
+        lastTarget = window;
+      }
+
+      shelf.show(lastTarget);
     },
     preload: preloadPath("toast"),
     recallEnded: (place, how) => {

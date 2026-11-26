@@ -722,14 +722,20 @@ describe("the recall pill", () => {
     expect(state.shown.kind).toBe("hidden");
   });
 
-  it("opens the shelf filtered to its items on a click", () => {
+  it("opens the shelf at the place it was shown for, filtered to its items, on a click", () => {
+    // The click makes the pill, or nothing, the window in front: the place comes from the pill, not from reading the front again.
     const { effects } = run([RECALLED, { seq: 1, type: "opened" }]);
 
     expect(effects.slice(3)).toStrictEqual([
       { type: "hide" },
       { type: "stopTimer" },
       { how: "opened", place: PLACE, type: "recallEnded" },
-      { ids: [ITEM], place: PLACE, type: "openRecall" },
+      {
+        ids: [ITEM],
+        label: "GitHub · acme/app #12",
+        type: "openRecall",
+        window: FRONT,
+      },
     ]);
   });
 
