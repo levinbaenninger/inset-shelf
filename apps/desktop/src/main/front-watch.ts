@@ -7,8 +7,10 @@ import type { PlaceSource } from "@shared/recall";
  * makes starts with input the key hook already sees: a click, or a shortcut
  * held with Cmd, Ctrl or Alt. A pause after it reads the front window once. A
  * slow poll covers the rest (a swipe between Spaces, an address typed into a
- * browser) while the machine is in use. Nothing is read while recall can't
- * show, and the costly page address only when it could match.
+ * browser) while the machine is in use, and waits for the same pause. Nothing
+ * is read while recall can't show, and the costly page address only in an app
+ * where it could match: there it is asked on every read, since two pages of
+ * one app can share a title.
  */
 
 /** A window must stay in front this long, with no click or key, before it is read. */
@@ -51,6 +53,12 @@ export interface FrontWatch {
 const sameWindow = (a: PlaceSource, b: PlaceSource): boolean =>
   a.app === b.app && a.title === b.title;
 
+/** The same window showing the same page or app link. */
+const samePage = (a: PlaceSource, b: PlaceSource): boolean =>
+  sameWindow(a, b) &&
+  a.url === b.url &&
+  (a.appLink ?? null) === (b.appLink ?? null);
+
 export const createFrontWatch = (deps: FrontWatchDeps): FrontWatch => {
   let running = false;
   let reading = false;
@@ -68,20 +76,27 @@ export const createFrontWatch = (deps: FrontWatchDeps): FrontWatch => {
     try {
       const cheap = await deps.probe(false);
 
-      // Inset in front, or the same window as last time: nothing new.
-      if (cheap === null || (last !== null && sameWindow(last, cheap.source))) {
+      // Inset in front: nothing new.
+      if (cheap === null) {
         return;
       }
 
-      last = cheap.source;
+      // An app the shelf holds a page from is told apart by its address, since a web app can keep one title on every page. Any other app is the same window while its title stays, and is never asked.
+      const addressed = deps.wantsAddress(cheap.source.app);
 
-      const full =
-        deps.wantsAddress(cheap.source.app) && deps.allowed()
-          ? await deps.probe(true)
-          : null;
+      const front =
+        addressed && deps.allowed() ? await deps.probe(true) : cheap;
+
+      const same = addressed ? samePage : sameWindow;
+
+      if (front === null || (last !== null && same(last, front.source))) {
+        return;
+      }
+
+      last = front.source;
 
       if (running && deps.allowed()) {
-        deps.onArrived(full ?? cheap);
+        deps.onArrived(front);
       }
     } finally {
       reading = false;
@@ -98,8 +113,9 @@ export const createFrontWatch = (deps: FrontWatchDeps): FrontWatch => {
 
   const poll = (): void => {
     cancelPoll = deps.setTimer(() => {
-      if (deps.idleSeconds() < POLL_MS / 1000) {
-        void read();
+      // The poll's read waits for a pause like any other, so none is sent while the user types. One already waiting keeps its time.
+      if (deps.idleSeconds() < POLL_MS / 1000 && cancelSettle === null) {
+        settle();
       }
 
       poll();
