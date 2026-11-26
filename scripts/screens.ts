@@ -6378,9 +6378,22 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
             tiles.map((tile) => tile.getAttribute("aria-label") ?? "")
           );
 
-        return labels.length === 4 && labels[0]?.startsWith(LONG_NAME)
+        if (labels.length !== 4 || !labels[0]?.startsWith(LONG_NAME)) {
+          return `the tiles in details don't carry their whole names: ${labels.length}`;
+        }
+
+        // The keyboard on a tile shows its whole name.
+        await page.locator("[data-attachment-grid] [data-tile]").nth(2).focus();
+
+        const tip = await page
+          .getByRole("tooltip")
+          .first()
+          .textContent({ timeout: 2000 })
+          .catch(() => null);
+
+        return tip?.includes("export.backup-before-the-move-2026") === true
           ? null
-          : `the tiles in details don't carry their whole names: ${labels.length}`;
+          : `the keyboard on a tile must show its whole name: ${String(tip)}`;
       },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-long-names-details",

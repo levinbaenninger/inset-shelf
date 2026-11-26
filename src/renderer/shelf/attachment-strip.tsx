@@ -19,6 +19,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { tooltipText, Truncated } from "@/shared/clamp";
 
@@ -60,15 +65,19 @@ export const attachmentLabel = (attachment: Attachment): string => {
     : `${name} · ${what}, ${pinCount(attachment.pins.length)}`;
 };
 
+/** An extension is a few letters or digits: what follows the last dot of "export.backup-before-the-move" is part of the name. */
+const EXTENSION = /^[\p{L}\p{N}]{1,5}$/u;
+
 /** A file's name and its extension apart; the extension is "" when it has none. */
 const splitName = (
   name: string
 ): { readonly base: string; readonly extension: string } => {
   const dot = name.lastIndexOf(".");
+  const extension = name.slice(dot + 1);
 
-  return dot <= 0 || dot === name.length - 1
+  return dot <= 0 || !EXTENSION.test(extension)
     ? { base: name, extension: "" }
-    : { base: name.slice(0, dot), extension: name.slice(dot + 1) };
+    : { base: name.slice(0, dot), extension };
 };
 
 /** What a row's small tile calls a file, in capitals: its extension up to four letters, else "file". */
@@ -303,39 +312,55 @@ export const AttachmentGrid = ({
 
       return (
         <li className="group/tile relative shrink-0" key={attachment.id}>
-          <button
-            aria-label={label}
-            className={cn(
-              "focus-visible:ring-ring/50 block rounded-lg p-1 outline-none focus-visible:ring-3",
-              attachment.id === active && "ring-primary ring-2",
-              attachment.kind === "image"
-                ? "cursor-pointer hover:opacity-85"
-                : "cursor-grab active:cursor-grabbing"
-            )}
-            data-tile
-            draggable
-            onClick={() => {
-              if (attachment.kind === "image") {
-                handlers.open(attachment);
-              }
-            }}
-            onDragStart={dragOutOf(attachment, handlers)}
-            onFocus={() => {
-              onPick(attachment);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Backspace" || event.key === "Delete") {
-                focusAfterRemoval(event.currentTarget);
-                remove(event);
-              }
-            }}
-            title={tooltipText(
-              attachment.kind === "image" ? `${label}\nClick to open` : label
-            )}
-            type="button"
-          >
-            <AttachmentTile attachment={attachment} large />
-          </button>
+          {/* The whole name shows on hover and once the keyboard is on the tile. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={label}
+                className={cn(
+                  "focus-visible:ring-ring/50 block rounded-lg p-1 outline-none focus-visible:ring-3",
+                  attachment.id === active && "ring-primary ring-2",
+                  attachment.kind === "image"
+                    ? "cursor-pointer hover:opacity-85"
+                    : "cursor-grab active:cursor-grabbing"
+                )}
+                data-tile
+                draggable
+                onClick={() => {
+                  if (attachment.kind === "image") {
+                    handlers.open(attachment);
+                  }
+                }}
+                onDragStart={dragOutOf(attachment, handlers)}
+                onFocus={() => {
+                  onPick(attachment);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Backspace" || event.key === "Delete") {
+                    focusAfterRemoval(event.currentTarget);
+                    remove(event);
+                  }
+                }}
+                type="button"
+              >
+                <AttachmentTile attachment={attachment} large />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              className="max-w-[calc(100vw-1rem)]"
+              collisionPadding={8}
+              side="bottom"
+            >
+              {/* A long word wraps rather than run past the window. */}
+              <span className="min-w-0 [overflow-wrap:anywhere] whitespace-pre-line">
+                {tooltipText(
+                  attachment.kind === "image"
+                    ? `${label}\nClick to open`
+                    : label
+                )}
+              </span>
+            </TooltipContent>
+          </Tooltip>
           {/* On the tile's corner, clear of a file's icon and a picture's middle. */}
           <span className="absolute top-0 right-0 flex opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
             <Button
