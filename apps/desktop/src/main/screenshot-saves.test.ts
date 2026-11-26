@@ -86,6 +86,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   const events: string[] = [];
   const disk: ShelfDoc[] = [];
   const deleted: string[] = [];
+  // The picture files the card wrote for a place it then didn't make, and took away again.
+  const dropped: string[] = [];
   let view: ScreenshotView | null = null;
   let held = false;
 
@@ -244,6 +246,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     controller,
     /** The picture files deleted so far. */
     deleted,
+    dropped,
     /** What every shelf written to the disk so far held, oldest first. */
     disk: () => disk.map(holds),
     /** What the shelf shows now. */
@@ -1671,6 +1674,291 @@ describe("the adds the card shows after the shelf changed under it", () => {
     expect(second).toBeNull();
     expect(card.attachmentsOn(card.note)).toBe(1);
     expect(written(card).doubled).toStrictEqual([]);
+  });
+});
+
+/** A press of the pill, the add the card shows first: it goes where the pill says. */
+const pressPill = async (card: ReturnType<typeof setup>) => {
+  const view = card.view();
+
+  if (view === null) {
+    return null;
+  }
+
+  const { item } = cardAdds(view).pill;
+
+  return await (item === null
+    ? card.saves.addToShelf(view.seq)
+    : card.saves.addToItem(view.seq, item));
+};
+
+/** Retry for the screenshot's own row is the card's one add. */
+const RETRY_ON_ROW = { adds: ["Retry"], annotate: true };
+
+describe("a screenshot the user's Undo brought back to a place an earlier add made", () => {
+  it("offers Retry for the restored row, never a fresh Add to Shelf, and holds the screenshot once, after a refused Add to “…”, Undo of the row's delete and the new tile's removal", async () => {
+    const card = await refused("shelf");
+    const row = rowOf(card);
+
+    card.controller.apply({ id: row, type: "remove" });
+    // Refused at the shelf's write: the screenshot is on the note, not saved.
+    await card.saves.addToItem(1, card.note);
+    card.controller.apply({ type: "undoRemove" });
+    await settled(card);
+    card.controller.apply({
+      attachmentId: tileOf(card),
+      id: card.note,
+      type: "removeAttachment",
+    });
+    await settled(card);
+
+    const offered = offers(card);
+
+    card.failWrites({ ok: true });
+
+    const pressed = await pressPill(card);
+
+    await settled(card);
+
+    expect({ offered, pressed, written: written(card) }).toStrictEqual({
+      offered: RETRY_ON_ROW,
+      pressed: row,
+      written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("offers one Retry, which main accepts, and no fresh add while the shelf shows the screenshot in both places after the user's Undo", async () => {
+    const card = await refused("shelf");
+
+    card.controller.apply({ id: rowOf(card), type: "remove" });
+    await card.saves.addToItem(1, card.note);
+    // The user's own Undo, after the new add put the screenshot on the note: the shelf shows both because they asked for both.
+    card.controller.apply({ type: "undoRemove" });
+    await settled(card);
+
+    expect(card.shown()).toStrictEqual({ attached: 1, items: 1 });
+    expect(offers(card)).toStrictEqual(RETRY_ON_NOTE);
+
+    card.failWrites({ ok: true });
+
+    await expect(pressPill(card)).resolves.toBe(card.note);
+    expect(card.notices).toStrictEqual([]);
+    expect(card.view()).toBeNull();
+  });
+
+  it("attaches nothing, and holds the screenshot once, when Undo brings its deleted row back while Add to “…” writes its picture file and the shelf's write is then refused", async () => {
+    const card = await refused("shelf");
+    const row = rowOf(card);
+
+    card.controller.apply({ id: row, type: "remove" });
+
+    const adding = card.saves.addToItem(1, card.note);
+
+    // The user's Undo of their delete, while the picture file is on its way.
+    card.controller.apply({ type: "undoRemove" });
+
+    await expect(adding).resolves.toBeNull();
+    await settled(card);
+
+    const offered = offers(card);
+
+    card.failWrites({ ok: true });
+
+    const pressed = await pressPill(card);
+
+    await settled(card);
+
+    expect({
+      dropped: card.dropped.length,
+      notices: card.notices,
+      offered,
+      pressed,
+      written: written(card),
+    }).toStrictEqual({
+      // The picture file written for the note, where nothing was attached, is gone again.
+      dropped: 1,
+      notices: [SHOT_STAYS],
+      offered: RETRY_ON_ROW,
+      pressed: row,
+      written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("makes no row, and holds the screenshot once, when Undo brings its removed tile back while Add to Shelf writes its picture file and the shelf's write is then refused", async () => {
+    const card = await refused("item");
+    const tile = tileOf(card);
+
+    card.controller.apply({
+      attachmentId: tile,
+      id: card.note,
+      type: "removeAttachment",
+    });
+
+    const adding = card.saves.addToShelf(1);
+
+    // The user's Undo of the tile's removal in details, while the picture file is on its way.
+    card.controller.apply({
+      attachmentId: tile,
+      id: card.note,
+      type: "restoreAttachment",
+    });
+
+    await expect(adding).resolves.toBeNull();
+    await settled(card);
+
+    const offered = offers(card);
+
+    card.failWrites({ ok: true });
+
+    const pressed = await pressPill(card);
+
+    await settled(card);
+
+    expect({
+      dropped: card.dropped.length,
+      notices: card.notices,
+      offered,
+      pressed,
+      written: written(card),
+    }).toStrictEqual({
+      dropped: 1,
+      notices: [SHOT_STAYS],
+      offered: RETRY_ON_NOTE,
+      pressed: card.note,
+      written: { doubled: [], last: { attached: 1, items: 0 } },
+    });
+  });
+});
+
+/**
+ * Add to Shelf pressed while an earlier shelf write is held; the row is
+ * deleted before the next write reads the shelf, another change makes that
+ * write happen without the row, and Undo brings the row back once that write
+ * is on its way. `endRestore` ends the write that holds the row again.
+ */
+const restoredAfterItsWriteBegan = async () => {
+  const card = setup();
+
+  await card.controller.flush();
+  card.saves.show(shot(1));
+
+  const endAhead = card.holdWrite();
+  const endWithout = card.holdWrite();
+  const endRestore = card.holdWrite();
+
+  card.controller.apply({
+    id: card.note,
+    text: "Quote from the movers, by Friday",
+    type: "editText",
+  });
+
+  const ahead = card.controller.flush();
+  const adding = card.saves.addToShelf(1);
+
+  await placedOnShelf(card);
+
+  const row = rowOf(card);
+
+  card.controller.apply({ id: row, type: "remove" });
+  card.controller.apply({ text: "Book the lift", type: "compose" });
+  endAhead({ ok: true });
+  await ahead;
+  // One turn, and the next write is on its way with the shelf as it is now: without the row.
+  await turn();
+  card.controller.apply({ id: row, type: "undoRemove" });
+  endWithout({ ok: true });
+  await turn();
+  await turn();
+
+  return { adding, card, endRestore, row };
+};
+
+describe("a write that landed while the user had the screenshot off the shelf", () => {
+  it("keeps the card as Saving…, and says nothing of added, until the write that holds the restored row lands", async () => {
+    const { adding, card, endRestore, row } =
+      await restoredAfterItsWriteBegan();
+
+    expect({
+      disk: card.disk().at(-1),
+      offers: offers(card),
+      saved: card.saved,
+      shown: card.shown(),
+    }).toStrictEqual({
+      disk: { attached: 0, items: 0 },
+      offers: { adds: ["Saving…"], annotate: true },
+      saved: [],
+      shown: { attached: 0, items: 1 },
+    });
+
+    endRestore({ ok: true });
+
+    await expect(adding).resolves.toBe(row);
+    expect({ disk: card.disk().at(-1), view: card.view() }).toStrictEqual({
+      disk: { attached: 0, items: 1 },
+      view: null,
+    });
+  });
+
+  it("says why, and offers Retry for the row, when the write that holds the restored row is refused", async () => {
+    const { adding, card, endRestore } = await restoredAfterItsWriteBegan();
+
+    endRestore(DISK_REFUSES);
+
+    await expect(adding).resolves.toBeNull();
+    await settled(card);
+
+    expect({ offers: offers(card), save: card.view()?.save }).toStrictEqual({
+      offers: RETRY_ON_ROW,
+      save: {
+        message: "The disk is full.",
+        placed: { to: "shelf" },
+        state: "failed",
+      },
+    });
+  });
+});
+
+describe("the reason a failed card gives", () => {
+  it("keeps the reason the shelf's own Retry was refused for once the tile is removed, not the first one", async () => {
+    const card = await refused("item");
+
+    card.failWrites(NO_ACCESS);
+    await card.controller.flush();
+    card.controller.apply({
+      attachmentId: tileOf(card),
+      id: card.note,
+      type: "removeAttachment",
+    });
+    await settled(card);
+
+    expect(card.view()?.save).toMatchObject({
+      message: "Inset can’t write to its data folder.",
+      placed: null,
+      state: "failed",
+    });
+  });
+});
+
+describe("a card whose save landed after the user deleted its screenshot's row", () => {
+  it("has its time again, as a card no one pressed, with both adds and no message", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+
+    await placedOnShelf(card);
+    card.controller.apply({ id: rowOf(card), type: "remove" });
+    end({ ok: true });
+    await adding;
+
+    expect({ held: card.held(), save: card.view()?.save }).toStrictEqual({
+      held: false,
+      save: { state: "idle" },
+    });
   });
 });
 
