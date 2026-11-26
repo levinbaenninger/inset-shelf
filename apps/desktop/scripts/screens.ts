@@ -6599,6 +6599,53 @@ const retryOnly = (
   page: "screenshot",
 });
 
+const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
+
+/** A failed Add to “…” whose Retry is the only add: the screenshot stays on its item. */
+const CARD_SOLE = failedCard("item", "The disk is full.", CARD_ITEM, true);
+
+/** The same card once the write that held the screenshot on its item failed too: both adds are back. */
+const CARD_BOTH = failedCard(
+  "item",
+  "Saving didn’t finish in time.",
+  CARD_ITEM
+);
+
+const CARD_RETRY = `Retry adding to “${CARD_LABEL}”`;
+
+/** What one press of Retry adding to “…” sends, as `cardAddsSent` reads it. */
+const CARD_TO_ITEM = JSON.stringify([
+  { arg: { id: CARD_ITEM.id, seq: 1 }, call: "addToItem" },
+]);
+
+/** Main pushes the card anew, as a write's end does (screenshot-saves.ts, retarget). */
+const pushCard = async (
+  page: Page,
+  view: ReturnType<typeof failedCard>
+): Promise<void> => {
+  await page.evaluate(`globalThis.__emit("view", ${JSON.stringify(view)})`);
+  await page.waitForTimeout(100);
+};
+
+/** The name of the control the keyboard is on; the tag of what holds it when that has no name. */
+const cardFocus = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(
+      "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? ''"
+    )
+  );
+
+/** The adds the card sent since `from`. */
+const cardAddsSent = async (page: Page, from: number): Promise<string> => {
+  const sent = await calls(page, from);
+
+  return JSON.stringify(
+    sent
+      .filter((each) => each.call === "addToItem" || each.call === "addToShelf")
+      .map((each) => ({ arg: each.arg, call: each.call }))
+  );
+};
+
 const ATTACHMENT_SCENES: readonly Scene[] = (
   [
     {
@@ -7431,6 +7478,89 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       },
       keepPointer: true,
       name: "screenshot-card-attach-focus",
+      page: "screenshot",
+    },
+    {
+      // The keyboard is on the only Retry when a late failed write gives both adds back: the picture shows it on Retry adding to “…”, now the line.
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await pushCard(page, CARD_BOTH);
+      },
+      check: async (page) => {
+        const problems: string[] = [];
+        const start = await callCount(page);
+
+        // Retry was the pill and is the line now: the keyboard went with it, and Enter still retries on the item.
+        const afterBoth = await cardFocus(page);
+
+        await page.keyboard.press("Enter");
+
+        const retried = await cardAddsSent(page, start);
+
+        if (afterBoth !== CARD_RETRY || retried !== CARD_TO_ITEM) {
+          problems.push(
+            `both adds came back under a focused Retry pill: the keyboard is on “${afterBoth}” and Enter sent ${retried}`
+          );
+        }
+
+        // The other way: Retry was the line and is the pill now, and Tab goes on from the pill.
+        await page.getByRole("button", { name: CARD_RETRY }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const afterSole = await cardFocus(page);
+
+        await page.keyboard.press("Tab");
+
+        const next = await cardFocus(page);
+
+        if (afterSole !== CARD_RETRY || next !== "Copy") {
+          problems.push(
+            `Retry became the only add under a focused Retry adding to “…” line: the keyboard is on “${afterSole}” and Tab went to “${next}”, not Copy`
+          );
+        }
+
+        // Add to Shelf goes while the keyboard is on it: Enter adds nowhere, and Tab starts at the pill that took its place.
+        await pushCard(page, CARD_BOTH);
+        await page.getByRole("button", { name: "Add to Shelf" }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const mark = await callCount(page);
+
+        await page.keyboard.press("Enter");
+
+        const stray = await cardAddsSent(page, mark);
+
+        await page.keyboard.press("Tab");
+
+        const first = await cardFocus(page);
+
+        if (stray !== "[]" || first !== CARD_RETRY) {
+          problems.push(
+            `Add to Shelf went under the keyboard: Enter sent ${stray}, and Tab went to “${first}”`
+          );
+        }
+
+        // Any other control keeps the keyboard through both changes.
+        await pushCard(page, CARD_BOTH);
+        await page.getByRole("button", { name: "Copy" }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const kept = [await cardFocus(page)];
+
+        await pushCard(page, CARD_BOTH);
+        kept.push(await cardFocus(page));
+
+        if (kept.some((on) => on !== "Copy")) {
+          problems.push(
+            `the keyboard was on Copy and went to ${JSON.stringify(kept)}`
+          );
+        }
+
+        return problems.length === 0 ? null : problems.join(" || ");
+      },
+      data: { view: CARD_SOLE },
+      keepPointer: true,
+      name: "screenshot-card-retry-focus",
       page: "screenshot",
     },
     {
