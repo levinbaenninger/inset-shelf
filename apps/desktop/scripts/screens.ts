@@ -3724,7 +3724,7 @@ const failedCard = (
   target: { readonly id: string; readonly label: string } | null = null
 ) => ({
   ...SCREENSHOT_VIEW,
-  save: { message, state: "failed", to },
+  save: { message, only: false, state: "failed", to },
   target,
 });
 

@@ -21,6 +21,7 @@ import type {
   PickerView,
   ShelfCommand,
   ShelfHere,
+  ShotSaveTo,
 } from "@shared/contracts";
 import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
@@ -898,6 +899,40 @@ const start = async (): Promise<void> => {
   /** The item selected or open in details in the shelf, or null; the page reports it. */
   let shelfSelection: ItemId | null = null;
 
+  /** The section an item is in, as a notice names it. */
+  const sectionName = (id: ItemId): string => {
+    const { doc } = controller.view();
+    const sectionId = controller.item(id)?.sectionId ?? doc.activeSectionId;
+
+    return (
+      doc.sections.find((section) => section.id === sectionId)?.name ??
+      "the shelf"
+    );
+  };
+
+  /**
+   * The card's screenshot is saved to `to`: a notice says where it is, by
+   * the section's name or the item's words. Add to “…” also ends the
+   * tutorial's screenshot step here; Add to Shelf ended it when its row was
+   * made.
+   */
+  const shotAdded = (to: ShotSaveTo, id: ItemId): void => {
+    if (to === "shelf") {
+      notify(`Added to ${sectionName(id)}`);
+
+      return;
+    }
+
+    const item = controller.item(id);
+
+    tutorial.complete(SHELF_TASK_IDS.screenshot);
+    notify(
+      item === undefined
+        ? "Added to the item"
+        : `Added to “${excerpt(itemText(item))}”`
+    );
+  };
+
   const shotSaves = createShotSaves<CardShot>({
     addItem: addShotItem,
     attach: attachShotTo,
@@ -929,8 +964,10 @@ const start = async (): Promise<void> => {
         controller.persisted(controller.snapshot().rev),
         setTimer
       ),
+    saved: shotAdded,
     selection: () => shelfSelection,
     shelfVisible: () => shelf.isVisible(),
+    stored: controller.stored,
   });
 
   let shotSeq = 0;
@@ -2350,15 +2387,6 @@ const start = async (): Promise<void> => {
     drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
-  const activeSectionName = (): string => {
-    const { doc } = controller.view();
-
-    return (
-      doc.sections.find((section) => section.id === doc.activeSectionId)
-        ?.name ?? "the shelf"
-    );
-  };
-
   const screenshotServer = serveContract(
     screenshotContract,
     {
@@ -2370,15 +2398,7 @@ const start = async (): Promise<void> => {
             return;
           }
 
-          tutorial.complete(SHELF_TASK_IDS.screenshot);
-
-          const item = controller.item(id);
-
-          notify(
-            item === undefined
-              ? "Added to the item"
-              : `Added to “${excerpt(itemText(item))}”`
-          );
+          shotAdded("item", id);
         })();
       },
       addToShelf: (seq) => {
@@ -2393,7 +2413,7 @@ const start = async (): Promise<void> => {
             controller.focus(id);
           }
 
-          notify(`Added to ${activeSectionName()}`);
+          shotAdded("shelf", id);
         })();
       },
       annotate: (seq) => {
@@ -2407,7 +2427,7 @@ const start = async (): Promise<void> => {
 
           // An open drawing keeps its marks; the screenshot is only saved then.
           if (drawing.isVisible()) {
-            notify(`Added to ${activeSectionName()}`);
+            shotAdded("shelf", id);
 
             return;
           }

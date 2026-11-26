@@ -267,6 +267,9 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const shelfLabel = SHELF_LABEL[saveState(save, "shelf")];
   const itemState = saveState(save, "item");
 
+  // The screenshot is on the item, changed there since: Retry adding to it is the only add, so Add to Shelf keeps its room and can't be seen, pressed or reached.
+  const itemOnly = save.state === "failed" && save.only && save.to === "item";
+
   return (
     <main
       className="group bg-muted ring-foreground/10 relative flex h-svh flex-col overflow-hidden rounded-2xl ring-1 ring-inset"
@@ -285,7 +288,11 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
                 aria-disabled={saving ? true : undefined}
                 aria-label={shelfLabel}
                 // Wide enough, with an item to name, that the line under it reads a name and is never wider.
-                className={cn("flex-1", target !== null && "min-w-36")}
+                className={cn(
+                  "flex-1",
+                  target !== null && "min-w-36",
+                  itemOnly && "invisible"
+                )}
                 onClick={() => {
                   if (!saving) {
                     api.addToShelf(seq);

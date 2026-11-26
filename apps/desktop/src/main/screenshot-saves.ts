@@ -4,7 +4,12 @@ import type {
   ShotSaveTo,
 } from "@shared/contracts";
 import { ATTACHMENTS_MAX, PICTURE_KIND } from "@shared/shelf";
-import type { AttachmentId, ItemId, ShelfItem } from "@shared/shelf";
+import type {
+  Attachment,
+  AttachmentId,
+  ItemId,
+  ShelfItem,
+} from "@shared/shelf";
 
 import { reportSaveError } from "./save-error";
 import type { WriteResult } from "./shelf-store";
@@ -37,6 +42,10 @@ const missedNotice = (named: ItemId | null, exists: boolean): string => {
 
   return named === null ? CARD_CLEARED : CARD_RETARGETED;
 };
+
+/** A press of the other add that reached main after the user changed the screenshot where the first add put it. */
+export const SHOT_CHANGED =
+  "The screenshot was changed where it is, so it stays there. Retry saves it.";
 
 /** A screenshot the card shows, held in memory: the file may be moved or deleted meanwhile. */
 export interface Shot {
@@ -78,25 +87,56 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly detach: (id: ItemId, attachment: AttachmentId) => void;
   /** Waits until the disk holds every change so far. */
   readonly persisted: () => Promise<WriteResult>;
+  /** The item as the disk holds it; undefined while no write of it has landed. */
+  readonly stored: (id: ItemId) => ShelfItem | undefined;
+  /** A write other than the card's own save landed its screenshot where it was: the card went, and the user hears where it is. */
+  readonly saved: (to: ShotSaveTo, id: ItemId) => void;
   readonly notify: (message: string, tone: "failed") => void;
   readonly imageUrl: (shot: S) => string;
 }
 
-/** Where the shelf holds the card's screenshot, saved or not: the item Add to Shelf made of it, or the item Add to “…” attached it to. */
+/**
+ * Where the shelf holds the card's screenshot, saved or not: the item Add to
+ * Shelf made of it, or the item Add to “…” attached it to. `as` is the row
+ * or the attachment as the card made it: the shelf never changes one in
+ * place, so anything else found there holds a change made since.
+ */
 type Placement =
-  | { readonly to: "shelf"; readonly item: ItemId }
+  | { readonly to: "shelf"; readonly item: ItemId; readonly as: ShelfItem }
   | {
       readonly to: "item";
       readonly item: ItemId;
       readonly attachment: AttachmentId;
+      readonly as: Attachment;
     };
+
+/**
+ * How the screenshot stands in its place. The card may move it only while it
+ * is `placed`: as the card made it, and in no write that landed. `saved`
+ * ends the card's part, since the disk holds the screenshot there. `changed`
+ * leaves Retry for that place alone, since moving it would lose the change.
+ */
+interface Standing {
+  readonly placed: Placement;
+  readonly state: "placed" | "changed" | "saved";
+}
+
+/** The card's screenshot in an item: the row itself, or its attachment there. */
+const within = (
+  item: ShelfItem | undefined,
+  placed: Placement
+): ShelfItem | Attachment | undefined =>
+  placed.to === "shelf"
+    ? item
+    : item?.attachments.find((each) => each.id === placed.attachment);
 
 interface Held<S extends Shot> {
   readonly shot: S;
   /**
    * The one place a save put it. Retry after a failed save finds it there
    * and doesn't place it twice; the other destination takes it from there
-   * first, so the shelf never holds it twice.
+   * first, so the shelf never holds it twice, and only while it stands
+   * there as the card placed it (`Standing`).
    */
   placed: Placement | null;
   /** A save is under way: a second click waits for it. */
@@ -201,10 +241,38 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       : selected;
   };
 
+  /** How the screenshot stands where a save put it; null when it is nowhere: never placed, or taken off by Delete or Discard changes since. */
+  const standing = (now: Held<S>): Standing | null => {
+    const { placed } = now;
+
+    if (placed === null) {
+      return null;
+    }
+
+    const shown = within(deps.item(placed.item), placed);
+
+    if (shown === undefined) {
+      return null;
+    }
+
+    if (within(deps.stored(placed.item), placed) !== undefined) {
+      return { placed, state: "saved" };
+    }
+
+    return { placed, state: shown === placed.as ? "placed" : "changed" };
+  };
+
+  /** The screenshot's own row holds a change made since: Add to “…” would drop the row, so it names nothing. */
+  const rowChanged = (): boolean => {
+    const at = held === null ? null : standing(held);
+
+    return at?.placed.to === "shelf" && at.state === "changed";
+  };
+
   const target = (): ScreenshotView["target"] => {
     // Once attached, the card keeps naming that item, so Retry after a failed save saves it there and never attaches twice.
     const attached = held?.placed?.to === "item" ? held.placed.item : null;
-    const id = attached ?? candidate();
+    const id = attached ?? (rowChanged() ? null : candidate());
     const item = id === null ? undefined : deps.item(id);
 
     cardItem =
@@ -217,11 +285,32 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       : { id: item.id, label: excerpt(cardLabel(item)) };
   };
 
-  /** The card names the item that counts now, without moving it or keeping it longer. */
+  /** The disk holds the card's screenshot where it was: another write did the card's save, so the card goes as after its own. */
+  const finish = (placed: Placement): void => {
+    held = null;
+    card.hide();
+    deps.saved(placed.to, placed.item);
+  };
+
+  /**
+   * The card as the shelf and the disk stand now, without moving the
+   * screenshot or keeping the card longer: it goes once a write landed its
+   * screenshot, names the item that counts, and offers only what a press
+   * may still do.
+   */
   const retarget = (): void => {
     const view = card.view();
 
     if (view === null) {
+      return;
+    }
+
+    // While the card's own save runs, that save says how it went.
+    const at = held === null || held.saving ? null : standing(held);
+
+    if (at?.state === "saved") {
+      finish(at.placed);
+
       return;
     }
 
@@ -231,51 +320,75 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       card.update({ target: next });
     }
 
-    // Add to “…” names another item now: its button reads that name, not Retry, so a press never goes somewhere unseen.
     const { save: shown } = view;
 
-    if (
-      shown.state === "failed" &&
-      shown.to === "item" &&
-      cardItem !== (held?.tried ?? null)
-    ) {
-      card.update({ save: { ...shown, to: null } });
+    if (shown.state !== "failed") {
+      return;
+    }
+
+    // Add to “…” names another item now: its button reads that name, not Retry, so a press never goes somewhere unseen.
+    const to =
+      shown.to === "item" && cardItem !== (held?.tried ?? null)
+        ? null
+        : shown.to;
+
+    const only = at?.state === "changed";
+
+    if (to !== shown.to || only !== shown.only) {
+      card.update({ save: { ...shown, only, to } });
     }
   };
 
-  /** Where the shelf still holds the screenshot: Delete or Discard changes may have taken it from its place since. */
-  const placement = (now: Held<S>): Placement | null => {
-    const { placed } = now;
+  /**
+   * Whether the card's screenshot may go to `to`: it is nowhere, already
+   * there, or in the other place as the card put it. Saved in the other
+   * place, the card is done and goes; changed there, it stays and the user
+   * hears why.
+   */
+  const free = (now: Held<S>, to: ShotSaveTo): boolean => {
+    const at = standing(now);
 
-    if (placed === null) {
-      return null;
+    if (at === null || at.placed.to === to || at.state === "placed") {
+      return true;
     }
 
-    const item = deps.item(placed.item);
+    if (at.state === "saved") {
+      finish(at.placed);
+    } else {
+      deps.notify(SHOT_CHANGED, "failed");
+    }
 
-    const there =
-      placed.to === "shelf"
-        ? item !== undefined
-        : item?.attachments.some((each) => each.id === placed.attachment) ===
-          true;
+    return false;
+  };
 
-    if (!there) {
+  /** `standing` at a press, which also forgets a place Delete or Discard changes took the screenshot from. */
+  const placement = (now: Held<S>): Standing | null => {
+    const at = standing(now);
+
+    if (at === null) {
       now.placed = null;
     }
 
-    return now.placed;
+    return at;
   };
 
-  /** The screenshot leaves its place before it goes to the other destination, so no shelf, shown or written, holds it twice. */
-  const takeBack = (now: Held<S>): void => {
-    const { placed } = now;
+  /**
+   * The screenshot leaves its place before it goes to the other destination,
+   * so no shelf, shown or written, holds it twice. It removes only what
+   * stands as the card made it, never a row or an attachment the disk holds
+   * or the user changed; `free` turned those presses away in this same turn.
+   */
+  const takeBack = (now: Held<S>, at: Standing | null): void => {
+    if (at?.state !== "placed") {
+      return;
+    }
 
     now.placed = null;
 
-    if (placed?.to === "shelf") {
-      deps.dropItem(placed.item);
-    } else if (placed?.to === "item") {
-      deps.detach(placed.item, placed.attachment);
+    if (at.placed.to === "shelf") {
+      deps.dropItem(at.placed.item);
+    } else {
+      deps.detach(at.placed.item, at.placed.attachment);
     }
   };
 
@@ -283,17 +396,22 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   const current = (seq: number): Held<S> | null =>
     held !== null && held.shot.seq === seq ? held : null;
 
-  const save = async (
-    seq: number,
-    to: ShotSaveTo,
-    place: (now: Held<S>) => Promise<Placed>
-  ): Promise<ItemId | null> => {
+  /**
+   * The card's screenshot when a press may save it to `to`: it is still the
+   * newest, no save of it runs (a second click waits for the first), and it
+   * is free to go there.
+   */
+  const ready = (seq: number, to: ShotSaveTo): Held<S> | null => {
     const now = current(seq);
 
-    if (now === null || now.saving) {
-      return null;
-    }
+    return now === null || now.saving || !free(now, to) ? null : now;
+  };
 
+  const save = async (
+    now: Held<S>,
+    to: ShotSaveTo,
+    place: () => Promise<Placed>
+  ): Promise<ItemId | null> => {
     now.saving = true;
     // The card stays while its screenshot is written, however slow the disk.
     card.hold();
@@ -302,7 +420,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     let placed: ItemId | null = null;
 
     const written = await reportSaveError(async () => {
-      const result = await place(now);
+      const result = await place();
 
       if (!result.ok) {
         return result;
@@ -325,6 +443,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         card.update({
           save: {
             message: written.message,
+            only: false,
             state: "failed",
             to: retry ? to : null,
           },
@@ -347,38 +466,46 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
   return {
     /** Add to Shelf: the screenshot as a new item; Retry makes it again if its row was deleted meanwhile. */
-    addToShelf: async (seq: number): Promise<ItemId | null> =>
-      await save(seq, "shelf", async (now) => {
-        const placed = placement(now);
+    addToShelf: async (seq: number): Promise<ItemId | null> => {
+      const now = ready(seq, "shelf");
 
-        if (placed?.to === "shelf") {
-          return { id: placed.item, ok: true };
+      if (now === null) {
+        return null;
+      }
+
+      return await save(now, "shelf", async () => {
+        const at = placement(now);
+
+        if (at?.placed.to === "shelf") {
+          return { id: at.placed.item, ok: true };
         }
 
-        takeBack(now);
+        takeBack(now, at);
 
         const id = await deps.addItem(now.shot);
+        const row = id === null ? undefined : deps.item(id);
 
-        if (id === null) {
+        if (row === undefined) {
           return {
             message: "The shelf couldn’t take the screenshot.",
             ok: false,
           };
         }
 
-        now.placed = { item: id, to: "shelf" };
+        now.placed = { as: row, item: row.id, to: "shelf" };
 
-        return { id, ok: true };
-      }),
+        return { id: row.id, ok: true };
+      });
+    },
 
     /**
      * Add to “…”: the screenshot attached to `id`, the item the card named
      * when it was pressed, while the card still names it and it exists.
      */
     addToItem: async (seq: number, id: ItemId): Promise<ItemId | null> => {
-      const now = current(seq);
+      // Null for an older card's click too: its screenshot is gone, and the card names nothing now.
+      const now = ready(seq, "item");
 
-      // An older card's click: its screenshot is gone, and the card names nothing now.
       if (now === null) {
         return null;
       }
@@ -392,29 +519,30 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return null;
       }
 
-      if (!now.saving) {
-        now.tried = id;
-      }
+      now.tried = id;
 
-      return await save(seq, "item", async (holding) => {
+      return await save(now, "item", async () => {
         // A Retry checks the attachment itself: Discard changes may have taken it off since.
-        const placed = placement(holding);
+        const at = placement(now);
 
         if (deps.item(id) === undefined) {
           return { message: ITEM_GONE, ok: false, retry: false };
         }
 
-        if (placed?.to === "item" && placed.item === id) {
+        if (at?.placed.to === "item" && at.placed.item === id) {
           return { id, ok: true };
         }
 
         // No item holds it now, so the card names this one only while it could take it.
-        takeBack(holding);
+        takeBack(now, at);
 
-        const result = await deps.attach(holding.shot, id);
-        const [attachment] = result.attached;
+        const result = await deps.attach(now.shot, id);
 
-        if (attachment === undefined) {
+        const tile = deps
+          .item(id)
+          ?.attachments.find((each) => each.id === result.attached.at(0));
+
+        if (tile === undefined) {
           const message =
             result.message ?? "The screenshot couldn’t be attached.";
 
@@ -424,7 +552,12 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
             : { message, ok: false };
         }
 
-        holding.placed = { attachment, item: id, to: "item" };
+        now.placed = {
+          as: tile,
+          attachment: tile.id,
+          item: id,
+          to: "item",
+        };
         retarget();
 
         return { id, ok: true };

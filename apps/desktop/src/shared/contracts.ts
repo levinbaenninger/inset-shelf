@@ -343,6 +343,12 @@ export type ShotSave =
       /** The button that offers Retry; null when none does (the item it went to is gone or full, or the card names another now). */
       readonly to: ShotSaveTo | null;
       readonly message: string;
+      /**
+       * Retry is the only add left: the screenshot is in the shelf where
+       * `to` put it, not saved, and the user has changed it there since, so
+       * the other add would lose that change.
+       */
+      readonly only: boolean;
     };
 
 const Seq = z.number().int().min(0);

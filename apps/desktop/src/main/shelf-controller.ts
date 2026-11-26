@@ -86,6 +86,8 @@ export interface ShelfController {
   readonly discard: (id: ItemId) => boolean;
   /** A window removed in details that can still come back. */
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
+  /** The item as the disk holds it; undefined for one no write has landed yet. */
+  readonly stored: (id: ItemId) => ShelfItem | undefined;
 }
 
 /** Typing saves after a pause; everything else at once. */
@@ -663,6 +665,7 @@ export const createShelfController = (
     persisted,
     setStatus,
     snapshot: () => ({ doc, rev: version }),
+    stored: (id) => onDisk.items.find((item) => item.id === id),
     subscribe: (listener) => {
       listeners.add(listener);
 
