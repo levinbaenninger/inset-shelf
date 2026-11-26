@@ -6,6 +6,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -2234,7 +2236,7 @@ const checkDragOut = async (): Promise<void> => {
   await closeFinderWindow(folder);
 };
 
-// Copy with Details (src/main/copy-commands.ts): read back from the pasteboard, then pasted into a new TextEdit document that is never saved.
+// Copy with Details (src/main/copy-commands.ts): read back from the pasteboard, then pasted into a document of the test's own under the run's temp folder.
 
 /** The pasteboard's types, its plain text and its HTML. */
 const pasteboard = () =>
@@ -2256,38 +2258,119 @@ const pasteboard = () =>
       )
     );
 
-/** TextEdit's front window: its name and its text, or "" for each when it has none. */
-const textEditFront = (): { readonly name: string; readonly text: string } =>
-  z.object({ name: z.string(), text: z.string() }).parse(
-    JSON.parse(
-      jxa(`const w = Application("System Events").processes.byName("TextEdit").windows();
-        let name = "", text = "";
+/**
+ * The document the paste goes into: a blank rich-text package in the run's temp folder.
+ * TextEdit keeps a new Untitled document in iCloud Drive, so the test never makes one.
+ */
+const PASTE_DOCUMENT = path.join(work, "inset-e2e-paste.rtfd");
+
+const TextEditWindow = z.object({
+  document: z.string(),
+  standard: z.boolean(),
+  text: z.string(),
+});
+
+/** Reads TextEdit's windows through System Events: the file each shows, and its text. */
+const TEXTEDIT_WINDOWS = `const textEditWindows = () => Application("System Events").processes.byName("TextEdit").windows().map((w) => {
+    const read = (get) => { try { const v = get(); return v === null || v === undefined ? "" : String(v); } catch { return ""; } };
+    const area = (() => { try { return w.entireContents().find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } }); } catch { return undefined; } })();
+    return { document: read(() => w.attributes.byName("AXDocument").value()), standard: read(() => w.subrole()) === "AXStandardWindow", text: area ? read(() => area.value()) : "", w };
+  });`;
+
+const textEditWindows = (): z.infer<typeof TextEditWindow>[] =>
+  z
+    .array(TextEditWindow)
+    .parse(
+      JSON.parse(
+        jxa(
+          `${TEXTEDIT_WINDOWS} JSON.stringify(textEditWindows().map(({ document, standard, text }) => ({ document, standard, text })));`
+        )
+      )
+    );
+
+/** A window's AXDocument is a file URL; a package's ends in a slash. */
+const documentPath = (url: string): string =>
+  url === ""
+    ? ""
+    : decodeURIComponent(new URL(url).pathname).replace(/\/$/u, "");
+
+const isPasteDocument = (window: z.infer<typeof TextEditWindow>): boolean =>
+  documentPath(window.document) === realpathSync(PASTE_DOCUMENT);
+
+/**
+ * Edit > Paste in TextEdit, pressed only when its one window shows the test's own blank document.
+ * The look and the press are one script, so the paste can reach no other document.
+ */
+const pasteIntoOwnDocument = (): string =>
+  jxa(`${TEXTEDIT_WINDOWS}
+    const own = ${JSON.stringify(`file://${realpathSync(PASTE_DOCUMENT)}`)};
+    const open = textEditWindows();
+    const plain = (url) => decodeURIComponent(url).replace(/\\/$/, "");
+    (() => {
+      if (open.length !== 1) return "not pasted: " + open.length + " windows";
+      if (plain(open[0].document) !== own) return "not pasted: the window shows " + (open[0].document || "no file");
+      if (open[0].text !== "") return "not pasted: the document is not blank";
+      Application("System Events").processes.byName("TextEdit").menuBars[0].menuBarItems.byName("Edit").menus[0].menuItems.byName("Paste").click();
+      return "pasted";
+    })();`);
+
+/** One step of a cleanup: a step that fails says so and does not skip the next. */
+const attempt = (run: () => string): string => {
+  try {
+    return run();
+  } catch (error) {
+    return `failed: ${error instanceof Error ? error.message.split("\n")[0] : "unknown"}`;
+  }
+};
+
+/**
+ * Closes the test's own document and nothing else, then quits TextEdit when no document of anyone's is left open.
+ * Runs after a failure too.
+ */
+const closePasteDocument = async (): Promise<void> => {
+  if (spawnSync("pgrep", ["-x", "TextEdit"]).status !== 0) {
+    return;
+  }
+
+  const closed = attempt(() =>
+    jxa(`${TEXTEDIT_WINDOWS}
+      const own = ${JSON.stringify(`file://${realpathSync(PASTE_DOCUMENT)}`)};
+      const mine = textEditWindows().filter((each) => decodeURIComponent(each.document).replace(/\\/$/, "") === own);
+      for (const { w } of mine) {
+        const close = w.buttons().find((b) => { try { return b.subrole() === "AXCloseButton"; } catch { return false; } });
+        if (close) close.click();
+        delay(0.8);
+        // Only with "Ask to keep changes when closing documents": the file is the test's own, so either answer is safe. Without it the window is gone by now, and there is nothing to read.
         try {
-          name = w.length > 0 ? String(w[0].name()) : "";
-          const area = w.length > 0 ? w[0].entireContents().find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } }) : undefined;
-          text = area ? String(area.value()) : "";
+          const sheet = w.sheets().length > 0 ? w.sheets()[0] : undefined;
+          const answer = sheet ? sheet.entireContents().find((e) => { try { return e.role() === "AXButton" && ["Revert Changes", "Don’t Save", "Delete"].includes(e.name()); } catch { return false; } }) : undefined;
+          if (answer) answer.click();
         } catch {}
-        JSON.stringify({ name, text });`)
-    )
+      }
+      String(mine.length);`)
   );
 
-/** Closes TextEdit's Untitled documents with Delete, which also removes the draft TextEdit autosaves to iCloud Drive, then quits it through its menu. */
-const closeUntitled = async (): Promise<void> => {
-  jxa(`const p = Application("System Events").processes.byName("TextEdit");
-    for (const w of p.windows().filter((each) => String(each.name()).startsWith("Untitled"))) {
-      const close = w.buttons().find((b) => { try { return b.subrole() === "AXCloseButton"; } catch { return false; } });
-      if (close) close.click();
-      delay(0.8);
-      const sheet = w.sheets().length > 0 ? w.sheets()[0] : undefined;
-      const remove = sheet ? sheet.entireContents().find((e) => { try { return e.role() === "AXButton" && e.name() === "Delete"; } catch { return false; } }) : undefined;
-      if (remove) remove.click();
-      delay(0.8);
-    }
-    "";`);
-  osa(
-    'tell application "System Events" to tell process "TextEdit" to click menu item "Quit TextEdit" of menu 1 of menu bar item "TextEdit" of menu bar 1'
+  await delay(800);
+
+  const left = attempt(() =>
+    String(textEditWindows().filter((each) => each.standard).length)
   );
-  await delay(1500);
+
+  console.log(
+    `  TextEdit: closed ${closed} of the test's windows, ${left} left`
+  );
+
+  if (left === "0") {
+    attempt(() =>
+      osa(
+        'tell application "System Events" to tell process "TextEdit" to click menu item "Quit TextEdit" of menu 1 of menu bar item "TextEdit" of menu bar 1'
+      )
+    );
+    await waitUntil(
+      () => spawnSync("pgrep", ["-x", "TextEdit"]).status !== 0,
+      4000
+    );
+  }
 };
 
 /** C8: the note with a picture attached, copied with ⌥⌘C's menu item; its flavours, then a paste into TextEdit. */
@@ -2329,10 +2412,8 @@ const checkCopyDetails = async (): Promise<void> => {
   writeFileSync(path.join(work, "copy-details.html"), board.html);
   writeFileSync(path.join(work, "copy-details.txt"), board.plain);
 
-  // TextEdit only through `open` and System Events, never an Apple Event to it. It is opened without its saved windows, so none of the owner's documents opens, and the paste goes only into a new Untitled document, which is closed with Delete.
-  const running = spawnSync("pgrep", ["-x", "TextEdit"]).status === 0;
-
-  if (running) {
+  // TextEdit only through `open` and System Events, never an Apple Event to it. It opens one file, the test's own, without its saved windows. No Untitled document is made, so nothing reaches iCloud Drive.
+  if (spawnSync("pgrep", ["-x", "TextEdit"]).status === 0) {
     record(
       "copy details: TextEdit was not already open",
       false,
@@ -2342,44 +2423,45 @@ const checkCopyDetails = async (): Promise<void> => {
     return;
   }
 
+  mkdirSync(PASTE_DOCUMENT);
+  writeFileSync(
+    path.join(PASTE_DOCUMENT, "TXT.rtf"),
+    String.raw`{\rtf1\ansi\ansicpg1252{\fonttbl\f0\fswiss Helvetica;}\f0\fs24 }`
+  );
+
   try {
     execFileSync("open", [
       "-a",
       "TextEdit",
+      PASTE_DOCUMENT,
       "--args",
       "-ApplePersistenceIgnoreState",
       "YES",
     ]);
-    await waitUntil(() => frontmost() === "TextEdit", 6000);
-    await delay(800);
-    guardedKeys(() => {
-      osa(
-        'tell application "System Events" to keystroke "n" using command down'
-      );
-    }, ["TextEdit"]);
 
-    const blank = await waitUntil(
+    const shown = await waitUntil(
       () =>
-        textEditFront().name.startsWith("Untitled") &&
-        textEditFront().text === "",
-      4000
+        frontmost() === "TextEdit" && textEditWindows().some(isPasteDocument),
+      8000
     );
 
-    if (blank) {
-      guardedKeys(() => {
-        osa(
-          'tell application "System Events" to keystroke "v" using command down'
-        );
-      }, ["TextEdit"]);
-      await delay(1200);
-    }
+    await delay(600);
 
-    const pasted = textEditFront().text;
+    const outcome = shown
+      ? pasteIntoOwnDocument()
+      : "not pasted: the document did not open";
+
+    await delay(1200);
+
+    const own = textEditWindows().find(isPasteDocument);
+    const pasted = own?.text ?? "";
 
     record(
-      "copy details: TextEdit pastes the words and the picture into a new document",
-      blank && pasted.includes(ATTACH_TARGET) && pasted.includes("\uFFFC"),
-      `${textEditFront().name}: ${JSON.stringify(pasted.replaceAll("\uFFFC", "[picture]").slice(0, 160))}`
+      "copy details: TextEdit pastes the words and the picture into the test's own document",
+      outcome === "pasted" &&
+        pasted.includes(ATTACH_TARGET) &&
+        pasted.includes("￼"),
+      `${outcome}, ${path.basename(PASTE_DOCUMENT)}: ${JSON.stringify(pasted.replaceAll("￼", "[picture]").slice(0, 160))}`
     );
 
     const window = windows().find(
@@ -2394,7 +2476,14 @@ const checkCopyDetails = async (): Promise<void> => {
       ]);
     }
   } finally {
-    await closeUntitled();
+    await closePasteDocument();
+    console.log(
+      `  paste document on disk: ${readdirSync(PASTE_DOCUMENT).join(", ")}`
+    );
+    record(
+      "copy details: TextEdit is quit again",
+      spawnSync("pgrep", ["-x", "TextEdit"]).status !== 0
+    );
   }
 };
 
