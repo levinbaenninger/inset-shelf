@@ -43,9 +43,6 @@ export const DocsActions = () => (
           sideOffset={8}
           className="bg-fd-popover text-fd-popover-foreground z-50 min-w-44 rounded-lg border p-1 text-sm shadow-lg"
         >
-          <DropdownMenu.Label className="text-fd-muted-foreground px-2 py-1.5 text-xs font-medium">
-            Download Inset Shelf
-          </DropdownMenu.Label>
           {DOWNLOAD_CHOICES.map(({ label, url }) => (
             <DropdownMenu.Item key={url} asChild>
               <a
