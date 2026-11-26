@@ -81,8 +81,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   const saved: string[] = [];
   // The card's waits for the disk that are still running, each by what ends it.
   const waits = new Set<() => void>();
-  // Set by holdWrite(): the next write stays on the disk's way until the test ends it.
-  let heldWrite: Promise<WriteResult> | null = null;
+  // Filled by holdWrite(): the next writes, in order, each stay on the disk's way until the test ends it.
+  const heldWrites: Promise<WriteResult>[] = [];
   const attached: ItemId[] = [];
   const events: string[] = [];
   const disk: ShelfDoc[] = [];
@@ -105,11 +105,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     save: async (doc) => {
       await turn();
 
-      const hold = heldWrite;
-
-      heldWrite = null;
-
-      const result = hold === null ? writes : await hold;
+      const result = (await heldWrites.shift()) ?? writes;
 
       if (result.ok) {
         disk.push(doc);
@@ -291,16 +287,18 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
         run();
       }
     },
-    /** Keeps the next write on the disk's way until the returned function ends it, with how it went. */
+    /** Keeps the next write no call before this one holds on the disk's way, until the returned function ends it, with how it went. */
     holdWrite: (): ((result: WriteResult) => void) => {
       const write = new EventTarget();
       let result: WriteResult = { ok: true };
 
-      heldWrite = (async () => {
-        await once(write, "end");
+      heldWrites.push(
+        (async () => {
+          await once(write, "end");
 
-        return result;
-      })();
+          return result;
+        })()
+      );
 
       return (ended) => {
         result = ended;
@@ -975,7 +973,7 @@ describe("a screenshot the user or a later write touched in its place", () => {
     expect(card.shown()).toStrictEqual({ attached: 1, items: 0 });
   });
 
-  it("moves nothing the disk holds, even when nothing told the card that the write landed", async () => {
+  it("goes once the shelf's own Retry lands its screenshot, though another item is still not saved", async () => {
     const card = await refused("shelf");
     const row = rowOf(card);
 
@@ -991,7 +989,7 @@ describe("a screenshot the user or a later write touched in its place", () => {
 
     // One turn, and the write is on its way with the shelf as it is now.
     await turn();
-    // Edited while the shelf's Retry is on its way: that write lands the row and tells no one, since this item is still not saved.
+    // Edited while the shelf's Retry is on its way: that write lands the row, and the shelf still shows its save error for this item.
     card.controller.apply({
       id: other,
       text: "Book the lift for Friday",
@@ -1000,13 +998,14 @@ describe("a screenshot the user or a later write touched in its place", () => {
     end({ ok: true });
     await retry;
 
-    expect(card.view()?.save).toMatchObject({ state: "failed", to: "shelf" });
+    expect(card.controller.view().notSaved).toMatchObject([{ id: other }]);
+    expect(card.view()).toBeNull();
 
+    // A press that was already on its way moves nothing.
     await card.saves.addToItem(1, card.note);
 
-    expect(card.images()).toMatchObject([{ id: row }]);
     expect(card.shown()).toStrictEqual({ attached: 0, items: 1 });
-    expect(card.view()).toBeNull();
+    expect(card.images()).toMatchObject([{ id: row }]);
     expect(card.saved).toStrictEqual(["shelf"]);
   });
 
@@ -1069,6 +1068,11 @@ const settled = async (card: ReturnType<typeof setup>) => {
 };
 
 const DISK_REFUSES: WriteResult = { message: "The disk is full.", ok: false };
+
+const NO_ACCESS: WriteResult = {
+  message: "Inset can’t write to its data folder.",
+  ok: false,
+};
 
 describe("a save that gave up waiting while its write was still on its way", () => {
   it("says it isn't saved yet, and offers only Retry while that write can still land", async () => {
@@ -1246,6 +1250,171 @@ describe("a save that gave up waiting while its write was still on its way", () 
     expect(card.shown()).toStrictEqual({ attached: 1, items: 0 });
     expect(card.disk().filter((each) => each.items > 0)).toStrictEqual([]);
     expect(card.saved).toStrictEqual([]);
+  });
+
+  it("keeps what a newer save of the screenshot said when the write an older save waited for is refused", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+
+    const end = card.holdWrite();
+
+    card.controller.apply({
+      id: card.note,
+      text: "Quote from the movers, by Friday",
+      type: "editText",
+    });
+
+    const ahead = card.controller.flush();
+    const adding = card.saves.addToShelf(1);
+
+    await card.giveUpWaiting();
+    await adding;
+    // The newer save: Add to “…”, and the screenshot's file can't be written.
+    card.failAttachments(DISK_FULL);
+    await card.saves.addToItem(1, card.note);
+    card.failWrites(NO_ACCESS);
+    end(NO_ACCESS);
+    await ahead;
+    await settled(card);
+
+    expect(card.view()?.save).toStrictEqual({
+      message: "The disk is full.",
+      only: false,
+      state: "failed",
+      to: "item",
+    });
+  });
+
+  it("keeps what a newer screenshot's card says when the write an older screenshot waited for is refused", async () => {
+    const { card, end } = await waitedOut("shelf");
+
+    card.saves.show(shot(2));
+    card.failAttachments(DISK_FULL);
+    await card.saves.addToShelf(2);
+    end(NO_ACCESS);
+    await settled(card);
+
+    expect(card.view()).toMatchObject({
+      save: { message: "The disk is full.", state: "failed", to: "shelf" },
+      seq: 2,
+    });
+  });
+
+  it("goes with one notice once the first write lands, though Retry gave up waiting too and a later write is still held", async () => {
+    const { card, end } = await waitedOut("shelf");
+    const endLater = card.holdWrite();
+
+    // A separate change to the shelf: its write waits behind the first.
+    card.controller.apply({ text: "Book the lift", type: "compose" });
+
+    const retrying = card.saves.addToShelf(1);
+
+    await card.giveUpWaiting();
+    await retrying;
+
+    expect(card.view()?.save).toStrictEqual({
+      message: SAVE_TOO_SLOW,
+      only: true,
+      state: "failed",
+      to: "shelf",
+    });
+
+    end({ ok: true });
+    await turn();
+
+    // The later write is still on its way: the disk holds the first alone.
+    expect(card.disk()).toStrictEqual([
+      { attached: 0, items: 0 },
+      { attached: 0, items: 1 },
+    ]);
+    expect({ saved: card.saved, view: card.view() }).toStrictEqual({
+      saved: ["shelf"],
+      view: null,
+    });
+
+    endLater({ ok: true });
+    await settled(card);
+
+    expect(card.saved).toStrictEqual(["shelf"]);
+    expect(card.notices).toStrictEqual([]);
+  });
+
+  it("goes with one notice, and no word of a failure, when its write lands while Retry still waits for a later one", async () => {
+    const { card, end } = await waitedOut("shelf");
+    const endLater = card.holdWrite();
+
+    card.controller.apply({ text: "Book the lift", type: "compose" });
+
+    const retrying = card.saves.addToShelf(1);
+
+    end({ ok: true });
+    await turn();
+
+    // Retry waits for every change so far: its own answer comes with the later write, or with its limit.
+    expect(card.view()?.save).toStrictEqual({ state: "saving", to: "shelf" });
+
+    await card.giveUpWaiting();
+    await retrying;
+
+    expect({ saved: card.saved, view: card.view() }).toStrictEqual({
+      saved: ["shelf"],
+      view: null,
+    });
+
+    endLater({ ok: true });
+    await settled(card);
+
+    expect(card.saved).toStrictEqual(["shelf"]);
+    expect(card.notices).toStrictEqual([]);
+  });
+
+  it("offers only Retry from the moment a write that waited starts and holds its screenshot, and goes once it lands", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+
+    const endAhead = card.holdWrite();
+    const end = card.holdWrite();
+
+    card.controller.apply({
+      id: card.note,
+      text: "Quote from the movers, by Friday",
+      type: "editText",
+    });
+
+    const ahead = card.controller.flush();
+    const adding = card.saves.addToShelf(1);
+
+    await card.giveUpWaiting();
+    await adding;
+
+    // Its write waits behind the edit's: the screenshot may still go to the note.
+    expect(card.view()).toMatchObject({
+      save: { only: false, state: "failed", to: "shelf" },
+      target: { id: card.note },
+    });
+
+    endAhead({ ok: true });
+    await ahead;
+    await turn();
+
+    // Nothing on the shelf changed: the write that waited started, and it holds the row.
+    expect(card.disk().at(-1)).toStrictEqual({ attached: 0, items: 0 });
+    expect(card.view()).toMatchObject({
+      save: { only: true, state: "failed", to: "shelf" },
+      target: null,
+    });
+
+    end({ ok: true });
+    await settled(card);
+
+    expect(card.view()).toBeNull();
+    expect(card.saved).toStrictEqual(["shelf"]);
   });
 });
 
