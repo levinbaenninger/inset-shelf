@@ -1669,7 +1669,6 @@ const start = async (): Promise<void> => {
   const drawingSaves = createDrawingSaves({
     added: (id, via) => {
       e2eLog("itemAdded", { itemId: id, kind: "image", via });
-      controller.focus(id);
     },
     clearStaging: (id) => {
       staging.clear(id);
@@ -1692,6 +1691,9 @@ const start = async (): Promise<void> => {
     },
     ended: () => {
       drawing.saveEnded();
+    },
+    focus: (id) => {
+      controller.focus(id);
     },
     readFile: async (file) => {
       try {

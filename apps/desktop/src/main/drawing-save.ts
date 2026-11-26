@@ -99,6 +99,8 @@ export interface DrawingSaveDeps {
   readonly ended: () => void;
   /** The item the marks went to: the e2e log and the shelf's selection. */
   readonly added: (id: ItemId, via: "annotation" | "drawing") => void;
+  /** The shelf selects an item and brings it into view, as after a capture, which also leaves details. */
+  readonly focus: (id: ItemId) => void;
   /** After the user's own Save: the shelf shows the item, and says so when a copy failed or a copied drawing never reached the disk. */
   readonly show: (
     copied: ActionResult | null,
@@ -555,6 +557,19 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       : await deps.copies.copyOwnPicture(attachment);
   };
 
+  /**
+   * Marks that went to an item of their own, new or annotated, bring it into
+   * view. Marks on an attachment leave the shelf where the user was: in the
+   * details the picture was opened from, or on the list.
+   */
+  const landed = (put: Put): void => {
+    deps.added(put.placed.id, put.via);
+
+    if (put.placed.kind === "item") {
+      deps.focus(put.placed.id);
+    }
+  };
+
   /** The user's own Save: the window closes at once; a copy waits for its own save. */
   const saveAndClose = async (
     input: DrawingSaveInput,
@@ -581,7 +596,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     }
 
     deps.close();
-    deps.added(put.placed.id, put.via);
+    landed(put);
     deps.show(copied, saving);
 
     return { ok: true };
@@ -609,7 +624,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     }
 
     deps.close();
-    deps.added(put.placed.id, put.via);
+    landed(put);
 
     return { ok: true };
   };
