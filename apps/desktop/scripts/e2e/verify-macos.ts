@@ -1225,20 +1225,6 @@ const seedShelf = (seeded: readonly unknown[]): void => {
   );
 };
 
-/** Every picture the shelf file holds: image items and attached images. */
-const picturesInDoc = (): number =>
-  items().reduce(
-    (sum, item) =>
-      sum +
-      (item.kind === "image" ? 1 : 0) +
-      z
-        .array(z.looseObject({ kind: z.string() }))
-        .catch([])
-        .parse(item.attachments)
-        .filter((attachment) => attachment.kind === "image").length,
-    0
-  );
-
 /** The shelf's own window: the one of the app that is 300 pt or wider and taller than a card. */
 const shelfWindow = () =>
   windows().find(
@@ -1342,6 +1328,21 @@ const picturesOnDisk = (): boolean[] =>
     .map((file) => existsSync(path.join(userData, "attachments", file)));
 
 const REROUTE_TARGET = "Card target note";
+
+/**
+ * Each place the shelf file holds a picture in: `own` for an image item,
+ * else the id of the item it is attached to.
+ */
+const picturePlaces = (): string[] =>
+  items().flatMap((item) => [
+    ...(item.kind === "image" ? ["own"] : []),
+    ...z
+      .array(z.looseObject({ kind: z.string() }))
+      .catch([])
+      .parse(item.attachments)
+      .filter((attachment) => attachment.kind === "image")
+      .map(() => item.id),
+  ]);
 
 /** The screenshot card's window: the app's window on the floating layer. */
 const cardWindow = () =>
@@ -1451,14 +1452,24 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
 
   showShelfFromTray();
   await waitUntil(() => shelfWindow() !== undefined, 4000);
-  await delay(1200);
+  record(
+    `${label}: the shelf window shows the screenshot where the refused save put it`,
+    await waitUntil(() => shelfScreenshots() === 1, 6000),
+    `${shelfScreenshots()} pictures`
+  );
 
   const takeOff =
     first === "shelf" ? "Delete: " : `Discard changes: ${REROUTE_TARGET}`;
 
   record(
-    `${label}: the shelf takes the screenshot off with ${takeOff.replace(/: .*$|: $/u, "")}`,
+    `${label}: ${takeOff.replace(/: .*$|: $/u, "")} is pressed on the shelf`,
     await clickInShelf(takeOff)
+  );
+  // Read from the shelf window, not taken from the click: the shelf file never held the unsaved screenshot.
+  record(
+    `${label}: the shelf window no longer shows the screenshot before the other add is pressed`,
+    await waitUntil(() => shelfScreenshots() === 0, 6000),
+    `${shelfScreenshots()} pictures`
   );
 
   const both = await waitUntil(() => {
@@ -1479,23 +1490,18 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
     return;
   }
 
-  const onNote = (): number =>
-    z
-      .array(z.unknown())
-      .catch([])
-      .parse(items().find((item) => item.id === seedId(1))?.attachments).length;
+  // The one place the other add puts it: on the seeded note, or as an item of its own. A picture on any other item fails this.
+  const place = first === "shelf" ? seedId(1) : "own";
 
   const settled = await waitUntil(
-    () =>
-      picturesInDoc() === 1 &&
-      (first === "shelf" ? onNote() === 1 : onNote() === 0),
+    () => isDeepStrictEqual(picturePlaces(), [place]),
     10_000
   );
 
   record(
     `${label}: the shelf file holds the screenshot once, ${first === "shelf" ? "as an attachment of the note" : "as an item of its own"}`,
     settled,
-    `pictures ${picturesInDoc()}, on the note ${onNote()}, items ${items().length}`
+    `pictures in ${JSON.stringify(picturePlaces())}, items ${items().length}`
   );
   record(
     `${label}: the card goes once it is saved`,
