@@ -2027,12 +2027,12 @@ const finderWindow = async (folder: string): Promise<Box | undefined> => {
   return shown ? finderFrame() : undefined;
 };
 
-/** The centres of the entries the front Finder window shows, as list rows or icons. */
+/** The centres of the entries selected in the front Finder window, as list rows or icons; the sidebar's rows are never selected here. */
 const finderEntries = (): string[] =>
   jxa(`const w = Application("System Events").processes.byName("Finder").windows()[0];
     const all = w.entireContents();
-    const rows = all.filter((e) => { try { return e.role() === "AXRow"; } catch { return false; } });
-    const icons = all.filter((e) => { try { return e.role() === "AXImage" && e.size()[0] >= 32; } catch { return false; } });
+    const rows = all.filter((e) => { try { return e.role() === "AXRow" && e.selected(); } catch { return false; } });
+    const icons = all.filter((e) => { try { return e.role() === "AXImage" && e.size()[0] >= 32 && e.selected(); } catch { return false; } });
     (rows.length > 0 ? rows : icons).map((e) => { const [x, y] = e.position(); const [ww, h] = e.size(); return Math.round(x + Math.min(ww / 2, 120)) + " " + Math.round(y + h / 2); }).join("\\n")`)
     .split("\n")
     .filter(Boolean);
@@ -2068,16 +2068,22 @@ const checkFinderDrop = async (): Promise<void> => {
   showShelfFromTray();
   await delay(1000);
 
+  // An open row's words are no longer a button: its place is read before the click opens it.
+  await windowShows(ATTACH_TARGET, 6);
+
+  const row = elementCentre("AXButton", ATTACH_TARGET);
   const opened = await clickElement("AXButton", ATTACH_TARGET);
 
   await delay(600);
 
-  const row = elementCentre("AXButton", ATTACH_TARGET);
+  const open = opened && row !== "" && (await windowShows("Show details", 4));
 
-  record(
-    "drop: the note's row is open before the drop",
-    opened && row !== "" && (await windowShows("Show details", 4))
-  );
+  record("drop: the note's row is open before the drop", open, row);
+
+  if (!open) {
+    console.log(`DEBUG shelf tree: ${shelfTree()}`);
+    shelfShot("finder-drop-row");
+  }
 
   const finder = await finderWindow(folder);
 
@@ -2122,9 +2128,8 @@ const checkFinderDrop = async (): Promise<void> => {
 
   await delay(600);
 
-  const notice = /(?:Attached|Added)[^.]*\.(?:[^.]*folder[^.]*\.)?/u.exec(
-    windowText().replaceAll(/\s+/gu, " ")
-  )?.[0];
+  // A drop that only partly lands says what was refused, names the item, and offers Undo (src/renderer/shelf/shelf-app.tsx attachDropped).
+  const notice = windowText().replaceAll(/\s+/gu, " ");
 
   record(
     "drop: the file is attached to the note on disk, and only the file",
@@ -2142,13 +2147,24 @@ const checkFinderDrop = async (): Promise<void> => {
     `${items().length - before} added`
   );
   record(
-    "drop: the notice says what landed and names the folder refused",
-    notice !== undefined && notice.includes("Quotes"),
-    notice ?? "no notice"
+    "drop: the notice names the folder refused and offers Undo",
+    notice.includes("Quotes is a folder, not a file.") &&
+      notice.includes("Undo"),
+    /Quotes is a folder[^.]*\./u.exec(notice)?.[0] ?? "no notice"
   );
   shelfShot("finder-drop");
   await closeFinderWindow(folder);
 };
+
+/** A PNG's width and height, as sips reads them. */
+const pictureSize = (file: string): string =>
+  execFileSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", file], {
+    encoding: "utf-8",
+  })
+    .split("\n")
+    .slice(1)
+    .map((line) => line.trim())
+    .join(" ");
 
 /**
  * C6: an attached picture dragged from details onto a Finder window lands
@@ -2201,6 +2217,20 @@ const checkDragOut = async (): Promise<void> => {
     landed().some((name) => name.startsWith("Seeded picture")),
     landed().join(", ") || "nothing in the folder"
   );
+
+  const dropped = landed().find((name) => name.startsWith("Seeded picture"));
+
+  // The app exports the picture with its pins drawn in (exportImage), so its bytes differ from the stored file; its size doesn't.
+  const droppedSize =
+    dropped === undefined ? "" : pictureSize(path.join(folder, dropped));
+
+  record(
+    "drag out: the dropped file is the picture as a PNG of its own size",
+    dropped !== undefined &&
+      droppedSize ===
+        pictureSize(path.join(attachmentsDir(), attachedPicture())),
+    droppedSize
+  );
   await closeFinderWindow(folder);
 };
 
@@ -2226,10 +2256,39 @@ const pasteboard = () =>
       )
     );
 
-const textEditValue = (): string =>
-  jxa(`const w = Application("System Events").processes.byName("TextEdit").windows();
-    const area = w.length > 0 ? w[0].entireContents().find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } }) : undefined;
-    area ? String(area.value()) : "";`);
+/** TextEdit's front window: its name and its text, or "" for each when it has none. */
+const textEditFront = (): { readonly name: string; readonly text: string } =>
+  z.object({ name: z.string(), text: z.string() }).parse(
+    JSON.parse(
+      jxa(`const w = Application("System Events").processes.byName("TextEdit").windows();
+        let name = "", text = "";
+        try {
+          name = w.length > 0 ? String(w[0].name()) : "";
+          const area = w.length > 0 ? w[0].entireContents().find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } }) : undefined;
+          text = area ? String(area.value()) : "";
+        } catch {}
+        JSON.stringify({ name, text });`)
+    )
+  );
+
+/** Closes TextEdit's Untitled documents with Delete, which also removes the draft TextEdit autosaves to iCloud Drive, then quits it through its menu. */
+const closeUntitled = async (): Promise<void> => {
+  jxa(`const p = Application("System Events").processes.byName("TextEdit");
+    for (const w of p.windows().filter((each) => String(each.name()).startsWith("Untitled"))) {
+      const close = w.buttons().find((b) => { try { return b.subrole() === "AXCloseButton"; } catch { return false; } });
+      if (close) close.click();
+      delay(0.8);
+      const sheet = w.sheets().length > 0 ? w.sheets()[0] : undefined;
+      const remove = sheet ? sheet.entireContents().find((e) => { try { return e.role() === "AXButton" && e.name() === "Delete"; } catch { return false; } }) : undefined;
+      if (remove) remove.click();
+      delay(0.8);
+    }
+    "";`);
+  osa(
+    'tell application "System Events" to tell process "TextEdit" to click menu item "Quit TextEdit" of menu 1 of menu bar item "TextEdit" of menu bar 1'
+  );
+  await delay(1500);
+};
 
 /** C8: the note with a picture attached, copied with ⌥⌘C's menu item; its flavours, then a paste into TextEdit. */
 const checkCopyDetails = async (): Promise<void> => {
@@ -2250,7 +2309,8 @@ const checkCopyDetails = async (): Promise<void> => {
   console.log(`  pasteboard types: ${board.types.join(", ")}`);
   record(
     "copy details: the item is copied",
-    selected && copied !== undefined && board.plain !== CLIPBOARD_SENTINEL
+    selected && board.plain !== CLIPBOARD_SENTINEL,
+    `clicked ${selected}, copied event ${copied === undefined ? "none" : "logged"}`
   );
   record(
     "copy details: plain text names the note and its attachment",
@@ -2269,64 +2329,72 @@ const checkCopyDetails = async (): Promise<void> => {
   writeFileSync(path.join(work, "copy-details.html"), board.html);
   writeFileSync(path.join(work, "copy-details.txt"), board.plain);
 
-  // TextEdit only through `open` and System Events; a new document, closed with Delete, never saved.
+  // TextEdit only through `open` and System Events, never an Apple Event to it. It is opened without its saved windows, so none of the owner's documents opens, and the paste goes only into a new Untitled document, which is closed with Delete.
   const running = spawnSync("pgrep", ["-x", "TextEdit"]).status === 0;
 
-  execFileSync("open", ["-a", "TextEdit"]);
-  await waitUntil(() => frontmost() === "TextEdit", 6000);
-  await delay(800);
-  guardedKeys(() => {
-    osa('tell application "System Events" to keystroke "n" using command down');
-  }, ["TextEdit"]);
-  await delay(1000);
-  guardedKeys(() => {
-    osa('tell application "System Events" to keystroke "v" using command down');
-  }, ["TextEdit"]);
-  await delay(1200);
+  if (running) {
+    record(
+      "copy details: TextEdit was not already open",
+      false,
+      "not pasted, to leave the owner's documents alone"
+    );
 
-  const pasted = textEditValue();
-
-  record(
-    "copy details: TextEdit pastes the words and the picture",
-    pasted.includes(ATTACH_TARGET) && pasted.includes("￼"),
-    JSON.stringify(pasted.replaceAll("￼", "[picture]").slice(0, 160))
-  );
-
-  const window = windows().find(
-    (each) => each.owner === "TextEdit" && each.layer === 0
-  );
-
-  if (window !== undefined) {
-    execFileSync("screencapture", [
-      "-x",
-      `-R${window.x},${window.y},${window.width},${window.height}`,
-      path.join(work, "copy-details-textedit.png"),
-    ]);
+    return;
   }
-
-  guardedKeys(() => {
-    osa('tell application "System Events" to keystroke "w" using command down');
-  }, ["TextEdit"]);
-  await delay(800);
 
   try {
-    osa(
-      'tell application "System Events" to tell process "TextEdit" to click button "Delete" of sheet 1 of window 1'
-    );
-  } catch {
-    osa(
-      'tell application "System Events" to tell process "TextEdit" to click button "Don’t Save" of sheet 1 of window 1'
-    );
-  }
-
-  await delay(600);
-
-  if (!running) {
+    execFileSync("open", [
+      "-a",
+      "TextEdit",
+      "--args",
+      "-ApplePersistenceIgnoreState",
+      "YES",
+    ]);
+    await waitUntil(() => frontmost() === "TextEdit", 6000);
+    await delay(800);
     guardedKeys(() => {
       osa(
-        'tell application "System Events" to keystroke "q" using command down'
+        'tell application "System Events" to keystroke "n" using command down'
       );
     }, ["TextEdit"]);
+
+    const blank = await waitUntil(
+      () =>
+        textEditFront().name.startsWith("Untitled") &&
+        textEditFront().text === "",
+      4000
+    );
+
+    if (blank) {
+      guardedKeys(() => {
+        osa(
+          'tell application "System Events" to keystroke "v" using command down'
+        );
+      }, ["TextEdit"]);
+      await delay(1200);
+    }
+
+    const pasted = textEditFront().text;
+
+    record(
+      "copy details: TextEdit pastes the words and the picture into a new document",
+      blank && pasted.includes(ATTACH_TARGET) && pasted.includes("\uFFFC"),
+      `${textEditFront().name}: ${JSON.stringify(pasted.replaceAll("\uFFFC", "[picture]").slice(0, 160))}`
+    );
+
+    const window = windows().find(
+      (each) => each.owner === "TextEdit" && each.layer === 0
+    );
+
+    if (window !== undefined) {
+      execFileSync("screencapture", [
+        "-x",
+        `-R${window.x},${window.y},${window.width},${window.height}`,
+        path.join(work, "copy-details-textedit.png"),
+      ]);
+    }
+  } finally {
+    await closeUntitled();
   }
 };
 
