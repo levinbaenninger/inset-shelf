@@ -212,6 +212,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     now: () => clock,
     onItsWay: (id) => controller.onItsWay(id),
+    onWrite: (listener) => controller.onWrite(listener),
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
     saved: (to) => {

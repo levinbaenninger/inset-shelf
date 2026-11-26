@@ -98,7 +98,9 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly stored: (id: ItemId) => ShelfItem | undefined;
   /** The item as the write now on the disk's way holds it; undefined while none holds it. */
   readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
-  /** A write other than the card's own save landed its screenshot where it was: the card went, and the user hears where it is. */
+  /** Tells the card each time a write starts and each time one ends, whoever started it: `stored` and `onItsWay` can read differently from then on. */
+  readonly onWrite: (listener: () => void) => () => void;
+  /** A write the card's own save didn't wait out landed its screenshot where it was: the card went, and the user hears where it is. */
   readonly saved: (to: ShotSaveTo, id: ItemId) => void;
   readonly notify: (message: string, tone: "failed") => void;
   readonly imageUrl: (shot: S) => string;
@@ -158,7 +160,7 @@ interface Held<S extends Shot> {
   saving: boolean;
   /** The item Add to “…” last tried: its Retry stands only while the card still names it. */
   tried: ItemId | null;
-  /** The write the last save waited for and didn't see land: the card follows it to its end, until a newer save starts. */
+  /** The write the newest save waits or waited for: only its refusal may still change what the card says of that save. */
   write: Promise<WriteResult> | null;
 }
 
@@ -306,13 +308,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       : { id: item.id, label: excerpt(cardLabel(item)) };
   };
 
-  /** The disk holds the card's screenshot where it was: another write did the card's save, so the card goes as after its own. */
-  const finish = (placed: Placement): void => {
-    held = null;
-    card.hide();
-    deps.saved(placed.to, placed.item);
-  };
-
   /**
    * The card as the shelf and the disk stand now, without moving the
    * screenshot or keeping the card longer: it goes once a write landed its
@@ -329,8 +324,11 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     // While the card's own save runs, that save says how it went.
     const at = held === null || held.saving ? null : standing(held);
 
+    // Another write did the card's save: the card goes as after its own.
     if (at?.state === "saved") {
-      finish(at.placed);
+      held = null;
+      card.hide();
+      deps.saved(at.placed.to, at.placed.item);
 
       return;
     }
@@ -362,9 +360,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
   /**
    * Whether the card's screenshot may go to `to`: it is nowhere, already
-   * there, or in the other place as the card put it. Saved in the other
-   * place, the card is done and goes; changed there, or in a write on its
-   * way, it stays and the user hears why.
+   * there, or in the other place as the card put it. Changed there, or in a
+   * write on its way, it stays and the user hears why. Saved there it never
+   * is at a press: the card went when that write landed.
    */
   const free = (now: Held<S>, to: ShotSaveTo): boolean => {
     const at = standing(now);
@@ -373,14 +371,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return true;
     }
 
-    if (at.state === "saved") {
-      finish(at.placed);
-    } else {
-      deps.notify(
-        at.state === "landing" ? SHOT_LANDING : SHOT_CHANGED,
-        "failed"
-      );
-    }
+    deps.notify(at.state === "landing" ? SHOT_LANDING : SHOT_CHANGED, "failed");
 
     return false;
   };
@@ -417,6 +408,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     }
   };
 
+  // Whichever write lands the screenshot or starts to hold it, the card says so at once.
+  deps.onWrite(retarget);
+
   /** The card's screenshot, when it is still the newest; null for an older card's request. */
   const current = (seq: number): Held<S> | null =>
     held !== null && held.shot.seq === seq ? held : null;
@@ -433,12 +427,12 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   };
 
   /**
-   * A save that gave up waiting left its write on the disk's way. The card
-   * follows that write to its end, with nothing else to tell it: landed, the
-   * card goes as after any write that saved its screenshot; refused, the
-   * card says why instead of that it took too long.
+   * A save that gave up waiting said so, and its write went on. Refused
+   * later, the card says why instead, unless a newer save or a newer
+   * screenshot has spoken since. That it landed the card hears as of every
+   * write, from `onWrite`.
    */
-  const follow = async (now: Held<S>): Promise<void> => {
+  const sayWhy = async (now: Held<S>): Promise<void> => {
     const { write } = now;
 
     if (write === null) {
@@ -446,23 +440,17 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     }
 
     const ended = await reportSaveError(async () => await write);
-
-    // A newer screenshot, or a newer save of this one, says how it went.
-    if (held !== now || now.write !== write) {
-      return;
-    }
-
     const shown = card.view()?.save;
 
     if (
       !ended.ok &&
+      held === now &&
+      now.write === write &&
       shown?.state === "failed" &&
       shown.message !== ended.message
     ) {
       card.update({ save: { ...shown, message: ended.message } });
     }
-
-    retarget();
   };
 
   const save = async (
@@ -509,7 +497,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           },
         });
         retarget();
-        void follow(now);
+        void sayWhy(now);
       } else {
         deps.notify(written.message, "failed");
       }

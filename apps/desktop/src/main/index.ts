@@ -960,6 +960,7 @@ const start = async (): Promise<void> => {
     },
     now: () => Date.now(),
     onItsWay: controller.onItsWay,
+    onWrite: controller.onWrite,
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
     saved: shotAdded,
