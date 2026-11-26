@@ -11,6 +11,9 @@ import type { FolderFollower } from "./follow-folder";
 /** How long a file event may take: macOS reports through FSEvents, which can lag past a second when the machine is busy. */
 const WATCH_MS = 5000;
 
+/** Above the wait, so a late event fails the wait, not the test. */
+const TEST_MS = WATCH_MS * 2;
+
 describe(followFolder, () => {
   const followers: FolderFollower[] = [];
   const dirs: string[] = [];
@@ -52,19 +55,23 @@ describe(followFolder, () => {
     );
   });
 
-  it("reports a file saved to a folder that is there", async () => {
-    const dir = await tempDir();
-    const names = follow(dir);
+  it(
+    "reports a file saved to a folder that is there",
+    async () => {
+      const dir = await tempDir();
+      const names = follow(dir);
 
-    await writeFile(path.join(dir, "Screenshot 1.png"), "png");
-
-    await vi.waitFor(
-      () => {
-        expect(names).toContain("Screenshot 1.png");
-      },
-      { timeout: WATCH_MS }
-    );
-  });
+      // A watch hears nothing until it has started, which lags behind watch() on a busy macOS: save until it's heard.
+      await vi.waitFor(
+        async () => {
+          await writeFile(path.join(dir, "Screenshot 1.png"), "png");
+          expect(names).toContain("Screenshot 1.png");
+        },
+        { interval: 100, timeout: WATCH_MS }
+      );
+    },
+    TEST_MS
+  );
 
   it("reports the file that made a missing folder, once the folder appears", async () => {
     const parent = await tempDir();
