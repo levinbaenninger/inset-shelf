@@ -213,7 +213,7 @@ const LinkRow = ({
   onOpenLink,
   siteShown,
 }: {
-  /** On one line, its site cut short, where the row is long already. */
+  /** On one line where the row is long already: its site shows beside the words when it fits whole, and not at all when it doesn't. */
   readonly fold: boolean;
   readonly link: TextItem["links"][number];
   readonly onOpenLink: (url: string) => void;
@@ -238,16 +238,19 @@ const LinkRow = ({
         icon={Link01Icon}
         size={12}
       />
-      {/* The site goes under the words when both don't fit on one line, so it stays readable, unless the row folds it. */}
+      {/* The site goes under the words when both don't fit on one line, so it stays readable. A folded row shows only the first line: a site that would be cut to a few letters isn't shown, and its link's tooltip still names the address. */}
       <span
         className={cn(
-          "flex min-w-0 gap-x-1.5",
-          fold ? "flex-nowrap" : "flex-wrap"
+          "flex min-w-0 flex-wrap gap-x-1.5",
+          fold && "h-4 overflow-hidden"
         )}
       >
         <span className="max-w-full truncate">{link.text}</span>
         {link.text === link.url || siteShown ? null : (
-          <span className="text-muted-foreground max-w-full truncate">
+          <span
+            className="text-muted-foreground max-w-full truncate"
+            data-link-site
+          >
             {hostOf(link.url)}
           </span>
         )}

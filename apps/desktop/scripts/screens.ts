@@ -4108,6 +4108,23 @@ const moreGapProblem = async (strip: Locator): Promise<string | null> => {
     : `“+N” starts ${gaps.toMore} px after the last tile, and the tiles are ${gaps.between} px apart`;
 };
 
+/** The site beside each link of an open row that names one: whether it is in view, and whether it is cut short there. */
+const linkSites = async (page: Page, n: number) =>
+  z.array(z.object({ cut: z.boolean(), shown: z.boolean() })).parse(
+    await item(page, n).evaluate((row) =>
+      [...row.querySelectorAll("[data-link-site]")].map((site) => {
+        const line = site.parentElement;
+
+        const shown =
+          line !== null &&
+          site.getBoundingClientRect().top <
+            line.getBoundingClientRect().bottom - 1;
+
+        return { cut: shown && site.scrollWidth > site.clientWidth, shown };
+      })
+    )
+  );
+
 /** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
 type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
   readonly page?: PageName;
@@ -4231,8 +4248,19 @@ const STRESS_SCENES: readonly Scene[] = (
             .first()
         );
 
-        return link.bottom - link.top > 24
-          ? `the link must fold to one line beside a long description: ${link.bottom - link.top}px`
+        if (link.bottom - link.top > 24) {
+          return `the link must fold to one line beside a long description: ${link.bottom - link.top}px`;
+        }
+
+        // At this width the site can't show its domain beside the words: it isn't shown as a few letters.
+        const sites = await linkSites(page, 710);
+
+        if (sites.some((site) => site.cut)) {
+          return `a folded link shows its site cut short: ${JSON.stringify(sites)}`;
+        }
+
+        return sites.some((site) => site.shown)
+          ? `the site fits beside its link at 300 wide, so this scene no longer shows it left out: ${JSON.stringify(sites)}`
           : await reachedDetails(710)(page);
       },
       data: { view: stressView() },
@@ -4376,7 +4404,30 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 710);
       },
-      check: reachedDetails(710),
+      // The link's words fill this line too, so its site stays out. With shorter words the site shows beside them, whole.
+      check: async (page) => {
+        const long = await linkSites(page, 710);
+
+        await item(page, 710).evaluate((row) => {
+          for (const site of row.querySelectorAll("[data-link-site]")) {
+            const words = site.previousElementSibling;
+
+            if (words !== null) {
+              words.textContent = "Angebot";
+            }
+          }
+        });
+
+        const short = await linkSites(page, 710);
+
+        if (long.some((site) => site.cut) || short.some((site) => site.cut)) {
+          return `a folded link shows its site cut short: ${JSON.stringify({ long, short })}`;
+        }
+
+        return short.length > 0 && short.every((site) => site.shown)
+          ? await reachedDetails(710)(page)
+          : `a folded link with room beside its words must show its site: ${JSON.stringify(short)}`;
+      },
       data: { view: stressView() },
       name: "stress-open-text-wide",
     },
