@@ -4,8 +4,8 @@
  * built renderer in their main states, light and dark, without Electron. Each
  * page runs in Playwright's Chromium with a fake preload bridge
  * (scripts/fixtures/screens-bridge.js) that answers from the sample data
- * below. The shelf is shot at 360×620 with an item that has every field
- * filled in, and the run fails a scene where anything overflows. The
+ * below. The shelf is shot at the size it opens at beside a tall window
+ * (src/shared/geometry.ts) with an item that has every field filled in, and the run fails a scene where anything overflows. The
  * stress- scenes push the longest labels the data allows through the shelf,
  * the notice, the card and the drawing window at their smallest sizes
  * (scripts/fixtures/screens-layout.js says what counts as broken).
@@ -26,6 +26,12 @@ import { isDeepStrictEqual } from "node:util";
 import { chromium } from "playwright";
 import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
+
+import {
+  SHELF_MAX_HEIGHT_DIP,
+  SHELF_MIN_WIDTH_DIP,
+  SHELF_WIDTH_DIP,
+} from "../src/shared/geometry.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const RENDERER = path.join(ROOT, "out", "renderer");
@@ -3172,9 +3178,9 @@ const clickElsewhereCheck = async (page: Page): Promise<string | null> => {
     : `a click on search with B's menu open left focus on “${String(searching)}”`;
 };
 
-// Stress scenes: the longest labels the data allows (src/shared/shelf.ts), German-length words and every badge at once, at the shelf's narrowest width (src/main/shelf-window.ts MIN_WIDTH), in the shelf, the capture notice and the screenshot card.
+// Stress scenes: the longest labels the data allows (src/shared/shelf.ts), German-length words and every badge at once, at the shelf's narrowest width, in the shelf, the capture notice and the screenshot card.
 
-const NARROWEST = 300;
+const NARROWEST = SHELF_MIN_WIDTH_DIP;
 
 const LONG_WORD =
   "Donaudampfschifffahrtsgesellschaftskapitänsmützenabteilungsleiterstellvertreterin";
@@ -6927,7 +6933,7 @@ const SCENES: readonly Scene[] = [
     name: "shelf-list-narrow",
     page: "shelf",
     platforms: ["macos", "windows"],
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -6949,7 +6955,7 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "shelf-expanded-full-item-narrow",
     page: "shelf",
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -7119,7 +7125,7 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "shelf-expanded-image-pins-narrow",
     page: "shelf",
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -7292,7 +7298,7 @@ const SCENES: readonly Scene[] = [
     name: "shelf-due-calendar",
     page: "shelf",
     // The shelf at its narrowest, so the calendar must fit there.
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -7700,7 +7706,7 @@ const SCENES: readonly Scene[] = [
     },
     name: "shelf-quit-held",
     page: "shelf",
-    width: 300,
+    width: NARROWEST,
   },
   {
     check: notSavedCheck,
@@ -8302,7 +8308,7 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "tutorial-examples-narrow",
     page: "shelf",
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -9767,7 +9773,8 @@ const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   picker: { height: 520, width: 600 },
   // src/main/screenshot-window.ts: 280 wide, as tall as the picture's shape allows within 180–260.
   screenshot: { height: 180, width: 280 },
-  shelf: { height: 620, width: 360 },
+  // What users get by default: the width the shelf opens at, and its height beside a window at least that tall.
+  shelf: { height: SHELF_MAX_HEIGHT_DIP, width: SHELF_WIDTH_DIP },
   // src/main/toast-window.ts: a done notice's window; a failed one is 360×72.
   toast: { height: 44, width: 260 },
 };

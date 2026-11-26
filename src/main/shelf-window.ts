@@ -2,6 +2,7 @@ import {
   dockShelf,
   rect,
   SHELF_MIN_HEIGHT_DIP,
+  SHELF_MIN_WIDTH_DIP,
   WINDOWS_FRAME_INSET_DIP,
 } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
@@ -11,8 +12,6 @@ import type { Rectangle, WebContents } from "electron";
 import { hideWindow } from "./hide-window";
 import { keepOnTop } from "./keep-on-top";
 import { harden, secureWebPreferences } from "./window-security";
-
-const MIN_WIDTH = 300;
 
 const isMac = process.platform === "darwin";
 
@@ -89,7 +88,7 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
     hasShadow: true,
     maximizable: false,
     minHeight: SHELF_MIN_HEIGHT_DIP,
-    minWidth: MIN_WIDTH,
+    minWidth: SHELF_MIN_WIDTH_DIP,
     minimizable: false,
     show: false,
     skipTaskbar: true,

@@ -41,6 +41,9 @@ const clamp = (value: number, low: number, high: number): number =>
   Math.min(Math.max(value, low), high);
 
 export const SHELF_WIDTH_DIP = 340;
+
+/** As narrow as the shelf's window can be dragged. */
+export const SHELF_MIN_WIDTH_DIP = 300;
 export const SHELF_MIN_HEIGHT_DIP = 360;
 export const SHELF_DEFAULT_HEIGHT_DIP = 560;
 
