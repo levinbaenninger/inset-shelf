@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 
 import { z } from "zod";
 
@@ -1271,6 +1272,14 @@ const shelfScreenshots = (): number =>
     ) || "0"
   );
 
+/** The buttons in the shelf window whose name starts with `prefix`: an attachment's tile is named "<name> · Picture" or "<name> · PDF". */
+const shelfButtons = (prefix: string): number =>
+  Number(
+    inShelf(
+      `String(els.filter((e) => { try { return e.role() === "AXButton" && (e.name() ?? "").startsWith(${JSON.stringify(prefix)}); } catch { return false; } }).length)`
+    ) || "0"
+  );
+
 /** A screenshot of the shelf window alone, kept with the run's artifacts. */
 const shelfShot = (name: string): void => {
   const shelf = shelfWindow();
@@ -1422,6 +1431,903 @@ const checkSwitch = async (app: ChildProcess): Promise<ChildProcess> => {
   await hideShelf();
 
   return await switchDirection("item", current);
+};
+
+// The v3 upgrade (src/shared/shelf.ts upgradeV3): the file becomes v4 the first time the shelf changes (README.md, Attachments).
+
+const V3_FIXTURE = path.join(root, "src/shared/fixtures/shelf-v3.json");
+
+/** A 1×1 PNG: the fixture's pictures need real bytes, not their sizes. */
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+  "base64"
+);
+
+const attachmentsDir = (): string => path.join(userData, "attachments");
+
+/** Every picture, drawing's marks and file the fixture names. */
+const v3Files = (): string[] => [
+  ...new Set(
+    readFileSync(V3_FIXTURE, "utf-8").match(/[0-9a-f-]{36}\.(?:png|json|pdf)/gu)
+  ),
+];
+
+/** Each file's own bytes, so a swap or a rewrite shows. */
+const v3Bytes = (name: string): Buffer => {
+  if (name.endsWith(".png")) {
+    return Buffer.concat([TINY_PNG, Buffer.from(name)]);
+  }
+
+  return Buffer.from(
+    name.endsWith(".json") ? '{"strokes":[]}' : `%PDF-1.4\n%${name}\n`
+  );
+};
+
+/** The fixture as shelf.json, and its files in the data folder. */
+const seedV3 = (): void => {
+  mkdirSync(attachmentsDir(), { recursive: true });
+
+  for (const name of v3Files()) {
+    writeFileSync(path.join(attachmentsDir(), name), v3Bytes(name));
+  }
+
+  writeFileSync(
+    path.join(userData, "shelf.json"),
+    readFileSync(V3_FIXTURE, "utf-8")
+  );
+};
+
+/** The fixture's files that are gone or differ from their seeded bytes. */
+const changedFiles = (): string[] =>
+  v3Files().flatMap((name) => {
+    const file = path.join(attachmentsDir(), name);
+
+    return existsSync(file) && readFileSync(file).equals(v3Bytes(name))
+      ? []
+      : [name];
+  });
+
+/** Every item's main words, as the shelf shows them, by section. */
+const V3_WORDS = {
+  Inbox: ["Call about the", "Floor plan, level 3"],
+  "Office move": ["The quote is here.", "Login screen: two things to fix"],
+} as const;
+
+/** Picks a section from the View menu and reads whether the shelf shows each word. */
+const sectionShows = async (
+  section: keyof typeof V3_WORDS
+): Promise<string[]> => {
+  menuItem("View", section);
+  await delay(800);
+
+  const missing: string[] = [];
+
+  for (const words of V3_WORDS[section]) {
+    // oxlint-disable-next-line no-await-in-loop -- one read at a time, the tree fills in after a switch.
+    if (!(await windowShows(words, 4))) {
+      missing.push(words);
+    }
+  }
+
+  return missing;
+};
+
+/** The fixture's items, as the app should write them: each as it was, with no attachments. */
+const upgradedItems = (): unknown[] =>
+  z
+    .object({ items: z.array(z.looseObject({})) })
+    .parse(JSON.parse(readFileSync(V3_FIXTURE, "utf-8")))
+    .items.map((item) => ({ ...item, attachments: [] }));
+
+const schemaVersion = (): number | null =>
+  z
+    .looseObject({ schemaVersion: z.number().nullable().catch(null) })
+    .parse(JSON.parse(readFileSync(path.join(userData, "shelf.json"), "utf-8")))
+    .schemaVersion;
+
+/**
+ * C2: a v3 shelf opens with every item, still v3 on disk; the first change
+ * writes it as v4 with every item as it was and no file lost; a relaunch on
+ * the v4 file keeps them all.
+ */
+const checkUpgrade = async (app: ChildProcess): Promise<ChildProcess> => {
+  const seeded = readFileSync(path.join(userData, "shelf.json"), "utf-8");
+
+  enableWebAccessibility();
+  showShelfFromTray();
+  await delay(1500);
+
+  // The active section, before anything changes: opening alone writes nothing.
+  const first = await sectionShows("Office move");
+
+  record(
+    "upgrade: opening alone leaves the file as it was (v3)",
+    readFileSync(path.join(userData, "shelf.json"), "utf-8") === seeded,
+    `schemaVersion ${schemaVersion() ?? "unreadable"}`
+  );
+  record(
+    "upgrade: every picture, drawing's marks and file is kept on launch",
+    changedFiles().length === 0,
+    changedFiles().join(", ")
+  );
+  shelfShot("upgrade-office-move-v3");
+
+  // The first change: picking the other section, which the shelf file keeps as the active one.
+  const second = await sectionShows("Inbox");
+
+  record(
+    "upgrade: a v3 shelf shows every item, in both sections",
+    first.length === 0 && second.length === 0,
+    [...first, ...second].join(", ")
+  );
+  shelfShot("upgrade-inbox");
+
+  const written = await waitUntil(() => schemaVersion() === 4, 6000);
+
+  const doc = z
+    .object({
+      activeSectionId: z.string(),
+      items: z.array(z.looseObject({ id: z.string() })),
+    })
+    .parse(
+      JSON.parse(readFileSync(path.join(userData, "shelf.json"), "utf-8"))
+    );
+
+  const expected = upgradedItems();
+
+  const kept = expected.filter((item) =>
+    doc.items.some((saved) => isDeepStrictEqual(saved, item))
+  ).length;
+
+  record(
+    "upgrade: the first change (the active section) writes the file as v4",
+    written &&
+      doc.activeSectionId !==
+        z.object({ activeSectionId: z.string() }).parse(JSON.parse(seeded))
+          .activeSectionId,
+    `schemaVersion ${schemaVersion() ?? "unreadable"}`
+  );
+  record(
+    "upgrade: every v3 item is written as it was, with no attachments",
+    kept === expected.length && doc.items.length === expected.length,
+    `${kept} of ${expected.length} equal, ${doc.items.length} items`
+  );
+  record(
+    "upgrade: no file is lost by the write",
+    changedFiles().length === 0,
+    changedFiles().join(", ")
+  );
+
+  // A relaunch on the v4 file: the launch's tidy-up deletes files no shelf names.
+  quitApp(app);
+  await exited(app);
+
+  const next = launch();
+
+  await waitFor("launch", events().length, Date.now() + 15_000);
+  enableWebAccessibility();
+  showShelfFromTray();
+  await delay(1500);
+
+  const after = [
+    ...(await sectionShows("Office move")),
+    ...(await sectionShows("Inbox")),
+  ];
+
+  shelfShot("upgrade-inbox-v4");
+  record(
+    "upgrade: after a relaunch on the v4 file every item shows and every file is kept",
+    after.length === 0 && changedFiles().length === 0,
+    [...after, ...changedFiles()].join(", ")
+  );
+
+  return next;
+};
+
+// Attachments on an existing item (src/main/attachments.ts), on a seeded note.
+
+const ATTACH_TARGET = "Attach target note";
+
+/** The seeded note's attachments as the shelf file holds them. */
+const targetAttachments = () =>
+  z
+    .array(
+      z.looseObject({
+        file: z.looseObject({ name: z.string() }).optional(),
+        id: z.string(),
+        image: z.looseObject({ file: z.string() }).optional(),
+        kind: z.string(),
+        name: z.string().optional(),
+        scene: z.unknown().optional(),
+      })
+    )
+    .catch([])
+    .parse(items().find((item) => item.id === seedId(1))?.attachments);
+
+/** A 64×48 PNG on the clipboard; screenshot cards are off in these trials, so it raises no card. */
+const copyPicture = (): void => {
+  const file = path.join(work, "picture.png");
+
+  writeFileSync(file, TINY_PNG);
+  execFileSync("sips", ["-z", "48", "64", file], { stdio: "ignore" });
+  jxa(`ObjC.import("AppKit");
+    const board = $.NSPasteboard.generalPasteboard;
+    board.clearContents;
+    const data = $.NSData.dataWithContentsOfFile(${JSON.stringify(file)});
+    board.setDataForType(data, "public.png");
+    "";`);
+};
+
+/** Opens the seeded note's row with a click, then its details with the open row's Show details. */
+const openTargetDetails = async (): Promise<boolean> => {
+  enableWebAccessibility();
+  showShelfFromTray();
+  await waitUntil(() => shelfWindow() !== undefined, 4000);
+  await delay(800);
+
+  if (!(await clickElement("AXButton", ATTACH_TARGET))) {
+    return false;
+  }
+
+  await delay(600);
+
+  return (
+    (await clickElement("AXButton", "Show details")) &&
+    (await windowShows("Back to the list"))
+  );
+};
+
+/** Opens details' Add menu and picks `entry`; a menu item's name ends with its shortcut ("Paste Image ⌘V"). */
+const addMenu = async (entry: string): Promise<boolean> => {
+  if (!(await clickElement("AXPopUpButton", "Add a field", 4))) {
+    return false;
+  }
+
+  await delay(500);
+
+  const found = jxa(`const hit = ${processElements}.find((e) => {
+      try { return e.role() === "AXMenuItem" && (e.name() === ${JSON.stringify(entry)} || e.name().startsWith(${JSON.stringify(`${entry} `)})); } catch { return false; }
+    });
+    hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
+
+  if (found === "") {
+    return false;
+  }
+
+  input("click", ...found.split(" "));
+
+  return true;
+};
+
+/**
+ * C3: a picture pasted with ⌘V while the note's row is open becomes a new
+ * item, as README.md (Attachments) says the list does; in details, Add ›
+ * Paste Image and ⌘V each attach it to the note.
+ */
+const checkPasteImage = async (): Promise<void> => {
+  enableWebAccessibility();
+  showShelfFromTray();
+  await delay(1000);
+
+  const opened = await clickElement("AXButton", ATTACH_TARGET);
+
+  await delay(600);
+  record(
+    "paste: the note's row opens on a click",
+    opened && (await windowShows("Show details", 4))
+  );
+  copyPicture();
+
+  const before = items().length;
+  const mark = events().length;
+
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "v" using command down');
+  }, [processName]);
+
+  const added = await waitFor("itemAdded", mark, Date.now() + 6000);
+
+  record(
+    "paste: ⌘V on an open row adds the picture as a new item (README: in the list ⌘V adds a new item)",
+    added?.via === "paste" &&
+      items().length === before + 1 &&
+      targetAttachments().length === 0,
+    `${items().length - before} added, ${targetAttachments().length} on the note`
+  );
+  shelfShot("paste-open-row");
+
+  record("paste: details open from the open row", await openTargetDetails());
+
+  const pasted = await addMenu("Paste Image");
+
+  record(
+    "paste: Add › Paste Image in details attaches the clipboard's picture to the note",
+    pasted &&
+      (await waitUntil(
+        () =>
+          targetAttachments().length === 1 &&
+          targetAttachments()[0]?.kind === "image",
+        6000
+      )),
+    JSON.stringify(targetAttachments().map((each) => each.name))
+  );
+
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "v" using command down');
+  }, [processName]);
+  record(
+    "paste: ⌘V in details attaches it too",
+    await waitUntil(
+      () =>
+        targetAttachments().length === 2 &&
+        targetAttachments().every((each) => each.kind === "image"),
+      6000
+    ),
+    `${targetAttachments().length} on the note`
+  );
+  record(
+    "paste: details show both pictures",
+    await waitUntil(() => shelfButtons("Pasted image") === 2, 3000),
+    `${shelfButtons("Pasted image")} tiles`
+  );
+  shelfShot("paste-details");
+};
+
+/** A file the native dialogs and Finder show: under the run's own temporary folder, never Desktop or Documents. */
+const attachableFile = (name: string): string => {
+  const folder = path.join(work, "files");
+
+  mkdirSync(folder, { recursive: true });
+
+  const file = path.join(folder, name);
+
+  writeFileSync(file, `%PDF-1.4\n% ${name}\n`);
+
+  return file;
+};
+
+/** C4: Add › Attach Files… opens the system's open panel; a file picked in it is attached to the note. */
+const checkAttachFiles = async (): Promise<void> => {
+  const file = attachableFile("Quote 2026-114.pdf");
+
+  record("attach: details open from the open row", await openTargetDetails());
+  record("attach: Add lists Attach Files…", await addMenu("Attach Files…"));
+
+  const panel = await waitUntil(() => windowText().includes("Cancel"), 6000);
+
+  record(
+    "attach: the open panel shows, with the app in front",
+    panel && frontmost() === processName,
+    frontmost()
+  );
+
+  if (!panel) {
+    return;
+  }
+
+  // Go to the file by its path, as a person can with ⇧⌘G, then Open.
+  guardedKeys(() => {
+    osa(
+      'tell application "System Events" to keystroke "g" using {command down, shift down}'
+    );
+  }, [processName]);
+  await delay(900);
+  guardedKeys(() => {
+    osa(
+      `tell application "System Events" to keystroke ${JSON.stringify(file)}`
+    );
+  }, [processName]);
+  await delay(900);
+  guardedKeys(() => {
+    osa('tell application "System Events" to key code 36');
+  }, [processName]);
+  await delay(1200);
+  guardedKeys(() => {
+    osa('tell application "System Events" to key code 36');
+  }, [processName]);
+
+  const attached = await waitUntil(
+    () =>
+      targetAttachments().some(
+        (each) =>
+          each.kind === "file" && each.file?.name === path.basename(file)
+      ),
+    8000
+  );
+
+  record(
+    "attach: the picked file is attached to the note, on disk",
+    attached && targetAttachments().length === 1,
+    JSON.stringify(
+      targetAttachments().map((each) => each.file?.name ?? each.kind)
+    )
+  );
+  record("attach: the open panel is gone", !windowText().includes("Cancel"));
+  record(
+    "attach: details show the file's tile",
+    await waitUntil(() => shelfButtons("Quote 2026-114") === 1, 3000),
+    `${shelfButtons("Quote 2026-114")} tiles`
+  );
+  shelfShot("attach-details");
+};
+
+/** A 400×300 picture attached to the seeded note, its file in the data folder. */
+const seedAttachedPicture = () => {
+  const name = "6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3a90.png";
+  const file = path.join(attachmentsDir(), name);
+
+  mkdirSync(attachmentsDir(), { recursive: true });
+  writeFileSync(file, TINY_PNG);
+  execFileSync("sips", ["-z", "300", "400", file], { stdio: "ignore" });
+
+  return {
+    addedAt: "2026-10-26T09:05:00.000Z",
+    id: "6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3a91",
+    image: { file: name, heightPx: 300, pixelsPerDip: 1, widthPx: 400 },
+    kind: "image",
+    name: "Seeded picture",
+    pins: [],
+  };
+};
+
+/** Clicks a picture's tile and gives the drawing window it opened, once the app says it showed. */
+const openPicture = async (tile: string): Promise<Box | undefined> => {
+  const frame = (window: Box): string =>
+    `${window.x},${window.y},${window.width},${window.height}`;
+
+  const others = new Set(
+    windows()
+      .filter((window) => window.owner === processName)
+      .map(frame)
+  );
+
+  const mark = events().length;
+
+  if (!(await clickElement("AXButton", tile, 4))) {
+    return undefined;
+  }
+
+  if ((await waitFor("drawingShown", mark, Date.now() + 6000)) === undefined) {
+    return undefined;
+  }
+
+  await delay(1000);
+
+  return windows().find(
+    (window) => window.owner === processName && !others.has(frame(window))
+  );
+};
+
+/** C5: a click on an attached picture in details opens it to draw on; Save puts the drawing on the attachment. */
+/** The file of the note's first attachment's picture, or "". */
+const attachedPicture = (): string => targetAttachments()[0]?.image?.file ?? "";
+
+/** Whether the note's first attachment keeps drawing marks. */
+const attachedScene = (): boolean =>
+  targetAttachments()[0]?.scene !== undefined;
+
+/** A stored picture's bytes, or null when there is none. */
+const storedPicture = (name: string): Buffer | null => {
+  const file = path.join(attachmentsDir(), name);
+
+  return name !== "" && existsSync(file) ? readFileSync(file) : null;
+};
+
+const checkAnnotate = async (): Promise<void> => {
+  const old = attachedPicture();
+
+  record("annotate: details open from the open row", await openTargetDetails());
+
+  const editor = await openPicture("Seeded picture · Picture");
+
+  record(
+    "annotate: a click on the picture opens it in the drawing window",
+    editor !== undefined,
+    JSON.stringify(editor ?? null)
+  );
+
+  if (editor === undefined || frontmost() !== processName) {
+    return;
+  }
+
+  // A cross through the middle, several strokes each way, so the tile's crop shows it.
+  const cx = editor.x + editor.width / 2;
+  const cy = editor.y + editor.height / 2;
+
+  for (const offset of [-6, 0, 6]) {
+    input(
+      "drag",
+      String(cx - 90),
+      String(cy - 70 + offset),
+      String(cx + 90),
+      String(cy + 70 + offset)
+    );
+    input(
+      "drag",
+      String(cx - 90),
+      String(cy + 70 + offset),
+      String(cx + 90),
+      String(cy - 70 + offset)
+    );
+  }
+
+  await delay(500);
+
+  const saved = await clickElement("AXButton", "Save", 4);
+
+  const changed = await waitUntil(
+    () => attachedPicture() !== old && attachedScene(),
+    8000
+  );
+
+  const now = attachedPicture();
+
+  record(
+    "annotate: Save keeps the drawing on the attachment: a new picture, with its marks kept",
+    saved && changed && targetAttachments().length === 1,
+    `${old} → ${now}, scene ${attachedScene() ? "kept" : "none"}`
+  );
+
+  const drawn = storedPicture(now);
+
+  record(
+    "annotate: the new picture is on disk and differs from the old one",
+    drawn !== null && !drawn.equals(storedPicture(old) ?? Buffer.alloc(0))
+  );
+  record(
+    "annotate: the drawing window closes after Save",
+    await waitUntil(
+      () =>
+        !windows().some(
+          (window) =>
+            window.owner === processName &&
+            window.x === editor.x &&
+            window.y === editor.y &&
+            window.width === editor.width
+        ),
+      4000
+    )
+  );
+  await delay(1000);
+  shelfShot("annotate-details");
+
+  if (drawn !== null) {
+    writeFileSync(path.join(work, "annotated.png"), drawn);
+  }
+};
+
+// Finder, driven only through `open` and System Events: an Apple Event to Finder itself asks for Automation access.
+
+/** The name of Finder's front window, or "" when it has none. */
+const finderFront = (): string =>
+  jxa(
+    `const ws = Application("System Events").processes.byName("Finder").windows(); ws.length > 0 ? String(ws[0].name()) : ""`
+  );
+
+/** The front Finder window's frame. */
+const finderFrame = (): Box => {
+  const [x = 0, y = 0, width = 0, height = 0] = jxa(
+    `const w = Application("System Events").processes.byName("Finder").windows()[0]; [...w.position(), ...w.size()].join(" ")`
+  )
+    .split(" ")
+    .map(Number);
+
+  return { height, width, x, y };
+};
+
+/** Opens a folder in a Finder window, in front, and gives that window's frame. */
+const finderWindow = async (folder: string): Promise<Box | undefined> => {
+  execFileSync("open", [folder]);
+
+  const shown = await waitUntil(
+    () => frontmost() === "Finder" && finderFront() === path.basename(folder),
+    6000
+  );
+
+  return shown ? finderFrame() : undefined;
+};
+
+/** The centres of the entries the front Finder window shows, as list rows or icons. */
+const finderEntries = (): string[] =>
+  jxa(`const w = Application("System Events").processes.byName("Finder").windows()[0];
+    const all = w.entireContents();
+    const rows = all.filter((e) => { try { return e.role() === "AXRow"; } catch { return false; } });
+    const icons = all.filter((e) => { try { return e.role() === "AXImage" && e.size()[0] >= 32; } catch { return false; } });
+    (rows.length > 0 ? rows : icons).map((e) => { const [x, y] = e.position(); const [ww, h] = e.size(); return Math.round(x + Math.min(ww / 2, 120)) + " " + Math.round(y + h / 2); }).join("\\n")`)
+    .split("\n")
+    .filter(Boolean);
+
+/** Closes the front Finder window, if it shows `folder`. */
+const closeFinderWindow = async (folder: string): Promise<void> => {
+  if (finderFront() !== path.basename(folder)) {
+    return;
+  }
+
+  osa(
+    `tell application "System Events" to tell process "Finder" to perform action "AXRaise" of window 1`
+  );
+  await delay(300);
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "w" using command down');
+  }, ["Finder"]);
+  await delay(500);
+};
+
+/**
+ * C7: a file and a folder dragged together from Finder onto the note's open
+ * row: the file is attached to the note, the folder refused with why, and no
+ * new item is made.
+ */
+const checkFinderDrop = async (): Promise<void> => {
+  const folder = path.join(work, "Drop here");
+
+  mkdirSync(path.join(folder, "Quotes"), { recursive: true });
+  writeFileSync(path.join(folder, "Quotes", "inside.txt"), "inside\n");
+  writeFileSync(path.join(folder, "Drop offer.pdf"), "%PDF-1.4\n");
+  enableWebAccessibility();
+  showShelfFromTray();
+  await delay(1000);
+
+  const opened = await clickElement("AXButton", ATTACH_TARGET);
+
+  await delay(600);
+
+  const row = elementCentre("AXButton", ATTACH_TARGET);
+
+  record(
+    "drop: the note's row is open before the drop",
+    opened && row !== "" && (await windowShows("Show details", 4))
+  );
+
+  const finder = await finderWindow(folder);
+
+  if (finder === undefined) {
+    record("drop: a Finder window shows the folder", false);
+
+    return;
+  }
+
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "a" using command down');
+  }, ["Finder"]);
+  await delay(500);
+
+  const entries = finderEntries();
+
+  record(
+    "drop: Finder shows and selects the file and the folder",
+    entries.length === 2,
+    `${entries.length} entries`
+  );
+
+  const [from] = entries;
+  const before = items().length;
+  const mark = events().length;
+
+  if (from === undefined || row === "") {
+    await closeFinderWindow(folder);
+
+    return;
+  }
+
+  input("drag", ...from.split(" "), ...row.split(" "));
+
+  const attached = await waitUntil(
+    () =>
+      targetAttachments().some(
+        (each) => each.kind === "file" && each.file?.name === "Drop offer.pdf"
+      ),
+    8000
+  );
+
+  await delay(600);
+
+  const notice = /(?:Attached|Added)[^.]*\.(?:[^.]*folder[^.]*\.)?/u.exec(
+    windowText().replaceAll(/\s+/gu, " ")
+  )?.[0];
+
+  record(
+    "drop: the file is attached to the note on disk, and only the file",
+    attached && targetAttachments().length === 1,
+    JSON.stringify(
+      targetAttachments().map((each) => each.file?.name ?? each.kind)
+    )
+  );
+  record(
+    "drop: no new item is made",
+    items().length === before &&
+      !events()
+        .slice(mark)
+        .some((event) => event.event === "itemAdded"),
+    `${items().length - before} added`
+  );
+  record(
+    "drop: the notice says what landed and names the folder refused",
+    notice !== undefined && notice.includes("Quotes"),
+    notice ?? "no notice"
+  );
+  shelfShot("finder-drop");
+  await closeFinderWindow(folder);
+};
+
+/**
+ * C6: an attached picture dragged from details onto a Finder window lands
+ * there as a file named after it.
+ */
+const checkDragOut = async (): Promise<void> => {
+  const folder = path.join(work, "Dragged out");
+
+  mkdirSync(folder, { recursive: true });
+  record("drag out: details open from the open row", await openTargetDetails());
+
+  const tile = elementCentre("AXButton", "Seeded picture · Picture");
+  const finder = await finderWindow(folder);
+
+  record(
+    "drag out: the tile and a Finder window are on screen",
+    tile !== "" && finder !== undefined,
+    `${tile} ${JSON.stringify(finder ?? null)}`
+  );
+
+  if (tile === "" || finder === undefined) {
+    await closeFinderWindow(folder);
+
+    return;
+  }
+
+  // The drop goes to the Finder window's lower half, clear of the shelf.
+  const to = [
+    String(Math.round(finder.x + finder.width / 2)),
+    String(Math.round(finder.y + finder.height * 0.7)),
+  ];
+
+  const landed = (): string[] =>
+    spawnSync("ls", [folder], { encoding: "utf-8" })
+      .stdout.split("\n")
+      .filter(Boolean);
+
+  for (const how of ["drag", "drag-hold"]) {
+    input(how, ...tile.split(" "), ...to);
+
+    // oxlint-disable-next-line no-await-in-loop -- one drag, then the next only if the first dropped nothing.
+    if (await waitUntil(() => landed().length > 0, 4000)) {
+      console.log(`  dropped with ${how}`);
+      break;
+    }
+  }
+
+  record(
+    "drag out: Finder gets the picture as a file named after it",
+    landed().some((name) => name.startsWith("Seeded picture")),
+    landed().join(", ") || "nothing in the folder"
+  );
+  await closeFinderWindow(folder);
+};
+
+// Copy with Details (src/main/copy-commands.ts): read back from the pasteboard, then pasted into a new TextEdit document that is never saved.
+
+/** The pasteboard's types, its plain text and its HTML. */
+const pasteboard = () =>
+  z
+    .object({
+      html: z.string(),
+      plain: z.string(),
+      rtf: z.number(),
+      types: z.array(z.string()),
+    })
+    .parse(
+      JSON.parse(
+        jxa(`ObjC.import("AppKit");
+          const b = $.NSPasteboard.generalPasteboard;
+          const types = ObjC.deepUnwrap(b.types) || [];
+          const text = (t) => { const s = b.stringForType(t); return s.isNil() ? "" : ObjC.unwrap(s); };
+          const rtf = b.dataForType("public.rtf");
+          JSON.stringify({ html: text("public.html"), plain: text("public.utf8-plain-text"), rtf: rtf.isNil() ? 0 : Number(rtf.length), types });`)
+      )
+    );
+
+const textEditValue = (): string =>
+  jxa(`const w = Application("System Events").processes.byName("TextEdit").windows();
+    const area = w.length > 0 ? w[0].entireContents().find((e) => { try { return e.role() === "AXTextArea"; } catch { return false; } }) : undefined;
+    area ? String(area.value()) : "";`);
+
+/** C8: the note with a picture attached, copied with ⌥⌘C's menu item; its flavours, then a paste into TextEdit. */
+const checkCopyDetails = async (): Promise<void> => {
+  enableWebAccessibility();
+  showShelfFromTray();
+  await delay(1000);
+  pbcopy(CLIPBOARD_SENTINEL);
+
+  const selected = await clickElement("AXButton", ATTACH_TARGET);
+  const mark = events().length;
+
+  await delay(500);
+  menuItem("Edit", "Copy with Details");
+
+  const copied = await waitFor("copied", mark);
+  const board = pasteboard();
+
+  console.log(`  pasteboard types: ${board.types.join(", ")}`);
+  record(
+    "copy details: the item is copied",
+    selected && copied !== undefined && board.plain !== CLIPBOARD_SENTINEL
+  );
+  record(
+    "copy details: plain text names the note and its attachment",
+    board.plain.includes(ATTACH_TARGET) &&
+      board.plain.includes("Seeded picture"),
+    JSON.stringify(board.plain.slice(0, 120))
+  );
+  record(
+    "copy details: HTML carries the words and the picture",
+    board.html.includes(ATTACH_TARGET) && /<img\b/u.test(board.html),
+    `${board.html.length} chars, ${(board.html.match(/<img\b/gu) ?? []).length} img`
+  );
+  console.log(
+    `  RTF: ${board.rtf === 0 ? "not written" : `${board.rtf} bytes`}`
+  );
+  writeFileSync(path.join(work, "copy-details.html"), board.html);
+  writeFileSync(path.join(work, "copy-details.txt"), board.plain);
+
+  // TextEdit only through `open` and System Events; a new document, closed with Delete, never saved.
+  const running = spawnSync("pgrep", ["-x", "TextEdit"]).status === 0;
+
+  execFileSync("open", ["-a", "TextEdit"]);
+  await waitUntil(() => frontmost() === "TextEdit", 6000);
+  await delay(800);
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "n" using command down');
+  }, ["TextEdit"]);
+  await delay(1000);
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "v" using command down');
+  }, ["TextEdit"]);
+  await delay(1200);
+
+  const pasted = textEditValue();
+
+  record(
+    "copy details: TextEdit pastes the words and the picture",
+    pasted.includes(ATTACH_TARGET) && pasted.includes("￼"),
+    JSON.stringify(pasted.replaceAll("￼", "[picture]").slice(0, 160))
+  );
+
+  const window = windows().find(
+    (each) => each.owner === "TextEdit" && each.layer === 0
+  );
+
+  if (window !== undefined) {
+    execFileSync("screencapture", [
+      "-x",
+      `-R${window.x},${window.y},${window.width},${window.height}`,
+      path.join(work, "copy-details-textedit.png"),
+    ]);
+  }
+
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "w" using command down');
+  }, ["TextEdit"]);
+  await delay(800);
+
+  try {
+    osa(
+      'tell application "System Events" to tell process "TextEdit" to click button "Delete" of sheet 1 of window 1'
+    );
+  } catch {
+    osa(
+      'tell application "System Events" to tell process "TextEdit" to click button "Don’t Save" of sheet 1 of window 1'
+    );
+  }
+
+  await delay(600);
+
+  if (!running) {
+    guardedKeys(() => {
+      osa(
+        'tell application "System Events" to keystroke "q" using command down'
+      );
+    }, ["TextEdit"]);
+  }
 };
 
 // Say why (src/shared/pill.ts): a second Double Shift opens a field in the capture notice; Return saves it.
@@ -1917,6 +2823,104 @@ const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
   return next;
 };
 
+/** The seeded note, a month old so the screenshot card's Add to “…” doesn't name it, with a picture attached or not; screenshot cards off. */
+const seedNote = (picture: boolean): void => {
+  seedShelf([
+    seedText(
+      1,
+      ATTACH_TARGET,
+      picture ? [seedAttachedPicture()] : [],
+      new Date("2026-10-26T09:00:00.000Z")
+    ),
+  ]);
+  writeFileSync(
+    path.join(userData, "settings.json"),
+    `${JSON.stringify({ screenshotCards: false })}\n`
+  );
+};
+
+interface SeededTrial {
+  readonly seed: () => void;
+  readonly run: (app: ChildProcess) => Promise<ChildProcess>;
+}
+
+/** Round 6's trials: each seeds its data folder before launch, then runs. */
+const SEEDED_TRIALS = new Map(
+  Object.entries({
+    annotate: {
+      run: async (app) => {
+        await checkAnnotate();
+
+        return app;
+      },
+      seed: () => {
+        seedNote(true);
+      },
+    },
+    "attach-files": {
+      run: async (app) => {
+        await checkAttachFiles();
+
+        return app;
+      },
+      seed: () => {
+        seedNote(false);
+      },
+    },
+    "copy-details": {
+      run: async (app) => {
+        await checkCopyDetails();
+
+        return app;
+      },
+      seed: () => {
+        seedNote(true);
+      },
+    },
+    "drag-out": {
+      run: async (app) => {
+        await checkDragOut();
+
+        return app;
+      },
+      seed: () => {
+        seedNote(true);
+      },
+    },
+    "finder-drop": {
+      run: async (app) => {
+        await checkFinderDrop();
+
+        return app;
+      },
+      seed: () => {
+        seedNote(false);
+      },
+    },
+    "paste-image": {
+      run: async (app) => {
+        await checkPasteImage();
+
+        return app;
+      },
+      seed: () => {
+        seedNote(false);
+      },
+    },
+    switch: {
+      run: async (app) => {
+        await hideShelf();
+
+        return await checkSwitch(app);
+      },
+      seed: () => {
+        seedShelf([seedText(1, SWITCH_TARGET)]);
+      },
+    },
+    upgrade: { run: checkUpgrade, seed: seedV3 },
+  } satisfies Record<string, SeededTrial>)
+);
+
 /** Trials that start on a disk refusing one write: the card's and the failed paste's the first, the why's the second (the capture's lands). */
 const failingWrite = (trial: string) => {
   if (trial === "card" || trial === "added-failed" || trial === "switch") {
@@ -1963,9 +2967,11 @@ const main = async (): Promise<void> => {
 
   if (only === "recall") {
     seedRecallShelf();
-  } else if (only === "switch") {
-    seedShelf([seedText(1, SWITCH_TARGET)]);
   }
+
+  const seeded = SEEDED_TRIALS.get(only);
+
+  seeded?.seed();
 
   const clipboardBefore = pbpaste();
 
@@ -1986,12 +2992,9 @@ const main = async (): Promise<void> => {
       app = await checkRecall(app);
     } else if (only === "card") {
       await checkScreenshotCard();
-    } else if (only === "switch") {
-      await hideShelf();
-      app = await checkSwitch(app);
     } else if (only === "added" || only === "added-failed") {
       await checkAddedNotice(only === "added-failed");
-    } else {
+    } else if (seeded === undefined) {
       await checkShelfStaysInFront();
       await checkComposer();
       await checkSelection();
@@ -2004,6 +3007,8 @@ const main = async (): Promise<void> => {
       await checkReopenCaret();
       app = await checkRestart(app);
       await checkFailedWrite();
+    } else {
+      app = await seeded.run(app);
     }
   } finally {
     stopSource();
