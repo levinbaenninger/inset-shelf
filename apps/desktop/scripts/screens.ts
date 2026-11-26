@@ -4063,6 +4063,51 @@ const openCrowdedCheck = async (page: Page): Promise<string | null> => {
   return await reachedDetails(711)(page);
 };
 
+/** In a strip of tiles that ends in “+N”: the words of “+N” start as far after the last tile as the tiles are apart, and the strip stays inside its row. */
+const moreGapProblem = async (strip: Locator): Promise<string | null> => {
+  const gaps = z
+    .object({ between: z.number(), inside: z.boolean(), toMore: z.number() })
+    .parse(
+      await strip.evaluate((list) => {
+        const entries = [...list.children];
+        const words = entries.at(-1)?.querySelector("button");
+        const tiles = entries.slice(0, -1);
+        const range = document.createRange();
+
+        // The words themselves, not the button around them.
+        if (words !== null && words !== undefined) {
+          range.selectNodeContents(words);
+        }
+
+        const last = tiles.at(-1)?.getBoundingClientRect();
+        const first = tiles[0]?.getBoundingClientRect();
+        const second = tiles[1]?.getBoundingClientRect();
+
+        return {
+          between:
+            first === undefined || second === undefined
+              ? -1
+              : second.left - first.right,
+          inside:
+            range.getBoundingClientRect().right <=
+            (list.parentElement?.getBoundingClientRect().right ?? 0),
+          toMore:
+            last === undefined
+              ? -1
+              : range.getBoundingClientRect().left - last.right,
+        };
+      })
+    );
+
+  if (!gaps.inside) {
+    return "“+N” runs out of its row";
+  }
+
+  return Math.abs(gaps.toMore - gaps.between) <= 1
+    ? null
+    : `“+N” starts ${gaps.toMore} px after the last tile, and the tiles are ${gaps.between} px apart`;
+};
+
 /** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
 type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
   readonly page?: PageName;
@@ -4153,9 +4198,11 @@ const STRESS_SCENES: readonly Scene[] = (
           })
           .textContent();
 
-        return shown > 0 && more === `+${25 - shown}`
-          ? null
-          : `the open row must show the windows that fit and “+N” for the other ${25 - shown}: ${String(more)}`;
+        if (!(shown > 0 && more === `+${25 - shown}`)) {
+          return `the open row must show the windows that fit and “+N” for the other ${25 - shown}: ${String(more)}`;
+        }
+
+        return await moreGapProblem(strip);
       },
       data: { view: shelfView(MANY_WINDOWS_DOC) },
       name: "stress-open-windows-many",
@@ -5989,7 +6036,9 @@ const stripProblem = async (
     return "the row's tiles don't sit on one line inside the card";
   }
 
-  return null;
+  return more === null
+    ? null
+    : await moreGapProblem(item(page, n).locator("[data-attachment-strip]"));
 };
 
 /** The arguments of every call of one kind the page made, in order. */

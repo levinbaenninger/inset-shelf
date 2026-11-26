@@ -358,9 +358,10 @@ export const WindowStrip = ({
         <li>
           <Button
             aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
+            // Its words start one gap after the last thumbnail: the button's own inset lies in that gap.
+            className="-ml-1"
             onClick={onMore}
-            // As tall as the thumbnails, and as wide as "+25" needs.
-            size="sm"
+            size="count"
             variant="quiet"
           >
             +{more}

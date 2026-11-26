@@ -258,9 +258,11 @@ export const AttachmentStrip = ({
         <li className="shrink-0">
           <Button
             aria-label={`${strip.more} more ${strip.more === 1 ? "attachment" : "attachments"} in details`}
+            // Its words start one gap after the last tile: the button's own inset lies in that gap.
+            className="-ml-1"
             data-row-keys
             onClick={onMore}
-            size="icon-sm"
+            size="count"
             tabIndex={-1}
             variant="quiet"
           >
