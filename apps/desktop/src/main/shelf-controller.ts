@@ -62,6 +62,13 @@ export interface ShelfController {
   readonly focus: (id: ItemId, edit?: boolean, field?: DetailField) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * Tells `listener` each time a write starts on the disk's way and each
+   * time one ends, landed or not: `stored` and `onItsWay` can read
+   * differently from then on. `subscribe` hears none of it, so a save
+   * never repaints the shelf.
+   */
+  readonly onWrite: (listener: () => void) => () => void;
   /** The shelf as it is now, with the revision that names it. Documents are never changed in place. */
   readonly snapshot: () => Revision;
   /**
@@ -196,6 +203,17 @@ export const createShelfController = (
     }
   };
 
+  const writeListeners = new Set<() => void>();
+
+  /** A write starts on the disk's way, or the one on it ended (null) and the disk is as it left it. Only who watches writes hears it. */
+  const setWriting = (next: Revision | null): void => {
+    writing = next;
+
+    for (const listener of writeListeners) {
+      listener();
+    }
+  };
+
   const setStatus = (patch: Partial<ShelfStatus>): void => {
     status = { ...status, ...patch };
     emit();
@@ -256,13 +274,13 @@ export const createShelfController = (
       changes.every(([id, epoch]) => epochOf(id) === epoch);
 
     toDelete = [];
-    writing = { doc: snapshot, rev: snapshotVersion };
+    setWriting({ doc: snapshot, rev: snapshotVersion });
 
     const result = await deps.save(snapshot, current);
 
     // Dropped before it replaced the file, or failed once Discard had made it stale: the disk holds what it held before it, and its failure is no longer anyone's.
     if (!result.ok && ("dropped" in result || !current())) {
-      writing = null;
+      setWriting(null);
 
       return stale(deletable);
     }
@@ -270,7 +288,12 @@ export const createShelfController = (
     // Discarded while the file was being replaced: the file from before it goes back.
     const restored = result.ok && !current() && (await deps.restore());
 
-    writing = null;
+    if (result.ok && !restored) {
+      saved = Math.max(saved, snapshotVersion);
+      onDisk = snapshot;
+    }
+
+    setWriting(null);
 
     if (restored) {
       return stale(deletable);
@@ -287,8 +310,6 @@ export const createShelfController = (
       return false;
     }
 
-    saved = Math.max(saved, snapshotVersion);
-    onDisk = snapshot;
     // An item edited again since this write began stays failed until a write holds its latest version.
     const written = byId(snapshot);
 
@@ -665,6 +686,13 @@ export const createShelfController = (
     },
     item: (id) => doc.items.find((item) => item.id === id),
     onItsWay: (id) => writing?.doc.items.find((item) => item.id === id),
+    onWrite: (listener) => {
+      writeListeners.add(listener);
+
+      return () => {
+        writeListeners.delete(listener);
+      };
+    },
     persisted,
     setStatus,
     snapshot: () => ({ doc, rev: version }),
