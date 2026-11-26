@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,7 @@ import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
 
-/** `reopen`, `say-why`, `say-why-failed` or `recall` runs only that trial (README.md, Testing). */
+/** A trial name (`reopen`, `say-why`, `recall`, `card`, `switch`, …: see `main`) runs only that trial (README.md, Testing). */
 const only = process.argv[3] ?? "";
 
 const packagedApp = path.join(
@@ -1177,6 +1178,252 @@ const checkScreenshotCard = async (): Promise<void> => {
   record("the card goes once it is saved", !windowText().includes("Retry"));
 };
 
+// Seeded shelves for the attachment trials: a v4 doc written before launch.
+
+const SEED_SECTION = "6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3a01";
+
+const seedId = (n: number): string =>
+  `6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3${String(100 + n).padStart(3, "0")}`;
+
+/** A typed note, made `createdAt` ago: the screenshot card names an item made in the last two minutes. */
+const seedText = (
+  n: number,
+  text: string,
+  attachments: readonly unknown[] = [],
+  createdAt = new Date()
+) => ({
+  attachments,
+  color: null,
+  context: null,
+  createdAt: createdAt.toISOString(),
+  description: "",
+  done: false,
+  due: null,
+  html: null,
+  id: seedId(n),
+  kind: "text",
+  links: [],
+  sectionId: SEED_SECTION,
+  steps: [],
+  text,
+  via: "typed",
+  windows: [],
+});
+
+const seedShelf = (seeded: readonly unknown[]): void => {
+  writeFileSync(
+    path.join(userData, "shelf.json"),
+    `${JSON.stringify({
+      activeSectionId: SEED_SECTION,
+      items: seeded,
+      schemaVersion: 4,
+      sections: [{ id: SEED_SECTION, name: "Inbox" }],
+    })}\n`
+  );
+};
+
+/** Every picture the shelf file holds: image items and attached images. */
+const picturesInDoc = (): number =>
+  items().reduce(
+    (sum, item) =>
+      sum +
+      (item.kind === "image" ? 1 : 0) +
+      z
+        .array(z.looseObject({ kind: z.string() }))
+        .catch([])
+        .parse(item.attachments)
+        .filter((attachment) => attachment.kind === "image").length,
+    0
+  );
+
+/** The shelf's own window: the one of the app that is 300 pt or wider and taller than a card. */
+const shelfWindow = () =>
+  windows().find(
+    (window) =>
+      window.owner === processName &&
+      window.width >= 300 &&
+      window.height >= 400 &&
+      window.layer !== 4
+  );
+
+/** Runs `body` on the shelf window's accessibility elements as `els`. */
+const inShelf = (body: string): string => {
+  const shelf = shelfWindow();
+
+  if (shelf === undefined) {
+    return "";
+  }
+
+  return jxa(`const w = Application("System Events").processes.byName(${JSON.stringify(processName)}).windows().find((w) => { const [x, y] = w.position(); return x === ${shelf.x} && y === ${shelf.y}; });
+    const els = w ? w.entireContents() : [];
+    ${body}`);
+};
+
+/**
+ * The screenshots the shelf window shows: an image item's picture is a
+ * button named "Select: Screenshot", an attached one's tile a button named
+ * as macOS names a screenshot ("Screenshot 2026-11-26 at 10.33.02 · Picture").
+ */
+const shelfScreenshots = (): number =>
+  Number(
+    inShelf(
+      `String(els.filter((e) => { try { return e.role() === "AXButton" && /^(Select: Screenshot|Screenshot \\d{4}-)/u.test(e.name() ?? ""); } catch { return false; } }).length)`
+    ) || "0"
+  );
+
+/** A screenshot of the shelf window alone, kept with the run's artifacts. */
+const shelfShot = (name: string): void => {
+  const shelf = shelfWindow();
+
+  if (shelf !== undefined) {
+    execFileSync("screencapture", [
+      "-x",
+      `-R${shelf.x},${shelf.y},${shelf.width},${shelf.height}`,
+      path.join(work, `${name}.png`),
+    ]);
+  }
+};
+
+/** Role and name of every element in the shelf window, for the log when a check fails. */
+const shelfTree = (): string =>
+  inShelf(
+    `els.map((e) => { try { return e.role() + ":" + (e.name() || e.description() || "") + ":" + e.size().join("x") + ":" + e.subrole(); } catch { return ""; } }).filter((s) => s.length > 6).join(" | ")`
+  );
+
+/** The window of a just-closed run's userData: its shelf.json's mtime, to see whether a launch wrote it. */
+const shelfMtime = (): number => {
+  const file = path.join(userData, "shelf.json");
+
+  return existsSync(file) ? statSync(file).mtimeMs : 0;
+};
+
+const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
+  for (let waited = 0; waited < ms; waited += 200) {
+    if (test()) {
+      return true;
+    }
+
+    // oxlint-disable-next-line no-await-in-loop -- polling the disk and the screen.
+    await delay(200);
+  }
+
+  return test();
+};
+
+const SWITCH_TARGET = "Card target note";
+
+/**
+ * One direction of the card's destination switch on a disk that refuses the
+ * first write: `first` fails, then the other button is pressed. The shelf
+ * file and the shelf window then hold the screenshot once.
+ */
+const switchDirection = async (
+  first: "shelf" | "item",
+  app: ChildProcess
+): Promise<ChildProcess> => {
+  const label = `switch ${first === "shelf" ? "Add to Shelf → Add to “…”" : "Add to “…” → Add to Shelf"}`;
+  const itemButton = `Add to “${SWITCH_TARGET}”`;
+  const before = shelfMtime();
+
+  await delay(1500);
+  record(
+    `${label}: launch left the shelf file unwritten, so the failing write is the card's`,
+    shelfMtime() === before
+  );
+
+  const mark = events().length;
+
+  takeScreenshot();
+  await waitFor("screenshotShown", mark);
+  enableWebAccessibility();
+
+  const offered = await clickInCard(
+    first === "shelf" ? "Add to Shelf" : itemButton
+  );
+
+  record(`${label}: the card offers both destinations`, offered);
+
+  if (!offered) {
+    return app;
+  }
+
+  const failedButton =
+    first === "shelf" ? "Retry" : `Retry adding to “${SWITCH_TARGET}”`;
+
+  const failed = await waitUntil(
+    () => windowText().includes(failedButton),
+    8000
+  );
+
+  record(`${label}: the first save fails and the card offers Retry`, failed);
+
+  const switched = await clickInCard(
+    first === "shelf" ? itemButton : "Add to Shelf"
+  );
+
+  record(
+    `${label}: the other destination can be pressed after the failure`,
+    switched
+  );
+
+  const target = (): number =>
+    z
+      .array(z.unknown())
+      .catch([])
+      .parse(items().find((item) => item.id === seedId(1))?.attachments).length;
+
+  const settled = await waitUntil(
+    () =>
+      picturesInDoc() === 1 &&
+      (first === "shelf" ? target() === 1 : target() === 0),
+    10_000
+  );
+
+  record(
+    `${label}: the shelf file holds the screenshot once, where the second press put it`,
+    settled,
+    `pictures ${picturesInDoc()}, on the note ${target()}, items ${items().length}`
+  );
+  record(
+    `${label}: the card goes once it is saved`,
+    await waitUntil(() => !windowText().includes(failedButton), 4000)
+  );
+
+  showShelfFromTray();
+  await waitUntil(() => shelfWindow() !== undefined, 4000);
+  await delay(1200);
+
+  const shown = shelfScreenshots();
+
+  record(
+    `${label}: the shelf window shows the screenshot once`,
+    shown === 1,
+    `${shown} pictures; banner ${windowText().includes("Not saved to disk") ? "still says Not saved" : "gone"}`
+  );
+
+  if (shown !== 1) {
+    console.log(`DEBUG shelf tree: ${shelfTree()}`);
+  }
+
+  shelfShot(`switch-${first}`);
+
+  return app;
+};
+
+/** C1: both directions, each on a fresh launch whose first write fails. */
+const checkSwitch = async (app: ChildProcess): Promise<ChildProcess> => {
+  let current = await switchDirection("shelf", app);
+
+  quitApp(current);
+  await exited(current);
+  seedShelf([seedText(1, SWITCH_TARGET)]);
+  current = launch({ INSET_FAIL_NEXT_WRITE: "1" });
+  await waitFor("launch", events().length, Date.now() + 15_000);
+  await hideShelf();
+
+  return await switchDirection("item", current);
+};
+
 // Say why (src/shared/pill.ts): a second Double Shift opens a field in the capture notice; Return saves it.
 
 /** What the source app's text view holds now. */
@@ -1672,7 +1919,7 @@ const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
 
 /** Trials that start on a disk refusing one write: the card's and the failed paste's the first, the why's the second (the capture's lands). */
 const failingWrite = (trial: string) => {
-  if (trial === "card" || trial === "added-failed") {
+  if (trial === "card" || trial === "added-failed" || trial === "switch") {
     return { INSET_FAIL_NEXT_WRITE: "1" };
   }
 
@@ -1716,6 +1963,8 @@ const main = async (): Promise<void> => {
 
   if (only === "recall") {
     seedRecallShelf();
+  } else if (only === "switch") {
+    seedShelf([seedText(1, SWITCH_TARGET)]);
   }
 
   const clipboardBefore = pbpaste();
@@ -1737,6 +1986,9 @@ const main = async (): Promise<void> => {
       app = await checkRecall(app);
     } else if (only === "card") {
       await checkScreenshotCard();
+    } else if (only === "switch") {
+      await hideShelf();
+      app = await checkSwitch(app);
     } else if (only === "added" || only === "added-failed") {
       await checkAddedNotice(only === "added-failed");
     } else {
