@@ -136,7 +136,7 @@ pnpm dev
 | `pnpm test` | Runs the Vitest suite. |
 | `pnpm build` | Builds the app into `out/` with electron-vite. |
 | `pnpm fix` | Formats the code and applies safe lint fixes. |
-| `pnpm screens` | Builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. Writes PNGs to `release/screens/` and fails a scene that overflows at 360×620 or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name. |
+| `pnpm screens` | Builds, then renders the shelf, the window-link picker, the drawing window, the setup window and the tutorial's checklist, tips and walkthrough in their main states, light and dark, in Playwright's Chromium with a fake preload bridge and sample data. Writes PNGs to `release/screens/` and fails a scene that overflows at 340×620, the size the shelf opens at beside a tall window, or whose check fails (the `#` section, layered `Esc`, `⌘Z` after removing a step). `SCREENS=details` renders only the scenes with that word in their name. |
 
 To build installers on your machine, run `pnpm package:mac` on macOS or `pnpm package:win` on Windows. The files land in `release/`.
 
