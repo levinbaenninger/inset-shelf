@@ -64,8 +64,8 @@ export interface ShelfController {
   readonly subscribe: (listener: () => void) => () => void;
   /**
    * Tells `listener` each time a write starts on the disk's way and each
-   * time one ends, landed or not: `stored` and `onItsWay` can read
-   * differently from then on. `subscribe` hears none of it, so a save
+   * time one ends, landed or not: `stored` can read differently once one
+   * ends. `subscribe` hears none of it, so a save
    * never repaints the shelf.
    */
   readonly onWrite: (listener: () => void) => () => void;
@@ -95,8 +95,6 @@ export interface ShelfController {
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
   /** The item as the disk holds it; undefined for one no write has landed yet. */
   readonly stored: (id: ItemId) => ShelfItem | undefined;
-  /** The item as the write now on the disk's way holds it, which can still land; undefined when no write is, or it doesn't hold the item. */
-  readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
 }
 
 /** Typing saves after a pause; everything else at once. */
@@ -685,7 +683,6 @@ export const createShelfController = (
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),
-    onItsWay: (id) => writing?.doc.items.find((item) => item.id === id),
     onWrite: (listener) => {
       writeListeners.add(listener);
 
