@@ -3862,6 +3862,27 @@ const tabToFailure = async (page: Page): Promise<boolean> => {
   return false;
 };
 
+/** With the keyboard on the failure message, it reads it all: whole in view, or in a box it scrolls. */
+const failureEndReached = async (page: Page): Promise<string | null> => {
+  const shown = z
+    .object({ client: z.number(), scroll: z.number(), style: z.string() })
+    .parse(
+      await page.evaluate(() => {
+        const alert = document.querySelector("[role=alert]");
+
+        return {
+          client: alert?.clientHeight ?? 0,
+          scroll: alert?.scrollHeight ?? 0,
+          style: alert === null ? "" : getComputedStyle(alert).overflowY,
+        };
+      })
+    );
+
+  return shown.scroll <= shown.client + 1 || shown.style === "auto"
+    ? null
+    : "the keyboard on the failure message can't reach its end";
+};
+
 /** A plain note that runs to about nine lines at 300 wide, between short ones. */
 const NINE_LINES = `${LONG_DESCRIPTION} Danach die Ergebnisse an das gesamte Projektteam schicken und die Zwischenablage wiederherstellen.`;
 
@@ -5449,26 +5470,7 @@ const STRESS_SCENES: readonly Scene[] = (
           throw new Error("Tab never reached the failure message");
         }
       },
-      check: async (page) => {
-        const shown = z
-          .object({ client: z.number(), scroll: z.number(), style: z.string() })
-          .parse(
-            await page.evaluate(() => {
-              const alert = document.querySelector("[role=alert]");
-
-              return {
-                client: alert?.clientHeight ?? 0,
-                scroll: alert?.scrollHeight ?? 0,
-                style: alert === null ? "" : getComputedStyle(alert).overflowY,
-              };
-            })
-          );
-
-        // The keyboard reads it all: whole in view, or in a box it scrolls.
-        return shown.scroll <= shown.client + 1 || shown.style === "auto"
-          ? null
-          : "the keyboard on the failure message can't reach its end";
-      },
+      check: failureEndReached,
       data: { view: failedCard("shelf") },
       keepPointer: true,
       name: "stress-screenshot-add-failed-focus",
@@ -6498,6 +6500,9 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
 /** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
 const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
 
+/** What the failure message says of Annotate while Retry is the only add: the words of the dimmed button's hover, as a sentence. */
+const ANNOTATE_NEXT = "Annotate it on its item, once Retry has saved it.";
+
 /** The failed card once Retry adding to “…” is the only add left (`only`, screenshot-saves.ts): one pill, in Add to Shelf's place, and the item named under it. */
 const retryOnly = (
   name: string,
@@ -6544,6 +6549,24 @@ const retryOnly = (
 
     // Annotate would add it to the shelf: it stays in its corner, off.
     const annotate = page.getByRole("button", { name: "Annotate" });
+
+    // Its hover says when it works again. The keyboard never reaches a button that is off, so the failure message says it too, after the reason.
+    const said = (await page.getByRole("alert").textContent()) ?? "";
+
+    if (!said.startsWith(message) || !said.endsWith(ANNOTATE_NEXT)) {
+      return `the failure message must start with the reason and end with “${ANNOTATE_NEXT}”: “${said}”`;
+    }
+
+    if (!(await tabToFailure(page))) {
+      return "Tab never reached the failure message";
+    }
+
+    const unread = await failureEndReached(page);
+
+    if (unread !== null) {
+      return unread;
+    }
+
     const before = await callCount(page);
 
     await annotate.click({ force: true });
