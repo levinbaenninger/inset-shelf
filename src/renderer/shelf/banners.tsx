@@ -146,26 +146,29 @@ export const NotSavedLine = ({
   readonly onRetry: () => void;
   readonly onDiscard: () => void;
 }) => (
-  <div className="text-destructive flex min-h-6 items-center gap-1 text-xs">
+  // Reaches under the ⋯ column, as the badges and Details do. Its words stay on one line; in a shelf too narrow for both, the buttons take the next line together.
+  <div className="text-destructive -mr-9 flex min-h-6 flex-wrap items-center gap-1 text-xs">
     <HugeiconsIcon className="size-3.5 shrink-0" icon={Alert02Icon} />
-    <span className="mr-auto font-medium">Not saved</span>
-    {notSavedActions(undo, onRetry, onDiscard).map((action) => (
-      <Button
-        aria-label={`${action.label}: ${name.slice(0, NAME_MAX)}`}
-        key={action.label}
-        onClick={() => {
-          action.run();
-        }}
-        // Focus stays in a text field open on the row, so closing it doesn't move the button out from under the click.
-        onMouseDown={(event) => {
-          event.preventDefault();
-        }}
-        size="xs"
-        variant={action.destructive === true ? "destructive" : "quiet"}
-      >
-        {action.label}
-      </Button>
-    ))}
+    <span className="font-medium whitespace-nowrap">Not saved</span>
+    <span className="ml-auto flex items-center gap-1">
+      {notSavedActions(undo, onRetry, onDiscard).map((action) => (
+        <Button
+          aria-label={`${action.label}: ${name.slice(0, NAME_MAX)}`}
+          key={action.label}
+          onClick={() => {
+            action.run();
+          }}
+          // Focus stays in a text field open on the row, so closing it doesn't move the button out from under the click.
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          size="xs"
+          variant={action.destructive === true ? "destructive" : "quiet"}
+        >
+          {action.label}
+        </Button>
+      ))}
+    </span>
   </div>
 );
 

@@ -2137,12 +2137,31 @@ const notSavedRows = async (page: Page) =>
       .count(),
   });
 
+/** "Not saved" stays on one line beside its buttons, or above them where the shelf is too narrow for both. */
+const notSavedOneLine = async (page: Page): Promise<string | null> => {
+  const heights = await page
+    .getByText("Not saved", { exact: true })
+    .evaluateAll((labels) =>
+      labels.map((label) => label.getBoundingClientRect().height)
+    );
+
+  return heights.length > 0 && heights.every((height) => height < 24)
+    ? null
+    : `each row's “Not saved” must take one line: ${JSON.stringify(heights)} px high`;
+};
+
 /**
  * Round 7: each item a failed save left unwritten says "Not saved" on its
  * row. Discard changes on A puts back only A's saved words; the new capture
  * keeps its line, and offers Delete instead, as the disk has never held it.
  */
 const notSavedCheck = async (page: Page): Promise<string | null> => {
+  const wrapped = await notSavedOneLine(page);
+
+  if (wrapped !== null) {
+    return wrapped;
+  }
+
   const before = await notSavedRows(page);
 
   if (
@@ -7674,6 +7693,14 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "shelf-not-saved",
     page: "shelf",
+  },
+  {
+    check: notSavedOneLine,
+    data: { echo: "later", savedDoc: MENU_DOC, view: NOT_SAVED_VIEW },
+    layoutCheck: true,
+    name: "shelf-not-saved-narrow",
+    page: "shelf",
+    width: NARROWEST,
   },
   {
     act: async (page) => {
