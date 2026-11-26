@@ -16,7 +16,7 @@ const ICON_BUTTON =
   "inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground";
 
 export const DocsActions = () => (
-  <div className="bg-fd-secondary/50 text-fd-muted-foreground flex items-center gap-0.5 rounded-lg border p-0.5">
+  <div className="bg-fd-secondary/50 text-fd-muted-foreground flex w-fit items-center gap-0.5 self-start rounded-lg border p-0.5">
     <a
       href={REPO_URL}
       aria-label="Inset Shelf on GitHub"
@@ -25,7 +25,7 @@ export const DocsActions = () => (
     >
       <HugeiconsIcon icon={GithubIcon} size={18} aria-hidden="true" />
     </a>
-    <DropdownMenu.Root>
+    <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
@@ -43,9 +43,6 @@ export const DocsActions = () => (
           sideOffset={8}
           className="bg-fd-popover text-fd-popover-foreground z-50 min-w-44 rounded-lg border p-1 text-sm shadow-lg"
         >
-          <DropdownMenu.Label className="text-fd-muted-foreground px-2 py-1.5 text-xs font-medium">
-            Download Inset Shelf
-          </DropdownMenu.Label>
           {DOWNLOAD_CHOICES.map(({ label, url }) => (
             <DropdownMenu.Item key={url} asChild>
               <a
