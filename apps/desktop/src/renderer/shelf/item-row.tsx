@@ -495,20 +495,52 @@ const percent = (value: number, total: number): string =>
 const imageCaption = (item: ImageItem): string =>
   item.title ?? (item.note === "" ? PICTURE_KIND[item.via] : item.note);
 
-const metaText = (item: ShelfItem): string => {
-  const when = whenText(item.createdAt);
-
+/** What the foot says after the time: how the item was captured, a file's size, a picture's source. Empty for a typed note. */
+const metaRest = (item: ShelfItem): string => {
   if (item.kind === "text") {
-    return item.via === "selection" ? `${when} · from a selection` : when;
+    return item.via === "selection" ? "from a selection" : "";
   }
 
   if (item.kind === "file") {
-    return `${when} · ${fileSizeText(item.file.bytes)}`;
+    return fileSizeText(item.file.bytes);
   }
 
   const where = item.source === null ? "" : ` · ${item.source}`;
 
-  return `${when} · ${PICTURE_KIND[item.via]}${where}`;
+  return `${PICTURE_KIND[item.via]}${where}`;
+};
+
+const metaText = (item: ShelfItem): string => {
+  const when = whenText(item.createdAt);
+  const rest = metaRest(item);
+
+  return rest === "" ? when : `${when} · ${rest}`;
+};
+
+/**
+ * The foot's words beside badges, where room is short: the time always
+ * shows, and what follows it shows when it has room for a word or two and
+ * not at all when it would be cut to a letter. The whole line is the time's
+ * tooltip then.
+ */
+const FootWords = ({ item }: { readonly item: ShelfItem }) => {
+  const rest = metaRest(item);
+
+  return (
+    <span
+      className="text-muted-foreground flex h-4 min-w-0 flex-1 flex-wrap gap-x-1 overflow-hidden text-xs"
+      data-foot-words
+    >
+      <Truncated
+        className="min-w-0"
+        text={whenText(item.createdAt)}
+        tooltip={metaText(item)}
+      />
+      {rest === "" ? null : (
+        <Truncated className="min-w-16 flex-1" text={`· ${rest}`} />
+      )}
+    </span>
+  );
 };
 
 /**
@@ -1155,10 +1187,14 @@ const OpenFooter = ({
   <div className="-mr-9 flex min-h-6 items-center gap-2">
     <div className="min-w-0 flex-1">
       <BadgeLine badges={badges} reach={false}>
-        <Truncated
-          className="text-muted-foreground min-w-0 flex-1 text-xs"
-          text={metaText(item)}
-        />
+        {badges.length === 0 ? (
+          <Truncated
+            className="text-muted-foreground min-w-0 flex-1 text-xs"
+            text={metaText(item)}
+          />
+        ) : (
+          <FootWords item={item} />
+        )}
       </BadgeLine>
     </div>
     <Button

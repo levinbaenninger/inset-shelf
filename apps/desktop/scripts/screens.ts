@@ -4147,6 +4147,33 @@ const badgesOnFoot = (n: number) =>
     const badge = await boxOf(lines.locator("> *").first());
     const more = await boxOf(row.locator("[data-details-button]"));
 
+    // The time shows whole; what follows it shows with room for a word, or not at all.
+    const words = z
+      .array(
+        z.object({ cut: z.boolean(), shown: z.boolean(), width: z.number() })
+      )
+      .parse(
+        await row.locator("[data-foot-words]").evaluate((foot) => {
+          const { bottom } = foot.getBoundingClientRect();
+
+          return [...foot.children].map((each) => ({
+            cut: each.scrollWidth > each.clientWidth,
+            shown: each.getBoundingClientRect().top < bottom,
+            width: each.clientWidth,
+          }));
+        })
+      );
+
+    const [time, ...rest] = words;
+
+    if (time === undefined || time.cut) {
+      return `the foot's time is cut: ${JSON.stringify(words)}`;
+    }
+
+    if (rest.some((each) => each.shown && each.width < 60)) {
+      return `the foot's words after the time are cut to a letter or two: ${JSON.stringify(words)}`;
+    }
+
     return badge.right <= more.left &&
       middle(badge) < more.bottom &&
       middle(badge) > more.top
