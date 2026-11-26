@@ -928,8 +928,9 @@ const start = async (): Promise<void> => {
     attach: attachShotTo,
     card: {
       hide: screenshotCard.hide,
-      hold: screenshotCard.hold,
+      holdForSave: screenshotCard.holdForSave,
       isVisible: screenshotCard.isVisible,
+      releaseSave: screenshotCard.releaseSave,
       show: (view) => {
         screenshotCard.show(view, shelf.bounds());
       },
@@ -947,8 +948,8 @@ const start = async (): Promise<void> => {
     },
     now: () => Date.now(),
     onWrite: controller.onWrite,
-    persisted: async () =>
-      await controller.persisted(controller.snapshot().rev),
+    persisted: async (accept) =>
+      await controller.persisted(controller.snapshot().rev, accept),
     refusal: (id) => {
       const state = controller.copyState([id], controller.snapshot().doc);
 

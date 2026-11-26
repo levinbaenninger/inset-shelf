@@ -62,8 +62,10 @@ export interface Shot {
 export interface ShotCard {
   readonly show: (view: ScreenshotView) => void;
   readonly hide: () => void;
-  /** Stops its time until it hides. */
-  readonly hold: () => void;
+  /** Stops its time for a save, including while it offers Retry. */
+  readonly holdForSave: () => void;
+  /** Gives the card its time again when the user took the screenshot off the shelf during a save. */
+  readonly releaseSave: () => void;
   readonly isVisible: () => boolean;
   readonly view: () => ScreenshotView | null;
   readonly update: (
@@ -87,8 +89,8 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly addItem: (shot: S, file: string) => ItemId | null;
   /** Attaches the screenshot, with its picture file written, to an item, and deletes the file when the item doesn't take it. Awaits nothing, as `addItem`. */
   readonly attach: (shot: S, file: string, id: ItemId) => AttachResult;
-  /** The write of every change so far, however long the disk takes: how it ended. The card's wait for it has a limit, the write has none. */
-  readonly persisted: () => Promise<WriteResult>;
+  /** Waits for the current revision and any queued writes needed to satisfy `accept`. */
+  readonly persisted: (accept: () => boolean) => Promise<WriteResult>;
   /** Runs `run` after `ms`, unless the function it returns is called first. */
   readonly setTimer: (run: () => void, ms: number) => () => void;
   /** The item as the disk holds it; undefined while no write of it has landed. */
@@ -304,12 +306,18 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           ? { to: "shelf" }
           : { id: at.item, label: excerpt(cardLabel(holder)), to: "item" };
 
-      const message =
-        now.saving === null
-          ? ((now.write === null ? deps.refusal(at.item) : null) ??
-            now.failed?.message ??
-            null)
+      const refusal =
+        now.saving === null && now.write === null
+          ? deps.refusal(at.item)
           : null;
+
+      // Keep the shelf's newer Retry reason even if the user takes the screenshot off its place.
+      if (refusal !== null && now.failed !== null) {
+        now.failed = { ...now.failed, message: refusal };
+      }
+
+      const message =
+        now.saving === null ? (refusal ?? now.failed?.message ?? null) : null;
 
       cardItem = at.to === "item" ? at.item : null;
 
@@ -453,7 +461,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     now.failed = null;
     now.write = null;
     // The card stays while its screenshot is written, however slow the disk.
-    card.hold();
+    card.holdForSave();
     retarget();
 
     let placed: ItemId | null = null;
@@ -468,7 +476,12 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       placed = result.id;
       // The shelf holds it now: the card shows no other add while it is written.
       retarget();
-      now.write = deps.persisted();
+      now.write = deps.persisted(() => {
+        // Undo can bring the screenshot back after a write that didn't hold it started.
+        const on = shown(now);
+
+        return on === null || landed(on.at);
+      });
 
       return await withinWait(now.write, deps.setTimer);
     });
@@ -481,8 +494,20 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     if (written.ok) {
       now.write = null;
 
+      const on = shown(now);
+
       // The write landed, and the user had taken the screenshot off the shelf by then: nothing was added, and the card offers its adds again.
-      if (shown(now) === null) {
+      if (on === null) {
+        if (mine) {
+          card.releaseSave();
+          retarget();
+        }
+
+        return null;
+      }
+
+      if (!landed(on.at)) {
+        // A new Undo can bring it back between the write ending and this save returning.
         if (mine) {
           retarget();
         }
@@ -493,6 +518,13 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       if (held === now) {
         held = null;
         card.hide();
+      }
+
+      if (on.at.to !== to || on.at.item !== placed) {
+        // Undo restored an older placement. Don't report success for the add that no longer holds it.
+        deps.saved(on.at.to, on.at.item);
+
+        return null;
       }
 
       return placed;

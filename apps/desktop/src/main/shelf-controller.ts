@@ -75,8 +75,13 @@ export interface ShelfController {
    * Resolves once the disk holds revision `rev` or a later one, writing a
    * change still waiting for its pause, or with why it doesn't. A write
    * already on its way that covers `rev` is waited for, not repeated.
+   * If `accept` is given, keeps waiting for queued writes until it accepts
+   * what landed, or the queue ends.
    */
-  readonly persisted: (rev: number) => Promise<WriteResult>;
+  readonly persisted: (
+    rev: number,
+    accept?: () => boolean
+  ) => Promise<WriteResult>;
   /** `persisted` for every change made so far: Retry, and quitting. */
   readonly flush: () => Promise<WriteResult>;
   /** How many items differ from what the disk holds; a change to sections alone counts as one. */
@@ -514,7 +519,10 @@ export const createShelfController = (
     };
   };
 
-  const persisted = async (rev: number): Promise<WriteResult> => {
+  const persisted = async (
+    rev: number,
+    accept: () => boolean = () => true
+  ): Promise<WriteResult> => {
     // A typed edit waiting for its pause, or a change a failed save left unwritten.
     if (saved < rev && !queued && (writing?.rev ?? 0) < rev) {
       saveNow();
@@ -527,14 +535,14 @@ export const createShelfController = (
       // oxlint-disable-next-line no-await-in-loop -- each write the last one queued.
       await seen;
 
-      if (saved >= rev || seen === inFlight) {
-        break;
+      if (saved >= rev && accept()) {
+        return { ok: true };
+      }
+
+      if (seen === inFlight) {
+        return { message: status.saveError ?? SAVE_FAILED, ok: false };
       }
     }
-
-    return saved >= rev
-      ? { ok: true }
-      : { message: status.saveError ?? SAVE_FAILED, ok: false };
   };
 
   /** The version Discard changes goes back to: the disk's, or the one a Discard put back while a write was on its way. */

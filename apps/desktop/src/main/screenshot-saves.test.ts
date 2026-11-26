@@ -178,10 +178,13 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
         held = false;
         events.push("hide");
       },
-      hold: () => {
+      holdForSave: () => {
         held = true;
       },
       isVisible: () => view !== null,
+      releaseSave: () => {
+        held = false;
+      },
       show: (shown) => {
         view = shown;
         held = false;
@@ -201,8 +204,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     now: () => clock,
     onWrite: (listener) => controller.onWrite(listener),
-    persisted: async () =>
-      await controller.persisted(controller.snapshot().rev),
+    persisted: async (accept) =>
+      await controller.persisted(controller.snapshot().rev, accept),
     // As index.ts wires it: the reason the shelf gives for an item its last write was refused.
     refusal: (id) => {
       const state = controller.copyState([id], controller.snapshot().doc);
@@ -1905,6 +1908,8 @@ describe("a write that landed while the user had the screenshot off the shelf", 
   it("says why, and offers Retry for the row, when the write that holds the restored row is refused", async () => {
     const { adding, card, endRestore } = await restoredAfterItsWriteBegan();
 
+    // The disk still refuses any queued writes and the flush in settled().
+    card.failWrites(DISK_REFUSES);
     endRestore(DISK_REFUSES);
 
     await expect(adding).resolves.toBeNull();
@@ -1917,6 +1922,34 @@ describe("a write that landed while the user had the screenshot off the shelf", 
         placed: { to: "shelf" },
         state: "failed",
       },
+    });
+  });
+
+  it("says where the screenshot landed when Undo restores an older place during a save", async () => {
+    const card = await refused("shelf");
+    const row = rowOf(card);
+
+    card.controller.apply({ id: row, type: "remove" });
+    card.failWrites({ ok: true });
+    await settled(card);
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToItem(1, card.note);
+
+    await placedOnShelf(card);
+    TAKE_OFF["removing its tile"](card);
+    card.controller.apply({ id: row, type: "undoRemove" });
+    end({ ok: true });
+
+    await expect(adding).resolves.toBeNull();
+    expect({
+      disk: card.disk().at(-1),
+      saved: card.saved,
+      view: card.view(),
+    }).toStrictEqual({
+      disk: { attached: 0, items: 1 },
+      saved: ["shelf"],
+      view: null,
     });
   });
 });
@@ -2065,6 +2098,27 @@ describe("the screenshot card's time", () => {
     card.clock.hold();
     card.clock.hover(false);
 
+    expect(card.running()).toBeFalsy();
+  });
+
+  it("releases a save's hold without overriding hover or Keep on Screen", () => {
+    const card = timed();
+
+    card.clock.shown();
+    card.clock.holdForSave();
+    card.clock.hover(true);
+    card.clock.hover(false);
+    expect(card.running()).toBeFalsy();
+
+    card.clock.hover(true);
+    card.clock.releaseSave();
+    expect(card.running()).toBeFalsy();
+    card.clock.hover(false);
+    expect(card.running()).toBeTruthy();
+
+    card.clock.hold();
+    card.clock.holdForSave();
+    card.clock.releaseSave();
     expect(card.running()).toBeFalsy();
   });
 
