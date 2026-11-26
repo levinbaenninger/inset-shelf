@@ -50,7 +50,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k("Shift+CommandOrControl+L")], label: "New window link" },
         {
           keys: [`${k("CommandOrControl+1")}–9`],
-          label: "Add new items to a section",
+          label: "Choose where new items go",
         },
       ],
       title: "Capture",
@@ -83,7 +83,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         },
         {
           keys: [k("Alt+CommandOrControl+Up"), k("Alt+CommandOrControl+Down")],
-          label: "Move to the section above or below",
+          label: "Move the selected item to the section above or below",
         },
         { keys: [k("Backspace")], label: "Delete" },
         { keys: [k("CommandOrControl+Z")], label: "Undo delete" },
