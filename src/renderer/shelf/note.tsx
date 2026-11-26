@@ -5,11 +5,12 @@ import type { MouseEvent } from "react";
 
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { Clamp } from "@/shared/clamp";
 
 import { useCaretStart } from "./edit-start";
 import type { RowHandlers } from "./item-row";
 import { contextMenuAt, DONE } from "./row-look";
-import { RowText } from "./row-text";
+import { ROW_CAPS } from "./row-parts";
 
 /** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
 const noteLook = (item: ImageItem | FileItem): string =>
@@ -149,9 +150,9 @@ const NoteText = ({
   );
 
   return selected ? (
-    <RowText className={noteLook(item)} part="words">
+    <Clamp className={noteLook(item)} lines={ROW_CAPS.words} what="the note">
       {note}
-    </RowText>
+    </Clamp>
   ) : (
     note
   );

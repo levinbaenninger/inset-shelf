@@ -13,13 +13,24 @@ export interface RowList {
   readonly more: number;
 }
 
-/** What an open row lists under its words, each only once it is set: how many of each, 0 for none. How many show is the row's budget (open-row.ts). */
-export interface RowExtras {
+/** The steps an open row lists, and the rest: how many, and how many of those are done. */
+export interface RowStepList {
+  readonly shown: readonly Step[];
+  readonly more: number;
+  readonly moreDone: number;
+}
+
+/**
+ * What an open row shows besides its words, each part only once it is set
+ * and each under its own cap (ROW_CAPS): no part's share depends on
+ * another's or on the list's height.
+ */
+export interface RowOpen {
   /** The labelled pins. */
-  readonly pinLegend: number;
+  readonly pins: RowList | null;
   readonly description: boolean;
-  /** Steps that hold words. */
-  readonly steps: number;
+  /** Steps that hold words, those still to do first. */
+  readonly steps: RowStepList | null;
   readonly windows: number;
   readonly links: boolean;
 }
@@ -35,15 +46,35 @@ export interface RowParts {
   /** A file without a source carries its badges on its name's line; every other row on its source line. */
   readonly badgesOn: "source" | "file";
   /** Null while the row is closed. */
-  readonly extras: RowExtras | null;
+  readonly open: RowOpen | null;
   /** The first attachments as tiles, open or closed, and how many more only details show; null when the item has none. */
   readonly strip: RowList | null;
 }
 
+/** How much of each part an open row shows: the picture's height in pixels, the words' lines before Show more, and how many pins and steps it lists. */
+export const ROW_CAPS = {
+  description: 10,
+  picture: 192,
+  pins: 3,
+  steps: 5,
+  title: 3,
+  words: 10,
+} as const;
+
 const MAX_BADGES = 3;
 
-/** How many linked windows the open row's strip shows; it says "+N" for the rest itself. */
-export const ROW_WINDOWS = 3;
+/** A window's thumbnail with the gap after it, and the "+N" after the last one with its gap, in pixels (item-meta.tsx WindowStrip). */
+const WINDOW_STEP = 48 + 6;
+const WINDOW_MORE = 44 + 6;
+
+/** How many linked windows fit on the open row's one line of thumbnails `width` wide, leaving room for "+N" when some don't. */
+export const windowsThatFit = (width: number, total: number): number => {
+  const all = Math.floor((width + 6) / WINDOW_STEP);
+
+  return total <= all
+    ? total
+    : Math.max(0, Math.floor((width + 6 - WINDOW_MORE) / WINDOW_STEP));
+};
 
 /** How many attachments a row shows as tiles; the rest are a "+N" that opens details. */
 export const ROW_STRIP_MAX = 3;
@@ -63,10 +94,10 @@ export const checkedSteps = (steps: readonly Step[]): ReadonlySet<string> =>
 
 /**
  * The steps an open row lists, first to last: those still to do when it
- * opened, then those checked by then, each group in its stored order. How
- * many show is the row's budget, so what it cuts is done work before open
- * work. A step ticked in the open row stays where it is until the row opens
- * again, so nothing moves under the pointer or the keyboard.
+ * opened, then those checked by then, each group in its stored order, so
+ * what its cap leaves out is done work before open work. A step ticked in
+ * the open row stays where it is until the row opens again, so nothing
+ * moves under the pointer or the keyboard.
  */
 export const rowSteps = (
   steps: readonly Step[],
@@ -115,17 +146,41 @@ const badgesOf = (item: ShelfItem, open: boolean): readonly RowBadge[] => {
   return badges.slice(0, MAX_BADGES);
 };
 
-const extrasOf = (item: ShelfItem): RowExtras => ({
+const stepList = (
+  steps: readonly Step[],
+  checkedAtOpen: ReadonlySet<string>
+): RowStepList | null => {
+  const listed = rowSteps(steps, checkedAtOpen);
+  const rest = listed.slice(ROW_CAPS.steps);
+
+  return listed.length === 0
+    ? null
+    : {
+        more: rest.length,
+        moreDone: rest.filter((step) => step.done).length,
+        shown: listed.slice(0, ROW_CAPS.steps),
+      };
+};
+
+const openOf = (
+  item: ShelfItem,
+  checkedAtOpen: ReadonlySet<string>
+): RowOpen => ({
   description: item.description.trim() !== "",
   links: item.kind === "text" && item.links.length > 0,
-  pinLegend: labelledPins(item),
-  steps: filledSteps(item.steps).length,
+  pins: rowList(labelledPins(item), ROW_CAPS.pins),
+  steps: stepList(item.steps, checkedAtOpen),
   windows: item.windows.length,
 });
 
-export const rowParts = (item: ShelfItem, open: boolean): RowParts => ({
+/** `checkedAtOpen`: the steps checked when the row opened (checkedSteps), which the row lists last. */
+export const rowParts = (
+  item: ShelfItem,
+  open: boolean,
+  checkedAtOpen: ReadonlySet<string> = checkedSteps(item.steps)
+): RowParts => ({
   badges: badgesOf(item, open),
   badgesOn: item.kind === "file" && item.context === null ? "file" : "source",
-  extras: open ? extrasOf(item) : null,
+  open: open ? openOf(item, checkedAtOpen) : null,
   strip: rowList(item.attachments.length, ROW_STRIP_MAX),
 });

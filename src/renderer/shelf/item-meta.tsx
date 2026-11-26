@@ -21,7 +21,7 @@ import type { DueBucket } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import type { Pin, Step, WindowRef } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,7 @@ import { Truncated } from "@/shared/clamp";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
-import { filledSteps } from "./row-parts";
+import { filledSteps, windowsThatFit } from "./row-parts";
 import type { RowBadge } from "./row-parts";
 
 const BADGE_TONE: Readonly<Record<DueBucket | "plain", string>> = {
@@ -291,58 +291,87 @@ export const WindowThumb = ({
 );
 
 /**
- * The linked windows as one row of small pictures, each reopening its
- * window, and "+N" for the ones only details show.
+ * The linked windows as one line of small pictures, each reopening its
+ * window: as many as fit the line's width (row-parts.ts windowsThatFit),
+ * then "+N", which opens details, for the rest.
  */
 export const WindowStrip = ({
-  more,
   onMore,
   onReopen,
   windows,
 }: {
   readonly windows: readonly WindowRef[];
   readonly onReopen: (window: WindowRef) => void;
-  /** How many more windows details show; "+N" opens them. */
-  readonly more: number;
   readonly onMore: () => void;
-}) => (
-  <ul aria-label="Linked windows" className="flex items-center gap-1.5">
-    {windows.map((window) => (
-      <li key={window.id}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              aria-label={`${reopenLabel(window)}: ${windowName(window)}`}
-              className="focus-visible:ring-ring/50 block rounded-md outline-none hover:opacity-85 focus-visible:ring-3"
-              onClick={() => {
-                onReopen(window);
-              }}
-              type="button"
-            >
-              <WindowThumb className="h-8 w-12" window={window} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {reopenLabel(window)} · {windowName(window)}
-          </TooltipContent>
-        </Tooltip>
-      </li>
-    ))}
-    {more === 0 ? null : (
-      <li>
-        <Button
-          aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
-          onClick={onMore}
-          // As tall as icon-sm, and as wide as "+25" needs.
-          size="sm"
-          variant="quiet"
-        >
-          +{more}
-        </Button>
-      </li>
-    )}
-  </ul>
-);
+}) => {
+  const ref = useRef<HTMLUListElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
+
+  // The line's own width, the only thing it measures: a block, as wide as the row whatever it holds.
+  useLayoutEffect(() => {
+    const line = ref.current;
+
+    const observer = new ResizeObserver(() => {
+      setWidth(line?.clientWidth ?? null);
+    });
+
+    if (line !== null) {
+      observer.observe(line);
+      setWidth(line.clientWidth);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const shown = width === null ? 0 : windowsThatFit(width, windows.length);
+
+  const more = width === null ? 0 : windows.length - shown;
+
+  return (
+    <ul
+      aria-label="Linked windows"
+      className="flex items-center gap-1.5"
+      ref={ref}
+    >
+      {windows.slice(0, shown).map((window) => (
+        <li key={window.id}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={`${reopenLabel(window)}: ${windowName(window)}`}
+                className="focus-visible:ring-ring/50 block rounded-md outline-none hover:opacity-85 focus-visible:ring-3"
+                onClick={() => {
+                  onReopen(window);
+                }}
+                type="button"
+              >
+                <WindowThumb className="h-8 w-12" window={window} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {reopenLabel(window)} · {windowName(window)}
+            </TooltipContent>
+          </Tooltip>
+        </li>
+      ))}
+      {more === 0 ? null : (
+        <li>
+          <Button
+            aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
+            onClick={onMore}
+            // As tall as the thumbnails, and as wide as "+25" needs.
+            size="sm"
+            variant="quiet"
+          >
+            +{more}
+          </Button>
+        </li>
+      )}
+    </ul>
+  );
+};
 
 /** A quick choice's day, right of its name: "Sat, Nov 7". */
 const dayHint = (iso: string, now: Date): string => {

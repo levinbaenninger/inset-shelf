@@ -34,13 +34,12 @@ import type { Service } from "@shared/web-source";
 import {
   isValidElement,
   memo,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -50,7 +49,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { tooltipText, Truncated, useCut } from "@/shared/clamp";
+import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -68,23 +67,13 @@ import { MarkdownField } from "./markdown-field";
 import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
-import { moreText } from "./open-row";
 import { bindRow } from "./row-actions";
 import type { RowActions } from "./row-actions";
-import {
-  budgetOf,
-  contextMenuAt,
-  DONE,
-  EDITING,
-  OpenRow,
-  WORDS,
-} from "./row-look";
-import { checkedSteps, ROW_WINDOWS, rowParts, rowSteps } from "./row-parts";
-import type { RowExtras } from "./row-parts";
-import { RowText } from "./row-text";
+import { contextMenuAt, DONE, EDITING, WORDS } from "./row-look";
+import { checkedSteps, ROW_CAPS, rowParts } from "./row-parts";
+import type { RowOpen } from "./row-parts";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
-import { useOpenRow } from "./use-open-row";
 import { isTextField } from "./use-shelf-keys";
 
 /**
@@ -596,12 +585,9 @@ const Picture = ({
   onDragImage,
   onOpen,
   onSelect,
-  tallest = 0,
 }: {
   readonly item: ImageItem;
   readonly compact: boolean;
-  /** Open, as tall as the row's budget lets it (open-row.ts): the first part to give way. */
-  readonly tallest?: number;
 } & Pick<
   RowHandlers,
   "onContextMenu" | "onDragImage" | "onOpen" | "onSelect"
@@ -616,7 +602,6 @@ const Picture = ({
     )}
     draggable
     data-row-keys
-    data-row-part={compact ? undefined : "picture"}
     onClick={onSelect}
     onContextMenu={contextMenuAt(onContextMenu)}
     onDoubleClick={onOpen}
@@ -638,7 +623,7 @@ const Picture = ({
       draggable={false}
       height={item.image.heightPx}
       src={insetUrl.attachment(item.image.file)}
-      style={compact ? undefined : { "--picture": `${tallest}px` }}
+      style={compact ? undefined : { "--picture": `${ROW_CAPS.picture}px` }}
       width={item.image.widthPx}
     />
     {item.pins.map((pin, index) => (
@@ -684,8 +669,6 @@ const ImageBody = ({
   | "onSelect"
   | "onStopEditing"
 >) => {
-  const budget = budgetOf(useContext(OpenRow));
-
   if (!selected && !editing) {
     return (
       <div className="flex gap-2.5">
@@ -733,22 +716,22 @@ const ImageBody = ({
       <Picture
         compact={false}
         item={item}
-        tallest={budget.picture}
         onContextMenu={onContextMenu}
         onDragImage={onDragImage}
         onOpen={onOpen}
         onSelect={onSelect}
       />
       {item.title === null ? null : (
-        <RowText
+        <Clamp
           className={cn(
             "text-sm leading-snug font-medium break-words",
             item.done && "text-muted-foreground line-through"
           )}
-          part="title"
+          lines={ROW_CAPS.title}
+          what="the title"
         >
           {item.title}
-        </RowText>
+        </Clamp>
       )}
       <Note
         editing={editing}
@@ -793,9 +776,13 @@ const FileTitle = ({
   );
 
   return selected ? (
-    <RowText className="text-sm leading-snug" part="title">
+    <Clamp
+      className="text-sm leading-snug"
+      lines={ROW_CAPS.title}
+      what="the title"
+    >
       {title}
-    </RowText>
+    </Clamp>
   ) : (
     title
   );
@@ -907,8 +894,8 @@ const TextBody = ({
     <>
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Ten lines at most until Show more, fewer when the rest of the row needs the room, so one item never fills the shelf; an edit shows all of it.
-        <RowText className={WORDS} part="words">
+        // Ten lines at most until Show more; an edit shows all of it.
+        <Clamp className={WORDS} lines={ROW_CAPS.words} what="the text">
           {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
           {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
           <div
@@ -931,7 +918,7 @@ const TextBody = ({
               text={item.text}
             />
           </div>
-        </RowText>
+        </Clamp>
       ) : (
         <button
           className={cn(
@@ -978,92 +965,94 @@ const SourceRow = ({
   </BadgeLine>
 );
 
+/** A quiet line under a list that says how much more details hold, and opens them. */
+const MoreLine = ({
+  onShowDetails,
+  text,
+}: {
+  readonly text: string;
+  readonly onShowDetails: () => void;
+}) => (
+  <Button
+    className="-ml-2 max-w-full self-start"
+    onClick={onShowDetails}
+    size="xs"
+    variant="quiet"
+  >
+    <Truncated className="min-w-0" text={text} />
+    <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
+  </Button>
+);
+
+const moreSteps = ({ more, moreDone }: { more: number; moreDone: number }) =>
+  `${more} more ${more === 1 ? "step" : "steps"}${moreDone === 0 ? "" : ` · ${moreDone} done`}`;
+
 /**
  * What an open row shows besides its words, each only once it is set: pin
- * labels, the description, checkable steps and the linked windows, each as
- * much as the row's budget gives it (open-row.ts), with one line that says
- * how much more details hold and opens them.
+ * labels, the description, checkable steps and the linked windows, each
+ * under its own cap (row-parts.ts ROW_CAPS), with its own line under it
+ * that says how much more details hold and opens them.
  */
 const Expansion = ({
-  extras,
   item,
   onReopenWindow,
   onShowDetails,
   onToggleStep,
-  steps: listed,
+  open,
 }: {
-  readonly extras: RowExtras;
+  readonly open: RowOpen;
   readonly item: ShelfItem;
-  /** The item's steps in the order the row lists them. */
-  readonly steps: readonly Step[];
   readonly onToggleStep: (step: Step) => void;
   readonly onReopenWindow: (window: WindowRef) => void;
   readonly onShowDetails: () => void;
 }) => {
-  const budget = budgetOf(useContext(OpenRow));
+  const { pins, steps } = open;
 
   if (
-    !extras.description &&
-    extras.steps === 0 &&
-    extras.windows === 0 &&
-    extras.pinLegend === 0
+    !open.description &&
+    steps === null &&
+    open.windows === 0 &&
+    pins === null
   ) {
     return null;
   }
 
-  const pins = Math.min(extras.pinLegend, budget.pins);
-  const steps = Math.min(extras.steps, budget.steps);
-
-  const more = moreText({
-    pins: extras.pinLegend - pins,
-    steps: extras.steps - steps,
-    windows: budget.windows ? 0 : extras.windows,
-  });
-
   return (
     <div className="flex flex-col gap-2 pt-0.5">
-      {extras.pinLegend === 0 || item.kind !== "image" ? null : (
-        <div data-row-part="pins">
-          <PinLegend pins={item.pins} shown={pins} />
+      {pins === null || item.kind !== "image" ? null : (
+        <div className="flex flex-col gap-1">
+          <PinLegend pins={item.pins} shown={pins.shown} />
+          {pins.more === 0 ? null : (
+            <MoreLine
+              onShowDetails={onShowDetails}
+              text={`${pins.more} more ${pins.more === 1 ? "pin" : "pins"}`}
+            />
+          )}
         </div>
       )}
-      {extras.description ? (
-        <RowText
+      {open.description ? (
+        <Clamp
           className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
-          part="description"
+          lines={ROW_CAPS.description}
+          what="the description"
         >
           {item.description.trim()}
-        </RowText>
+        </Clamp>
       ) : null}
-      {extras.steps === 0 ? null : (
-        <div data-row-part="steps">
-          <StepChecklist
-            onToggle={onToggleStep}
-            steps={listed.slice(0, steps)}
-          />
+      {steps === null ? null : (
+        <div className="flex flex-col gap-1">
+          <StepChecklist onToggle={onToggleStep} steps={steps.shown} />
+          {steps.more === 0 ? null : (
+            <MoreLine onShowDetails={onShowDetails} text={moreSteps(steps)} />
+          )}
         </div>
       )}
-      {extras.windows === 0 || !budget.windows ? null : (
-        <div data-row-part="windows">
-          <WindowStrip
-            more={Math.max(0, extras.windows - ROW_WINDOWS)}
-            onMore={onShowDetails}
-            onReopen={onReopenWindow}
-            windows={item.windows.slice(0, ROW_WINDOWS)}
-          />
-        </div>
-      )}
-      {more === null ? null : (
-        <Button
-          className="-ml-2 max-w-full self-start"
-          data-row-part="more-line"
-          onClick={onShowDetails}
-          size="xs"
-          variant="quiet"
-        >
-          <Truncated className="min-w-0" text={more} />
-          <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
-        </Button>
+      {open.windows === 0 ? null : (
+        <WindowStrip
+          onMore={onShowDetails}
+          onReopen={onReopenWindow}
+          windows={item.windows}
+        />
       )}
     </div>
   );
@@ -1125,12 +1114,9 @@ const MoreButton = ({
 
 /** The open row's foot: when and how it was captured, and Details (→). */
 const OpenFooter = ({
-  badges,
   item,
   onShowDetails,
 }: {
-  /** An open row without a source carries its badges here, saving it a line. */
-  readonly badges: readonly ReactNode[];
   readonly item: ShelfItem;
   readonly onShowDetails: () => void;
 }) => (
@@ -1140,9 +1126,6 @@ const OpenFooter = ({
       className="text-muted-foreground min-w-0 flex-1 text-xs"
       text={metaText(item)}
     />
-    {badges.length === 0 ? null : (
-      <div className="flex shrink-0 items-center gap-1">{badges}</div>
-    )}
     <Button
       aria-label="Show details"
       className="-mr-2.75 shrink-0"
@@ -1165,206 +1148,203 @@ const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
 };
 
 /**
- * Which line carries a row's badges: a file's name without a source, else
- * the source line; open and without a source, the Details line, which saves
- * the open row a line.
+ * The steps checked when the row opened, which it lists last until it opens
+ * again (row-parts.ts rowSteps): a step ticked there stays under the pointer.
  */
-const placeBadges = (
-  parts: ReturnType<typeof rowParts>,
-  item: ShelfItem,
-  open: boolean,
-  badges: readonly ReactNode[]
-) => {
-  const foot = parts.badgesOn === "source" && open && item.context === null;
-  const on = foot ? "foot" : parts.badgesOn;
-
-  return {
-    file: on === "file" ? badges : [],
-    foot: on === "foot" ? badges : [],
-    source: on === "source" ? badges : [],
-  };
-};
-
-/**
- * The steps in the order the open row lists them, fixed when it opens
- * (row-parts.ts rowSteps): a step ticked there stays under the pointer.
- */
-const useRowSteps = (
+const useCheckedAtOpen = (
   steps: readonly Step[],
   open: boolean
-): readonly Step[] => {
+): ReadonlySet<string> => {
   const [opened, setOpened] = useState({ checked: checkedSteps(steps), open });
 
   if (opened.open !== open) {
     setOpened({ checked: checkedSteps(steps), open });
   }
 
-  return rowSteps(steps, opened.checked);
+  return opened.checked;
+};
+
+/** An opened row comes into view whole where it fits, its Details line included. */
+const useRevealOnOpen = (
+  row: RefObject<HTMLElement | null>,
+  open: boolean
+): void => {
+  useEffect(() => {
+    const frame = open
+      ? requestAnimationFrame(() => {
+          row.current?.scrollIntoView({ block: "nearest" });
+        })
+      : null;
+
+    return () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [row, open]);
 };
 
 const RowView = (props: RowViewProps) => {
   const { copied, editing, item, selected } = props;
-  const parts = rowParts(item, selected);
+
+  const parts = rowParts(
+    item,
+    selected,
+    useCheckedAtOpen(item.steps, selected)
+  );
+
   const badges = badgeNodes(parts.badges, props.now);
   const rowRef = useRef<HTMLLIElement>(null);
-  const steps = useRowSteps(item.steps, selected);
-  const openRow = useOpenRow(rowRef, selected && !editing, item, steps);
-  const placed = placeBadges(parts, item, selected, badges);
+
+  useRevealOnOpen(rowRef, selected && !editing);
 
   return (
-    <OpenRow value={openRow}>
-      <li
-        aria-current={selected ? "true" : undefined}
-        className={cn(
-          "group bg-background/60 relative flex items-start gap-3 rounded-lg border px-3 py-2.5",
-          selected || props.picked
-            ? "border-primary"
-            : "border-foreground/10 hover:border-foreground/20",
-          props.picked && "bg-primary/10",
-          props.dragging && "opacity-40",
-          DROP_LOOK[props.dropLook]
-        )}
-        data-item-id={item.id}
-        ref={rowRef}
-        // A modified click picks instead of opening; caught before the card's own buttons see it.
-        onClickCapture={(event) => {
-          const toggle = isMac ? event.metaKey : event.ctrlKey;
+    <li
+      aria-current={selected ? "true" : undefined}
+      className={cn(
+        "group bg-background/60 relative flex items-start gap-3 rounded-lg border px-3 py-2.5",
+        selected || props.picked
+          ? "border-primary"
+          : "border-foreground/10 hover:border-foreground/20",
+        props.picked && "bg-primary/10",
+        props.dragging && "opacity-40",
+        DROP_LOOK[props.dropLook]
+      )}
+      data-item-id={item.id}
+      ref={rowRef}
+      // A modified click picks instead of opening; caught before the card's own buttons see it.
+      onClickCapture={(event) => {
+        const toggle = isMac ? event.metaKey : event.ctrlKey;
 
-          if (toggle || event.shiftKey) {
-            event.preventDefault();
-            event.stopPropagation();
-            props.onPick(event.shiftKey ? "range" : "toggle");
-          }
-        }}
-        // A text field inside keeps ordinary text dragging.
-        {...(editing ? {} : props.dragProps)}
-        {...props.dropProps}
-        // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
-        onContextMenuCapture={(event) => {
-          if (!isTextField(event.target)) {
-            contextMenuAt(props.onContextMenu)(event);
-            event.stopPropagation();
-          }
-        }}
-        onDoubleClickCapture={(event) => {
-          if (
-            item.kind === "text" &&
-            selected &&
-            !editing &&
-            !(
-              event.target instanceof Element &&
-              event.target.closest("a") !== null
-            )
-          ) {
-            props.onEdit();
-          }
-        }}
-      >
-        <TagStripe item={item} />
-        <Checkbox
-          aria-label={item.done ? "Mark as not done" : "Mark as done"}
-          checked={item.done}
-          className="mt-0.5"
-          onCheckedChange={props.onToggle}
-          {...coach("item-check")}
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {props.example === true ? (
-            <span className="bg-foreground/5 text-muted-foreground w-fit rounded-sm px-1.5 text-xs">
-              Example
-            </span>
-          ) : null}
-          {item.kind === "text" ? (
-            <TextBody
-              editing={editing}
-              item={item}
-              links={parts.extras?.links === true}
-              onContextMenu={props.onContextMenu}
-              onEdit={props.onEdit}
-              onEditText={props.onEditText}
-              onOpenLink={props.onOpenLink}
-              onSelect={props.onSelect}
-              onStopEditing={props.onStopEditing}
-              selected={selected}
-            />
-          ) : null}
-          {item.kind === "image" ? (
-            <ImageBody
-              editing={editing}
-              item={item}
-              onContextMenu={props.onContextMenu}
-              onDragImage={props.onDragImage}
-              onEdit={props.onEdit}
-              onEditNote={props.onEditNote}
-              onHide={props.onHide}
-              onOpen={props.onOpen}
-              onSelect={props.onSelect}
-              onStopEditing={props.onStopEditing}
-              selected={selected}
-            />
-          ) : null}
-          {item.kind === "file" ? (
-            <FileBody
-              badges={placed.file}
-              editing={editing}
-              item={item}
-              onContextMenu={props.onContextMenu}
-              onDragImage={props.onDragImage}
-              onEdit={props.onEdit}
-              onEditNote={props.onEditNote}
-              onHide={props.onHide}
-              onSelect={props.onSelect}
-              onStopEditing={props.onStopEditing}
-              selected={selected}
-            />
-          ) : null}
-          <AttachmentStrip
-            attachments={item.attachments}
-            handlers={props.attachments}
-            onMore={props.onShowDetails}
+        if (toggle || event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onPick(event.shiftKey ? "range" : "toggle");
+        }
+      }}
+      // A text field inside keeps ordinary text dragging.
+      {...(editing ? {} : props.dragProps)}
+      {...props.dropProps}
+      // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
+      onContextMenuCapture={(event) => {
+        if (!isTextField(event.target)) {
+          contextMenuAt(props.onContextMenu)(event);
+          event.stopPropagation();
+        }
+      }}
+      onDoubleClickCapture={(event) => {
+        if (
+          item.kind === "text" &&
+          selected &&
+          !editing &&
+          !(
+            event.target instanceof Element &&
+            event.target.closest("a") !== null
+          )
+        ) {
+          props.onEdit();
+        }
+      }}
+    >
+      <TagStripe item={item} />
+      <Checkbox
+        aria-label={item.done ? "Mark as not done" : "Mark as done"}
+        checked={item.done}
+        className="mt-0.5"
+        onCheckedChange={props.onToggle}
+        {...coach("item-check")}
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {props.example === true ? (
+          <span className="bg-foreground/5 text-muted-foreground w-fit rounded-sm px-1.5 text-xs">
+            Example
+          </span>
+        ) : null}
+        {item.kind === "text" ? (
+          <TextBody
+            editing={editing}
+            item={item}
+            links={parts.open?.links === true}
+            onContextMenu={props.onContextMenu}
+            onEdit={props.onEdit}
+            onEditText={props.onEditText}
+            onOpenLink={props.onOpenLink}
             onSelect={props.onSelect}
-            strip={parts.strip}
+            onStopEditing={props.onStopEditing}
+            selected={selected}
           />
-          {parts.extras === null ? null : (
-            <Expansion
-              extras={parts.extras}
-              item={item}
-              onReopenWindow={props.onReopenWindow}
-              onShowDetails={props.onShowDetails}
-              onToggleStep={props.onToggleStep}
-              steps={steps}
-            />
-          )}
-          <SourceRow
-            badges={placed.source}
-            context={item.context}
-            onOpenLink={() => {
-              props.onOpenLink();
-            }}
+        ) : null}
+        {item.kind === "image" ? (
+          <ImageBody
+            editing={editing}
+            item={item}
+            onContextMenu={props.onContextMenu}
+            onDragImage={props.onDragImage}
+            onEdit={props.onEdit}
+            onEditNote={props.onEditNote}
+            onHide={props.onHide}
+            onOpen={props.onOpen}
+            onSelect={props.onSelect}
+            onStopEditing={props.onStopEditing}
+            selected={selected}
           />
-          {props.notSaved === undefined ? null : (
-            <NotSavedLine
-              name={rowName(item)}
-              undo={props.notSaved.undo}
-              onDiscard={props.onDiscardChanges}
-              onRetry={props.onRetrySave}
-            />
-          )}
-          {selected ? (
-            <OpenFooter
-              badges={placed.foot}
-              item={item}
-              onShowDetails={props.onShowDetails}
-            />
-          ) : null}
-        </div>
-        <MoreButton
-          copied={copied}
-          onOpen={props.onContextMenu}
-          shown={selected || copied}
+        ) : null}
+        {item.kind === "file" ? (
+          <FileBody
+            badges={parts.badgesOn === "file" ? badges : []}
+            editing={editing}
+            item={item}
+            onContextMenu={props.onContextMenu}
+            onDragImage={props.onDragImage}
+            onEdit={props.onEdit}
+            onEditNote={props.onEditNote}
+            onHide={props.onHide}
+            onSelect={props.onSelect}
+            onStopEditing={props.onStopEditing}
+            selected={selected}
+          />
+        ) : null}
+        <AttachmentStrip
+          attachments={item.attachments}
+          handlers={props.attachments}
+          onMore={props.onShowDetails}
+          onSelect={props.onSelect}
+          strip={parts.strip}
         />
-      </li>
-    </OpenRow>
+        {parts.open === null ? null : (
+          <Expansion
+            item={item}
+            onReopenWindow={props.onReopenWindow}
+            onShowDetails={props.onShowDetails}
+            onToggleStep={props.onToggleStep}
+            open={parts.open}
+          />
+        )}
+        <SourceRow
+          badges={parts.badgesOn === "source" ? badges : []}
+          context={item.context}
+          onOpenLink={() => {
+            props.onOpenLink();
+          }}
+        />
+        {props.notSaved === undefined ? null : (
+          <NotSavedLine
+            name={rowName(item)}
+            undo={props.notSaved.undo}
+            onDiscard={props.onDiscardChanges}
+            onRetry={props.onRetrySave}
+          />
+        )}
+        {selected ? (
+          <OpenFooter item={item} onShowDetails={props.onShowDetails} />
+        ) : null}
+      </div>
+      <MoreButton
+        copied={copied}
+        onOpen={props.onContextMenu}
+        shown={selected || copied}
+      />
+    </li>
   );
 };
 

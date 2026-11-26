@@ -2,7 +2,13 @@ import { FileItemSchema, ImageItemSchema, TextItemSchema } from "@shared/shelf";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { checkedSteps, rowParts, rowSteps } from "./row-parts";
+import {
+  checkedSteps,
+  ROW_CAPS,
+  rowParts,
+  rowSteps,
+  windowsThatFit,
+} from "./row-parts";
 
 const uuid = (n: number): string =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -103,7 +109,7 @@ describe(rowParts, () => {
     expect(rowParts(text(), false)).toStrictEqual({
       badges: [],
       badgesOn: "source",
-      extras: null,
+      open: null,
       strip: null,
     });
   });
@@ -141,11 +147,11 @@ describe(rowParts, () => {
     const parts = rowParts(text(FULL), true);
 
     expect(parts.badges).toStrictEqual([{ due: "2026-11-01", kind: "due" }]);
-    expect(parts.extras).toStrictEqual({
+    expect(parts.open).toMatchObject({
       description: true,
       links: false,
-      pinLegend: 0,
-      steps: 2,
+      pins: null,
+      steps: { more: 0, moreDone: 0 },
       windows: 2,
     });
   });
@@ -156,11 +162,11 @@ describe(rowParts, () => {
       true
     );
 
-    expect(parts.extras).toStrictEqual({
+    expect(parts.open).toStrictEqual({
       description: false,
       links: false,
-      pinLegend: 0,
-      steps: 0,
+      pins: null,
+      steps: null,
       windows: 0,
     });
     expect(parts.badges).toStrictEqual([{ count: 1, kind: "pins" }]);
@@ -186,23 +192,69 @@ describe(rowParts, () => {
       ).badgesOn
     ).toBe("source");
   });
+});
 
-  it("counts what an open row lists, for its budget to cut short", () => {
+/** An image with this many labelled pins. */
+const labelled = (count: number) =>
+  image({
+    pins: Array.from({ length: count }, (_, n) => ({
+      label: `Pin ${n}`,
+      x: n,
+      y: n,
+    })),
+  });
+
+describe("an open row's caps", () => {
+  it("lists every labelled pin up to three, then counts the rest", () => {
+    expect(rowParts(labelled(3), true).open?.pins).toStrictEqual({
+      more: 0,
+      shown: 3,
+    });
+    expect(rowParts(labelled(30), true).open?.pins).toStrictEqual({
+      more: 27,
+      shown: ROW_CAPS.pins,
+    });
+  });
+
+  it("lists up to five steps, then counts the rest and how many of them are done", () => {
+    const steps = Array.from({ length: 20 }, (_, n) =>
+      step(10 + n, `Step ${n}`, n < 3)
+    );
+
+    const listed = rowParts(text({ steps }), true).open?.steps;
+
+    expect(listed?.shown.map((each) => each.text)).toStrictEqual([
+      "Step 3",
+      "Step 4",
+      "Step 5",
+      "Step 6",
+      "Step 7",
+    ]);
+    expect([listed?.more, listed?.moreDone]).toStrictEqual([15, 3]);
+  });
+
+  it("shows every part it has whatever the others hold", () => {
     const crowded = image({
-      pins: Array.from({ length: 30 }, (_, n) => ({
-        label: `Pin ${n}`,
-        x: n,
-        y: n,
-      })),
-      steps: Array.from({ length: 6 }, (_, n) => step(10 + n, `Step ${n}`)),
-      windows: [1, 2, 3, 4, 5].map(windowRef),
+      description: "Why it matters",
+      pins: labelled(30).pins,
+      steps: Array.from({ length: 20 }, (_, n) => step(10 + n, `Step ${n}`)),
+      windows: Array.from({ length: 10 }, (_, n) => windowRef(n)),
     });
 
-    expect(rowParts(crowded, true).extras).toMatchObject({
-      pinLegend: 30,
-      steps: 6,
-      windows: 5,
+    expect(rowParts(crowded, true).open).toMatchObject({
+      description: true,
+      pins: { more: 27, shown: 3 },
+      steps: { more: 15, moreDone: 0 },
+      windows: 10,
     });
+  });
+
+  it("puts as many windows on one line as fit, with room for +N when some don't", () => {
+    // Four thumbnails are 48 px each with 6 px between: 210 px.
+    expect(windowsThatFit(210, 4)).toBe(4);
+    expect(windowsThatFit(210, 10)).toBe(3);
+    expect(windowsThatFit(500, 10)).toBe(8);
+    expect(windowsThatFit(560, 2)).toBe(2);
   });
 });
 
@@ -255,11 +307,23 @@ describe("the steps an open row lists", () => {
     ]);
   });
 
-  it("counts every step with words, so the more line's count is what the list leaves out", () => {
-    const parts = rowParts(text({ steps: STEPS }), true);
+  it("cuts the list in the order it opened with, so a step ticked there doesn't move or leave it", () => {
+    const many = [...STEPS, step(7, "Order lunch"), step(8, "Thank everyone")];
 
-    expect(parts.extras?.steps).toBe(
-      rowSteps(STEPS, checkedSteps(STEPS)).length
+    const ticked = many.map((each) =>
+      each.text === "Book the room" ? { ...each, done: true } : each
     );
+
+    const cut = rowParts(text({ steps: ticked }), true, checkedSteps(many)).open
+      ?.steps;
+
+    expect(cut?.shown.map((each) => each.text)).toStrictEqual([
+      "Book the room",
+      "Send the invite",
+      "Print the agenda",
+      "Order lunch",
+      "Thank everyone",
+    ]);
+    expect([cut?.more, cut?.moreDone]).toStrictEqual([2, 2]);
   });
 });
