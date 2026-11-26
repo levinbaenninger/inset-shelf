@@ -1,0 +1,232 @@
+import {
+  emptyShelf,
+  ItemIdSchema,
+  SectionIdSchema,
+  NO_META,
+} from "@shared/shelf";
+import type { ShelfDoc } from "@shared/shelf";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { appMenuTemplate } from "./app-menu";
+import type { AppMenuActions, AppMenuState } from "./app-menu";
+
+const uuid = (n: number) =>
+  `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(n).padStart(2, "0")}`;
+
+const INBOX = SectionIdSchema.parse(uuid(1));
+const LATER = SectionIdSchema.parse(uuid(2));
+
+const doc: ShelfDoc = {
+  ...emptyShelf(INBOX),
+  sections: [
+    { id: INBOX, name: "Inbox" },
+    { id: LATER, name: "Later" },
+  ],
+};
+
+const actions: AppMenuActions = {
+  checkForUpdates: vi.fn<() => void>(),
+  clearDone: vi.fn<() => void>(),
+  closeWindow: vi.fn<() => void>(),
+  copy: vi.fn<() => void>(),
+  copyAsList: vi.fn<() => void>(),
+  field: vi.fn<(field: string) => void>(),
+  newWindowLink: vi.fn<() => void>(),
+  showShortcuts: vi.fn<() => void>(),
+  selectAll: vi.fn<() => void>(),
+  find: vi.fn<() => void>(),
+  item: vi.fn<(action: string) => void>(),
+  newNote: vi.fn<() => void>(),
+  newDrawing: vi.fn<() => void>(),
+  newSection: vi.fn<() => void>(),
+  openHelp: vi.fn<() => void>(),
+  openSettings: vi.fn<() => void>(),
+  selectSection: vi.fn<(id: string) => void>(),
+  setFloatOnTop: vi.fn<(on: boolean) => void>(),
+  setUpPermissions: vi.fn<() => void>(),
+  gettingStarted: vi.fn<() => void>(),
+  showMeAround: vi.fn<() => void>(),
+  redo: vi.fn<() => void>(),
+  restartToUpdate: vi.fn<() => void>(),
+  undo: vi.fn<() => void>(),
+};
+
+const state: AppMenuState = {
+  doc,
+  floatOnTop: true,
+  setUpPermissions: true,
+  update: { kind: "idle" },
+};
+
+const submenu = (
+  template: ReturnType<typeof appMenuTemplate>,
+  label: string
+) => {
+  const menu = template.find(
+    (item) => item.label === label || item.role === label
+  )?.submenu;
+
+  return Array.isArray(menu) ? menu : [];
+};
+
+const appMenuLabels = (setUpPermissions: boolean) =>
+  submenu(
+    appMenuTemplate({ ...state, setUpPermissions }, actions),
+    "Inset Shelf"
+  ).map((item) => item.label);
+
+const clearItem = (current: ShelfDoc) =>
+  submenu(appMenuTemplate({ ...state, doc: current }, actions), "Edit").find(
+    (item) => item.label === "Clear Checked Items"
+  );
+
+describe(appMenuTemplate, () => {
+  it("has the menus of a regular Mac app", () => {
+    expect(
+      appMenuTemplate(state, actions).map((item) => item.label ?? item.role)
+    ).toStrictEqual([
+      "Inset Shelf",
+      "File",
+      "Edit",
+      "Item",
+      "View",
+      "Window",
+      "help",
+    ]);
+  });
+
+  it("lists the sections with numbered shortcuts and checks the current one", () => {
+    expect(submenu(appMenuTemplate(state, actions), "View")).toMatchObject([
+      {
+        accelerator: "CommandOrControl+1",
+        checked: true,
+        label: "Inbox",
+        type: "radio",
+      },
+      {
+        accelerator: "CommandOrControl+2",
+        checked: false,
+        label: "Later",
+        type: "radio",
+      },
+    ]);
+  });
+
+  it("offers Set Up Permissions… after Settings… on macOS only", () => {
+    const labels = appMenuLabels(true);
+
+    expect(labels.indexOf("Set Up Permissions…")).toBe(
+      labels.indexOf("Settings…") + 1
+    );
+    expect(appMenuLabels(false)).not.toContain("Set Up Permissions…");
+  });
+
+  it("lists the tutorial in Help: Getting Started and Show Me Around", () => {
+    const help = submenu(appMenuTemplate(state, actions), "help").map(
+      (item) => item.label ?? "---"
+    );
+
+    expect(help.slice(0, 3)).toStrictEqual([
+      "Keyboard Shortcuts",
+      "Getting Started",
+      "Show Me Around",
+    ]);
+  });
+
+  it("puts the update after About, as a restart once it is ready", () => {
+    const appMenu = (update: AppMenuState["update"]) =>
+      submenu(appMenuTemplate({ ...state, update }, actions), "Inset Shelf");
+
+    expect(appMenu({ kind: "idle" })[1]).toStrictEqual({
+      click: actions.checkForUpdates,
+      label: "Check for Updates…",
+    });
+    expect(appMenu({ kind: "checking", manual: true })[1]).toStrictEqual({
+      enabled: false,
+      label: "Checking for Updates…",
+    });
+    expect(appMenu({ kind: "ready", version: "0.1.901" })[1]).toStrictEqual({
+      click: actions.restartToUpdate,
+      label: "Restart to Update to v0.1.901",
+    });
+  });
+
+  it("enables clearing only when the current section has checked items", () => {
+    expect(clearItem(doc)).toMatchObject({ enabled: false });
+    expect(
+      clearItem({
+        ...doc,
+        items: [
+          {
+            ...NO_META,
+            color: null,
+            context: null,
+            createdAt: "2026-10-22T10:00:00.000Z",
+            done: true,
+            id: ItemIdSchema.parse(uuid(10)),
+            html: null,
+            kind: "text",
+            links: [],
+            sectionId: INBOX,
+            text: "x",
+            via: "typed",
+          },
+        ],
+      })
+    ).toMatchObject({ enabled: true });
+  });
+
+  it("puts Settings and Exit in File and uses Ctrl+Y for Redo without an app menu", () => {
+    const template = appMenuTemplate(state, actions, false);
+
+    expect(template.map((item) => item.label ?? item.role)).toStrictEqual([
+      "File",
+      "Edit",
+      "Item",
+      "View",
+      "Window",
+      "help",
+    ]);
+    expect(submenu(template, "File")).toContainEqual(
+      expect.objectContaining({
+        accelerator: "CommandOrControl+,",
+        label: "Settings…",
+      })
+    );
+    expect(submenu(template, "File").at(-1)).toStrictEqual({ role: "quit" });
+    expect(submenu(template, "Edit")[1]).toMatchObject({
+      accelerator: "Control+Y",
+      label: "Redo",
+    });
+    expect(submenu(template, "help")).toContainEqual(
+      expect.objectContaining({ label: "About Inset Shelf" })
+    );
+  });
+
+  it("lists the item shortcuts, leaving plain keys to the page", () => {
+    const items = submenu(appMenuTemplate(state, actions), "Item");
+
+    expect(items[0]).toMatchObject({
+      accelerator: "CommandOrControl+O",
+      label: "Open",
+      registerAccelerator: true,
+    });
+    expect(items.find((item) => item.label === "Check Off")).toMatchObject({
+      accelerator: "Space",
+      registerAccelerator: false,
+    });
+  });
+
+  it("shows Float on Top as a checkbox in the Window menu", () => {
+    expect(
+      submenu(
+        appMenuTemplate({ ...state, floatOnTop: false }, actions),
+        "Window"
+      )[0]
+    ).toMatchObject({
+      checked: false,
+      label: "Float on Top",
+      type: "checkbox",
+    });
+  });
+});

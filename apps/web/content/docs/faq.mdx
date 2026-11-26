@@ -1,0 +1,28 @@
+---
+title: FAQ
+description: Short answers to the common questions.
+---
+
+## Does it run on Windows?
+
+Yes, on Windows 11. The installer sits beside the Mac builds for Apple silicon and Intel. See [Install](/docs/install#windows).
+
+## Why is the download blocked at first?
+
+The builds are not signed with a developer certificate. On a Mac, click **Open Anyway** in **System Settings > Privacy & Security** once. On Windows, click **More info**, then **Run anyway**.
+
+## How does it update?
+
+The Mac builds and the Windows installer check for a newer build at launch and every four hours. The portable Windows zip does not update itself. See [Updates and versions](/docs/updates).
+
+## Where does the shelf keep my items?
+
+On your computer, in one file called `shelf.json`, with images and files in a folder beside it. See [Where your data lives](/docs/data).
+
+## Double Shift does nothing. Why?
+
+On a Mac, check that **Inset Shelf** is allowed under **Accessibility** in **System Settings > Privacy & Security**. The shelf shows a **Double Shift is off** banner with **Turn On…** while it isn't. On Windows, some apps ignore the `Ctrl+Insert` the shelf sends to copy.
+
+## Is Inset Shelf finished?
+
+No. It is a free test build that changes as people try it. If something breaks, [report it on GitHub](https://github.com/levinbaenninger/inset-shelf/issues).

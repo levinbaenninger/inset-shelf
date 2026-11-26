@@ -1,0 +1,39 @@
+---
+title: Install
+description: Download a build, get past the first-launch warning and grant the permissions.
+---
+
+Install once, then the app [updates itself](/docs/updates). The builds are not signed with a developer certificate, so each system warns once, at the first install.
+
+## macOS
+
+1. Download [the build for Apple silicon](https://github.com/levinbaenninger/inset-shelf/releases/latest/download/Inset-Shelf-mac-arm64.dmg), or [the one for an Intel Mac](https://github.com/levinbaenninger/inset-shelf/releases/latest/download/Inset-Shelf-mac-x64.dmg).
+2. Open the disk image and drag **Inset Shelf** to **Applications**.
+3. Open the app. macOS blocks it the first time. Open **System Settings > Privacy & Security** and click **Open Anyway**.
+
+If you prefer the terminal, run this and open the app again:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Inset Shelf.app"
+```
+
+### Permissions
+
+The first time it opens, a small setup window asks for two permissions. **Not now** skips one, and the app works without the permissions you skip.
+
+- **Accessibility** (**Device Control and Data Access** from macOS 27), for double Shift and for a browser page's address. **Allow** shows macOS's prompt and opens the right settings page. Turn on **Inset Shelf** there, and double Shift starts listening without a restart.
+- **Screen & System Audio Recording**, for the title of the window an item came from and for window links. macOS applies it only after the app opens again, so the row then offers **Reopen to finish**.
+
+If **Inset Shelf** isn't in the list, drag the **Inset Shelf** tile from the setup window into it. **Set Up Permissions…** in the **Inset Shelf** menu opens the window again.
+
+The first time an item is saved from Safari, Chrome, Edge, Brave, Arc or another Chromium browser, macOS also asks for **Automation**, once per browser, so the app can read the page's address.
+
+## Windows
+
+1. Download [the installer](https://github.com/levinbaenninger/inset-shelf/releases/latest/download/Inset-Shelf-win-x64.exe).
+2. If SmartScreen shows **Windows protected your PC**, click **More info**, then **Run anyway**.
+3. Look for the Shelf mark in the notification area of the taskbar. Windows may put it behind the **^** arrow; drag it onto the taskbar to keep it in view. Click it to show or hide the shelf, and right-click it for its menu.
+
+### Portable zips
+
+To run the app without installing it, download `inset-shelf-<version>-win-x64.zip`, or `-win-arm64.zip` on an Arm device, from [the releases](https://github.com/levinbaenninger/inset-shelf/releases/latest). A zip copy doesn't update itself. To update one, download the new zip.

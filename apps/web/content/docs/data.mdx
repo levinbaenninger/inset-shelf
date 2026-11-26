@@ -1,0 +1,28 @@
+---
+title: Where your data lives
+description: Everything stays on your computer, in one folder.
+---
+
+The shelf is stored in one file, `shelf.json`, with images and files in an `attachments` folder and the settings in `settings.json` next to it:
+
+- macOS: `~/Library/Application Support/Inset Shelf`
+- Windows: `%APPDATA%\Inset Shelf`
+
+The folder can hold two kinds of recovery copy beside `shelf.json`:
+
+- `shelf.json.prev` is the shelf as it was before the last save. An item you deleted stays in it until the next save replaces it, and its images and files stay in `attachments` until the app starts after that.
+- `shelf.unreadable-<date>.json` is a damaged shelf the app set aside at launch. The app moves it aside under that name, starts a new shelf, and keeps the images and files the old one names.
+
+If the app can't open the shelf file at all, or can't move a damaged one aside, it leaves the file where it is, makes no dated copy, and doesn't save changes to the shelf for that session. Files you drop and images you paste can still be copied into `attachments`, but the shelf won't list them after a restart. The shelf shows a notice that says why.
+
+Quit the app and delete the folder to remove the shelf and every copy of it.
+
+The app has no account and sends your items nowhere. It goes online to check for [updates](/docs/updates); see [Privacy](/privacy) for the details.
+
+## Saving
+
+Edits save as you type. The file is written to a temporary file first and then renamed into place. If the shelf can't be saved, a **Not saved to disk** notice says why in plain words, and each item that isn't on disk says **Not saved**, with **Retry** and **Discard changes**.
+
+## Deleting and undo
+
+Deleting an item doesn't ask: a notice with **Undo** appears, and `⌘Z` brings back the last deleted item.
