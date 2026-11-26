@@ -71,17 +71,26 @@ const MAX_BADGES = 3;
 /** An open text row's links take one line each once its description passes this many lines. */
 export const LINKS_FOLD_AFTER = 3;
 
-/** A window's thumbnail with the gap after it, and the "+N" after the last one, its words one gap after it, in pixels (item-meta.tsx WindowStrip). */
-const WINDOW_STEP = 48 + 6;
-const WINDOW_MORE = 30 + 6;
+/**
+ * The open row's one line of linked windows, in pixels. WindowStrip
+ * (item-meta.tsx) draws its thumbnails, its gap and the room for "+N" from
+ * these, and windowsThatFit counts with them, so the two can't drift apart.
+ */
+export const WINDOW_STRIP = {
+  /** Between two thumbnails, and between the last one and the words of "+N". */
+  gap: 6,
+  /** The room "+N" has after that gap: enough for "+25". */
+  more: 30,
+  thumb: { height: 32, width: 48 },
+} as const;
 
 /** How many linked windows fit on the open row's one line of thumbnails `width` wide, leaving room for "+N" when some don't. */
 export const windowsThatFit = (width: number, total: number): number => {
-  const all = Math.floor((width + 6) / WINDOW_STEP);
+  const { gap, more, thumb } = WINDOW_STRIP;
+  const step = thumb.width + gap;
+  const all = Math.floor((width + gap) / step);
 
-  return total <= all
-    ? total
-    : Math.max(0, Math.floor((width + 6 - WINDOW_MORE) / WINDOW_STEP));
+  return total <= all ? total : Math.max(0, Math.floor((width - more) / step));
 };
 
 /** How many attachments a row shows as tiles; the rest are a "+N" that opens details. */
