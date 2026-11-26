@@ -8,7 +8,7 @@ import {
   ItemIdSchema,
   SectionIdSchema,
 } from "@shared/shelf";
-import type { AttachmentId, ItemId } from "@shared/shelf";
+import type { AttachmentId, ItemId, ShelfDoc } from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createCardClock } from "./card-clock";
@@ -75,12 +75,15 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   const notices: string[] = [];
   const attached: ItemId[] = [];
   const events: string[] = [];
+  const disk: ShelfDoc[] = [];
+  const deleted: string[] = [];
   let view: ScreenshotView | null = null;
   let held = false;
 
   const controller = createShelfController({
-    deleteAttachment: async () => {
+    deleteAttachment: async (file) => {
       await Promise.resolve();
+      deleted.push(file);
     },
     env: {
       newItemId: () => ItemIdSchema.parse(uuid((next += 1))),
@@ -89,8 +92,12 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     initial: emptyShelf(SectionIdSchema.parse(uuid(1))),
     restore: async () => await Promise.resolve(false),
-    save: async () => {
+    save: async (doc) => {
       await turn();
+
+      if (writes.ok) {
+        disk.push(doc);
+      }
 
       return writes;
     },
@@ -106,7 +113,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
   });
 
-  const note = controller.apply({
+  const noteId = controller.apply({
     text: "Quote from the movers",
     type: "compose",
   });
@@ -179,6 +186,12 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       },
       view: () => view,
     },
+    detach: (id, attachmentId) => {
+      controller.apply({ attachmentId, id, type: "dropAttachment" });
+    },
+    dropItem: (id) => {
+      controller.apply({ id, type: "dropItem" });
+    },
     imageUrl: (each) => `inset://shot/${each.seq}`,
     item: controller.item,
     items: () => controller.snapshot().doc.items,
@@ -192,8 +205,23 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     shelfVisible: () => shelfVisible,
   });
 
+  const note = ItemIdSchema.parse(noteId);
+
+  /** Where a shelf holds screenshots: as items of their own, and attached to the note. */
+  const holds = (doc: ShelfDoc) => ({
+    attached:
+      doc.items.find((each) => each.id === note)?.attachments.length ?? 0,
+    items: doc.items.filter((each) => each.kind === "image").length,
+  });
+
   return {
     controller,
+    /** The picture files deleted so far. */
+    deleted,
+    /** What every shelf written to the disk so far held, oldest first. */
+    disk: () => disk.map(holds),
+    /** What the shelf shows now. */
+    shown: () => holds(controller.snapshot().doc),
     /** Fills the item to its 12 attachments, as drops in the shelf would. */
     fill: (id: ItemId) => {
       controller.apply({
@@ -218,7 +246,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       controller.snapshot().doc.items.filter((each) => each.kind === "image"),
     /** How many attachments an item holds now. */
     attachmentsOn: (id: ItemId) => controller.item(id)?.attachments.length,
-    note: ItemIdSchema.parse(note),
+    note,
     notices,
     attached,
     saves,
@@ -578,6 +606,133 @@ describe("Add to “…” on the screenshot card", () => {
       label: "Book the lift",
     });
     expect(card.view()?.save).toMatchObject({ state: "failed", to: null });
+  });
+});
+
+/** A card whose first save the disk refused: the shelf holds the screenshot where that save put it, unsaved. */
+const refused = async (first: "item" | "shelf") => {
+  const card = setup();
+
+  await card.controller.flush();
+  card.select(card.note, true);
+  card.saves.show(shot(1));
+  card.failWrites({ message: "The disk is full.", ok: false });
+  await (first === "item"
+    ? card.saves.addToItem(1, card.note)
+    : card.saves.addToShelf(1));
+
+  return card;
+};
+
+describe("another destination after a failed save", () => {
+  it("shows the screenshot where the refused save put it, not saved, until the next choice", async () => {
+    const onItem = await refused("item");
+    const onShelf = await refused("shelf");
+
+    expect(onItem.shown()).toStrictEqual({ attached: 1, items: 0 });
+    expect(onItem.controller.view().notSaved).toStrictEqual([
+      { id: onItem.note, undo: "discard" },
+    ]);
+    expect(onShelf.shown()).toStrictEqual({ attached: 0, items: 1 });
+    expect(onShelf.controller.view().notSaved).toMatchObject([
+      { undo: "delete" },
+    ]);
+  });
+
+  it("holds the screenshot only as a new item when Add to Shelf follows a refused Add to “…”", async () => {
+    const card = await refused("item");
+
+    card.failWrites({ ok: true });
+
+    await expect(card.saves.addToShelf(1)).resolves.not.toBeNull();
+    expect(card.shown()).toStrictEqual({ attached: 0, items: 1 });
+    expect(card.disk().at(-1)).toStrictEqual({ attached: 0, items: 1 });
+    expect(card.disk().filter((each) => each.attached > 0)).toStrictEqual([]);
+    expect(card.controller.view()).toMatchObject({ notSaved: [] });
+  });
+
+  it("holds the screenshot only on the item when Add to “…” follows a refused Add to Shelf", async () => {
+    const card = await refused("shelf");
+
+    card.failWrites({ ok: true });
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBe(card.note);
+    expect(card.shown()).toStrictEqual({ attached: 1, items: 0 });
+    expect(card.disk().at(-1)).toStrictEqual({ attached: 1, items: 0 });
+    expect(card.disk().filter((each) => each.items > 0)).toStrictEqual([]);
+    // The row left with the choice, not by a delete: Undo has nothing to bring back.
+    expect(card.controller.view()).toMatchObject({
+      canUndo: false,
+      notSaved: [],
+    });
+  });
+
+  it("takes the screenshot off the item again when the shelf's own Retry had saved it there", async () => {
+    const card = await refused("item");
+
+    card.failWrites({ ok: true });
+    await card.controller.flush();
+
+    expect(card.disk().at(-1)).toStrictEqual({ attached: 1, items: 0 });
+
+    await card.saves.addToShelf(1);
+
+    expect(card.disk().at(-1)).toStrictEqual({ attached: 0, items: 1 });
+    expect(
+      card.disk().filter((each) => each.attached + each.items > 1)
+    ).toStrictEqual([]);
+  });
+
+  it("deletes the picture file of the row the screenshot left", async () => {
+    const card = await refused("shelf");
+
+    card.failWrites({ ok: true });
+    await card.saves.addToItem(1, card.note);
+
+    expect(card.deleted).toStrictEqual([`${uuid(91)}.png`]);
+  });
+
+  it("deletes the picture file of the attachment the screenshot left", async () => {
+    const card = await refused("item");
+    const [left] = card.controller.item(card.note)?.attachments ?? [];
+
+    card.failWrites({ ok: true });
+    await card.saves.addToShelf(1);
+
+    expect(card.deleted).toStrictEqual([`${left?.id}.png`]);
+  });
+
+  it("leaves the screenshot on the card alone when the other destination can't take it, and Retry places it once", async () => {
+    const card = await refused("item");
+
+    card.failAttachments(DISK_FULL);
+
+    await expect(card.saves.addToShelf(1)).resolves.toBeNull();
+    expect(card.shown()).toStrictEqual({ attached: 0, items: 0 });
+    expect(card.view()?.save).toMatchObject({ state: "failed", to: "shelf" });
+
+    card.failWrites({ ok: true });
+    card.failAttachments(null);
+
+    await expect(card.saves.addToShelf(1)).resolves.not.toBeNull();
+    expect(card.disk().at(-1)).toStrictEqual({ attached: 0, items: 1 });
+  });
+
+  it("never names the screenshot's own unsaved row as the item to add it to", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+    card.failWrites({ message: "The disk is full.", ok: false });
+    await card.saves.addToShelf(1);
+
+    const [row] = card.images();
+
+    expect(card.view()?.target).toBeNull();
+
+    // Selecting the row in the shelf changes nothing: a screenshot is never attached to itself.
+    card.select(ItemIdSchema.parse(row?.id), true);
+
+    expect(card.view()?.target).toBeNull();
   });
 });
 

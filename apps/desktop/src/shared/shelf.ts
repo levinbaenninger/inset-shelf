@@ -842,6 +842,14 @@ export type MainOp =
       readonly attachmentId: AttachmentId;
       readonly image: ShelfImage;
       readonly scene?: DrawingScene;
+    }
+  /** An item gone for good, with nothing for Undo to bring back: the screenshot card moved its screenshot elsewhere. */
+  | { readonly type: "dropItem"; readonly id: ItemId }
+  /** An attachment gone for good, the same way. */
+  | {
+      readonly type: "dropAttachment";
+      readonly id: ItemId;
+      readonly attachmentId: AttachmentId;
     };
 
 export interface OpEnv {
@@ -1148,6 +1156,49 @@ const pendingFor = (
     ? pending.at(-1)
     : pending.find((removed) => removed.item.id === id)) ?? null;
 
+type RemovalOp = Extract<
+  ShelfOp | MainOp,
+  { readonly type: "remove" | "undoRemove" | "dropItem" }
+>;
+
+const REMOVAL_OPS: ReadonlySet<string> = new Set([
+  "remove",
+  "undoRemove",
+  "dropItem",
+]);
+
+const isRemovalOp = (op: ShelfOp | MainOp): op is RemovalOp =>
+  REMOVAL_OPS.has(op.type);
+
+/** Items deleted, put back, or dropped for good. */
+const applyRemovalOp = (
+  doc: ShelfDoc,
+  op: RemovalOp,
+  pending: readonly Removed[]
+): OpResult => {
+  switch (op.type) {
+    case "remove": {
+      return removeUndoably(doc, op.id, pending);
+    }
+
+    case "undoRemove": {
+      return restore(doc, pendingFor(pending, op.id));
+    }
+
+    case "dropItem": {
+      const { doc: without, removed } = remove(doc, op.id);
+
+      return removed === null
+        ? unchanged(doc)
+        : { ...changed(without), discarded: [removed.item] };
+    }
+
+    default: {
+      return unchanged(doc);
+    }
+  }
+};
+
 type SectionOp = Extract<
   ShelfOp,
   {
@@ -1391,6 +1442,7 @@ type AttachmentOp = Extract<
       | "insertAttachment"
       | "removeAttachment"
       | "restoreAttachment"
+      | "dropAttachment"
       | "replaceAttachmentImage"
       | "setAttachmentPins";
   }
@@ -1401,6 +1453,7 @@ const ATTACHMENT_OPS: ReadonlySet<string> = new Set([
   "insertAttachment",
   "removeAttachment",
   "restoreAttachment",
+  "dropAttachment",
   "replaceAttachmentImage",
   "setAttachmentPins",
 ]);
@@ -1543,6 +1596,20 @@ const applyAttachmentOp = (doc: ShelfDoc, op: AttachmentOp): OpResult => {
       return unchanged(doc);
     }
 
+    case "dropAttachment": {
+      const result = mapAttachments(doc, op.id, (attachments) =>
+        removeAttachment(attachments, op.attachmentId)
+      );
+
+      // Only the file nothing names any more goes: the dropped attachment's.
+      return result.doc === doc
+        ? result
+        : {
+            ...result,
+            discarded: doc.items.filter((item) => item.id === op.id),
+          };
+    }
+
     case "replaceAttachmentImage": {
       return replaceAttachmentImage(doc, op);
     }
@@ -1579,6 +1646,10 @@ export const applyOp = (
 
   if (isAttachmentOp(op)) {
     return applyAttachmentOp(doc, op);
+  }
+
+  if (isRemovalOp(op)) {
+    return applyRemovalOp(doc, op, pending);
   }
 
   switch (op.type) {
@@ -1655,14 +1726,6 @@ export const applyOp = (
       return changed(
         mapItem(doc, op.id, (item) => ({ ...item, done: !item.done }))
       );
-    }
-
-    case "remove": {
-      return removeUndoably(doc, op.id, pending);
-    }
-
-    case "undoRemove": {
-      return restore(doc, pendingFor(pending, op.id));
     }
 
     case "setColor": {

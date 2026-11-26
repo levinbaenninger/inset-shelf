@@ -911,6 +911,12 @@ const start = async (): Promise<void> => {
       update: screenshotCard.update,
       view: screenshotCard.view,
     },
+    detach: (id, attachmentId) => {
+      controller.apply({ attachmentId, id, type: "dropAttachment" });
+    },
+    dropItem: (id) => {
+      controller.apply({ id, type: "dropItem" });
+    },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
     items: () => controller.snapshot().doc.items,
