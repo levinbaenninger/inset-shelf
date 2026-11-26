@@ -12,6 +12,7 @@ import {
 import type { AttachmentId, ItemId, ShelfDoc } from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
+import { cardAdds } from "../renderer/screenshot/card-adds";
 import { createCardClock } from "./card-clock";
 import {
   CARD_CLEARED,
@@ -1371,6 +1372,232 @@ describe("a save that gave up waiting while its write was still on its way", () 
 
     expect(card.saved).toStrictEqual(["shelf"]);
     expect(card.notices).toStrictEqual([]);
+  });
+});
+
+/**
+ * What the card draws for the view main last sent: the name of each add the
+ * user can press, the pill first, and whether Annotate can be pressed.
+ */
+const offers = (card: ReturnType<typeof setup>) => {
+  const view = card.view();
+
+  if (view === null) {
+    return null;
+  }
+
+  const { line, pill, sole } = cardAdds(view, false);
+
+  return {
+    adds: [
+      pill.name,
+      ...(line?.kind === "add" ? [`${line.lead} “${line.name}”`] : []),
+    ],
+    annotate: !sole,
+  };
+};
+
+const NOTE = "Quote from the movers";
+
+/** Retry for the note is the card's one add, and Annotate is off. */
+const RETRY_ON_NOTE = { adds: [`Retry adding to “${NOTE}”`], annotate: false };
+
+/** Each way the user takes the attached screenshot off its note on the shelf. */
+const TAKE_OFF = {
+  "Discard changes": (card: ReturnType<typeof setup>) => {
+    card.controller.discard(card.note);
+  },
+  "deleting the note": (card: ReturnType<typeof setup>) => {
+    card.controller.apply({ id: card.note, type: "remove" });
+  },
+  "removing its tile": (card: ReturnType<typeof setup>) => {
+    card.controller.apply({
+      attachmentId: tileOf(card),
+      id: card.note,
+      type: "removeAttachment",
+    });
+  },
+};
+
+/** Until the save under way has put the screenshot on the shelf. */
+const placedOnShelf = async (card: ReturnType<typeof setup>) => {
+  while (card.shown().attached + card.shown().items === 0) {
+    // oxlint-disable-next-line no-await-in-loop -- until the add reaches the shelf.
+    await turn();
+  }
+};
+
+describe("the adds the card shows after the shelf changed under it", () => {
+  it("offers only Retry for the note, with Annotate off, once Undo brings back the note deleted with the unsaved screenshot on it", async () => {
+    const card = await refused("item");
+
+    card.controller.apply({ id: card.note, type: "remove" });
+    card.controller.apply({ type: "undoRemove" });
+
+    expect(card.shown()).toStrictEqual({ attached: 1, items: 0 });
+    expect(offers(card)).toStrictEqual(RETRY_ON_NOTE);
+
+    card.failWrites({ ok: true });
+
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBe(card.note);
+    expect(written(card)).toStrictEqual({
+      doubled: [],
+      last: { attached: 1, items: 0 },
+    });
+  });
+
+  it.each(Object.entries(TAKE_OFF))(
+    "names the item selected now after a refused Add to “…” and %s, attaches there, and refuses a press that still names the note",
+    async (_, takeOff) => {
+      const card = await refused("item");
+
+      const other = ItemIdSchema.parse(
+        card.controller.apply({ text: "Book the lift", type: "compose" })
+      );
+
+      takeOff(card);
+      card.select(other, true);
+
+      expect(offers(card)).toStrictEqual({
+        adds: ["Add to Shelf", "Add to “Book the lift”"],
+        annotate: true,
+      });
+
+      card.failWrites({ ok: true });
+
+      // A press that left the card while it still named the note.
+      await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+      expect({
+        notices: card.notices.length,
+        onOther: card.attachmentsOn(other),
+      }).toStrictEqual({ notices: 1, onOther: 0 });
+
+      await expect(card.saves.addToItem(1, other)).resolves.toBe(other);
+      expect({
+        onOther: card.attachmentsOn(other),
+        view: card.view(),
+      }).toStrictEqual({ onOther: 1, view: null });
+    }
+  );
+
+  it("names no item once the screenshot is off its note and the note has filled up", async () => {
+    const card = await refused("item");
+
+    card.controller.apply({
+      attachmentId: tileOf(card),
+      id: card.note,
+      type: "removeAttachment",
+    });
+    card.fill(card.note);
+
+    expect(offers(card)).toStrictEqual({
+      adds: ["Add to Shelf"],
+      annotate: true,
+    });
+  });
+
+  it("doesn't say added, stays, and offers both adds when its row is deleted before the write of it lands", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+
+    await placedOnShelf(card);
+    card.controller.apply({ id: rowOf(card), type: "remove" });
+    end({ ok: true });
+
+    // Null: main says Added for an id, and focuses its row.
+    await expect(adding).resolves.toBeNull();
+    expect(card.saved).toStrictEqual([]);
+    expect(offers(card)).toStrictEqual({
+      adds: ["Add to Shelf", `Add to “${NOTE}”`],
+      annotate: true,
+    });
+  });
+
+  it("doesn't say added, stays, and offers both adds when its tile is removed before the write of it lands", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToItem(1, card.note);
+
+    await placedOnShelf(card);
+    card.controller.apply({
+      attachmentId: tileOf(card),
+      id: card.note,
+      type: "removeAttachment",
+    });
+    end({ ok: true });
+
+    await expect(adding).resolves.toBeNull();
+    expect(card.saved).toStrictEqual([]);
+    expect(offers(card)).toStrictEqual({
+      adds: ["Add to Shelf", `Add to “${NOTE}”`],
+      annotate: true,
+    });
+  });
+
+  it("holds the screenshot once when Undo brings its deleted row back while a new add's picture file is refused", async () => {
+    const card = await refused("shelf");
+    const row = rowOf(card);
+
+    card.controller.apply({ id: row, type: "remove" });
+    card.failAttachments(DISK_FULL);
+
+    const adding = card.saves.addToItem(1, card.note);
+
+    // The user's Undo of their delete, while the picture file is on its way.
+    card.controller.apply({ type: "undoRemove" });
+
+    await expect(adding).resolves.toBeNull();
+    expect(offers(card)).toStrictEqual({ adds: ["Retry"], annotate: true });
+
+    card.failAttachments(null);
+    card.failWrites({ ok: true });
+
+    await expect(card.saves.addToShelf(1)).resolves.toBe(row);
+    expect(written(card)).toStrictEqual({
+      doubled: [],
+      last: { attached: 0, items: 1 },
+    });
+  });
+
+  it("says the reason the shelf's own Retry was refused for, not the first one", async () => {
+    const card = await refused("item");
+
+    card.failWrites(NO_ACCESS);
+    await card.controller.flush();
+
+    expect(card.view()?.save).toMatchObject({
+      message: "Inset can’t write to its data folder.",
+      state: "failed",
+    });
+    expect(offers(card)).toStrictEqual(RETRY_ON_NOTE);
+  });
+
+  it("attaches once when Add to “…” is pressed twice while the first save runs", async () => {
+    const card = setup();
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+
+    const [first, second] = await Promise.all([
+      card.saves.addToItem(1, card.note),
+      card.saves.addToItem(1, card.note),
+    ]);
+
+    expect(first).toBe(card.note);
+    expect(second).toBeNull();
+    expect(card.attachmentsOn(card.note)).toBe(1);
+    expect(written(card).doubled).toStrictEqual([]);
   });
 });
 
