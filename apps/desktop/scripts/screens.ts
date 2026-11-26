@@ -3714,8 +3714,11 @@ const SCREENSHOT_VIEW = {
   widthPx: LOGIN.widthPx,
 };
 
-/** Main's reason a card's save failed: a sentence of its own, here a long one. */
-const CARD_FAILURE = `Der Datenträger „${LONG_WORD}“ ist voll.`;
+/** What the card must keep in view of a long reason: the words that say what went wrong. */
+const CARD_REASON = "Datenträger voll";
+
+/** Main's reason a card's save failed: a sentence of its own, here a long one. It says what went wrong first, as main's own sentences do (save-error.ts), so a long name after it can't push that out of the card's two lines. */
+const CARD_FAILURE = `${CARD_REASON}: „${LONG_WORD}“.`;
 
 /** The card as main shows it once a save failed. */
 const failedCard = (
@@ -5281,6 +5284,31 @@ const STRESS_SCENES: readonly Scene[] = (
 
         if (problem !== null) {
           return problem;
+        }
+
+        // At rest the two lines say what went wrong, whatever name follows.
+        const reasonShows = await page
+          .getByRole("alert")
+          .evaluate((alert, reason) => {
+            const text = alert.querySelector("span")?.firstChild;
+            const range = document.createRange();
+
+            if (text === null || text === undefined) {
+              return false;
+            }
+
+            range.setStart(text, 0);
+            range.setEnd(text, reason.length);
+
+            return (
+              range.toString() === reason &&
+              range.getBoundingClientRect().bottom <=
+                alert.getBoundingClientRect().bottom
+            );
+          }, CARD_REASON);
+
+        if (!reasonShows) {
+          return `the failed card's two lines don't show “${CARD_REASON}”`;
         }
 
         await page.getByRole("button", { name: "Retry" }).click();
