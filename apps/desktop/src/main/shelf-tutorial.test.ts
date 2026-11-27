@@ -8,6 +8,8 @@ import { shortcutLabels } from "@shared/shortcut";
 import { DRAWING_TOOL_KEYS, shortcutSheet } from "@shared/shortcuts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { HELP_URL } from "./app-menu";
+
 import {
   removeShelfExamples,
   SHELF_TASK_IDS,
@@ -147,6 +149,12 @@ describe("Inset Shelf's tutorial", () => {
         (text) => text.includes("Shift Shift") || text.includes("Ctrl+C")
       ),
     }).toMatchObject({ mac: { length: 2 }, source: 1, windows: { length: 2 } });
+  });
+
+  it("names the docs on the source line that opens them", () => {
+    expect(
+      shelfExamples(true).find((example) => example.context !== null)?.context
+    ).toMatchObject({ title: "Inset Shelf docs", url: HELP_URL });
   });
 });
 
