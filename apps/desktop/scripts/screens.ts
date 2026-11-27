@@ -9145,7 +9145,39 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     page: "shelf",
     platforms: ["macos", "windows"],
   },
+  {
+    // Items picked before a search let go once ↓ selects the first result, so Delete then removes only that one.
+    act: async (page) => {
+      await select(page, 12);
+      await page.evaluate(`globalThis.__emit("command", { kind: "selectAll" })`);
+      await searchFor(page, "the");
+      await page.keyboard.press("ArrowDown");
+    },
+    check: async (page) => {
+      const shown = await page.locator("[data-item-id]").count();
+
+      await page.keyboard.press("Delete");
+
+      const removed = await removes(page);
+
+      return shown > 1 && removed === 1
+        ? null
+        : `Delete after ↓ from the search removed ${removed} of the ${shown} results, not only the first`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-drops-picks",
+    page: "shelf",
+  },
 ];
+
+/** ⌘F and words typed in the search field. */
+const searchFor = async (page: Page, words: string): Promise<void> => {
+  await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Search the shelf'"
+  );
+  await page.keyboard.type(words);
+};
 
 const SETTINGS_VIEW = {
   openAtLogin: false,
