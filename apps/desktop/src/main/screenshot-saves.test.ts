@@ -21,6 +21,7 @@ import {
   cardLabel,
   createShotSaves,
   RECENT_ITEM_MS,
+  SHOT_REMOVAL_UNSAVED,
   SHOT_STAYS,
 } from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
@@ -196,6 +197,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       notices.push(message);
     },
     now: () => clock,
+    onItsWay: (id) => controller.onItsWay(id),
     onWrite: (listener) => controller.onWrite(listener),
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
@@ -2008,9 +2010,6 @@ const tileOffWhileItsWriteIsHeld = async () => {
   return { card, end };
 };
 
-const REMOVAL_NOT_SAVED =
-  "The shelf hasn’t saved the screenshot’s removal yet. Add it again once it has.";
-
 describe("a screenshot taken off the shelf whose removal the disk doesn't hold yet", () => {
   it("adds nothing anew while a write on its way still holds the screenshot on the note, so Discard changes brings back the only copy", async () => {
     const { card, end } = await tileOffWhileItsWriteIsHeld();
@@ -2018,7 +2017,7 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
     await expect(card.saves.addToShelf(1)).resolves.toBeNull();
 
     expect({ notices: card.notices, shown: card.shown() }).toStrictEqual({
-      notices: [REMOVAL_NOT_SAVED],
+      notices: [SHOT_REMOVAL_UNSAVED],
       shown: { attached: 0, items: 0 },
     });
 
@@ -2051,7 +2050,7 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
     await expect(card.saves.addToShelf(1)).resolves.toBeNull();
 
     expect({ notices: card.notices, shown: card.shown() }).toStrictEqual({
-      notices: [REMOVAL_NOT_SAVED],
+      notices: [SHOT_REMOVAL_UNSAVED],
       shown: { attached: 0, items: 0 },
     });
   });

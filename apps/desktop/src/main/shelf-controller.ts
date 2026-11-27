@@ -95,6 +95,8 @@ export interface ShelfController {
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
   /** The item as the disk holds it; undefined for one no write has landed yet. */
   readonly stored: (id: ItemId) => ShelfItem | undefined;
+  /** The item as the write now on the disk's way holds it, which can still land; undefined when no write is, or it doesn't hold the item. */
+  readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
 }
 
 /** Typing saves after a pause; everything else at once. */
@@ -683,6 +685,7 @@ export const createShelfController = (
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),
+    onItsWay: (id) => writing?.doc.items.find((item) => item.id === id),
     onWrite: (listener) => {
       writeListeners.add(listener);
 
