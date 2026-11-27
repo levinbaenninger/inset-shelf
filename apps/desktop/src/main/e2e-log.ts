@@ -46,12 +46,23 @@ const logFile = process.env.INSET_E2E_LOG;
 
 /**
  * The desktop test's stand-in editor, scripts/e2e/source.swift, whose window
- * names a file. Only the capture's code place reads it, never recall.
+ * names a file, and which opens one through a scheme its bundle registers.
+ * Only the capture's code place and its way back read it, never recall.
  */
 export const E2E_EDITORS: readonly CodeEditor[] =
   logFile === undefined || logFile === ""
     ? []
-    : [{ apps: ["source"], document: "file", title: ["file", "project"] }];
+    : [
+        {
+          apps: ["source"],
+          document: "file",
+          open: {
+            atLine: "inset-e2e-source://file{path}:{line}",
+            file: "inset-e2e-source://file{path}",
+          },
+          title: ["file", "project"],
+        },
+      ];
 
 export const e2eLog = (event: E2eEvent, details: E2eDetails = {}): void => {
   if (logFile === undefined || logFile === "") {

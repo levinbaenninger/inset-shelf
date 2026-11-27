@@ -32,6 +32,12 @@ export interface CodeEditor {
    * can set another), is split on the longest dash the title holds.
    */
   readonly dash?: Readonly<Record<string, TitleDash>>;
+  /**
+   * The addresses that open a file in the editor, with `{path}` the file's
+   * absolute path and `{line}` its line: `atLine` when a line is known, `file`
+   * when not. Null when how the editor opens a file is not confirmed.
+   */
+  readonly open: { readonly file: string; readonly atLine: string } | null;
 }
 
 /** What a window title names, by an editor's row. */
@@ -53,12 +59,15 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
     // From Code's bundle, which sets the window's document to the active
     // editor's local file; not read from a running window with a file open.
     document: "file",
+    // Code's documented way in from outside (code.visualstudio.com/docs/configure/command-line).
+    open: { atLine: "vscode://file{path}:{line}", file: "vscode://file{path}" },
     title: ["file", "project"],
   },
   {
     // Inferred from Code, which it forks; not read from a running Cursor.
     apps: ["Cursor"],
     document: null,
+    open: null,
     title: ["file", "project"],
   },
 ];
@@ -209,4 +218,27 @@ export const codeLabel = (place: CodePlace, home: string | null): CodeLabel => {
         : (fromHome(place.file, home) ?? place.file),
     project: root === "" ? null : root.slice(root.lastIndexOf("/") + 1),
   };
+};
+
+/**
+ * The address that opens a code place in its editor, at `line` when given,
+ * or null when the editor's row knows no way to open a file. Each part of the
+ * path is encoded, so a space, "#", "?", "%" or a letter outside ASCII stays
+ * part of the path. The only place an editor's address is built.
+ */
+export const openAddress = (
+  editor: CodeEditor,
+  place: CodePlace,
+  line: number | null
+): string | null => {
+  if (editor.open === null) {
+    return null;
+  }
+
+  const path = place.file.split("/").map(encodeURIComponent).join("/");
+  const template = line === null ? editor.open.file : editor.open.atLine;
+
+  return template
+    .replace("{path}", () => path)
+    .replace("{line}", () => String(line));
 };

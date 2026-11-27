@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { codeEditor, codeLabel, codePlace, titleParts } from "./code-editors";
+import {
+  CODE_EDITORS,
+  codeEditor,
+  codeLabel,
+  codePlace,
+  openAddress,
+  titleParts,
+} from "./code-editors";
 import type { CodeEditor } from "./code-editors";
 
 const rowOf = (app: string): CodeEditor => {
@@ -240,5 +247,66 @@ describe(codeLabel, () => {
 
   it("writes no ~ for a home folder whose name only starts the same", () => {
     expect(codeLabel({ file, line: null, root }, "/Users/an").path).toBe(file);
+  });
+});
+
+/** The file and line an address names, as the editor reads them back. */
+const opened = (address: string | null): string | null =>
+  address === null ? null : decodeURIComponent(new URL(address).pathname);
+
+describe(openAddress, () => {
+  const code = rowOf("Code");
+
+  it("opens a file in Code at its line", () => {
+    expect(
+      openAddress(code, { file: "/Users/anna/p/a.ts", line: 9, root: null }, 12)
+    ).toBe("vscode://file/Users/anna/p/a.ts:12");
+  });
+
+  it("opens the file alone when no line is known", () => {
+    expect(
+      openAddress(
+        code,
+        { file: "/Users/anna/p/a.ts", line: 9, root: null },
+        null
+      )
+    ).toBe("vscode://file/Users/anna/p/a.ts");
+  });
+
+  it.each([
+    ["a space", "/Users/anna/My Code/a b.ts"],
+    ["a #", "/Users/anna/p/#notes/a#1.ts"],
+    ["a ?", "/Users/anna/p/why?.ts"],
+    ["a %", "/Users/anna/p/100%/a%20.ts"],
+    ["a non-ASCII letter", "/Users/anna/Projekte/Zürich/straße.ts"],
+    ["a $ and an &", "/Users/anna/p/$&a.ts"],
+  ])("keeps a path with %s whole", (_, file) => {
+    const place = { file, line: null, root: null };
+
+    expect(opened(openAddress(code, place, 7))).toBe(`${file}:7`);
+    expect(opened(openAddress(code, place, null))).toBe(file);
+  });
+
+  it("leaves no part of the path to be read as the address's query or fragment", () => {
+    const address = new URL(
+      openAddress(code, { file: "/p/a?b#c.ts", line: null, root: null }, 3) ??
+        ""
+    );
+
+    expect([address.search, address.hash]).toStrictEqual(["", ""]);
+  });
+
+  it("gives no address for an editor not known to open a file", () => {
+    expect(
+      openAddress(rowOf("Cursor"), { file: "/p/a.ts", line: 1, root: null }, 1)
+    ).toBeNull();
+  });
+
+  it("knows how to open every editor whose window names its file", () => {
+    expect(
+      CODE_EDITORS.filter(
+        (editor) => editor.document === "file" && editor.open === null
+      )
+    ).toStrictEqual([]);
   });
 });
