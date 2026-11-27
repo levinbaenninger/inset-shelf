@@ -1,4 +1,5 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 import type { AttachResult, ShotSaveTo } from "@shared/contracts";
@@ -33,8 +34,8 @@ export interface ShotDropDeps<S extends NamedShot> {
   readonly dropFailed: (why: string) => void;
   /** Writes the card's picture, a PNG, as `name` into `folder`, the drag's own folder in staging, and returns the file; never a file of the user's. */
   readonly stage: (shot: S, folder: string, name: string) => string;
-  /** Removes a drag's folder from staging once its drop came back to the shelf and its screenshot has a place there. Never throws. */
-  readonly unstage: (folder: string) => void;
+  /** Removes a drag's file from staging, still as it was written: its screenshot has a place on the shelf, or the app quits. Never throws. */
+  readonly unstage: (file: string) => void;
 }
 
 /** Where a file is on disk: macOS can name a temporary file under /var or under /private/var. */
@@ -46,22 +47,14 @@ const onDisk = (file: string): string => {
   }
 };
 
-/** A file's size and when it was last written; null when it can't be read. */
-const stamp = (file: string): string | null => {
-  try {
-    const { mtimeMs, size } = statSync(file);
+/** What bytes hold, by their SHA-256: a file's size and modification time can stay the same through an edit. */
+const digestOf = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
-    return `${size}:${mtimeMs}`;
-  } catch {
-    return null;
-  }
-};
-
-/** A drag's staged file: the drop it goes to, the folder it was staged in, and the file as it was written. */
+/** A drag's staged file: the drop it goes to, and the digest of the picture written. */
 interface Copy {
   readonly drop: ShotDrop;
-  readonly folder: string;
-  readonly written: string | null;
+  readonly digest: string;
 }
 
 /** A drop of a drag's file: where it is on disk, its record, and the picture it holds. */
@@ -85,26 +78,27 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * shelf's plain route.
  */
 export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
-  // Each drag whose file is still staged, by where the file is on disk, with the folder it staged the file in and the file as it was written. No count of newer drags says a drop has come: the shelf and the card reach main on channels of their own.
+  // Each drag whose file is still staged, by where the file is on disk. No count of newer drags says a drop has come: the shelf and the card reach main on channels of their own.
   const drags = new Map<string, Copy>();
 
-  // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
-  let made = 0;
-
-  /** The drag a dropped file is the staged file of, with the picture the file holds. Null for any other file. */
-  const claim = (dropped: string): Claimed | null => {
-    const file = onDisk(dropped);
-    const copy = drags.get(file);
-
-    if (copy === undefined) {
-      return null;
-    }
-
+  /** The picture a drag's file holds, while it is the one written; null once an app saved the user's edit into it, or it can't be read. */
+  const unchanged = (file: string, copy: Copy): Uint8Array | null => {
     try {
-      return { copy, file, png: readFileSync(file) };
+      const png = readFileSync(file);
+
+      return digestOf(png) === copy.digest ? png : null;
     } catch {
       return null;
     }
+  };
+
+  /** The drag a dropped file is the staged file of, with the picture the file holds. Null for any other file, and for a drag's file the user edited in another app: that is a new picture of theirs. */
+  const claim = (dropped: string): Claimed | null => {
+    const file = onDisk(dropped);
+    const copy = drags.get(file);
+    const png = copy === undefined ? null : unchanged(file, copy);
+
+    return copy === undefined || png === null ? null : { copy, file, png };
   };
 
   /**
@@ -114,9 +108,9 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
    * place.
    */
   const retire = ({ copy, file }: Claimed): void => {
-    if (copy.drop.placed() && stamp(file) === copy.written) {
+    if (copy.drop.placed() && unchanged(file, copy) !== null) {
       drags.delete(file);
-      deps.unstage(copy.folder);
+      deps.unstage(file);
     }
   };
 
@@ -189,17 +183,14 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       }
 
       const { drop, shot } = drag;
-
-      made += 1;
-
-      const folder = `screenshot-drag-${made}`;
-      const file = staged(shot, folder);
+      // A folder no drag of this launch or an earlier one used: an edited file stays across launches.
+      const file = staged(shot, randomUUID());
 
       if (file === null) {
         return null;
       }
 
-      drags.set(onDisk(file), { drop, folder, written: stamp(file) });
+      drags.set(onDisk(file), { digest: digestOf(shot.png), drop });
 
       return { file, shot };
     },
@@ -241,6 +232,17 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
           await deps.addFiles(plain);
         });
       }
+    },
+
+    /** At quit: each drag's file still as it was written goes; one the user edited in another app stays theirs. */
+    sweep: (): void => {
+      for (const [file, copy] of drags) {
+        if (unchanged(file, copy) !== null) {
+          deps.unstage(file);
+        }
+      }
+
+      drags.clear();
     },
   };
 };
