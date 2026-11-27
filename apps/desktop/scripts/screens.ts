@@ -8963,6 +8963,43 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     platforms: ["macos", "windows"],
   },
   {
+    // The stop a field leaves the keyboard on is a button named for its field, so a screen reader says where the keyboard is, and pressing it types in the field again.
+    act: async (page) => {
+      await details(page, 11);
+      await titleBox(page).focus();
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const stop = await page.evaluate(() => {
+        const active = document.activeElement;
+
+        return {
+          button: active instanceof HTMLButtonElement,
+          name: active?.getAttribute("aria-label") ?? "",
+        };
+      });
+
+      if (!stop.button || stop.name !== "Edit Title") {
+        return `Return in Title left focus on ${stop.button ? "a button" : "an element"} named “${stop.name}”, not on a button named “Edit Title”`;
+      }
+
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.click();
+        }
+      });
+
+      const again = await keyboardPlace(page);
+
+      return again.field && again.label === "Title"
+        ? null
+        : `pressing “Edit Title” left focus on ${placeText(again)}, not in Title`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-named-stop",
+    page: "shelf",
+  },
+  {
     act: async (page) => {
       await details(page, 10);
       await stepBox(page).focus();
@@ -9275,6 +9312,61 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-search-down-focuses-result",
+    page: "shelf",
+  },
+  {
+    // Tab or a click right after ↓ from the search, before the result's row is drawn, keeps the keyboard where it went: the row doesn't take it back a frame on.
+    act: async (page) => {
+      await searchFor(page, "the");
+    },
+    check: async (page) => {
+      // ↓ and the Tab after it in one task, so no frame comes between them.
+      await page.evaluate(() => {
+        document
+          .querySelector('[aria-label="Search the shelf"]')
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key: "ArrowDown",
+            })
+          );
+        document
+          .querySelector<HTMLElement>('[aria-label="Clear Search"]')
+          ?.focus();
+      });
+      await page.waitForTimeout(100);
+
+      const kept = await page.evaluate(() => {
+        const active = document.activeElement;
+
+        return {
+          clear: active?.getAttribute("aria-label") === "Clear Search",
+          row:
+            active?.closest<HTMLElement>("[data-item-id]")?.dataset.itemId ??
+            "",
+          selected:
+            document.querySelector<HTMLElement>(
+              '[data-item-id][aria-current="true"]'
+            )?.dataset.itemId ?? "",
+        };
+      });
+
+      const first = await page
+        .locator("[data-item-id]")
+        .first()
+        .getAttribute("data-item-id");
+
+      if (kept.selected !== first) {
+        return `↓ from the search selected “${kept.selected}”, not the first result “${String(first)}”`;
+      }
+
+      return kept.clear
+        ? null
+        : `Tab right after ↓ from the search went to Clear Search, then a frame on to row “${kept.row}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-yields-to-tab",
     page: "shelf",
   },
   {
