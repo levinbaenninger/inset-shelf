@@ -1165,9 +1165,17 @@ const checkAddedNotice = async (failing: boolean): Promise<void> => {
     return;
   }
 
+  const confirmed = await windowShows(
+    `Added 1 of 2. ${folder} is a folder, not a file.`
+  );
+
   record(
     "pasted files are confirmed once saved, naming the folder refused",
-    await windowShows(`Added 1 of 2. ${folder} is a folder, not a file.`)
+    confirmed,
+    // What the app's windows read instead, and how many it had: a missing notice is told from a notice not read.
+    confirmed
+      ? ""
+      : `${windows().filter((window) => window.owner === processName).length} windows; read: ${windowText().replaceAll(/\s+/gu, " ").slice(-400)}`
   );
   record(
     "the file became one item",
