@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { AttachResult, ShotSaveTo } from "@shared/contracts";
@@ -74,7 +74,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   const drags = new Map<string, Copy>();
 
   /** The picture a drag's file holds, while it is the one written; null once an app saved the user's edit into it, or it can't be read. */
-  const unchanged = (file: string, copy: Copy): Uint8Array | null => {
+  const asStaged = (file: string, copy: Copy): Uint8Array | null => {
     try {
       const png = readFileSync(file);
 
@@ -88,7 +88,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   const claim = (dropped: string): Claimed | null => {
     const file = onDisk(dropped);
     const copy = drags.get(file);
-    const png = copy === undefined ? null : unchanged(file, copy);
+    const png = copy === undefined ? null : asStaged(file, copy);
 
     return copy === undefined || png === null ? null : { copy, file, png };
   };
@@ -100,9 +100,13 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
    * place.
    */
   const retire = ({ copy, file }: Claimed): void => {
-    if (copy.drop.placed() && unchanged(file, copy) !== null) {
-      drags.delete(file);
+    if (copy.drop.placed() && asStaged(file, copy) !== null) {
       deps.unstage(file);
+
+      // Windows keeps a file another app has open: it stays staged, for a later drop of it and the sweep at quit.
+      if (!existsSync(file)) {
+        drags.delete(file);
+      }
     }
   };
 
@@ -229,7 +233,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
     /** At quit: each drag's file still as it was written goes; one the user edited in another app stays theirs. */
     sweep: (): void => {
       for (const [file, copy] of drags) {
-        if (unchanged(file, copy) !== null) {
+        if (asStaged(file, copy) !== null) {
           deps.unstage(file);
         }
       }
