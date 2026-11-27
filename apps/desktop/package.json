@@ -16,6 +16,7 @@
     "package:mac": "electron-vite build && electron-builder --mac --publish never",
     "package:win": "electron-vite build && electron-builder --win --publish never",
     "package:dir": "electron-vite build && electron-builder --dir --publish never",
+    "package:e2e": "INSET_E2E_BUILD=1 electron-vite build && electron-builder --dir --publish never",
     "icons": "node scripts/generate-icons.ts",
     "screens": "vp run build && node scripts/screens.ts"
   },

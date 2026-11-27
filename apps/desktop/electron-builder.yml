@@ -21,6 +21,16 @@ asarUnpack:
   - "**/node_modules/uiohook-napi/**"
   - "**/node_modules/get-windows/**"
 npmRebuild: false
+# Flipped by electron-builder before afterSign, so scripts/sign-mac.ts signs the final binary.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+  # Left on the default on purpose: turning it on would orphan the cookies of existing installs.
+  enableCookieEncryption: false
 afterSign: scripts/sign-mac.ts
 mac:
   category: public.app-category.productivity
@@ -31,6 +41,7 @@ mac:
       arch: [arm64, x64]
   # scripts/sign-mac.ts signs with the shared self-signed identity, which electron-builder refuses.
   identity: null
+  # scripts/sign-mac.ts signs with the hardened runtime itself.
   hardenedRuntime: false
   extendInfo:
     NSAccessibilityUsageDescription: Inset Shelf reads your text selection when you tap Shift twice.
