@@ -128,25 +128,25 @@ const projectFolder = (
   app: string | null
 ): number => {
   const clean = cleanTitle(title, app);
-  const dashes = dashesOf(editor, app);
 
-  const lead = dashes
-    .map((dash) => `${file.name}${dash}`)
-    .find((each) => clean?.startsWith(each) === true);
+  // The dash after the file's name is the title's own: any other dash is part of a name.
+  const dash = dashesOf(editor, app).find(
+    (each) => clean?.startsWith(`${file.name}${each}`) === true
+  );
 
-  if (clean === null || lead === undefined) {
+  if (clean === null || dash === undefined) {
     const { project } = titleParts(editor, title, app);
 
     return project === null ? -1 : file.folders.lastIndexOf(project);
   }
 
-  const rest = clean.slice(lead.length);
+  const rest = clean.slice(file.name.length + dash.length);
 
   return file.folders.findLastIndex(
     (folder) =>
       folder !== "" &&
       !EDITOR_NAMES.has(folder) &&
-      (rest === folder || dashes.some((dash) => rest.startsWith(folder + dash)))
+      (rest === folder || rest.startsWith(folder + dash))
   );
 };
 
