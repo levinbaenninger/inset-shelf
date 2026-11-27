@@ -1,10 +1,16 @@
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { CODE_EDITORS } from "@shared/code-editors";
 import type { CodePlace } from "@shared/code-place";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import { fileIsThere, openCode } from "./open-code";
 import type { CodeSystem } from "./open-code";
@@ -187,6 +193,11 @@ describe(openCode, () => {
 
 describe(fileIsThere, () => {
   const folder = realpathSync(mkdtempSync(path.join(tmpdir(), "open-code-")));
+
+  afterAll(() => {
+    rmSync(folder, { force: true, recursive: true });
+  });
+
   const home = path.join(folder, "home");
   const file = path.join(home, "dev", "a.ts");
   const kept = path.join(home, "Documents", "a.ts");
