@@ -63,7 +63,7 @@ export const shelfTasks = (mac: boolean): readonly TutorialTask[] => {
     },
     {
       anchor: null,
-      how: `Press ${keys.screenshot} and drag over an area. Click Add to Shelf on the card that appears beside the shelf.`,
+      how: `Press ${keys.screenshot} and drag over an area. Click Add to Shelf on the card that appears beside the shelf, or drag the card onto an open item.`,
       id: SHELF_TASK_IDS.screenshot,
       keys: keys.screenshot,
       title: "Capture part of the screen",
