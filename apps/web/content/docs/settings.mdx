@@ -8,7 +8,8 @@ description: Open at Login, where the icon shows, copying and tips.
 - **Open at Login**.
 - Where the app's icon shows: the Dock, the menu bar or both (macOS only).
 - Whether items are marked as done when they are copied.
-- Whether screenshot cards appear.
+- Whether screenshot cards appear. They are off by default: turning them on starts a clipboard watcher and watches your screenshot folder.
+- **Privacy & permissions**: what the app can reach and why (Accessibility, Screen Recording, Automation, the Desktop and Documents folders, the clipboard, Open at Login and the network), with a button to open each one's pane in System Settings, and **Show Data Folder**. It also holds **Look up chat titles and links**, which is off by default. Turned on, the app reads `~/.codex/session_index.jsonl` (the ChatGPT desktop app's thread list) and T3 Code's database under `~/.t3/userdata`, to name a chat and reopen it from an item. Nothing else in those apps is read and nothing is sent anywhere.
 - **Tips**: turn the one-time tips off, or **Reset Tutorial** to start the checklist and tips over.
 
 On Windows there is no menu bar. **Settings…** is in the tray icon's menu, in the shelf's top **⋯** menu and on `Ctrl+,`. That **⋯** menu also holds **Float on Top** and **Inset Shelf Help**.

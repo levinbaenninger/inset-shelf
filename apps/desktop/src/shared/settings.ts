@@ -9,8 +9,13 @@ export const SettingsSchema = z.object({
   iconIn: z.enum(ICON_PLACES),
   /** Copying an item checks it off, so capturing and clearing is one step. */
   markDoneOnCopy: z.boolean(),
-  /** A card with each new screenshot appears beside the shelf (macOS). */
+  /** A card with each new screenshot appears beside the shelf. Off until asked for: it watches the clipboard and the screenshot folder. */
   screenshotCards: z.boolean(),
+  /**
+   * Titles and links of chats are looked up in other apps' private files (~/.codex/session_index.jsonl and
+   * T3 Code's database under ~/.t3). Off until asked for.
+   */
+  chatLookups: z.boolean(),
 });
 
 export type Settings = z.output<typeof SettingsSchema>;
@@ -18,7 +23,8 @@ export type Settings = z.output<typeof SettingsSchema>;
 export const DEFAULT_SETTINGS: Settings = {
   iconIn: "dockAndMenuBar",
   markDoneOnCopy: false,
-  screenshotCards: true,
+  screenshotCards: false,
+  chatLookups: false,
 };
 
 const StoredSettingsSchema = z
@@ -42,6 +48,16 @@ export const readSettings = (raw: string | null): Settings => {
     ? { ...DEFAULT_SETTINGS, ...parsed.data }
     : DEFAULT_SETTINGS;
 };
+
+/** The System Settings panes the privacy section opens. */
+export const PRIVACY_PANES = [
+  "accessibility",
+  "screen",
+  "automation",
+  "files",
+] as const;
+
+export type PrivacyPane = (typeof PRIVACY_PANES)[number];
 
 /** What the settings window shows: the stored settings, the system's login item and the app's version. */
 export interface SettingsView {

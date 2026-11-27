@@ -10,6 +10,7 @@ import { app, clipboard, nativeImage } from "electron";
 import type { NativeImage } from "electron";
 import { z } from "zod";
 
+import { isConcealedClipboard, itemsConcealed } from "./clipboard-privacy";
 import { followFolder } from "./follow-folder";
 import type { FolderFollower } from "./follow-folder";
 import { isScreenshotClipboard } from "./screenshot-clipboard";
@@ -158,6 +159,10 @@ const readClipboardImage = async (): Promise<NativeImage | null> => {
   try {
     const items = await clipboard.read();
 
+    if (await itemsConcealed(items)) {
+      return null;
+    }
+
     const item = items.find((candidate) =>
       candidate.types.includes("image/png")
     );
@@ -248,9 +253,11 @@ export const createScreenshotWatcher = (
   const onClipboard = async (line: string): Promise<void> => {
     const types = parseTypes(line);
 
+    // A password manager's copy (concealed or transient) is never looked at, let alone read.
     if (
       Date.now() < ignoreUntil ||
       types === null ||
+      isConcealedClipboard(types) ||
       !isScreenshotClipboard(types)
     ) {
       return;

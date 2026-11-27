@@ -99,14 +99,57 @@ const Privacy = () => (
         granted. That stays in the same file.
       </li>
     </ul>
-    <p>The app connects to the internet in these cases only:</p>
+    <p>What the app can reach, and why:</p>
     <ul>
       <li>
-        <strong>Updates.</strong> At launch and every four hours, the installed
-        app checks the latest release on{" "}
-        <a href={RELEASES_URL}>GitHub Releases</a> and downloads a newer build
-        from there. GitHub sees the request, including your IP address. A copy
-        run from a portable zip doesn’t check.
+        <strong>Accessibility (macOS).</strong> Double Shift listens for Shift
+        system-wide. Only Shift is acted on; other keys reset the detector and
+        are never stored. The app copies your selection and reads the title,
+        page address and file path of the window in front.
+      </li>
+      <li>
+        <strong>Screen Recording (macOS).</strong> Window titles and window
+        links. Pictures of other windows are used only in the window picker.
+      </li>
+      <li>
+        <strong>Automation (macOS).</strong> Safari, Chrome and other browsers
+        are asked for the page address of the window an item came from.
+      </li>
+      <li>
+        <strong>Desktop and Documents folders (macOS).</strong> Only for
+        screenshot cards, which are off by default.
+      </li>
+      <li>
+        <strong>Clipboard.</strong> Double Shift saves your clipboard, copies
+        the selection, reads it and puts the clipboard back. Contents that a
+        password manager marks as private (concealed or transient on macOS,
+        excluded from history on Windows) are never read, kept or rewritten, and
+        a selection copied with those marks is not captured. Screenshot cards,
+        when turned on, watch the clipboard for screenshots and ignore such
+        items.
+      </li>
+      <li>
+        <strong>Other apps’ chat files.</strong> Off by default. If you turn on
+        “Look up chat titles and links” in Settings, the app reads{" "}
+        <code>~/.codex/session_index.jsonl</code> (ChatGPT desktop) and T3
+        Code’s database under <code>~/.t3/userdata</code> to name a chat and
+        reopen it. Nothing is sent anywhere.
+      </li>
+      <li>
+        <strong>Open at Login.</strong> Only if you turn it on.
+      </li>
+    </ul>
+    <p>
+      The app has no telemetry, analytics or crash reporting. It connects to the
+      internet in these cases only:
+    </p>
+    <ul>
+      <li>
+        <strong>Updates.</strong> Only when you check for updates: the app asks{" "}
+        <a href={RELEASES_URL}>GitHub Releases</a> for the latest release and
+        downloads a newer build from there only when you choose to. GitHub sees
+        the request, including your IP address. A copy run from a portable zip
+        doesn’t check.
       </li>
       <li>
         <strong>Spell checking on Windows.</strong> The note field uses the
@@ -119,6 +162,12 @@ const Privacy = () => (
         note hands it to your browser or to the app it belongs to.
       </li>
     </ul>
+
+    <p>
+      Your items are stored as plain files, which disk encryption (FileVault,
+      BitLocker) covers. The app does not encrypt them itself. Screenshot cards
+      are off by default.
+    </p>
 
     <h2>Your rights</h2>
     <p>

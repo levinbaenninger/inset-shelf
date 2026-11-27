@@ -5,7 +5,7 @@ import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
 import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
 import type { OnboardingView } from "./onboarding";
-import { SettingsSchema } from "./settings";
+import { PRIVACY_PANES, SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import {
   ItemIdSchema,
@@ -396,8 +396,12 @@ export const settingsContract = defineContract({
     getView: invoke(z.void(), out<SettingsView>()),
     /** The page's height, so the window fits it without empty space. */
     fitHeight: send(z.number().int().min(120).max(1200)),
+    /** Opens one of the privacy panes in System Settings (macOS). */
+    openPane: send(z.enum(PRIVACY_PANES)),
     /** Reset Tutorial: the checklist and hints start over. */
     resetTutorial: send(z.void()),
+    /** Shows the folder holding the shelf, its attachments and the settings. */
+    showDataFolder: send(z.void()),
     setOpenAtLogin: send(z.boolean()),
     /** Show tips: the tutorial's one-time hints. */
     setTips: send(z.boolean()),
