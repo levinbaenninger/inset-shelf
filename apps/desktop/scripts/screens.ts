@@ -7768,9 +7768,11 @@ const codeSource = async (page: Page, words: string) =>
 
 const CODE_PLACE = { file: CODE_FILE, line: 147, root: CODE_ROOT };
 
-/** The code item's source line, as a button. */
+/** The code item's source line, as a button: on its row, or in its details. */
 const codeLink = (page: Page) =>
-  item(page, 760).getByRole("button", { name: /^recall\.ts:147/u });
+  page
+    .getByRole("button", { name: /^recall\.ts:147/u })
+    .filter({ visible: true });
 
 /** The page asked main to open the code item once, by its id alone: never an address. */
 const openedOnce = async (page: Page): Promise<string | null> => {
@@ -7937,6 +7939,17 @@ const CODE_SCENES: readonly Scene[] = (
       },
       keepPointer: true,
       name: "item-code-open",
+    },
+    {
+      act: async (page) => {
+        await details(page, 760);
+        await codeLink(page).click();
+      },
+      check: async (page) => await openedOnce(page),
+      data: {
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "details-code-open",
     },
     {
       act: async (page) => {
