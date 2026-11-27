@@ -76,16 +76,21 @@ const Code = ({ children }: Children) => (
 );
 
 /**
- * Code keeps its spaces and lines, and wraps a long line, open or closed, so
- * reading it takes no sideways scroll and nothing is cut at the card's edge.
+ * How code reads, and is typed in (code-field.tsx): it keeps its spaces and
+ * lines, and wraps a long line, open or closed, so reading it takes no
+ * sideways scroll and nothing is cut at the card's edge.
  */
+export const CODE_BLOCK =
+  "bg-foreground/5 rounded-md px-2 font-mono text-xs wrap-anywhere whitespace-pre-wrap";
+
 const CodeBlock = ({ children }: Children) => {
   const { interactive } = use(Mode);
 
   return (
     <Block
       className={cn(
-        "bg-foreground/5 rounded-md px-2 font-mono text-xs wrap-anywhere whitespace-pre-wrap [&_code]:bg-transparent [&_code]:p-0",
+        CODE_BLOCK,
+        "[&_code]:bg-transparent [&_code]:p-0",
         // Padding under a clamped block would show a sliver of the line after the cut.
         interactive && "py-1.5"
       )}

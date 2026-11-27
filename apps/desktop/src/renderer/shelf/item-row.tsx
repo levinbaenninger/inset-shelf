@@ -68,6 +68,7 @@ import { coach } from "@/tutorial/anchors";
 import { AttachmentStrip } from "./attachment-strip";
 import type { AttachmentHandlers } from "./attachment-strip";
 import { NotSavedLine } from "./banners";
+import { CodeField } from "./code-field";
 import { liveEdits } from "./drafts";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import { fileSizeText, whenText } from "./format";
@@ -705,12 +706,12 @@ export const TextEditor = ({
     onDone();
   };
 
-  const field = useRef<MarkdownFieldHandle>(null);
+  const handle = useRef<MarkdownFieldHandle>(null);
 
   // Return and Esc hand the keyboard back to the words, in the row or in details, where Return edits again; a row the edit took out of the search's results hands it to the search.
   const backToWords = (): void => {
     const words =
-      field.current?.element()?.closest("[data-item-id], [data-details]") ??
+      handle.current?.element()?.closest("[data-item-id], [data-details]") ??
       null;
 
     requestAnimationFrame(() => {
@@ -718,34 +719,35 @@ export const TextEditor = ({
     });
   };
 
-  return (
-    <MarkdownField
-      ariaLabel="Edit item"
-      autoFocus
-      caretAt={caretAt}
-      // The read text's own type, so the words stay exactly where they were.
-      className={cn("min-h-0", WORDS, item.done && DONE, EDITING)}
-      code={code}
-      keys={{
-        onEscape: () => {
-          cancelled.current = true;
-          live.current?.cancel();
-          onDone();
-          backToWords();
-        },
-        onSubmit: (markdown) => {
-          finish(markdown);
-          backToWords();
-        },
-      }}
-      onBlur={finish}
-      followValue={false}
-      ref={field}
-      onChange={(markdown) => {
-        edit().change(markdown);
-      }}
-      value={item.text}
-    />
+  const field = {
+    ariaLabel: "Edit item",
+    caretAt,
+    // The read text's own type, so the words stay exactly where they were.
+    className: cn("min-h-0", WORDS, item.done && DONE, EDITING),
+    keys: {
+      onEscape: () => {
+        cancelled.current = true;
+        live.current?.cancel();
+        onDone();
+        backToWords();
+      },
+      onSubmit: (markdown: string) => {
+        finish(markdown);
+        backToWords();
+      },
+    },
+    onBlur: finish,
+    onChange: (markdown: string) => {
+      edit().change(markdown);
+    },
+    ref: handle,
+    value: item.text,
+  };
+
+  return code ? (
+    <CodeField {...field} />
+  ) : (
+    <MarkdownField {...field} autoFocus followValue={false} />
   );
 };
 
