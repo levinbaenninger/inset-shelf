@@ -91,6 +91,7 @@ import {
 } from "./row-look";
 import { checkedSteps, linksOf, ROW_CAPS, rowParts } from "./row-parts";
 import type { RowLinks, RowOpen } from "./row-parts";
+import { DROP_LOOK } from "./use-attach-drop";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
@@ -1351,12 +1352,6 @@ const OpenFooter = ({
     </Button>
   </div>
 );
-
-const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
-  full: "ring-destructive/50 ring-2 ring-inset",
-  none: null,
-  open: "bg-pin/10 ring-pin ring-2 ring-inset",
-};
 
 /**
  * The steps checked when the row opened, which it lists last until it opens

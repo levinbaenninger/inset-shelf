@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { filePath, shelfBridge } from "@/shared/bridge";
 
 import { Excerpt, NOTICE_MS, UNDO_VISIBLE_MS } from "./toast-parts";
+import { DROP_LOOK } from "./use-attach-drop";
 import type { AttachTarget, RowDropLook } from "./use-attach-drop";
 
 // Files dropped on the shelf or pasted into it: as new items, or attached to
@@ -90,9 +91,29 @@ export const fullToast = (item: ShelfItem): void => {
   );
 };
 
-/** The window's ring while files are over it, unless a row is their target. */
-export const dropRing = (over: boolean, target: AttachTarget): string | null =>
-  over && target === null ? "ring-pin ring-2 ring-inset" : null;
+const isFull = (item: ShelfItem): boolean =>
+  item.attachments.length >= ATTACHMENTS_MAX;
+
+/**
+ * The window's ring while files are over it, unless a row is their target:
+ * the shelf's, for new items; with details open, the details item's, lit as
+ * an open row is, or refusing them when it is full.
+ */
+export const dropRing = (
+  over: boolean,
+  target: AttachTarget,
+  details: ShelfItem | undefined
+): string | null => {
+  if (!over || target !== null) {
+    return null;
+  }
+
+  if (details === undefined) {
+    return "ring-pin ring-2 ring-inset";
+  }
+
+  return DROP_LOOK[isFull(details) ? "full" : "open"];
+};
 
 /** How a row looks while files are over the shelf. */
 export const dropLook = (target: AttachTarget, id: ItemId): RowDropLook => {
@@ -110,88 +131,6 @@ const attachPasted = async (
 ): Promise<void> => {
   const result = await attachDataFiles(id, files);
   const message = result?.message ?? null;
-
-  if (message !== null) {
-    toast.error(message, { duration: NOTICE_MS });
-  }
-};
-
-const hasFiles = (event: DragEvent): boolean =>
-  event.dataTransfer?.types.includes("Files") === true;
-
-/**
- * Files can be dropped anywhere on the shelf, or pasted when the clipboard
- * holds files. One of the shelf's own images or files dragged back in is not
- * added again (`ownDrag`).
- */
-export const useFileDrops = (
-  ownDrag: () => boolean,
-  /** The item open in details: files pasted then attach to it. */
-  pasteTarget: () => ItemId | null
-): boolean => {
-  const [over, setOver] = useState(false);
-
-  const onDragOver = useEffectEvent((event: DragEvent) => {
-    if (hasFiles(event) && !ownDrag()) {
-      event.preventDefault();
-      setOver(true);
-    }
-  });
-
-  const onDragLeave = useEffectEvent((event: DragEvent) => {
-    if (event.relatedTarget === null) {
-      setOver(false);
-    }
-  });
-
-  const onDrop = useEffectEvent((event: DragEvent) => {
-    setOver(false);
-
-    // A row took it: the files attach to that item (use-attach-drop.ts).
-    if (event.defaultPrevented) {
-      return;
-    }
-
-    if (hasFiles(event) && !ownDrag()) {
-      event.preventDefault();
-      void addDataFiles([...(event.dataTransfer?.files ?? [])]);
-    }
-  });
-
-  const onPaste = useEffectEvent((event: ClipboardEvent) => {
-    const files = [...(event.clipboardData?.files ?? [])];
-
-    if (files.length === 0) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const target = pasteTarget();
-
-    void (target === null ? addDataFiles(files) : attachPasted(target, files));
-  });
-
-  useEffect(() => {
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
-    window.addEventListener("drop", onDrop);
-    window.addEventListener("paste", onPaste);
-
-    return () => {
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave);
-      window.removeEventListener("drop", onDrop);
-      window.removeEventListener("paste", onPaste);
-    };
-  }, []);
-
-  return over;
-};
-
-/** Paste Image in details: the clipboard's picture, read by main, attached to the item; says why when there is none. */
-export const pasteClipboardImage = async (id: ItemId): Promise<void> => {
-  const { message } = await api.pasteImageTo({ bytes: null, id });
 
   if (message !== null) {
     toast.error(message, { duration: NOTICE_MS });
@@ -246,5 +185,114 @@ export const attachDropped = async (
     );
   } else {
     toast.error(message, options);
+  }
+};
+
+const hasFiles = (event: DragEvent): boolean =>
+  event.dataTransfer?.types.includes("Files") === true;
+
+/**
+ * Files can be dropped anywhere on the shelf, or pasted when the clipboard
+ * holds files. With details open they attach to that item, as a drop on its
+ * open row does; a full one refuses a drop and says why while the files are
+ * over it. One of the shelf's own images or files dragged back in is not
+ * added again (`ownDrag`).
+ */
+export const useFileDrops = (
+  ownDrag: () => boolean,
+  /** The item open in details: files dropped or pasted then attach to it. */
+  detailsItem: () => ShelfItem | null
+): boolean => {
+  const [over, setOver] = useState(false);
+
+  const onDragOver = useEffectEvent((event: DragEvent) => {
+    if (!hasFiles(event) || ownDrag()) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const item = detailsItem();
+
+    if (item !== null && event.dataTransfer !== null) {
+      event.dataTransfer.dropEffect = isFull(item) ? "none" : "copy";
+
+      if (isFull(item) && !over) {
+        fullToast(item);
+      }
+    }
+
+    setOver(true);
+  });
+
+  const onDragLeave = useEffectEvent((event: DragEvent) => {
+    if (event.relatedTarget === null) {
+      setOver(false);
+    }
+  });
+
+  const onDrop = useEffectEvent((event: DragEvent) => {
+    setOver(false);
+
+    // A row took it: the files attach to that item (use-attach-drop.ts).
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (!hasFiles(event) || ownDrag()) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const files = [...(event.dataTransfer?.files ?? [])];
+    const item = detailsItem();
+
+    if (item === null) {
+      void addDataFiles(files);
+    } else if (!isFull(item)) {
+      void attachDropped(item, files);
+    }
+  });
+
+  const onPaste = useEffectEvent((event: ClipboardEvent) => {
+    const files = [...(event.clipboardData?.files ?? [])];
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const target = detailsItem();
+
+    void (target === null
+      ? addDataFiles(files)
+      : attachPasted(target.id, files));
+  });
+
+  useEffect(() => {
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("paste", onPaste);
+
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, []);
+
+  return over;
+};
+
+/** Paste Image in details: the clipboard's picture, read by main, attached to the item; says why when there is none. */
+export const pasteClipboardImage = async (id: ItemId): Promise<void> => {
+  const { message } = await api.pasteImageTo({ bytes: null, id });
+
+  if (message !== null) {
+    toast.error(message, { duration: NOTICE_MS });
   }
 };

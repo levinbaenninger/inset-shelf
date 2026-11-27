@@ -6974,6 +6974,20 @@ const ringed = async (page: Page, selector: string): Promise<boolean> =>
       )
     );
 
+/** How the shelf window looks while files are over it: ringed for the shelf, tinted too as one item's drop target, or refusing them. */
+const panelLook = async (page: Page) =>
+  z.object({ item: z.boolean(), pin: z.boolean(), refused: z.boolean() }).parse(
+    await page.evaluate(() => {
+      const panel = document.querySelector(".shelf-panel");
+
+      return {
+        item: panel?.classList.contains("bg-pin/10") === true,
+        pin: panel?.classList.contains("ring-pin") === true,
+        refused: panel?.classList.contains("ring-destructive/50") === true,
+      };
+    })
+  );
+
 /** Files dragged from outside over an element, as the system's drag would bring them. */
 const dragFilesOver = async (page: Page, selector: string) =>
   z.string().parse(
@@ -7910,6 +7924,77 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-details-paste",
+    },
+    {
+      // Files over details: they attach to the item open there, which lights as an open row does; a drop's own notice offers Undo.
+      act: async (page) => {
+        await details(page, 906);
+        await dragFilesOver(page, "[data-details]");
+      },
+      check: async (page) => {
+        const look = await panelLook(page);
+
+        const refused = await page.getByText(/the most it can/u).count();
+
+        return look.item && look.pin && !look.refused && refused === 0
+          ? null
+          : `files over details must light it as the item's drop target: ${JSON.stringify(look)}, ${refused} refusals said`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-drop-target",
+    },
+    {
+      // A full item open in details refuses files and says why while they are over it.
+      act: async (page) => {
+        await details(page, 901);
+        await dragFilesOver(page, "[data-details]");
+      },
+      check: async (page) => {
+        const effect = await dragFilesOver(page, "[data-details]");
+        const look = await panelLook(page);
+
+        const said = await page
+          .getByText(/the most it can/u)
+          .waitFor({ timeout: 2000 })
+          .then(() => true)
+          .catch(() => false);
+
+        return effect === "none" && said && look.refused && !look.pin
+          ? null
+          : `a full item in details must refuse files and say why: ${effect}, ${String(said)}, ${JSON.stringify(look)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-drop-full",
+    },
+    {
+      // A real drop in details attaches to that item (addFilesTo), as ⌘V there does; a full item takes nothing.
+      check: async (page) => {
+        await details(page, 906);
+        await dropFilesOn(page, "[data-details]");
+        await page.getByRole("button", { name: "Back to the list" }).click();
+        await details(page, 901);
+        await dropFilesOn(page, "[data-details]");
+        await page.waitForTimeout(100);
+
+        const all = await calls(page);
+
+        const sent = all.filter(
+          (each) => each.call === "addFilesTo" || each.call === "addFiles"
+        );
+
+        const expected = [
+          {
+            arg: { id: uuid(906), paths: ["/Users/anna/Desktop/offer.pdf"] },
+            call: "addFilesTo",
+          },
+        ];
+
+        return isDeepStrictEqual(sent, expected)
+          ? null
+          : `the drops in details sent ${JSON.stringify(sent)}`;
+      },
+      data: { filePaths: true, view: ROW_ATTACH_VIEW },
+      name: "attach-details-drop-real",
     },
     {
       // At rest the card names no item: Add to Shelf is its only add, and dragging the picture is how it goes onto an item.
