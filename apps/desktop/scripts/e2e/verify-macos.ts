@@ -82,6 +82,8 @@ const EventSchema = z.object({
   count: z.number().optional(),
   t: z.number(),
   text: z.string().optional(),
+  /** Where a drop of the screenshot card's own file went: "item" or "shelf". */
+  to: z.string().optional(),
   tone: z.string().optional(),
   via: z.string().optional(),
   windows: z.number(),
@@ -1728,7 +1730,7 @@ const SEED_SECTION = "6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3a01";
 const seedId = (n: number): string =>
   `6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3${String(100 + n).padStart(3, "0")}`;
 
-/** A typed note, made `createdAt` ago: the screenshot card names an item made in the last two minutes. */
+/** A typed note, made at `createdAt`. */
 const seedText = (
   n: number,
   text: string,
@@ -1934,17 +1936,103 @@ const clickInShelf = async (
   return await clickInShelf(prefix, attempts - 1);
 };
 
+/** The name of the card's picture: dragging it puts the screenshot on an item in the shelf, or into another app. */
+const CARD_PICTURE = "Drag the screenshot onto an item or into another app";
+
+/** The middle of the button with this name in the screenshot card's window, as "x y"; "" while there is none. */
+const cardCentre = (name: string): string => {
+  const card = cardWindow();
+
+  if (card === undefined) {
+    return "";
+  }
+
+  return jxa(`const card = Application("System Events").processes.byName(${JSON.stringify(processName)}).windows().find((w) => { const [x, y] = w.position(); return x === ${card.x} && y === ${card.y}; });
+    const hit = card ? card.entireContents().find((e) => { try { return e.role() === "AXButton" && (e.name() === ${JSON.stringify(name)} || e.description() === ${JSON.stringify(name)}); } catch { return false; } }) : undefined;
+    hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
+};
+
+/** Where main sent the card's own file, dropped on the shelf since `mark`: "item" or "shelf"; undefined while no drop of it came. */
+const shotDropped = async (
+  mark: number,
+  deadline = Date.now() + 4000
+): Promise<string | undefined> => {
+  const dropped = await waitFor("shotDropped", mark, deadline);
+
+  return dropped?.to;
+};
+
+/**
+ * Drags the card's picture to `to` ("x y") as a hand does, and says where
+ * main sent the card's file. A drag the system didn't start drops nothing,
+ * so it is tried once more the plain way; one that dropped is never repeated.
+ */
+const dragCard = async (to: string): Promise<string | undefined> => {
+  for (const how of ["drag-hold", "drag"]) {
+    const from = cardCentre(CARD_PICTURE);
+
+    if (from === "" || to === "") {
+      return undefined;
+    }
+
+    const mark = events().length;
+
+    input(how, ...from.split(" "), ...to.split(" "));
+
+    // oxlint-disable-next-line no-await-in-loop -- one drag, then the next only if the first dropped nothing.
+    const went = await shotDropped(mark);
+
+    if (went !== undefined) {
+      console.log(`  dropped with ${how}`);
+
+      return went;
+    }
+  }
+
+  return undefined;
+};
+
+/**
+ * Shows the shelf and opens the row whose words are `text`. Its middle is
+ * read before the click, since an open row's words are no longer a button;
+ * a row already open is found by its Show details. "" when neither shows.
+ */
+const openRow = async (text: string): Promise<string> => {
+  enableWebAccessibility();
+  showShelfFromTray();
+  await waitUntil(() => shelfWindow() !== undefined, 4000);
+  await delay(800);
+
+  const closed = elementCentre("AXButton", text);
+
+  if (closed === "") {
+    return elementCentre("AXButton", "Show details");
+  }
+
+  input("click", ...closed.split(" "));
+
+  return (await windowShows("Show details", 4)) ? closed : "";
+};
+
+/** The middle of the shelf window, at `down` of its height, as "x y"; "" while it is hidden. */
+const inShelfAt = (down: number): string => {
+  const shelf = shelfWindow();
+
+  return shelf === undefined
+    ? ""
+    : `${Math.round(shelf.x + shelf.width / 2)} ${Math.round(shelf.y + shelf.height * down)}`;
+};
+
 /**
  * One direction of putting the screenshot elsewhere after a refused save, on
- * a disk that refuses the first write: `first` fails, the card offers Retry
- * for that place only, the user takes the screenshot off on the shelf (Delete
- * for its row, Discard changes for the note), the card offers both adds, and
- * the other add is pressed. The shelf file and the shelf window then hold the
- * screenshot once, where that press put it.
+ * a disk that refuses the first write: `first` fails (Add to Shelf, or a drag
+ * onto the note's open row), the card offers Retry for that place only, the
+ * user takes the screenshot off on the shelf (Delete for its row, Discard
+ * changes for the note), and the other add is made. The shelf file and the
+ * shelf window then hold the screenshot once, where that add put it.
  */
 const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
-  const label = `reroute ${first === "shelf" ? "Add to Shelf → Delete → Add to “…”" : "Add to “…” → Discard changes → Add to Shelf"}`;
-  const itemButton = `Add to “${REROUTE_TARGET}”`;
+  const label = `reroute ${first === "shelf" ? "Add to Shelf → Delete → drag onto the note" : "drag onto the note → Discard changes → Add to Shelf"}`;
   const before = shelfMtime();
 
   await delay(1500);
@@ -1953,38 +2041,55 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
     shelfMtime() === before
   );
 
+  // The shelf shows before the screenshot, so the card is placed beside it, clear of the note's row.
+  const row = await openRow(REROUTE_TARGET);
+
+  record(`${label}: the note's row is open`, row !== "", row);
+
   const mark = events().length;
 
   takeScreenshot();
   await waitFor("screenshotShown", mark);
   enableWebAccessibility();
 
-  // Both buttons are read, not only the one pressed next: a card that offers one add alone fails here.
   const offered = await waitUntil(() => {
     const names = cardButtons();
 
-    return names.includes("Add to Shelf") && names.includes(itemButton);
+    return names.includes("Add to Shelf") && names.includes(CARD_PICTURE);
   }, 6000);
 
   record(
-    `${label}: the card offers both adds`,
-    offered,
+    `${label}: the card offers Add to Shelf and its picture to drag, and names no item`,
+    offered && !cardButtons().some((name) => name.startsWith("Add to “")),
     cardButtons().join(", ")
   );
 
-  if (
-    !offered ||
-    !(await clickInCard(first === "shelf" ? "Add to Shelf" : itemButton))
-  ) {
-    record(`${label}: the first add can be pressed`, false);
-
+  if (!offered) {
     return;
+  }
+
+  if (first === "shelf") {
+    if (!(await clickInCard("Add to Shelf"))) {
+      record(`${label}: Add to Shelf can be pressed`, false);
+
+      return;
+    }
+  } else {
+    const went = await dragCard(row);
+
+    record(
+      `${label}: the drag onto the note's row takes the card's way, to the note`,
+      went === "item",
+      String(went)
+    );
+
+    if (went === undefined) {
+      return;
+    }
   }
 
   const retry =
     first === "shelf" ? "Retry" : `Retry adding to “${REROUTE_TARGET}”`;
-
-  const other = first === "shelf" ? itemButton : "Add to Shelf";
 
   record(
     `${label}: the first save fails and the card offers Retry`,
@@ -1998,9 +2103,6 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
     sole.includes(retry) && !sole.some((name) => name.startsWith("Add to")),
     sole.join(", ")
   );
-
-  showShelfFromTray();
-  await waitUntil(() => shelfWindow() !== undefined, 4000);
   record(
     `${label}: the shelf window shows the screenshot where the refused save put it`,
     await waitUntil(() => shelfScreenshots() === 1, 6000),
@@ -2016,25 +2118,44 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
   );
   // Read from the shelf window, not taken from the click: the shelf file never held the unsaved screenshot.
   record(
-    `${label}: the shelf window no longer shows the screenshot before the other add is pressed`,
+    `${label}: the shelf window no longer shows the screenshot before the other add`,
     await waitUntil(() => shelfScreenshots() === 0, 6000),
     picturesSeen()
   );
 
-  const both = await waitUntil(() => {
+  // Off the shelf, the card offers Add to Shelf again: as Retry after a failed Add to Shelf, as itself after a failed drop.
+  const pill = first === "shelf" ? "Retry" : "Add to Shelf";
+
+  const again = await waitUntil(() => {
     const names = cardButtons();
 
-    return names.includes(retry) && names.includes(other);
+    return (
+      names.includes(pill) &&
+      names.includes(CARD_PICTURE) &&
+      !names.some((name) => name.startsWith("Retry adding to"))
+    );
   }, 6000);
 
   record(
-    `${label}: the card offers both adds again`,
-    both,
+    `${label}: the card offers ${pill} and its picture to drag again`,
+    again,
     cardButtons().join(", ")
   );
 
-  if (!both || !(await clickInCard(other))) {
-    record(`${label}: the other add can be pressed`, false);
+  if (!again) {
+    return;
+  }
+
+  if (first === "shelf") {
+    const went = await dragCard(await openRow(REROUTE_TARGET));
+
+    record(
+      `${label}: the drag onto the note's row takes the card's way, to the note`,
+      went === "item",
+      String(went)
+    );
+  } else if (!(await clickInCard("Add to Shelf"))) {
+    record(`${label}: Add to Shelf can be pressed`, false);
 
     return;
   }
@@ -3000,6 +3121,331 @@ const checkDragOut = async (): Promise<void> => {
   await closeFinderWindow(folder, "drag out");
 };
 
+// The screenshot card dragged onto the shelf (release/ux-rounds/plans/card-drag-to-item.md, slice 4).
+
+const DROP_TARGET = "Card drop target note";
+const CLOSED_TARGET = "Card drop closed note";
+
+/** An item's attachments as the shelf file holds them. */
+const attachmentsOf = (id: string): unknown[] =>
+  z
+    .array(z.unknown())
+    .catch([])
+    .parse(items().find((item) => item.id === id)?.attachments);
+
+const imageItems = (): number =>
+  items().filter((item) => item.kind === "image").length;
+
+/** A screenshot to the clipboard: true once its card shows, with its picture to drag. */
+const newCard = async (): Promise<boolean> => {
+  const mark = events().length;
+
+  takeScreenshot();
+
+  const shown = (await waitFor("screenshotShown", mark)) !== undefined;
+
+  enableWebAccessibility();
+
+  return (
+    shown && (await waitUntil(() => cardButtons().includes(CARD_PICTURE), 6000))
+  );
+};
+
+/** Where macOS saves a screenshot taken to a file: the folder set in Screenshot's options, else the Desktop. */
+const screenshotFolder = (): string => {
+  const set = spawnSync(
+    "defaults",
+    ["read", "com.apple.screencapture", "location"],
+    { encoding: "utf-8" }
+  );
+
+  const location = set.status === 0 ? set.stdout.trim() : "";
+
+  if (location === "") {
+    return path.join(homedir(), "Desktop");
+  }
+
+  return location.startsWith("~")
+    ? path.join(homedir(), location.slice(1))
+    : location;
+};
+
+/** Steps 1 to 4: onto the open row, onto the shelf off any row, onto a closed row, onto details. */
+const dropCardOnShelf = async (): Promise<void> => {
+  const row = await openRow(DROP_TARGET);
+
+  record("card-drop: the note's row is open", row !== "", row);
+
+  const first = await newCard();
+
+  record(
+    "card-drop: a screenshot shows its card, which names no item",
+    first && !cardButtons().some((name) => name.startsWith("Add to “")),
+    cardButtons().join(", ")
+  );
+
+  const mark = events().length;
+
+  record(
+    "card-drop: a drag onto the open row takes the card's way, to the note",
+    (await dragCard(row)) === "item"
+  );
+
+  const onNote = await waitUntil(
+    () => attachmentsOf(seedId(1)).length === 1,
+    8000
+  );
+
+  const pictures = picturesOnDisk();
+
+  record(
+    "card-drop: the note holds the screenshot once, its picture file on disk",
+    onNote && pictures.length === 1 && pictures.every(Boolean),
+    `${attachmentsOf(seedId(1)).length} attached; on disk: ${pictures.join(", ")}`
+  );
+  record(
+    "card-drop: the card goes once the drop is saved",
+    await waitUntil(() => cardWindow() === undefined, 4000)
+  );
+
+  const notice = await waitForNotice(`Added to “${DROP_TARGET}”`, mark);
+
+  record(
+    "card-drop: the notice names the note",
+    notice.kind === "shown",
+    fateText(notice)
+  );
+
+  const before = imageItems();
+
+  record("card-drop: a second screenshot shows its card", await newCard());
+  record(
+    "card-drop: a drag onto the shelf off any row takes the card's way, to the shelf",
+    (await dragCard(inShelfAt(0.75))) === "shelf"
+  );
+  record(
+    "card-drop: that drop is one new image row",
+    await waitUntil(() => imageItems() === before + 1, 8000),
+    `${imageItems() - before} new`
+  );
+  record(
+    "card-drop: the card goes once that row is saved",
+    await waitUntil(() => cardWindow() === undefined, 4000)
+  );
+
+  const closed = elementCentre("AXButton", CLOSED_TARGET);
+
+  record("card-drop: a third screenshot shows its card", await newCard());
+  record(
+    "card-drop: a drag onto a closed row goes to the shelf, as a new item",
+    (await dragCard(closed)) === "shelf",
+    closed
+  );
+  record(
+    "card-drop: one more image row, and the closed row holds nothing",
+    (await waitUntil(() => imageItems() === before + 2, 8000)) &&
+      attachmentsOf(seedId(2)).length === 0,
+    `${imageItems() - before} new; closed row holds ${attachmentsOf(seedId(2)).length}`
+  );
+
+  const details =
+    (await openRow(DROP_TARGET)) !== "" &&
+    (await clickElement("AXButton", "Show details")) &&
+    (await windowShows("Back to the list"));
+
+  record("card-drop: details open on the note", details);
+  record("card-drop: a fourth screenshot shows its card", await newCard());
+  record(
+    "card-drop: a drag onto details takes the card's way, to the note",
+    (await dragCard(inShelfAt(0.6))) === "item"
+  );
+  record(
+    "card-drop: the note holds a second screenshot",
+    await waitUntil(() => attachmentsOf(seedId(1)).length === 2, 8000),
+    `${attachmentsOf(seedId(1)).length} attached`
+  );
+  await clickElement("AXButton", "Back to the list");
+};
+
+/**
+ * Step 5: a screenshot saved as a file, dragged into a Finder window. Finder
+ * gets a file, the card stays, the shelf is unchanged; and whether the
+ * original is still in the screenshot folder says whether Finder moved it.
+ */
+const dropCardInFinder = async (): Promise<void> => {
+  const folder = finderFolder("Card dropped");
+
+  const original = path.join(
+    screenshotFolder(),
+    `Screenshot ${path.basename(work)}.png`
+  );
+
+  mkdirSync(folder, { recursive: true });
+
+  const shelfBefore = items().length;
+  const mark = events().length;
+
+  execFileSync("screencapture", ["-x", "-R0,0,320,200", original]);
+
+  const shown =
+    (await waitFor("screenshotShown", mark)) !== undefined &&
+    (await waitUntil(() => {
+      enableWebAccessibility();
+
+      return cardButtons().includes(CARD_PICTURE);
+    }, 6000));
+
+  record(
+    "card-drop: a screenshot saved as a file shows its card",
+    shown,
+    original
+  );
+
+  const finder = shown ? await finderWindow(folder) : null;
+
+  if (finder === null || !finder.ok) {
+    if (finder !== null) {
+      record("card-drop: a Finder window shows the folder", false, finder.why);
+    }
+
+    rmSync(original, { force: true });
+
+    return;
+  }
+
+  const to = `${Math.round(finder.frame.x + finder.frame.width / 2)} ${Math.round(finder.frame.y + finder.frame.height * 0.7)}`;
+  const landed = (): string[] => readdirSync(folder);
+
+  for (const how of ["drag-hold", "drag"]) {
+    const from = cardCentre(CARD_PICTURE);
+
+    if (from === "") {
+      break;
+    }
+
+    input(how, ...from.split(" "), ...to.split(" "));
+
+    // oxlint-disable-next-line no-await-in-loop -- one drag, then the next only if the first dropped nothing.
+    if (await waitUntil(() => landed().length > 0, 4000)) {
+      break;
+    }
+  }
+
+  record(
+    "card-drop: Finder gets the screenshot as a file",
+    landed().length === 1,
+    landed().join(", ") || "nothing in the folder"
+  );
+  record(
+    "card-drop: the card still shows after a drop into another app",
+    cardWindow() !== undefined
+  );
+  record(
+    "card-drop: the shelf is unchanged by a drop into another app",
+    items().length === shelfBefore,
+    `${items().length - shelfBefore} new items`
+  );
+  // A same-volume Finder drop may move the original instead of copying it; a later drag would then hand out a missing file.
+  record(
+    "card-drop: the screenshot's original stays in its folder after the Finder drop",
+    existsSync(original),
+    original
+  );
+  await closeFinderWindow(folder, "card-drop");
+  await clickInCard("Dismiss");
+  rmSync(original, { force: true });
+};
+
+/** Step 6: a drag held over the open row past the card's 12 s, then dropped; whether the card hid meanwhile is recorded as seen. */
+const dropCardAfterItsTime = async (): Promise<void> => {
+  const row = await openRow(DROP_TARGET);
+  const before = attachmentsOf(seedId(1)).length;
+
+  record(
+    "card-drop: a screenshot for the long drag shows its card",
+    await newCard()
+  );
+
+  const from = cardCentre(CARD_PICTURE);
+
+  if (from === "" || row === "") {
+    record("card-drop: the long drag can start", false, `${from} → ${row}`);
+
+    return;
+  }
+
+  const mark = events().length;
+
+  // About 1.6 s to start the drag and cross, then 15 s held over the row before the drop.
+  const drag = spawn(path.join(bin, "input"), [
+    "drag-hold",
+    ...from.split(" "),
+    ...row.split(" "),
+    "15000",
+  ]);
+
+  const ended = once(drag, "exit");
+
+  await delay(14_500);
+
+  const hid = cardWindow() === undefined;
+
+  await ended;
+
+  record(
+    "card-drop: a drop held over the open row past 12 s takes the card's way, to the note",
+    (await shotDropped(mark)) === "item"
+  );
+  record(
+    "card-drop: that drop attaches the screenshot once",
+    await waitUntil(() => attachmentsOf(seedId(1)).length === before + 1, 8000),
+    `${attachmentsOf(seedId(1)).length - before} attached`
+  );
+  record(
+    `card-drop: seen, the card ${hid ? "hid" : "stayed"} while the drag was held`,
+    true
+  );
+};
+
+/** Step 7: a screenshot with the shelf hidden, then the shelf opened: whether the card is over the shelf is recorded as seen. */
+const cardBesideShelf = async (): Promise<void> => {
+  await hideShelf();
+  record(
+    "card-drop: a screenshot with the shelf hidden shows its card",
+    await newCard()
+  );
+  showShelfFromTray();
+  await waitUntil(() => shelfWindow() !== undefined, 4000);
+  await delay(800);
+
+  const card = cardWindow();
+  const shelf = shelfWindow();
+
+  const overlaps =
+    card !== undefined &&
+    shelf !== undefined &&
+    card.x < shelf.x + shelf.width &&
+    card.x + card.width > shelf.x &&
+    card.y < shelf.y + shelf.height &&
+    card.y + card.height > shelf.y;
+
+  record(
+    `card-drop: seen, the card ${overlaps ? "lies over" : "is clear of"} the shelf opened after it`,
+    card !== undefined && shelf !== undefined,
+    JSON.stringify({ card, shelf })
+  );
+  await clickInCard("Dismiss");
+};
+
+/** The screenshot card dragged onto the shelf, into Finder, past its time, and shown before the shelf. */
+const checkCardDrop = async (): Promise<void> => {
+  await dropCardOnShelf();
+  await dropCardInFinder();
+  await dropCardAfterItsTime();
+  await cardBesideShelf();
+  shelfShot("card-drop");
+};
+
 // Copy with Details (src/main/copy-commands.ts): read back from the pasteboard, then pasted into a document of the test's own under the run's temp folder.
 
 /** The pasteboard's types, its plain text and its HTML. */
@@ -3759,15 +4205,10 @@ const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
   return next;
 };
 
-/** The seeded note, a month old so the screenshot card's Add to “…” doesn't name it, with a picture attached or not; screenshot cards off. */
+/** The seeded note, with a picture attached or not; screenshot cards off. */
 const seedNote = (picture: boolean): void => {
   seedShelf([
-    seedText(
-      1,
-      ATTACH_TARGET,
-      picture ? [seedAttachedPicture()] : [],
-      new Date("2026-10-26T09:00:00.000Z")
-    ),
+    seedText(1, ATTACH_TARGET, picture ? [seedAttachedPicture()] : []),
   ]);
   writeFileSync(
     path.join(userData, "settings.json"),
@@ -3801,6 +4242,16 @@ const SEEDED_TRIALS = new Map(
       },
       seed: () => {
         seedNote(false);
+      },
+    },
+    "card-drop": {
+      run: async (app) => {
+        await checkCardDrop();
+
+        return app;
+      },
+      seed: () => {
+        seedShelf([seedText(1, DROP_TARGET), seedText(2, CLOSED_TARGET)]);
       },
     },
     "copy-details": {
