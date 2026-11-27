@@ -137,7 +137,7 @@ import type { Shot } from "./screenshot-saves";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
-import type { SelectionResult } from "./selection";
+import { selectionProblem, warningToUser } from "./selection-problem";
 import { openSettingsStore } from "./settings-store";
 import { updateSettings } from "./settings-update";
 import { createSettingsWindow } from "./settings-window";
@@ -231,23 +231,6 @@ const trayIconPath = (): string => {
       ? "tray-on-dark.png"
       : "tray.png"
   );
-};
-
-/** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
-const selectionProblem = (result: SelectionResult): string | null => {
-  if (result.unchecked) {
-    return "Another app kept the clipboard busy, so Inset couldn't check it was put back after copying your selection.";
-  }
-
-  if (!result.restored) {
-    return result.kind === "busy"
-      ? "Another app kept the clipboard busy, so your selection wasn't copied and the clipboard couldn't be put back."
-      : "The clipboard could not be put back after copying your selection.";
-  }
-
-  return result.kind === "busy"
-    ? "Another app was using the clipboard, so your selection wasn't copied. Try again."
-    : null;
 };
 
 const excerpt = (text: string, max = TOAST_EXCERPT): string => {
@@ -1244,6 +1227,15 @@ const start = async (): Promise<void> => {
         controller.setStatus({ problem });
       }
 
+      /** With the shelf hidden its banner is out of sight, so the warning goes to the user as a notice, sent last so it stays showing. */
+      const warn = (): void => {
+        const warning = warningToUser(result, shelf.isVisible());
+
+        if (warning !== null) {
+          notify(warning.message, warning.tone);
+        }
+      };
+
       if (result.kind === "busy") {
         return;
       }
@@ -1272,6 +1264,8 @@ const start = async (): Promise<void> => {
         if ((await addFiles(result.paths)) > 0) {
           tutorial.complete(SHELF_TASK_IDS.doubleShift);
         }
+
+        warn();
 
         return;
       }
@@ -1320,6 +1314,8 @@ const start = async (): Promise<void> => {
                 }
               : { title: written.message, tone: "failed", type: "notified" }
           );
+
+          warn();
         })();
       }
     } finally {
