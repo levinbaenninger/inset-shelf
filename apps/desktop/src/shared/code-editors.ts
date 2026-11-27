@@ -462,8 +462,11 @@ export const isCodeCapture = (
     return false;
   }
 
-  if (context.code !== null) {
-    return !PROSE_FILES.has(extensionOf(fileName(context.code)));
+  // Read as the source line reads it (web-source.ts): a context may hold no code field at all.
+  const place = context.code ?? null;
+
+  if (place !== null) {
+    return !PROSE_FILES.has(extensionOf(fileName(place)));
   }
 
   const editor = codeEditor(context.app, editors);
