@@ -8947,6 +8947,27 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A step not typed yet goes as Esc leaves it; the keyboard waits on Add step, which made it.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Escape");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      return left.within === "Next steps" && !left.field
+        ? null
+        : `Esc in a step not typed yet left focus on ${placeText(left)}, not in Next steps`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-blank-step",
+    page: "shelf",
+  },
+  {
     // A text item's words in details, edited with Return and left with Return.
     act: async (page) => {
       await details(page, 12);
