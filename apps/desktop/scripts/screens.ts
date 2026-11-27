@@ -8902,6 +8902,41 @@ const stepBox = (page: Page) =>
 const descriptionBox = (page: Page) =>
   page.getByRole("textbox", { exact: true, name: "Description" });
 
+/** ⌘F and words typed in the search field. */
+const searchFor = async (page: Page, words: string): Promise<void> => {
+  await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Search the shelf'"
+  );
+  await page.keyboard.type(words);
+};
+
+/** Return on the selected words edits them, “Monday” becomes “Tuesday”, and Return ends the edit. */
+const unmatchWords = async (page: Page): Promise<void> => {
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("Book the movers for Tuesday");
+  await page.keyboard.press("Enter");
+};
+
+/** A row has the keyboard after `key`, a frame after it is selected; else what went wrong. */
+const rowFocus = async (
+  page: Page,
+  key: string,
+  row: string | undefined
+): Promise<string | null> => {
+  await page.waitForTimeout(50);
+
+  const place = await keyboardPlace(page);
+
+  return place.row === row
+    ? null
+    : `${key} left focus on ${placeText(place)}${place.row === "" ? "" : ` in row ${place.row}`}, not on row ${String(row)}`;
+};
+
 /** A keyboard user never loses their place: a field left in details or in a row keeps the keyboard there, and ↓ goes from the search field to its results. */
 const KEEPS_PLACE_SCENES: readonly Scene[] = [
   {
@@ -9201,29 +9236,28 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     check: async (page) => {
       const results = await page
         .locator("[data-item-id]")
-        .evaluateAll((rows) =>
-          rows.map((row) => row.getAttribute("data-item-id") ?? "")
-        );
+        .evaluateAll((rows) => rows.map((row) => row.dataset.itemId ?? ""));
 
-      const steps: readonly (readonly [string, string | undefined])[] = [
-        ["↓ from the search", results[0]],
-        ["↓", results[1]],
-        ["↑", results[0]],
-      ];
+      const fromSearch = await rowFocus(page, "↓ from the search", results[0]);
 
-      for (const [index, [key, row]] of steps.entries()) {
-        if (index > 0) {
-          await page.keyboard.press(key === "↓" ? "ArrowDown" : "ArrowUp");
-        }
+      if (fromSearch !== null) {
+        return fromSearch;
+      }
 
-        // The row takes the keyboard a frame after it is selected.
-        await page.waitForTimeout(50);
+      await page.keyboard.press("ArrowDown");
 
-        const place = await keyboardPlace(page);
+      const down = await rowFocus(page, "↓", results[1]);
 
-        if (place.row !== row) {
-          return `${key} left focus on ${placeText(place)}${place.row === "" ? "" : ` in row ${place.row}`}, not on row ${String(row)}`;
-        }
+      if (down !== null) {
+        return down;
+      }
+
+      await page.keyboard.press("ArrowUp");
+
+      const up = await rowFocus(page, "↑", results[0]);
+
+      if (up !== null) {
+        return up;
       }
 
       await page.keyboard.press("Tab");
@@ -9306,31 +9340,6 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     page: "shelf",
   },
 ];
-
-/** Return on the selected words edits them, “Monday” becomes “Tuesday”, and Return ends the edit. */
-const unmatchWords = async (page: Page): Promise<void> => {
-  await page.keyboard.press("Enter");
-  await page.waitForFunction(
-    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
-  );
-  await page.keyboard.press("End");
-
-  for (const _ of "Monday") {
-    await page.keyboard.press("Backspace");
-  }
-
-  await page.keyboard.type("Tuesday");
-  await page.keyboard.press("Enter");
-};
-
-/** ⌘F and words typed in the search field. */
-const searchFor = async (page: Page, words: string): Promise<void> => {
-  await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
-  await page.waitForFunction(
-    "document.activeElement?.getAttribute('aria-label') === 'Search the shelf'"
-  );
-  await page.keyboard.type(words);
-};
 
 const SETTINGS_VIEW = {
   openAtLogin: false,

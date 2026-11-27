@@ -1,3 +1,5 @@
+import { once } from "node:events";
+
 import { DEFAULT_SETTINGS } from "@shared/settings";
 import type { Settings } from "@shared/settings";
 import { describe, expect, it } from "vite-plus/test";
@@ -7,7 +9,7 @@ import { updateSettings } from "./settings-update";
 /** Settings open on the icon setting, with a write that waits until `written` is called. */
 const settingsApp = () => {
   let settings: Settings = { ...DEFAULT_SETTINGS, iconIn: "dockAndMenuBar" };
-  let written = (): void => undefined;
+  const disk = new EventTarget();
   let open = true;
   const opened: string[] = [];
 
@@ -28,19 +30,17 @@ const settingsApp = () => {
     opened,
     reach: {
       current: () => settings,
-      follow: () => undefined,
-      placeIcon: () => undefined,
+      follow: () => {},
+      placeIcon: () => {},
       save: async (change: Partial<Settings>) => {
         settings = { ...settings, ...change };
-        await new Promise<void>((resolve) => {
-          written = resolve;
-        });
+        await once(disk, "written");
       },
-      showView: () => undefined,
+      showView: () => {},
       window,
     },
     written: () => {
-      written();
+      disk.dispatchEvent(new Event("written"));
     },
   };
 };
@@ -64,6 +64,6 @@ describe(updateSettings, () => {
     app.written();
     await update;
 
-    expect(app.isOpen()).toBe(false);
+    expect(app.isOpen()).toBeFalsy();
   });
 });
