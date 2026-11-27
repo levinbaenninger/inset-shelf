@@ -297,15 +297,65 @@ interface Found {
   readonly times: 0 | 1 | 2;
 }
 
-/** Where `wanted` is in `text`: at one place, at more than one, or nowhere. Stops at the second. */
-const placeOf = (text: string, wanted: string): Found => {
-  const at = wanted === "" ? -1 : text.indexOf(wanted);
+/**
+ * The UTF-16 unit at `at`. The search compares units, not code points: the
+ * shelf's cap can cut a pair in two, and the half kept is still in the file.
+ */
+// oxlint-disable-next-line unicorn/prefer-code-point -- a unit, as above.
+const unitAt = (text: string, at: number): number => text.charCodeAt(at);
 
-  if (at === -1) {
-    return { at, times: 0 };
+/**
+ * Where `wanted` is in `text`: at one place, at more than one, or nowhere.
+ * Stops at the second. One pass over `text`, never back (Knuth, Morris and
+ * Pratt): no file and no capture make it slower than their two lengths,
+ * where a built-in search can compare most of a long capture at each place.
+ */
+const placeOf = (text: string, wanted: string): Found => {
+  if (wanted === "") {
+    return { at: -1, times: 0 };
   }
 
-  return { at, times: text.includes(wanted, at + 1) ? 2 : 1 };
+  // For each start of `wanted`, how long a start of it that start also ends with.
+  const border = new Int32Array(wanted.length);
+
+  for (let index = 1, length = 0; index < wanted.length; index += 1) {
+    const code = unitAt(wanted, index);
+
+    while (length > 0 && code !== unitAt(wanted, length)) {
+      length = border[length - 1] ?? 0;
+    }
+
+    if (code === unitAt(wanted, length)) {
+      length += 1;
+    }
+
+    border[index] = length;
+  }
+
+  let at = -1;
+
+  for (let index = 0, matched = 0; index < text.length; index += 1) {
+    const code = unitAt(text, index);
+
+    while (matched > 0 && code !== unitAt(wanted, matched)) {
+      matched = border[matched - 1] ?? 0;
+    }
+
+    if (code === unitAt(wanted, matched)) {
+      matched += 1;
+    }
+
+    if (matched === wanted.length) {
+      if (at !== -1) {
+        return { at, times: 2 };
+      }
+
+      at = index + 1 - wanted.length;
+      matched = border[matched - 1] ?? 0;
+    }
+  }
+
+  return { at, times: at === -1 ? 0 : 1 };
 };
 
 /** The 1-based line the character at `index` is on: its breaks are counted, and no list of lines is built. */
