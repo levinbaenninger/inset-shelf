@@ -1,6 +1,6 @@
 /**
  * Screenshots the shelf, the window-link picker, the drawing window, the
- * first-run onboarding, the capture notice and the screenshot card of the
+ * first-run onboarding, the capture notice, the screenshot card and Settings of the
  * built renderer in their main states, light and dark, without Electron. Each
  * page runs in Playwright's Chromium with a fake preload bridge
  * (scripts/fixtures/screens-bridge.js) that answers from the sample data
@@ -909,7 +909,8 @@ type PageName =
   | "drawing"
   | "onboarding"
   | "toast"
-  | "screenshot";
+  | "screenshot"
+  | "settings";
 
 interface Scene {
   readonly name: string;
@@ -9071,6 +9072,56 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
   },
 ];
 
+const SETTINGS_VIEW = {
+  openAtLogin: false,
+  settings: {
+    iconIn: "dockAndMenuBar",
+    markDoneOnCopy: false,
+    recall: true,
+    screenshotCards: true,
+  },
+  tips: true,
+  version: "0.1.0",
+};
+
+/** The settings window's calls to main, by name. */
+const settingsCalls = async (page: Page): Promise<string[]> => {
+  const sent = await calls(page);
+
+  return sent.map((entry) => entry.call);
+};
+
+const SETTINGS_SCENES: readonly Scene[] = [
+  {
+    // Esc closes Settings, as its × does; an open menu in it closes first.
+    act: async (page) => {
+      await page.getByRole("combobox").click();
+      await page.getByRole("listbox").waitFor();
+      await page.keyboard.press("Escape");
+      await page.getByRole("listbox").waitFor({ state: "hidden" });
+    },
+    check: async (page) => {
+      const menuEsc = await settingsCalls(page);
+
+      if (menuEsc.includes("close")) {
+        return `Esc in the open icon menu closed Settings (${JSON.stringify(menuEsc)})`;
+      }
+
+      await page.keyboard.press("Escape");
+
+      const closed = await settingsCalls(page);
+
+      return closed.includes("close")
+        ? null
+        : `Esc in Settings sent ${JSON.stringify(closed)}, not close`;
+    },
+    data: { view: SETTINGS_VIEW },
+    name: "settings-escape-closes",
+    page: "settings",
+    platforms: ["macos"],
+  },
+];
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -12370,6 +12421,7 @@ const SCENES: readonly Scene[] = [
   ...CODE_SCENES,
   ...ATTACHMENT_SCENES,
   ...KEEPS_PLACE_SCENES,
+  ...SETTINGS_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
@@ -12378,6 +12430,8 @@ const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   picker: { height: 520, width: 600 },
   // src/main/screenshot-window.ts: 280 wide, as tall as the picture's shape allows within 180–260.
   screenshot: { height: 180, width: 280 },
+  // src/main/settings-window.ts: 420 wide, as tall as its content.
+  settings: { height: 560, width: 420 },
   // What users get by default: the width the shelf opens at, and its height beside a window at least that tall.
   shelf: { height: SHELF_MAX_HEIGHT_DIP, width: SHELF_WIDTH_DIP },
   // src/main/toast-window.ts: a done notice's window; a failed one is 360×72.

@@ -532,3 +532,14 @@ if (page === "screenshot") {
     nothing
   );
 }
+
+if (page === "settings") {
+  globalThis.insetSettings = withFallback(
+    {
+      close: logged("close", nothing),
+      getView: resolved(data.view),
+      on,
+    },
+    nothing
+  );
+}
