@@ -8797,6 +8797,213 @@ const CODE_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map(stress);
 
+const PlaceSchema = z.object({
+  body: z.boolean(),
+  field: z.boolean(),
+  inDetails: z.boolean(),
+  label: z.string(),
+  row: z.string(),
+  within: z.string(),
+});
+
+/** Where the keyboard is: a text field or not, the named part of details it sits in, and the list row. */
+const keyboardPlace = async (page: Page) =>
+  PlaceSchema.parse(
+    await page.evaluate(() => {
+      const active = document.activeElement;
+
+      return {
+        body: active === null || active === document.body,
+        field:
+          active instanceof HTMLTextAreaElement ||
+          active instanceof HTMLInputElement ||
+          (active instanceof HTMLElement && active.isContentEditable),
+        inDetails: active?.closest("[data-details]") !== null,
+        label: active?.getAttribute("aria-label") ?? "",
+        row:
+          active?.closest<HTMLElement>("[data-item-id]")?.dataset.itemId ?? "",
+        within:
+          active?.closest("section[aria-label]")?.getAttribute("aria-label") ??
+          "",
+      };
+    })
+  );
+
+const placeText = (focus: z.infer<typeof PlaceSchema>): string =>
+  focus.body
+    ? "the page body"
+    : `${focus.field ? "the text field " : ""}“${focus.label}” in “${focus.within}”`;
+
+/**
+ * Left with `key`, a field in details keeps the keyboard on its own place
+ * (`within`), off the text so the details' keys work: Tab goes on from there,
+ * Return types in it again, and a second Esc goes back to the item's row.
+ */
+const keepsPlace = async (
+  page: Page,
+  key: string,
+  within: string,
+  field: () => Promise<void>
+): Promise<string | null> => {
+  const left = await keyboardPlace(page);
+
+  if (left.body || left.field || !left.inDetails || left.within !== within) {
+    return `${key} in ${within} left focus on ${placeText(left)}, not on ${within}'s place in details`;
+  }
+
+  await page.keyboard.press("Tab");
+
+  const tabbed = await keyboardPlace(page);
+
+  if (!tabbed.inDetails || tabbed.label === "Back to the list") {
+    return `Tab after ${key} in ${within} went to ${placeText(tabbed)}, not on from ${within}`;
+  }
+
+  await field();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Enter");
+
+  const again = await keyboardPlace(page);
+
+  if (!again.field || again.within !== within) {
+    return `Return on ${within}'s place went to ${placeText(again)}, not back into ${within}`;
+  }
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Back to the list" }).waitFor({
+    state: "hidden",
+  });
+  // Details put the keyboard back on the row a frame after they close.
+  await page
+    .waitForFunction(
+      () => document.activeElement?.closest("[data-item-id]") !== null,
+      null,
+      { timeout: 1000 }
+    )
+    .catch(() => null);
+
+  const back = await keyboardPlace(page);
+
+  return back.row === ""
+    ? `a second Esc from ${within} left focus on ${placeText(back)}, not on the item's row`
+    : null;
+};
+
+const titleBox = (page: Page) =>
+  page.getByRole("textbox", { exact: true, name: "Title" });
+
+const stepBox = (page: Page) =>
+  page.getByRole("textbox", { exact: true, name: "Step 3" });
+
+const descriptionBox = (page: Page) =>
+  page.getByRole("textbox", { exact: true, name: "Description" });
+
+/** A keyboard user never loses their place: a field left in details or in a row keeps the keyboard there. */
+const KEEPS_PLACE_SCENES: readonly Scene[] = [
+  {
+    // Return in a picture's Title keeps the keyboard on the Title, which shows where it is.
+    act: async (page) => {
+      await details(page, 11);
+      await titleBox(page).focus();
+      await page.keyboard.type("Today: ");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) =>
+      await keepsPlace(page, "Return", "Title", async () => {
+        await titleBox(page).focus();
+      }),
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-title",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await stepBox(page).focus();
+      await page.keyboard.press("Escape");
+    },
+    check: async (page) =>
+      await keepsPlace(page, "Esc", "Next steps", async () => {
+        await stepBox(page).focus();
+      }),
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-step",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await descriptionBox(page).focus();
+      await page.keyboard.press("Escape");
+    },
+    check: async (page) =>
+      await keepsPlace(page, "Esc", "Description", async () => {
+        await descriptionBox(page).focus();
+      }),
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-description",
+    page: "shelf",
+  },
+  {
+    // A text item's words in details, edited with Return and left with Return.
+    act: async (page) => {
+      await details(page, 12);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+      );
+      await page.keyboard.press("End");
+      await page.keyboard.type(" today");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      if (left.body || left.field || !left.inDetails) {
+        return `Return in a text item's words left focus on ${placeText(left)}, not on its words in details`;
+      }
+
+      await page.keyboard.press("Tab");
+
+      const tabbed = await keyboardPlace(page);
+
+      if (!tabbed.inDetails || tabbed.label === "Back to the list") {
+        return `Tab after editing the words went to ${placeText(tabbed)}, not on from them`;
+      }
+
+      return null;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-words",
+    page: "shelf",
+  },
+  {
+    // The words edited in the list's row and left with Return: the row keeps the keyboard.
+    act: async (page) => {
+      await select(page, 12);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+      );
+      await page.keyboard.press("End");
+      await page.keyboard.type(" today");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      return left.row === uuid(12) && !left.field
+        ? null
+        : `Return in a row's words left focus on ${placeText(left)}, not on the row`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-row-words",
+    page: "shelf",
+  },
+];
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -12095,6 +12302,7 @@ const SCENES: readonly Scene[] = [
   ...PILL_SCENES,
   ...CODE_SCENES,
   ...ATTACHMENT_SCENES,
+  ...KEEPS_PLACE_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
