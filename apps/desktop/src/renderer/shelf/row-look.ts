@@ -40,3 +40,15 @@ export const focusRow = (row: Element | null): boolean => {
 
   return target !== null && document.activeElement === target;
 };
+
+/**
+ * Focus on the row, else on the search field: an edit can take away the
+ * row's match, and the search is where the keyboard was before the results.
+ */
+export const focusRowOrSearch = (row: Element | null): void => {
+  if (!focusRow(row)) {
+    document
+      .querySelector<HTMLElement>("[data-search-field]")
+      ?.focus({ preventScroll: true });
+  }
+};

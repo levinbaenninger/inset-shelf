@@ -1189,7 +1189,20 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }, toggleMany),
   };
 
-  useShelfKeys({ ...listKeys, back: closeDetails }, inDetails);
+  useShelfKeys(
+    {
+      ...listKeys,
+      back: closeDetails,
+      // Return in details edits the item they show, which an edit may have taken out of the search's results.
+      edit:
+        detailsItem === undefined
+          ? listKeys.edit
+          : () => {
+              setEditingId(detailsItem.id);
+            },
+    },
+    inDetails
+  );
 
   /**
    * A press anywhere in the list view outside the items (search, the note

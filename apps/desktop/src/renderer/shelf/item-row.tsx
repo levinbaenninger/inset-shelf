@@ -81,7 +81,13 @@ import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
 import { bindRow } from "./row-actions";
 import type { RowActions } from "./row-actions";
-import { contextMenuAt, DONE, EDITING, focusRow, WORDS } from "./row-look";
+import {
+  contextMenuAt,
+  DONE,
+  EDITING,
+  focusRowOrSearch,
+  WORDS,
+} from "./row-look";
 import { checkedSteps, linksOf, ROW_CAPS, rowParts } from "./row-parts";
 import type { RowLinks, RowOpen } from "./row-parts";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
@@ -695,14 +701,14 @@ export const TextEditor = ({
 
   const field = useRef<MarkdownFieldHandle>(null);
 
-  // Return and Esc hand the keyboard back to the words, in the row or in details, where Return edits again.
+  // Return and Esc hand the keyboard back to the words, in the row or in details, where Return edits again; a row the edit took out of the search's results hands it to the search.
   const backToWords = (): void => {
     const words =
       field.current?.element()?.closest("[data-item-id], [data-details]") ??
       null;
 
     requestAnimationFrame(() => {
-      focusRow(words);
+      focusRowOrSearch(words);
     });
   };
 

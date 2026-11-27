@@ -275,6 +275,7 @@ export const SearchBar = ({
       </InputGroupAddon>
       <InputGroupInput
         aria-label="Search the shelf"
+        data-search-field
         onChange={(event) => {
           onChange(event.target.value);
         }}
