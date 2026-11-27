@@ -6,6 +6,8 @@ It is the third Inset prototype. [Inset Context Pin](https://github.com/levinbae
 
 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) lists what was tested, on which system, and what is still open.
 
+To report a bug or propose a change, see the [contributor guide](CONTRIBUTING.md). Report security issues through the [private reporting channel](SECURITY.md).
+
 ## Install a test build
 
 Install once, then the app updates itself. Download a build from the [latest release](https://github.com/levinbaenninger/inset-shelf/releases/latest). Every push to `main` publishes a new release, so the latest one holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
@@ -158,3 +160,7 @@ Apps installed from a build before these releases still check the `preview` rele
 To cut a versioned release, set `version` in `apps/desktop/package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The tag build keeps that version as it is and publishes a separate release, which never becomes **Latest**, because `main` already built that commit as a higher `0.2.<run number>`. Raising the minor or major number also moves the `main` builds that follow to `0.2.<run number>`.
 
 The macOS job signs with the shared certificate from the `MAC_SIGNING_P12_BASE64` and `MAC_SIGNING_P12_PASSWORD` secrets, through `apps/desktop/scripts/import-signing-key.sh` and the `apps/desktop/scripts/sign-mac.ts` hook, and fails without them. The CI workflow has no secrets and signs ad hoc. A local `vp run package:mac` signs with the certificate when its keychain (`~/Library/Keychains/inset-signing.keychain-db`) is on the machine, and ad hoc otherwise.
+
+## License
+
+Inset Shelf's original code and documentation use the [MIT license](LICENSE). Third-party code and assets retain their own terms. The website's vendored React Bits components use [MIT with a Commons Clause restriction](apps/web/components/react-bits/LICENSE.txt). See the [website's third-party notices](apps/web/public/third-party-notices.txt).
