@@ -357,6 +357,39 @@ describe(itemMenu, () => {
     ).toStrictEqual(labels(from(null)));
     expect(labels(from(null))).not.toContain("Open in Code");
   });
+
+  it("says a code file is shown in its folder when no address opens it, and offers nothing for an app it does not know", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const open = (app: string, file: string) =>
+      itemMenu(
+        {
+          ...item,
+          context: {
+            app,
+            appLink: null,
+            code: { file, line: null, root: null },
+            title: "a.ts — p",
+            url: null,
+          },
+        },
+        doc
+      ).find(
+        (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
+      );
+
+    expect(open("Code", "/Users/anna/p/a:12.ts")).toMatchObject({
+      label: "Show in Finder",
+    });
+    expect(open("Code", "/Users/anna/p/all.code-workspace")).toMatchObject({
+      label: "Show in Finder",
+    });
+    expect(open("Zed", "/Users/anna/p/a.ts")).toBeUndefined();
+  });
 });
 
 describe(pickedMenu, () => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { CodeEditor } from "./code-editors";
 import { StrokeMarksSchema } from "./drawing-scene";
 import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
@@ -94,6 +95,8 @@ export interface ShelfView {
   readonly here?: ShelfHere | null;
   /** The user's home folder, so a file's path shows from "~"; absent where it is not known. */
   readonly home?: string;
+  /** The code editors main knows, whose items open their file on a click; absent, the registry's own. */
+  readonly editors?: readonly CodeEditor[];
 }
 
 /** The open items from the window the shelf opened beside (src/shared/recall.ts). */

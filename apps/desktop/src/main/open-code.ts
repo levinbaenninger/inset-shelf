@@ -1,15 +1,13 @@
-import { stat } from "node:fs/promises";
-
-import { openAddress } from "@shared/code-editors";
+import { codeEditor, openAddress } from "@shared/code-editors";
 import type { CodeEditor } from "@shared/code-editors";
-import { goneMessage } from "@shared/code-place";
+import { fellBackMessage, goneMessage } from "@shared/code-place";
 import type { CodePlace } from "@shared/code-place";
 
-import { FsErrorSchema } from "./save-error";
+import type { QuietDisk } from "./quiet-disk";
 
 /** What opening a code place asks of the system; main passes Electron's. */
 export interface CodeSystem {
-  /** Whether the file is still at its path. */
+  /** Whether the file is still at its path, as far as Inset may look. */
   readonly fileIsThere: (file: string) => Promise<boolean>;
   /** Whether an app on this computer takes the address's scheme. */
   readonly registered: (address: string) => boolean;
@@ -23,20 +21,28 @@ export interface CodeSystem {
 }
 
 /**
- * Opens a code item's file in its editor, at its line when one is stored.
- * Only an address the editor's row builds opens, and only when its scheme is
- * registered here; else, or when the open fails, the file is shown in its
- * folder. A file that is gone opens nothing: the shelf says so and the editor
- * comes forward. It never rejects.
+ * Opens a code item's file in its editor, at its line when one is given.
+ * Only an item whose app has a row among `editors` starts anything: for any
+ * other app nothing is looked at, opened or shown. Only an address the row
+ * builds opens, and only when its scheme is registered here. A file no
+ * address opens as itself is shown in its folder, as its tooltip says. When
+ * the editor was to open it and can't, the file is shown in its folder and
+ * the shelf says so. A file that is gone opens nothing: the shelf says so
+ * and the editor comes forward.
  */
 export const openCode = async (
-  editor: CodeEditor | undefined,
+  app: string | null,
   place: CodePlace,
+  editors: readonly CodeEditor[],
   system: CodeSystem
 ): Promise<void> => {
-  const built =
-    editor === undefined ? null : openAddress(editor, place, place.line);
+  const editor = codeEditor(app, editors);
 
+  if (app === null || editor === undefined) {
+    return;
+  }
+
+  const built = openAddress(editor, place, place.line);
   const address = built !== null && system.registered(built) ? built : null;
 
   if (!(await system.fileIsThere(place.file))) {
@@ -53,36 +59,36 @@ export const openCode = async (
     return;
   }
 
-  if (address === null) {
-    system.reveal(place.file);
+  if (address !== null) {
+    try {
+      await system.open(address);
 
-    return;
+      return;
+    } catch {
+      // The system refused, or the editor went between the look and the open: the file is still shown.
+    }
   }
 
-  try {
-    await system.open(address);
-  } catch {
-    // The system refused, or the editor went between the look and the open: the file is still shown.
-    system.reveal(place.file);
+  if (built !== null) {
+    system.notify(fellBackMessage(place, app));
   }
+
+  system.reveal(place.file);
 };
-
-/** The errors that mean nothing is at a path, as against one the system won't say about. */
-const GONE = new Set(["ENOENT", "ENOTDIR"]);
 
 /**
  * Whether a file is at `file`. Only a path that holds nothing, or something
- * other than a file, is gone: a refused look leaves the editor to try.
+ * other than a file, is gone. Where Inset may not look (src/main/quiet-disk.ts),
+ * or the disk won't say, the editor is left to try.
  */
 export const fileIsThere = async (
   file: string,
-  look: (path: string) => Promise<{ isFile: () => boolean }> = stat
+  disk: QuietDisk
 ): Promise<boolean> => {
-  try {
-    const found = await look(file);
+  const looked = await disk.find(file);
 
-    return found.isFile();
-  } catch (error) {
-    return !GONE.has(FsErrorSchema.safeParse(error).data?.code ?? "");
-  }
+  return (
+    looked.kind === "unsure" ||
+    (looked.kind === "there" && looked.entry.isFile())
+  );
 };

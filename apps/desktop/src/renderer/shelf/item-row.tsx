@@ -18,6 +18,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
+import { codeAction, codeWay } from "@shared/code-editors";
+import type { CodeEditor } from "@shared/code-editors";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
@@ -70,6 +72,7 @@ import { liveEdits } from "./drafts";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import { fileSizeText, whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
+import { KnownEditors } from "./known-editors";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
@@ -212,19 +215,31 @@ const sourceTitle = (
     : [tooltipText(lines.join("\n"), room), ...last].join("\n");
 };
 
-/** Where a click on the source line leads: the page, the app, or the file (from home) in its editor. */
+/**
+ * Where a click on the source line leads: the page, the app, or the file
+ * (from home), which opens in its editor or, when no address opens it as
+ * itself, is shown in its folder.
+ */
 const leadsTo = (
   context: ItemContext,
   app: string | null,
-  code: SourceLabel["code"]
+  code: SourceLabel["code"],
+  editors: readonly CodeEditor[]
 ): Leads => {
   if (app === null) {
     return { action: null, path: null, to: context.url };
   }
 
-  return context.code === null
+  const way =
+    context.code === null ? null : codeWay(app, context.code, editors);
+
+  return way === null
     ? { action: `Open ${app}`, path: null, to: null }
-    : { action: `Open in ${app}`, path: code?.path ?? null, to: null };
+    : {
+        action: codeAction(app, way, isMac),
+        path: code?.path ?? null,
+        to: null,
+      };
 };
 
 /** The user's home folder, from the shelf's view: a code item's path shows from "~". */
@@ -247,7 +262,8 @@ export const SourceLine = ({
   const serviceIcon = service === null ? Link01Icon : SERVICE_ICON[service];
   const icon = code === undefined ? serviceIcon : CodeIcon;
   // A code editor opens its file again; a desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
-  const app = openingApp(context, isMac);
+  const editors = use(KnownEditors);
+  const app = openingApp(context, isMac, editors);
   const shown = label === "" ? (context.url ?? "") : label;
   const plain = useRef<HTMLParagraphElement>(null);
   const link = useRef<HTMLButtonElement>(null);
@@ -279,7 +295,7 @@ export const SourceLine = ({
       {...coach("item-source")}
       onClick={onOpenLink}
       ref={link}
-      title={sourceTitle(shown, leadsTo(context, app, code), linkCut)}
+      title={sourceTitle(shown, leadsTo(context, app, code, editors), linkCut)}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />

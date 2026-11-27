@@ -254,16 +254,14 @@ export const codeLabel = (place: CodePlace, home: string | null): CodeLabel => {
   };
 };
 
-/** A name's end that an editor reads as a line, and a column, however the address encodes it. */
-const LIKE_A_LINE = /:\d+$/u;
-
 /**
  * The address that opens a code place in its editor, at `line` when given,
  * or null when the editor's row knows no way to open a file, or the address
- * would open something other than this file: a name that ends like a line,
- * or one the row says it opens as something else. Each part of the
- * path is encoded, so a space, "#", "?", "%" or a letter outside ASCII stays
- * part of the path. The only place an editor's address is built.
+ * would open something other than this file: a path that holds a colon,
+ * which an editor reads as a line wherever it stands and however the address
+ * encodes it, or a name the row says it opens as something else. Each part of
+ * the path is encoded, so a space, "#", "?", "%" or a letter outside ASCII
+ * stays part of the path. The only place an editor's address is built.
  */
 export const openAddress = (
   editor: CodeEditor,
@@ -272,7 +270,7 @@ export const openAddress = (
 ): string | null => {
   if (
     editor.open === null ||
-    LIKE_A_LINE.test(place.file) ||
+    place.file.includes(":") ||
     editor.open.not?.some((end) => place.file.endsWith(end)) === true
   ) {
     return null;
@@ -359,4 +357,35 @@ export const quietlyReadable = (
   return !asked.some((each) =>
     isAncestor(each.toLowerCase(), file.toLowerCase())
   );
+};
+
+/** How a click on a code item reaches its file: opened in its editor, or shown in its folder. */
+export type CodeWay = "editor" | "folder";
+
+/**
+ * What a click on a code item does. Only an item whose app has a row among
+ * `editors` reaches a file at all: null for any other. A file no address
+ * opens as itself is shown in its folder.
+ */
+export const codeWay = (
+  app: string | null,
+  place: CodePlace,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): CodeWay | null => {
+  const editor = codeEditor(app, editors);
+
+  if (editor === undefined) {
+    return null;
+  }
+
+  return openAddress(editor, place, null) === null ? "folder" : "editor";
+};
+
+/** A code item's click in the words its tooltip and its menu entry use. */
+export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
+  if (way === "editor") {
+    return `Open in ${app}`;
+  }
+
+  return mac ? "Show in Finder" : "Show in Folder";
 };

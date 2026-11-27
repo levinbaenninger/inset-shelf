@@ -1,16 +1,18 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { codeEditor } from "@shared/code-editors";
-import type { CodeEditor } from "@shared/code-editors";
+import { CODE_EDITORS } from "@shared/code-editors";
 import type { CodePlace } from "@shared/code-place";
 import { describe, expect, it } from "vite-plus/test";
 
 import { fileIsThere, openCode } from "./open-code";
 import type { CodeSystem } from "./open-code";
+import { quietDisk } from "./quiet-disk";
 
-const CODE = codeEditor("Code");
+/** What the shelf says when the editor was to open the file and its folder shows it instead. */
+const FELL_BACK =
+  "say Couldn’t open a.ts in Code, so it is shown in its folder";
 
 const PLACE: CodePlace = {
   file: "/Users/anna/My Code/proj/a.ts",
@@ -48,23 +50,26 @@ const system = (
 };
 
 describe(openCode, () => {
-  it("shows the file in its folder when its editor refuses to open it", async () => {
+  it("shows the file in its folder, and says so, when its editor refuses to open it", async () => {
     const mac = system(true, ["vscode"]);
 
-    await openCode(CODE, PLACE, {
+    await openCode("Code", PLACE, CODE_EDITORS, {
       ...mac,
       open: async () => {
         await Promise.reject(new Error("the handler is gone"));
       },
     });
 
-    expect(mac.asked).toStrictEqual(["reveal /Users/anna/My Code/proj/a.ts"]);
+    expect(mac.asked).toStrictEqual([
+      FELL_BACK,
+      "reveal /Users/anna/My Code/proj/a.ts",
+    ]);
   });
 
   it("still says a file is gone when its editor can't be brought forward", async () => {
     const mac = system(false, ["vscode"]);
 
-    await openCode(CODE, PLACE, {
+    await openCode("Code", PLACE, CODE_EDITORS, {
       ...mac,
       bringForward: async () => {
         await Promise.reject(new Error("no such app"));
@@ -77,7 +82,7 @@ describe(openCode, () => {
   it("opens the file in its editor at its line", async () => {
     const mac = system(true, ["vscode"]);
 
-    await openCode(CODE, PLACE, mac);
+    await openCode("Code", PLACE, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual([
       "open vscode://file/Users/anna/My%20Code/proj/a.ts:12",
@@ -87,39 +92,62 @@ describe(openCode, () => {
   it("opens the file alone when no line is stored", async () => {
     const mac = system(true, ["vscode"]);
 
-    await openCode(CODE, { ...PLACE, line: null }, mac);
+    await openCode("Code", { ...PLACE, line: null }, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual([
       "open vscode://file/Users/anna/My%20Code/proj/a.ts",
     ]);
   });
 
-  it("shows the file in its folder when no app on this computer takes the editor's address", async () => {
+  it("shows the file in its folder, and says so, when no app on this computer takes the editor's address", async () => {
     const mac = system(true, []);
 
-    await openCode(CODE, PLACE, mac);
+    await openCode("Code", PLACE, CODE_EDITORS, mac);
 
-    expect(mac.asked).toStrictEqual([`reveal ${PLACE.file}`]);
+    expect(mac.asked).toStrictEqual([FELL_BACK, `reveal ${PLACE.file}`]);
   });
 
   it.each([
-    ["an editor the shelf no longer knows", undefined],
-    ["an editor with no known way to open a file", codeEditor("Cursor")],
+    ["a path with a colon", "/Users/anna/My Code/proj/a:12.ts"],
+    ["a workspace file", "/Users/anna/My Code/proj/all.code-workspace"],
   ])(
-    "shows the file in its folder for %s",
-    async (_, editor: CodeEditor | undefined) => {
-      const mac = system(true, ["vscode", "cursor"]);
+    "shows %s in its folder with no word, as its tooltip said it would",
+    async (_, file) => {
+      const mac = system(true, ["vscode"]);
 
-      await openCode(editor, PLACE, mac);
+      await openCode("Code", { ...PLACE, file }, CODE_EDITORS, mac);
 
-      expect(mac.asked).toStrictEqual([`reveal ${PLACE.file}`]);
+      expect(mac.asked).toStrictEqual([`reveal ${file}`]);
+    }
+  );
+
+  it.each([
+    ["an app the shelf has no row for", "Zed"],
+    ["an editor the shelf no longer knows", "Code"],
+    ["no app", null],
+  ])(
+    "does nothing for %s: it does not look for the file, and shows nothing",
+    async (_, app) => {
+      const mac = system(true, ["vscode", "zed"]);
+      const known = app === "Code" ? [] : CODE_EDITORS;
+
+      await openCode(app, PLACE, known, {
+        ...mac,
+        fileIsThere: async (file) => {
+          mac.asked.push(`look ${file}`);
+
+          return await Promise.resolve(true);
+        },
+      });
+
+      expect(mac.asked).toStrictEqual([]);
     }
   );
 
   it("says a file that is gone is gone, and brings its editor forward", async () => {
     const mac = system(false, ["vscode"]);
 
-    await openCode(CODE, PLACE, mac);
+    await openCode("Code", PLACE, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual([
       "say a.ts is no longer at this path",
@@ -130,38 +158,44 @@ describe(openCode, () => {
   it("only says a file is gone when no app takes the editor's address", async () => {
     const mac = system(false, []);
 
-    await openCode(CODE, PLACE, mac);
+    await openCode("Code", PLACE, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual(["say a.ts is no longer at this path"]);
   });
 });
 
 describe(fileIsThere, () => {
-  const folder = mkdtempSync(path.join(tmpdir(), "open-code-"));
-  const file = path.join(folder, "a.ts");
+  const folder = realpathSync(mkdtempSync(path.join(tmpdir(), "open-code-")));
+  const home = path.join(folder, "home");
+  const file = path.join(home, "dev", "a.ts");
+  const kept = path.join(home, "Documents", "a.ts");
 
+  mkdirSync(path.join(home, "dev", "src"), { recursive: true });
+  mkdirSync(path.dirname(kept));
   writeFileSync(file, "export {};\n");
-  mkdirSync(path.join(folder, "src"));
+  writeFileSync(kept, "export {};\n");
+
+  const disk = quietDisk({ home, temp: path.join(folder, "temp") });
 
   it("finds a file at its path", async () => {
-    await expect(fileIsThere(file)).resolves.toBeTruthy();
+    await expect(fileIsThere(file, disk)).resolves.toBeTruthy();
   });
 
   it.each([
-    ["nothing", path.join(folder, "b.ts")],
-    ["a folder", path.join(folder, "src")],
+    ["nothing", path.join(home, "dev", "b.ts")],
+    ["a folder", path.join(home, "dev", "src")],
     ["a path through a file", path.join(file, "c.ts")],
   ])("finds no file where %s is", async (_, gone) => {
-    await expect(fileIsThere(gone)).resolves.toBeFalsy();
+    await expect(fileIsThere(gone, disk)).resolves.toBeFalsy();
   });
 
-  it("does not call a file gone when the system only refuses to say", async () => {
-    const refused = Object.assign(new Error("not permitted"), {
-      code: "EPERM",
-    });
-
-    await expect(
-      fileIsThere(file, async () => await Promise.reject(refused))
-    ).resolves.toBeTruthy();
-  });
+  it.each([
+    ["a file", kept],
+    ["nothing", path.join(home, "Documents", "b.ts")],
+  ])(
+    "leaves the editor to try where it may not look, with %s there",
+    async (_, unseen) => {
+      await expect(fileIsThere(unseen, disk)).resolves.toBeTruthy();
+    }
+  );
 });

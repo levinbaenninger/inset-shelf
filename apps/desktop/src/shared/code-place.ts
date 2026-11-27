@@ -7,9 +7,18 @@ export const PATH_MAX = 4096;
 export const isAncestor = (root: string, file: string): boolean =>
   file.startsWith(root.endsWith("/") ? root : `${root}/`);
 
-/** A whole path from the root, with no step back or in place: where it leads is what it says. */
+/** Half of a character pair on its own: read by code point, only an unpaired one is a surrogate. */
+const HALF_A_PAIR = /\p{Surrogate}/u;
+
+/**
+ * A whole path from the root, with no step back or in place: where it leads
+ * is what it says. It is well-formed text with no NUL, so it can be written
+ * into an address and handed to the disk.
+ */
 const isWholePath = (value: string): boolean =>
   value.startsWith("/") &&
+  !HALF_A_PAIR.test(value) &&
+  !value.includes("\0") &&
   !value.split("/").some((step) => step === "." || step === "..");
 
 const WholePathSchema = z.string().min(1).max(PATH_MAX).refine(isWholePath);
@@ -57,3 +66,7 @@ export const fromHome = (path: string, home: string): string | null => {
 /** What the shelf says when a code item's file has moved or been deleted since it was captured. */
 export const goneMessage = (place: CodePlace): string =>
   `${fileName(place)} is no longer at this path`;
+
+/** What the shelf says when a code item's editor was to open its file and could not, so its folder shows it. */
+export const fellBackMessage = (place: CodePlace, app: string): string =>
+  `Couldn’t open ${fileName(place)} in ${app}, so it is shown in its folder`;

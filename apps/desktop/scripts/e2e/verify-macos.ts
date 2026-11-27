@@ -47,8 +47,9 @@ const logFile = path.join(work, "events.jsonl");
 const sourceBundleId = "ch.inset.e2e.source";
 
 // The source app lives under the repo, not in the temp folder: Launch Services
-// lists an app in a temp folder too, but never opens a scheme with it.
-const sourceHome = path.join(root, "release/e2e", path.basename(work));
+// lists an app in a temp folder too, but never opens a scheme with it. Its
+// folder is the run's own, straight under release, so removing it leaves nothing.
+const sourceHome = path.join(root, "release", path.basename(work));
 const sourceApp = path.join(sourceHome, "source.app");
 
 // The scheme the source app opens files by, as an editor does (E2E_EDITORS in src/main/e2e-log.ts).

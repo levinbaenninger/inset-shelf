@@ -27,7 +27,7 @@ import { chromium } from "playwright";
 import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
 
-import { goneMessage } from "../src/shared/code-place.ts";
+import { fellBackMessage, goneMessage } from "../src/shared/code-place.ts";
 import {
   SHELF_MAX_HEIGHT_DIP,
   SHELF_MIN_WIDTH_DIP,
@@ -7769,6 +7769,13 @@ const codeSource = async (page: Page, words: string) =>
 
 const CODE_PLACE = { file: CODE_FILE, line: 147, root: CODE_ROOT };
 
+/** A file whose name an editor's address would read as a line. */
+const CODE_COLON = {
+  file: `${CODE_ROOT}/a:12.ts`,
+  line: null,
+  root: CODE_ROOT,
+};
+
 /** The code item's source line, as a button: on its row, or in its details. */
 const codeLink = (page: Page) =>
   page
@@ -8005,6 +8012,95 @@ const CODE_SCENES: readonly Scene[] = (
         view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
       },
       name: "item-code-gone",
+    },
+    {
+      // No address opens a path with a colon as itself: the click shows it in its folder, and says so first.
+      check: async (page) => {
+        const source = await codeSource(page, "a:12.ts · inset-shelf");
+
+        if (source?.button !== true) {
+          return "a code file shown in its folder must still be a button";
+        }
+
+        return /\nShow in (?:Finder|Folder)$/u.test(source.title ?? "")
+          ? null
+          : `the tooltip is "${source.title}", which doesn't end with showing the file in its folder`;
+      },
+      data: {
+        view: codeView(codeItem("Code", "a:12.ts — inset-shelf", CODE_COLON)),
+      },
+      name: "item-code-folder",
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 760);
+      },
+      check: async (page) => {
+        const entries = await menuEntries(page);
+
+        const show = entries.find((entry) =>
+          /^Show in (?:Finder|Folder)/u.test(entry)
+        );
+
+        if (entries.some((entry) => entry.startsWith("Open in Code"))) {
+          return `the menu offers ${JSON.stringify(entries)}: Code can't open this file by address`;
+        }
+
+        return show?.endsWith("⌘O") === true
+          ? null
+          : `the menu offers ${JSON.stringify(entries)}, with no "Show in Finder ⌘O"`;
+      },
+      data: {
+        view: codeView(codeItem("Code", "a:12.ts — inset-shelf", CODE_COLON)),
+      },
+      name: "menu-code-folder",
+    },
+    {
+      // Only an editor the shelf has a row for opens a file: any other app's item shows where it is from and opens nothing.
+      check: async (page) => {
+        const source = await codeSource(page, "recall.ts · inset-shelf");
+
+        if (source === null) {
+          return "no source line reads recall.ts · inset-shelf";
+        }
+
+        return source.button
+          ? "an item from an app the shelf has no row for must not open a file"
+          : null;
+      },
+      data: {
+        view: codeView(
+          codeItem("Zed", "recall.ts — inset-shelf", {
+            ...CODE_PLACE,
+            line: null,
+          })
+        ),
+      },
+      name: "item-code-unknown-app",
+    },
+    {
+      act: async (page) => {
+        await codeLink(page).click();
+        await page.locator("[data-sonner-toast]").first().waitFor();
+        await page.waitForTimeout(500);
+      },
+      check: async (page) => {
+        const toast =
+          (await page.locator("[data-sonner-toast]").first().textContent()) ??
+          "";
+
+        return toast.includes("so it is shown in its folder")
+          ? await openedOnce(page)
+          : `the shelf says "${toast}", not that the file is shown in its folder`;
+      },
+      data: {
+        openNotice: {
+          message: fellBackMessage(CODE_PLACE, "Code"),
+          tone: "failed",
+        },
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "item-code-fell-back",
     },
   ] satisfies readonly StressScene[]
 ).map(stress);

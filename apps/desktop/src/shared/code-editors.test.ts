@@ -4,7 +4,9 @@ import {
   CODE_EDITORS,
   codeEditor,
   codeLabel,
+  codeAction,
   codePlace,
+  codeWay,
   lineOfText,
   openAddress,
   quietlyReadable,
@@ -280,6 +282,10 @@ describe(openAddress, () => {
     ["a name that ends like a line", "/Users/anna/p/report:12", null],
     ["a name that ends like a line, at a line", "/Users/anna/p/report:12", 5],
     ["a name that ends like a line and a column", "/Users/anna/p/a:3:9", null],
+    // Code splits the whole path on colons and takes a number wherever one stands alone.
+    ["a number between colons in a name", "/Users/anna/p/a:12:b.ts", null],
+    ["a folder with a colon", "/Users/anna/p:3/src/a.ts", null],
+    ["a colon and no number", "/Users/anna/p/a:b.ts", 4],
     // Code opens a workspace file as a workspace, leaving the window's own.
     ["a workspace file", "/Users/anna/p/all.code-workspace", null],
     ["a workspace file at a line", "/Users/anna/p/all.code-workspace", 4],
@@ -445,5 +451,44 @@ describe(quietlyReadable, () => {
     expect(
       quietlyReadable("/home/anna/Documents/a.ts", "/home/anna", "linux")
     ).toBeTruthy();
+  });
+});
+
+const at = (file: string) => ({ file, line: null, root: null });
+
+describe(codeWay, () => {
+  it("opens a file in the editor it came from", () => {
+    expect(codeWay("Code", at("/Users/anna/p/a.ts"))).toBe("editor");
+  });
+
+  it.each([
+    ["a path with a colon", "/Users/anna/p/a:12.ts"],
+    ["a workspace file", "/Users/anna/p/all.code-workspace"],
+  ])(
+    "shows %s in its folder, since no address opens it as itself",
+    (_, file) => {
+      expect(codeWay("Code", at(file))).toBe("folder");
+    }
+  );
+
+  it.each([
+    ["an app with no row", "Zed"],
+    ["no app", null],
+  ])("has no way to a file for %s", (_, app) => {
+    expect(codeWay(app, at("/Users/anna/p/a.ts"))).toBeNull();
+  });
+
+  it("knows only the editors it is given", () => {
+    expect(codeWay("Code", at("/Users/anna/p/a.ts"), [])).toBeNull();
+  });
+});
+
+describe(codeAction, () => {
+  it.each([
+    ["editor", true, "Open in Code"],
+    ["folder", true, "Show in Finder"],
+    ["folder", false, "Show in Folder"],
+  ] as const)("says what a click does: %s, on a Mac %s", (way, mac, words) => {
+    expect(codeAction("Code", way, mac)).toBe(words);
   });
 });
