@@ -93,6 +93,7 @@ import { lineInFile } from "./code-line";
 import { chatGptThreadLink } from "./codex-threads";
 import { contained } from "./contained";
 import { createContextRecall } from "./context-recall";
+import { COPIED_FILE_TYPES, copiedFilePaths } from "./copied-files";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
 import type { ClipboardContents } from "./copy-gate";
@@ -292,12 +293,6 @@ const decoded = (image: NativeImage): DecodedImage | null => {
 
   return { heightPx: height, png: image.toPNG(), widthPx: width };
 };
-
-/** How a copied file sits on the clipboard: the macOS pasteboard's file URL, or a URI list elsewhere. */
-const COPIED_FILE_TYPES = [
-  'electron application/osclipboard;format="public.file-url"',
-  "text/uri-list",
-] as const;
 
 /** The picture on the clipboard as PNG, else the path of a file copied in Finder or Explorer; null for neither. */
 const readClipboardUpload = async (): Promise<
@@ -1113,6 +1108,69 @@ const start = async (): Promise<void> => {
     toItem: (data) => new ClipboardItem(data),
   });
 
+  /**
+   * Says how adding went, as Double Shift does: once the disk holds what was
+   * added, and naming each file that couldn't be added and why.
+   */
+  const noticeAdded = async (
+    added: number,
+    tried: number,
+    problems: readonly string[],
+    noun: "file" | "picture" = "file"
+  ): Promise<void> => {
+    if (added > 0) {
+      const written = await withinWait(
+        controller.persisted(controller.snapshot().rev),
+        setTimer
+      );
+
+      if (!written.ok) {
+        notify(written.message, "failed");
+
+        return;
+      }
+    }
+
+    const { message, tone } = addedNotice(added, tried, problems, noun);
+
+    notify(message, tone);
+  };
+
+  /** Adds files in the order given; the last one added is shown, and a notice says how it went. Resolves to how many were added. */
+  const addFiles = async (paths: readonly string[]): Promise<number> => {
+    // A file dragged out of the shelf and dropped back in is already there.
+    const outside = paths.filter((filePath) => !staging.contains(filePath));
+    const prepared = await Promise.all(outside.map(attachments.prepareItem));
+    let lastId: ItemId | null = null;
+    let added = 0;
+
+    for (const op of prepared) {
+      if (!("problem" in op)) {
+        const id = controller.apply(op);
+
+        if (id !== null) {
+          lastId = id;
+          added += 1;
+        }
+      }
+    }
+
+    if (lastId !== null) {
+      e2eLog("itemAdded", { itemId: lastId, kind: "file", via: "added" });
+      controller.focus(lastId);
+    }
+
+    if (outside.length > 0) {
+      await noticeAdded(
+        added,
+        outside.length,
+        prepared.flatMap((op) => ("problem" in op ? [op.problem] : []))
+      );
+    }
+
+    return added;
+  };
+
   const keyMonitor = createKeyMonitor();
 
   let capturingSelection = false;
@@ -1147,6 +1205,8 @@ const start = async (): Promise<void> => {
         copy: keyMonitor.copy,
         content: clipboardContent,
         holds: holdsAgainIn,
+        readFiles: async () =>
+          await copiedFilePaths(withFormats(await clipboard.read())),
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
         readText: async () => await clipboard.readText(),
@@ -1175,6 +1235,7 @@ const start = async (): Promise<void> => {
 
       e2eLog("selection", {
         busy: result.kind === "busy",
+        count: result.kind === "files" ? result.paths.length : 0,
         restored: result.restored,
         text: result.kind === "text" ? result.text : "",
         unchecked: result.unchecked,
@@ -1194,7 +1255,7 @@ const start = async (): Promise<void> => {
         offer,
         result.kind === "text"
           ? { kind: "text", text: result.text }
-          : { kind: "none" }
+          : { kind: result.kind }
       );
 
       if (move === "why" && offer !== null) {
@@ -1205,6 +1266,15 @@ const start = async (): Promise<void> => {
 
       if (result.kind === "none") {
         void toggleShelf();
+
+        return;
+      }
+
+      // Files selected in Explorer or Finder are saved as dropping them on the shelf would.
+      if (result.kind === "files") {
+        if ((await addFiles(result.paths)) > 0) {
+          tutorial.complete(SHELF_TASK_IDS.doubleShift);
+        }
 
         return;
       }
@@ -1329,67 +1399,6 @@ const start = async (): Promise<void> => {
 
     if (keysRunning) {
       e2eLog("keysReady");
-    }
-  };
-
-  /**
-   * Says how adding went, as Double Shift does: once the disk holds what was
-   * added, and naming each file that couldn't be added and why.
-   */
-  const noticeAdded = async (
-    added: number,
-    tried: number,
-    problems: readonly string[],
-    noun: "file" | "picture" = "file"
-  ): Promise<void> => {
-    if (added > 0) {
-      const written = await withinWait(
-        controller.persisted(controller.snapshot().rev),
-        setTimer
-      );
-
-      if (!written.ok) {
-        notify(written.message, "failed");
-
-        return;
-      }
-    }
-
-    const { message, tone } = addedNotice(added, tried, problems, noun);
-
-    notify(message, tone);
-  };
-
-  /** Adds files in the order given; the last one added is shown, and a notice says how it went. */
-  const addFiles = async (paths: readonly string[]): Promise<void> => {
-    // A file dragged out of the shelf and dropped back in is already there.
-    const outside = paths.filter((filePath) => !staging.contains(filePath));
-    const prepared = await Promise.all(outside.map(attachments.prepareItem));
-    let lastId: ItemId | null = null;
-    let added = 0;
-
-    for (const op of prepared) {
-      if (!("problem" in op)) {
-        const id = controller.apply(op);
-
-        if (id !== null) {
-          lastId = id;
-          added += 1;
-        }
-      }
-    }
-
-    if (lastId !== null) {
-      e2eLog("itemAdded", { itemId: lastId, kind: "file", via: "added" });
-      controller.focus(lastId);
-    }
-
-    if (outside.length > 0) {
-      await noticeAdded(
-        added,
-        outside.length,
-        prepared.flatMap((op) => ("problem" in op ? [op.problem] : []))
-      );
     }
   };
 
