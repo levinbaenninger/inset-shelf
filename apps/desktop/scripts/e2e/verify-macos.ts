@@ -1120,18 +1120,28 @@ const fateText = (fate: NoticeFate): string => {
  * screen. The accessibility tree can miss a notice that shows for a moment,
  * so its read is only detail.
  */
+/** What the accessibility tree says, as detail only: a tree that can't be read is said so and fails no check. */
+const treeDetail = async (
+  read: () => string | Promise<string>
+): Promise<string> => {
+  try {
+    return await read();
+  } catch {
+    return "could not be read";
+  }
+};
+
 const recordNotice = async (
   check: string,
   message: string,
   mark: number
 ): Promise<void> => {
   const fate = await waitForNotice(message, mark);
-  const seen = await windowShows(message, 2);
 
   record(
     check,
     fate.kind === "shown",
-    `${fateText(fate)}; accessibility tree ${seen ? "saw it" : "did not see it"}`
+    `${fateText(fate)}; accessibility tree ${await treeDetail(async () => ((await windowShows(message, 2)) ? "saw it" : "did not see it"))}`
   );
 };
 
@@ -1174,7 +1184,7 @@ const checkAddedNotice = async (failing: boolean): Promise<void> => {
     record(
       "a paste whose save fails never says Added",
       added.length === 0,
-      `${added.length === 0 ? "no Added notice sent" : JSON.stringify(added.map((event) => event.text))}; accessibility tree ${windowText().includes("Added 1") ? "shows Added 1" : "shows no Added"}`
+      `${added.length === 0 ? "no Added notice sent" : JSON.stringify(added.map((event) => event.text))}; accessibility tree ${await treeDetail(() => (windowText().includes("Added 1") ? "shows Added 1" : "shows no Added"))}`
     );
 
     return;

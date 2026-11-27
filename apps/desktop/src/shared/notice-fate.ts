@@ -1,8 +1,9 @@
 /**
  * What the trial log (src/main/e2e-log.ts) says became of a notice: main
- * logs `noticeSent` in `notify`, and `noticeShown` once the shelf page or
- * the toast window put it on screen. A trial reads this instead of the
- * accessibility tree, which can miss a notice that shows for a moment.
+ * logs `noticeSent` in `notify`, and `noticeShown` once the shelf page has
+ * its row on screen. The toast window reports nothing, so a notice sent its
+ * way stays "sent, not shown". A trial reads this instead of the
+ * accessibility tree, so a miss says which of the three it was.
  */
 export type NoticeFate =
   | { readonly kind: "shown"; readonly via: string }

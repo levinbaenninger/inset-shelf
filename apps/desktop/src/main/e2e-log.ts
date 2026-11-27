@@ -24,7 +24,7 @@ export type E2eEvent =
   | "whyFallback"
   // Recall: the pill showed, with `count` open items from the window in front.
   | "recallShown"
-  // A notice: main sent it (`text`, `tone`, and `via` the shelf page or the toast window), then that one put it on screen.
+  // A notice: main sent it (`text`, `tone`, and `via` the shelf page or the toast window), then the shelf page put it on screen. The toast window reports nothing, so a notice sent its way is never logged as shown.
   | "noticeSent"
   | "noticeShown";
 

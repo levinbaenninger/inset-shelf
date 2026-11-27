@@ -54,15 +54,6 @@ export interface ToastWindow {
 
 const ignore = (): void => undefined;
 
-/** The trial log's record of what the pill put on screen: a notice's words, or the why field taking the keyboard. */
-const logShown = (view: PillBody): void => {
-  if (view.kind === "notice") {
-    e2eLog("noticeShown", { text: view.title, tone: view.tone, via: "toast" });
-  } else if (view.kind === "why" && view.phase === "typing") {
-    e2eLog("whyOpened");
-  }
-};
-
 const cornerNear = (
   pointer: Point<"screen">,
   bounds: Rect<"screen">
@@ -227,7 +218,10 @@ export const createToastWindow = (options: {
           showInPlace(effect.view);
         }
 
-        logShown(effect.view);
+        if (effect.view.kind === "why" && effect.view.phase === "typing") {
+          e2eLog("whyOpened");
+        }
+
         break;
       }
 
