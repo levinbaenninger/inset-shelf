@@ -976,6 +976,24 @@ const noticeShow = (page: Page) =>
     .locator("[data-sonner-toast]")
     .getByRole("button", { exact: true, name: "Show" });
 
+/** The shelf as main sends it after the screenshot's item (11) changed: moved to `section`, or deleted (null). */
+const shotChanged = async (
+  page: Page,
+  section: string | null
+): Promise<void> => {
+  const items = ITEMS.flatMap((entry) =>
+    entry.id !== uuid(11)
+      ? [entry]
+      : section === null
+        ? []
+        : [{ ...entry, sectionId: section }]
+  );
+
+  await page.evaluate(
+    `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), doc: { ...DOC, items } })})`
+  );
+};
+
 /** An item's details are on screen. */
 const detailsShown = async (page: Page): Promise<boolean> =>
   await page.getByRole("button", { name: "Back to the list" }).isVisible();
@@ -10002,6 +10020,55 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-screenshot-keeps-details-show",
+    page: "shelf",
+  },
+  {
+    // Back on the list, the screenshot moves to a folded section before Show: Show finds it where it is now.
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+      await page.getByRole("button", { name: "Back to the list" }).click();
+      await page.locator("[data-details-view]").waitFor({ state: "detached" });
+      await page.locator(`button[title="Fold “Inbox” away"]`).click();
+      await shotChanged(page, INBOX);
+      await noticeShow(page).click();
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => {
+      const shown = await item(page, 11).isVisible();
+      const selected =
+        shown && (await item(page, 11).getAttribute("aria-current")) === "true";
+
+      return selected
+        ? null
+        : `Show left the screenshot's item, moved to a folded section, ${shown ? "unselected" : "out of view"}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-show-moved",
+    page: "shelf",
+  },
+  {
+    // The screenshot is deleted before Show: A's details stay as they are, and the shelf says it is gone.
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+      await shotChanged(page, null);
+      await noticeShow(page).click();
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => {
+      const shown = await detailsShown(page);
+      const gone = await page
+        .locator("[data-sonner-toast]")
+        .filter({ hasText: "no longer on the shelf" })
+        .count();
+
+      return shown && gone === 1
+        ? null
+        : `Show on a deleted screenshot ${shown ? "kept" : "closed"} A's details, and ${gone === 1 ? "said" : "didn't say"} it is gone`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-show-gone",
     page: "shelf",
   },
   {
