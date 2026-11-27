@@ -40,3 +40,10 @@ export const reportSaveError = async <Result>(
 /** Any failed operation's cause: a common disk problem as its sentence, anything else in its own words. */
 export const causeText = (code: string | null, message: string): string =>
   SENTENCES.get(code ?? "") ?? message;
+
+/** What a thrown error says: a common disk problem as its sentence (Round 7), anything else in its own words. */
+export const errorMessage = (cause: unknown): string =>
+  causeText(
+    FsErrorSchema.safeParse(cause).data?.code ?? null,
+    cause instanceof Error ? cause.message : "Unknown error"
+  );

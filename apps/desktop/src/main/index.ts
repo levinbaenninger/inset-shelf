@@ -131,7 +131,7 @@ import {
   nativeDialog,
   withinWait,
 } from "./quit-hold";
-import { causeText, FsErrorSchema, reportSaveError } from "./save-error";
+import { errorMessage, reportSaveError } from "./save-error";
 import { createShotSaves } from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
 import { createScreenshotWatcher } from "./screenshot-watcher";
@@ -215,13 +215,6 @@ const keyPermission = (running: boolean, trusted: boolean): Permission => {
 const logRejected = (channel: string, reason: string): void => {
   console.warn(`Rejected IPC on ${channel}: ${reason}`);
 };
-
-/** A common disk problem reads as its sentence (Round 7); anything else in its own words. */
-const errorMessage = (cause: unknown): string =>
-  causeText(
-    FsErrorSchema.safeParse(cause).data?.code ?? null,
-    cause instanceof Error ? cause.message : "Unknown error"
-  );
 
 const trayIconPath = (): string => {
   const base = app.isPackaged
@@ -2258,12 +2251,17 @@ const start = async (): Promise<void> => {
 
   // The card's own file dropped back on the shelf goes through the card's add, so a screenshot keeps one place.
   const shotDrop = createShotDrop({
-    addFiles: (paths) => {
-      void addFiles(paths);
-    },
+    addFiles,
     added: shotLanded,
     attachFiles: async (id, paths) =>
       await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
+    dragFailed: (why) => {
+      notify(`The screenshot couldn’t be dragged: ${why}`, "failed");
+    },
+    dropFailed: (why) => {
+      console.warn(`A drop on the shelf failed: ${why}`);
+      notify(`The drop couldn’t be finished: ${why}`, "failed");
+    },
     dropped: (to) => {
       e2eLog("shotDropped", { to });
     },

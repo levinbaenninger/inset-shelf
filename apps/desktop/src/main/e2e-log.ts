@@ -84,8 +84,13 @@ export const e2eLog = (event: E2eEvent, details: E2eDetails = {}): void => {
     window.isVisible()
   ).length;
 
-  appendFileSync(
-    logFile,
-    `${JSON.stringify({ event, t: Date.now(), ...details, windows })}\n`
-  );
+  // A trial's log is for the trial: a disk that refuses it never stops what the app was doing.
+  try {
+    appendFileSync(
+      logFile,
+      `${JSON.stringify({ event, t: Date.now(), ...details, windows })}\n`
+    );
+  } catch (error) {
+    console.warn(`The test log couldn’t be written: ${String(error)}`);
+  }
 };
