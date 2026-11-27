@@ -402,6 +402,79 @@ const annotating = async (app: Awaited<ReturnType<typeof setup>>) => {
   };
 };
 
+/**
+ * The screenshot card's item, and what the shelf hears as its Annotate
+ * closes: the window's hide follows every close, as in main.
+ */
+const cardShot = async (app: Awaited<ReturnType<typeof setup>>) => {
+  const file = await app.store.writeAttachment(new Uint8Array([1, 2, 3]));
+
+  const id = app.controller.apply({
+    context: null,
+    image: { file, heightPx: 3, pixelsPerDip: 1, widthPx: 4 },
+    pins: [],
+    source: null,
+    type: "addImage",
+    via: "screenshot",
+  });
+
+  if (id === null) {
+    throw new Error("not added");
+  }
+
+  const shown: string[] = [];
+  // The window's hide, as main hears of it: after Save, Cancel or its close button alike.
+  const window = { hidden: (): void => {} };
+
+  const saves = savesReading(app, {
+    close: () => {
+      window.hidden();
+    },
+    focus: () => {
+      shown.push("brought into view");
+    },
+    shotClosed: () => {
+      shown.push("announced as closed");
+    },
+    shotSaved: () => {
+      shown.push("announced as saved");
+    },
+  });
+
+  window.hidden = saves.hidden;
+
+  /** Annotate opens the image, from the card or not. */
+  const annotate = async (screenshot: boolean) => {
+    const item = app.controller.item(id);
+
+    if (item?.kind !== "image") {
+      throw new Error("no image");
+    }
+
+    saves.open(
+      screenshot ? { id, kind: "item", screenshot } : { id, kind: "item" },
+      await saves.opening(item)
+    );
+  };
+
+  /** Save, or Retry in a held quit (`forQuit`), puts the marks on it and closes the window. */
+  const save = async (forQuit = false) => {
+    if (forQuit) {
+      saves.forQuit(new AbortController().signal);
+    }
+
+    await saves.save({
+      copy: false,
+      forQuit,
+      marks: HELLO,
+      pins: [],
+      png: PNG,
+    });
+  };
+
+  return { annotate, id, save, saves, shown };
+};
+
 describe(createDrawingSaves, () => {
   let dir = "";
 
@@ -782,67 +855,7 @@ describe(createDrawingSaves, () => {
   });
 
   it("leaves the shelf to main's notice once the screenshot card's Annotate closes, saved or not, telling main which, and brings any other annotated image into view", async () => {
-    const app = await setup(dir);
-    const file = await app.store.writeAttachment(new Uint8Array([1, 2, 3]));
-
-    const id = app.controller.apply({
-      context: null,
-      image: { file, heightPx: 3, pixelsPerDip: 1, widthPx: 4 },
-      pins: [],
-      source: null,
-      type: "addImage",
-      via: "screenshot",
-    });
-
-    if (id === null) {
-      throw new Error("not added");
-    }
-
-    const shown: string[] = [];
-    // The window's hide, as main hears of it: after Save, Cancel or its close button alike.
-    const window = { hidden: (): void => {} };
-
-    const saves = savesReading(app, {
-      close: () => {
-        window.hidden();
-      },
-      focus: () => {
-        shown.push("brought into view");
-      },
-      shotClosed: () => {
-        shown.push("announced as closed");
-      },
-      shotSaved: () => {
-        shown.push("announced as saved");
-      },
-    });
-
-    window.hidden = saves.hidden;
-
-    /** Annotate opens the image, from the card or not. */
-    const annotate = async (screenshot: boolean) => {
-      const item = app.controller.item(id);
-
-      if (item?.kind !== "image") {
-        throw new Error("no image");
-      }
-
-      saves.open(
-        screenshot ? { id, kind: "item", screenshot } : { id, kind: "item" },
-        await saves.opening(item)
-      );
-    };
-
-    /** Save puts the marks on it and closes the window. */
-    const save = async () => {
-      await saves.save({
-        copy: false,
-        forQuit: false,
-        marks: HELLO,
-        pins: [],
-        png: PNG,
-      });
-    };
+    const { annotate, save, saves, shown } = await cardShot(await setup(dir));
 
     await annotate(true);
     await save();
@@ -858,6 +871,15 @@ describe(createDrawingSaves, () => {
       "announced as closed",
       "brought into view",
     ]);
+  });
+
+  it("announces the screenshot card's item once when Retry in a held quit saves its marks", async () => {
+    const { annotate, save, shown } = await cardShot(await setup(dir));
+
+    await annotate(true);
+    await save(true);
+
+    expect(shown).toStrictEqual(["announced as saved"]);
   });
 
   describe("the marks kept beside the picture (feedback round 13)", () => {
