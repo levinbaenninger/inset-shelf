@@ -1,5 +1,12 @@
 import { once } from "node:events";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setImmediate } from "node:timers/promises";
@@ -1774,6 +1781,7 @@ const dropping = (
     },
     saves: card.saves,
     stage: (_, folder) => path.join(STAGING, folder, "Screenshot.png"),
+    unstage: () => {},
     ...deps,
   });
 
@@ -2185,6 +2193,36 @@ describe("the card's file dropped on the shelf", () => {
       dropped: [],
       plain: [{ call: "attachFiles", id: card.note, paths: [first] }],
     });
+  });
+
+  it("removes a drag's file once its drop came back to the shelf, and keeps the file of a drag that went elsewhere, which another app may still read", async () => {
+    const card = setup();
+    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
+
+    card.saves.show(shot(1));
+
+    const { drop } = dropping(card, {
+      stage: (_, each) => {
+        const file = path.join(folder, each, "Screenshot.png");
+
+        mkdirSync(path.dirname(file));
+        writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
+
+        return file;
+      },
+      unstage: (each) => {
+        rmSync(path.join(folder, each), { force: true, recursive: true });
+      },
+    });
+
+    const elsewhere = drop.drag(1)?.file ?? "";
+    const back = drop.drag(1)?.file ?? "";
+
+    await drop.onItem(card.note, [back]);
+    expect({
+      back: existsSync(back),
+      elsewhere: existsSync(elsewhere),
+    }).toStrictEqual({ back: false, elsewhere: true });
   });
 
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {

@@ -2267,6 +2267,16 @@ const start = async (): Promise<void> => {
     },
     saves: shotSaves,
     stage: (shot, folder) => staging.write(folder, shot.name, shot.png),
+    unstage: (folder) => {
+      try {
+        staging.clear(folder);
+      } catch (error) {
+        // Windows keeps a file another app has open; the sweep at quit and at startup takes it.
+        console.warn(
+          `A dragged screenshot's copy couldn't be removed: ${errorMessage(error)}`
+        );
+      }
+    },
   });
 
   const attachmentHandlers = {
