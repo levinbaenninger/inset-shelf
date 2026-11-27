@@ -85,6 +85,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   const waits = new Set<() => void>();
   // Filled by holdWrite(): the next writes, in order, each stay on the disk's way until the test ends it.
   const heldWrites: Promise<WriteResult>[] = [];
+  // Filled by holdPicture(): the next picture files, in order, each stay unwritten until the test ends it.
+  const heldPictures: Promise<unknown>[] = [];
   const attached: ItemId[] = [];
   const events: string[] = [];
   const disk: ShelfDoc[] = [];
@@ -223,6 +225,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     stored: (id) => controller.stored(id),
     writePicture: async () => {
       await turn();
+      await heldPictures.shift();
 
       if (attachmentWrites !== null) {
         throw attachmentWrites;
@@ -294,6 +297,16 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       for (const run of waits) {
         run();
       }
+    },
+    /** Keeps the next picture file no call before this one holds unwritten, until the returned function is called. */
+    holdPicture: (): (() => void) => {
+      const file = new EventTarget();
+
+      heldPictures.push(once(file, "written"));
+
+      return () => {
+        file.dispatchEvent(new Event("written"));
+      };
     },
     /** Keeps the next write no call before this one holds on the disk's way, until the returned function ends it, with how it went. */
     holdWrite: (): ((result: WriteResult) => void) => {
@@ -2097,6 +2110,74 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
 
     end({ ok: true });
     await settled(card);
+  });
+
+  it("adds nothing anew while Discard changes can still bring the screenshot back to its note, though neither the disk nor a write on its way holds it there", async () => {
+    const card = await refused("item");
+    const tile = { attachmentId: tileOf(card), id: card.note };
+
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+    card.failWrites({ ok: true });
+    await settled(card);
+
+    const writePicture = card.holdPicture();
+    const adding = card.saves.addToShelf(1);
+
+    // The user's Undo, saved, while the picture file is written; then the tile is off again, and the disk refuses that.
+    card.controller.apply({ ...tile, type: "restoreAttachment" });
+    await settled(card);
+    card.failWrites(DISK_REFUSES);
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+    await settled(card);
+
+    // The note's deletion is on the disk's way when Undo brings the note back and Discard changes its tile, which is then removed once more.
+    const endDeletion = card.holdWrite();
+
+    card.controller.apply({ id: card.note, type: "remove" });
+    await turn();
+    card.controller.apply({ id: card.note, type: "undoRemove" });
+
+    const offeredDiscard = card.controller.view().notSaved;
+
+    card.controller.discard(card.note);
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+    endDeletion({ ok: true });
+    await settled(card);
+
+    // The disk holds no note now, and no write is on its way: only Discard changes still holds the tile.
+    const before = {
+      notSaved: card.controller.view().notSaved,
+      shown: card.shown(),
+      stored: card.controller.stored(card.note),
+    };
+
+    writePicture();
+    await expect(adding).resolves.toBeNull();
+    await settled(card);
+    card.controller.discard(card.note);
+    card.failWrites({ ok: true });
+    // The shelf's own Retry.
+    await settled(card);
+
+    expect({
+      before,
+      dropped: card.dropped.length,
+      notices: card.notices,
+      offeredDiscard,
+      shown: card.shown(),
+      written: written(card),
+    }).toStrictEqual({
+      before: {
+        notSaved: [{ id: card.note, undo: "discard" }],
+        shown: { attached: 0, items: 0 },
+        stored: undefined,
+      },
+      dropped: 1,
+      notices: [SHOT_REMOVAL_UNSAVED],
+      offeredDiscard: [{ id: card.note, undo: "discard" }],
+      shown: { attached: 1, items: 0 },
+      written: { doubled: [], last: { attached: 1, items: 0 } },
+    });
   });
 
   it("adds it to the shelf, once, as soon as the disk holds the removal", async () => {
