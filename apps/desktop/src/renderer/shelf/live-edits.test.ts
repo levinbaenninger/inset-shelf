@@ -109,6 +109,27 @@ describe(createLiveEdits, () => {
     expect([sent, counts]).toStrictEqual([[], []]);
   });
 
+  it("sends nothing for a captured selection left as it opened, though it ends in a line break", () => {
+    const { edits } = setup();
+    const sent: string[] = [];
+    const original = "const total = sum(items);\n";
+
+    const send = (text: string): void => {
+      sent.push(text);
+    };
+
+    const closed = edits.open({ original, send });
+    const undone = edits.open({ original, send });
+
+    closed.finish(original);
+    undone.change(`${original}x`);
+    undone.change(original);
+    undone.flush();
+    undone.finish(original);
+
+    expect(sent).toStrictEqual([]);
+  });
+
   it("sends the last words once, however the field ends", () => {
     const { edit, edits, sent } = setup();
 

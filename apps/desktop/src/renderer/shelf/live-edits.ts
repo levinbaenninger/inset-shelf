@@ -81,6 +81,10 @@ export const createLiveEdits = (deps: {
       let latest = original;
       let cancelTimer: (() => void) | null = null;
 
+      // The words as they go to main: trimmed and cut to fit, but the item's own words, left as they opened, go back as they were.
+      const settled = (markdown: string): string =>
+        markdown === original ? original : clean(markdown);
+
       const stop = (): void => {
         cancelTimer?.();
         cancelTimer = null;
@@ -102,7 +106,7 @@ export const createLiveEdits = (deps: {
 
         stop();
 
-        const text = clean(latest);
+        const text = settled(latest);
 
         // An emptied field sends nothing until it is left.
         if (text !== "") {
@@ -130,7 +134,7 @@ export const createLiveEdits = (deps: {
           latest = markdown;
           stop();
 
-          const text = clean(markdown);
+          const text = settled(markdown);
 
           sendText(text === "" ? original : text);
         },
