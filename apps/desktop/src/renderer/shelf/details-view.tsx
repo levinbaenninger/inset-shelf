@@ -459,7 +459,10 @@ const StepsEditor = ({
 
   // The circle, the words and the × each sit in a box one line tall (h-7), so they share a centre line, typed in or not.
   return (
-    <ul className={cn(SURFACE, "flex flex-col px-2 py-1.5")} ref={listRef}>
+    <ul
+      className={cn(SURFACE, "flex flex-col px-2 py-1.5 empty:hidden")}
+      ref={listRef}
+    >
       {steps.map((step, index) => (
         <li className="group/step flex items-start gap-2" key={step.id}>
           <span className="flex h-7 shrink-0 items-center">
@@ -487,6 +490,12 @@ const StepsEditor = ({
               step.done && "text-muted-foreground line-through"
             )}
             maxLength={STEP_TEXT_MAX}
+            // A step left untyped goes, so Add step stays the one way to add one; not when only the window lost focus.
+            onBlur={() => {
+              if (step.text.trim() === "" && document.hasFocus()) {
+                onChange(steps.filter((other) => other.id !== step.id));
+              }
+            }}
             onChange={(event) => {
               markRemoved(false);
               onChange(
