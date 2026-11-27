@@ -20,7 +20,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 
 import { saveErrorText } from "../../src/main/save-error.ts";
-import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
+import { SHELF_HEIGHT_DIP } from "../../src/shared/geometry.ts";
 import { noticeFate } from "../../src/shared/notice-fate.ts";
 import type { NoticeFate } from "../../src/shared/notice-fate.ts";
 
@@ -628,14 +628,15 @@ const checkShelfStaysInFront = async (): Promise<void> => {
       ? JSON.stringify(bounds)
       : "the tray is out of reach on this desktop; shown with the shortcut"
   );
-  const height = Math.min(target.height, SHELF_MAX_HEIGHT_DIP);
+  // One height however the shelf opens; centred on the window unless that would leave the screen's top.
+  const centred = target.y + (target.height - SHELF_HEIGHT_DIP) / 2;
 
   record(
-    "the shelf docks beside the window in front, centred on its height",
+    "the shelf docks beside the window in front, centred on its height, at its one height",
     bounds !== undefined &&
       bounds.x === target.x + target.width + 8 &&
-      Math.abs(bounds.y - (target.y + (target.height - height) / 2)) <= 1 &&
-      bounds.height === height,
+      (Math.abs(bounds.y - centred) <= 1 || bounds.y > centred) &&
+      bounds.height === SHELF_HEIGHT_DIP,
     `window ${JSON.stringify(target)}`
   );
   await delay(500);

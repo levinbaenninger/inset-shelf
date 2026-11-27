@@ -16,13 +16,13 @@ import {
 describe(dockShelf, () => {
   const work = rect<"screen">(0, 25, 1440, 850);
 
-  it("docks beside the right edge of the window, at its top and height", () => {
+  it("docks beside the right edge of the window, centred on its height, 620 tall", () => {
     expect(dockShelf(rect<"screen">(100, 100, 800, 600), work)).toStrictEqual(
-      rect(908, 100, 340, 600)
+      rect(908, 90, 340, 620)
     );
   });
 
-  it("centres a shelf at most 620 tall on a taller window", () => {
+  it("centres the shelf on a taller window", () => {
     expect(dockShelf(rect<"screen">(100, 25, 800, 850), work)).toStrictEqual(
       rect(908, 140, 340, 620)
     );
@@ -30,11 +30,11 @@ describe(dockShelf, () => {
 
   it("docks to the left when there is no room on the right", () => {
     expect(dockShelf(rect<"screen">(500, 100, 900, 600), work)).toStrictEqual(
-      rect(152, 100, 340, 600)
+      rect(152, 90, 340, 620)
     );
   });
 
-  it("sits inside the right edge of a window that fills the screen, centred, at most 620 tall", () => {
+  it("sits inside the right edge of a window that fills the screen, centred, 620 tall", () => {
     expect(dockShelf(rect<"screen">(0, 25, 1440, 850), work)).toStrictEqual(
       rect(1092, 140, 340, 620)
     );
@@ -69,7 +69,7 @@ describe(dockShelf, () => {
           desktop,
           WINDOWS_FRAME_INSET_DIP
         )
-      ).toStrictEqual(rect(659, 100, 340, 593));
+      ).toStrictEqual(rect(659, 87, 340, 620));
     });
 
     it("sits inside a maximized window, whose bounds overhang the screen", () => {
@@ -83,14 +83,26 @@ describe(dockShelf, () => {
     });
   });
 
-  it("keeps a short window's shelf tall enough and on screen", () => {
+  it("keeps a short window's shelf at the one height, on screen", () => {
     expect(dockShelf(rect<"screen">(100, 700, 400, 120), work)).toStrictEqual(
-      rect(508, 515, 340, 360)
+      rect(508, 255, 340, 620)
     );
   });
 
   it("opens at the right without a window, centred on the screen's height", () => {
-    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 170, 340, 560));
+    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 140, 340, 620));
+  });
+
+  it("opens at one height however it was opened", () => {
+    const heights = [
+      null,
+      rect<"screen">(100, 100, 800, 600),
+      rect<"screen">(100, 25, 800, 850),
+      rect<"screen">(300, 200, 500, 420),
+      rect<"screen">(0, 25, 1440, 850),
+    ].map((target) => dockShelf(target, work).height);
+
+    expect(new Set(heights)).toStrictEqual(new Set([620]));
   });
 });
 

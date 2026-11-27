@@ -45,10 +45,13 @@ export const SHELF_WIDTH_DIP = 340;
 /** As narrow as the shelf's window can be dragged. */
 export const SHELF_MIN_WIDTH_DIP = 300;
 export const SHELF_MIN_HEIGHT_DIP = 360;
-export const SHELF_DEFAULT_HEIGHT_DIP = 560;
 
-/** A tall window still gets a shelf of a comfortable height, centred beside it. */
-export const SHELF_MAX_HEIGHT_DIP = 620;
+/**
+ * The shelf opens at this height whichever way it was opened, beside a
+ * window of any height or with none; only a screen too short for it makes
+ * it shorter.
+ */
+export const SHELF_HEIGHT_DIP = 620;
 
 /** Space between the shelf and the window it docks to, and to the screen edge. */
 export const SHELF_GAP_DIP = 8;
@@ -66,10 +69,9 @@ const centredTop = (top: number, extent: number, height: number): number =>
 /**
  * Docks the shelf to the window in front: beside its right edge, else beside
  * its left edge, else inside its right edge when it fills the screen. It is
- * centred on the window's height, and as tall as the window up to
- * SHELF_MAX_HEIGHT_DIP; inside the window it keeps a gap from its edges as it
- * does from the right. Without a window it opens at the right of the work
- * area, centred on its height. `frameInset` is the invisible border included
+ * centred on the window's height and kept on screen. Without a window it
+ * opens at the right of the work area, centred on its height. It is always
+ * SHELF_HEIGHT_DIP tall, less the gaps on a screen too short for that. `frameInset` is the invisible border included
  * in the target's bounds, so the visible gap stays SHELF_GAP_DIP.
  */
 export const dockShelf = (
@@ -80,13 +82,12 @@ export const dockShelf = (
   const width = Math.min(SHELF_WIDTH_DIP, workArea.width);
   const right = workArea.x + workArea.width;
   const bottom = workArea.y + workArea.height;
+  const height = Math.min(
+    SHELF_HEIGHT_DIP,
+    workArea.height - 2 * SHELF_GAP_DIP
+  );
 
   if (target === null) {
-    const height = Math.min(
-      SHELF_DEFAULT_HEIGHT_DIP,
-      workArea.height - 2 * SHELF_GAP_DIP
-    );
-
     return rect(
       Math.max(workArea.x, right - width - SHELF_GAP_DIP),
       centredTop(workArea.y, workArea.height, height),
@@ -96,9 +97,6 @@ export const dockShelf = (
   }
 
   const visibleHeight = target.height - frameInset;
-  const minHeight = Math.min(SHELF_MIN_HEIGHT_DIP, workArea.height);
-  const maxHeight = Math.min(SHELF_MAX_HEIGHT_DIP, workArea.height);
-  const height = clamp(visibleHeight, minHeight, maxHeight);
 
   const y = clamp(
     centredTop(target.y, visibleHeight, height),
@@ -122,17 +120,12 @@ export const dockShelf = (
 
   const top = Math.max(target.y, workArea.y) + SHELF_GAP_DIP;
   const end = Math.min(target.y + visibleHeight, bottom) - SHELF_GAP_DIP;
-  const insideHeight = clamp(end - top, minHeight, height);
 
   return rect(
     clamp(inside, workArea.x, right - width),
-    clamp(
-      centredTop(top, end - top, insideHeight),
-      workArea.y,
-      bottom - insideHeight
-    ),
+    clamp(centredTop(top, end - top, height), workArea.y, bottom - height),
     width,
-    insideHeight
+    height
   );
 };
 
