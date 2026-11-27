@@ -95,6 +95,23 @@ const dashesOf = (
   return own === undefined ? TITLE_DASHES : [own, ...TITLE_DASHES];
 };
 
+/** The cleaned title's parts, split on the dash the app's titles use; none without that dash. */
+const partsOf = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): readonly string[] => {
+  const clean = cleanTitle(title, app);
+
+  const dash = dashesOf(editor, app).find(
+    (each) => clean?.includes(each) === true
+  );
+
+  return clean === null || dash === undefined
+    ? []
+    : clean.split(dash).map((each) => each.trim());
+};
+
 /**
  * The file's and the project's name in a window title, by the editor's row.
  * A title with fewer parts than the row names gives neither: an editor drops
@@ -105,16 +122,7 @@ export const titleParts = (
   title: string | null,
   app: string | null
 ): TitleParts => {
-  const clean = cleanTitle(title, app);
-
-  const dash = dashesOf(editor, app).find(
-    (each) => clean?.includes(each) === true
-  );
-
-  const parts =
-    clean === null || dash === undefined
-      ? []
-      : clean.split(dash).map((each) => each.trim());
+  const parts = partsOf(editor, title, app);
 
   const named = (part: TitlePart): string | null => {
     const text =
@@ -129,6 +137,21 @@ export const titleParts = (
 
   return { file: named("file"), project: named("project") };
 };
+
+/**
+ * The file's and the project's name for showing: only from a title that
+ * holds exactly the row's parts. With more, a dash may sit inside a name or
+ * a location may follow the project, and the title alone can't say which, so
+ * neither is given and nothing wrong is shown.
+ */
+export const shownTitleParts = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): TitleParts =>
+  partsOf(editor, title, app).length === editor.title.length
+    ? titleParts(editor, title, app)
+    : { file: null, project: null };
 
 /**
  * Which of a file's folders the title names as the project: the deepest one
@@ -201,7 +224,8 @@ export interface CodeLabel {
   readonly project: string | null;
   /**
    * Where the file is, for a tooltip: from the home folder as "~/…". Without
-   * a known home, only the part inside the project, so no user name shows.
+   * a known home, or for a file outside it, only the part inside the project,
+   * so no user name shows.
    */
   readonly path: string;
 }
@@ -213,9 +237,8 @@ export const codeLabel = (place: CodePlace, home: string | null): CodeLabel => {
   return {
     file: atLine(fileName(place), place),
     path:
-      home === null
-        ? pathInProject(place)
-        : (fromHome(place.file, home) ?? place.file),
+      (home === null ? null : fromHome(place.file, home)) ??
+      pathInProject(place),
     project: root === "" ? null : root.slice(root.lastIndexOf("/") + 1),
   };
 };

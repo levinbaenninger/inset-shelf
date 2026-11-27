@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   Clamp,
-  tooltipEndingWith,
+  TOOLTIP_MAX,
   tooltipText,
   Truncated,
   useCut,
@@ -134,30 +134,60 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** Where a click on the source line leads: what it opens, and the action it takes, which the tooltip never cuts. */
+/** Where a click on the source line leads. */
 interface Leads {
-  readonly to: readonly (string | null)[];
+  /** The page it opens, shown unless the line already says it. */
+  readonly to: string | null;
+  /** The file it is from, from home: it keeps room of its own in the tooltip, and its end. */
+  readonly path: string | null;
+  /** What a click does, which the tooltip never cuts. */
   readonly action: string | null;
 }
 
-/** The source line's tooltip: the whole line when it shows cut, then where it leads (the page, the file), then what a click does, 300 characters in all; null when it would only repeat what shows. */
+/** The least of a file's path a tooltip keeps, however long the line beside it. */
+const PATH_TOOLTIP_MIN = 60;
+
+/** `text` in `room` characters, losing its start: a path's end names the file. */
+const endOf = (text: string, room: number): string =>
+  text.length > room ? `…${text.slice(1 - room)}` : text;
+
+/**
+ * The source line's tooltip: the whole line when it shows cut, then where it
+ * leads (the page, or the file), then what a click does, 300 characters in
+ * all; undefined when it would only repeat what shows. A file's path is never
+ * pushed out by a long line, and loses its start, never the file's name.
+ */
 const sourceTitle = (
   shown: string,
-  { action, to }: Leads,
+  { action, path, to }: Leads,
   cut: boolean
 ): string | undefined => {
-  const lines = [
-    ...(cut ? [shown] : []),
-    ...to.filter((lead) => lead !== null && lead !== shown),
-  ];
+  const last = action === null || action === shown ? [] : [action];
 
-  if (action === null || action === shown) {
-    return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
+  const room =
+    TOOLTIP_MAX - last.reduce((sum, each) => sum + each.length + 1, 0);
+
+  if (path === null || path === shown) {
+    const lines = [
+      ...(cut ? [shown] : []),
+      ...(to === null || to === shown ? [] : [to]),
+    ];
+
+    return lines.length === 0
+      ? last[0]
+      : [tooltipText(lines.join("\n"), room), ...last].join("\n");
   }
 
-  return lines.length === 0
-    ? action
-    : tooltipEndingWith(lines.join("\n"), action);
+  const where = endOf(
+    path,
+    cut ? Math.max(PATH_TOOLTIP_MIN, room - 1 - shown.length) : room
+  );
+
+  return [
+    ...(cut ? [tooltipText(shown, room - 1 - where.length)] : []),
+    where,
+    ...last,
+  ].join("\n");
 };
 
 /** Where a click on the source line leads: the page, the app, or the file (from home) in its editor. */
@@ -167,12 +197,12 @@ const leadsTo = (
   code: SourceLabel["code"]
 ): Leads => {
   if (app === null) {
-    return { action: null, to: [context.url] };
+    return { action: null, path: null, to: context.url };
   }
 
   return context.code === null
-    ? { action: `Open ${app}`, to: [] }
-    : { action: `Open in ${app}`, to: [code?.path ?? null] };
+    ? { action: `Open ${app}`, path: null, to: null }
+    : { action: `Open in ${app}`, path: code?.path ?? null, to: null };
 };
 
 /** The user's home folder, from the shelf's view: a code item's path shows from "~". */
@@ -209,7 +239,7 @@ export const SourceLine = ({
         ref={plain}
         title={sourceTitle(
           label,
-          { action: null, to: [code?.path ?? null] },
+          { action: null, path: code?.path ?? null, to: null },
           plainCut
         )}
       >
@@ -271,7 +301,11 @@ const LinkRow = ({
         onOpenLink(link.url);
       }}
       ref={ref}
-      title={sourceTitle(link.text, { action: null, to: [link.url] }, cut)}
+      title={sourceTitle(
+        link.text,
+        { action: null, path: null, to: link.url },
+        cut
+      )}
       type="button"
     >
       <HugeiconsIcon

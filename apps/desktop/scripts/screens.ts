@@ -7704,7 +7704,8 @@ const CODE_FILE = `${CODE_ROOT}/apps/desktop/src/shared/recall.ts`;
 const CODE_TOOLTIP =
   "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
 
-const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(4)}Übersicht.tsx`;
+// Long enough that the line and the path together overrun a tooltip, and short enough that the path's room holds the name whole.
+const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(2)}Übersicht.tsx`;
 
 const CODE_LONG_FOLDERS =
   "packages/kundenportal/src/features/rechnungen/ansichten";
@@ -7819,12 +7820,18 @@ const codeChecks = async (
     return `the tooltip is "${source.title}", which doesn't end "Open in Code"`;
   }
 
-  // The tooltip's 300 characters may cut the path's end, never its start.
+  // A long path loses its start to "…", never its end: the file's whole name stays.
+  const name = tooltip?.slice(tooltip.lastIndexOf("/") + 1) ?? "";
+
   const pathLine = source.title
     ?.split("\n")
-    .find((line) => tooltip?.startsWith(line.replace(/…$/u, "")) === true);
+    .find((line) =>
+      line.startsWith("…")
+        ? line.endsWith(name) && tooltip?.endsWith(line.slice(1)) === true
+        : line === tooltip
+    );
 
-  if (tooltip !== null && pathLine?.startsWith("~/") !== true) {
+  if (tooltip !== null && pathLine === undefined) {
     return `the tooltip is "${source.title}", not "${tooltip}"`;
   }
 

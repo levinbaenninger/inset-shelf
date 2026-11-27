@@ -236,17 +236,27 @@ describe(codeLabel, () => {
     }
   );
 
-  it("shows a file outside the home folder as it is", () => {
-    expect(
-      codeLabel(
-        { file: "/opt/src/proj/a.ts", line: null, root: "/opt/src/proj" },
-        "/Users/anna"
-      ).path
-    ).toBe("/opt/src/proj/a.ts");
-  });
+  it.each([
+    ["/opt/src/proj/lib/a.ts", "/opt/src/proj"],
+    // The same disk by another name: the home folder's path doesn't start it.
+    [
+      "/System/Volumes/Data/Users/anna/proj/lib/a.ts",
+      "/System/Volumes/Data/Users/anna/proj",
+    ],
+  ])(
+    "shows %s, outside the home folder, by its path inside the project, never whole",
+    (outside, folder) => {
+      expect(
+        codeLabel({ file: outside, line: null, root: folder }, "/Users/anna")
+          .path
+      ).toBe("lib/a.ts");
+    }
+  );
 
   it("writes no ~ for a home folder whose name only starts the same", () => {
-    expect(codeLabel({ file, line: null, root }, "/Users/an").path).toBe(file);
+    expect(codeLabel({ file, line: null, root }, "/Users/an").path).toBe(
+      "apps/desktop/src/shared/recall.ts"
+    );
   });
 });
 
