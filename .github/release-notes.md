@@ -8,5 +8,3 @@ Download Inset Shelf for your platform below. The [installation guide](https://i
 | Windows, Arm | `inset-shelf-*-win-arm64.zip` (portable) |
 
 The installers are also attached under their versioned names, `inset-shelf-<version>-mac-arm64.dmg`, `-mac-x64.dmg` and `-win-x64.exe`.
-
-Capture behaviour is verified only on the platforms named in IMPLEMENTATION_REPORT.md. A build for another platform is not evidence that capture works there.
