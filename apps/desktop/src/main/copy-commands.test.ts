@@ -1223,6 +1223,30 @@ describe(createCopyCommands, () => {
     });
   });
 
+  it("copies a note's details with attachments: its words as the shelf renders them, its details, then each attachment by name", async () => {
+    const { commands, controller, items, written } = await setup();
+
+    controller.apply({
+      id: items.text,
+      text: "type &amp;copy; **now**",
+      type: "editText",
+    });
+    controller.apply({
+      attachments: [attachedFile(74)],
+      id: items.text,
+      type: "attach",
+    });
+
+    await commands.copyDetails(items.text);
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html":
+        "<p>type &amp;copy; <strong>now</strong></p><p>Before Friday</p><p>Attachments:</p><p>Quote 74.pdf</p>",
+      "text/plain":
+        "type &copy; now\n\nBefore Friday\nAttachments:\n- Quote 74.pdf",
+    });
+  });
+
   it("copies a selection exactly as it was copied, its HTML beside its text, until it is edited", async () => {
     const { commands, controller, written } = await setup();
 
