@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { atLine, CodePlaceSchema, PATH_MAX, pathInProject } from "./code-place";
+import {
+  atLine,
+  CodePlaceSchema,
+  PATH_MAX,
+  pathInProject,
+  textMark,
+} from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
 import {
   isAppLink,
@@ -1118,6 +1124,15 @@ const imageItem = (
   ...made,
 });
 
+/** The context of a capture whose kept text is `text`: its place in the code knows that text for its own. */
+const withTextMark = (
+  context: ItemContext | null,
+  text: string
+): ItemContext | null =>
+  context === null || context.code === null
+    ? context
+    : { ...context, code: { ...context.code, mark: textMark(text) } };
+
 /** A selection or other text from main; blank text adds nothing. */
 const addText = (
   doc: ShelfDoc,
@@ -1128,10 +1143,12 @@ const addText = (
     return unchanged(doc);
   }
 
+  const text = op.text.slice(0, TEXT_MAX);
+
   return addItem(doc, {
     ...NO_META,
     color: null,
-    context: op.context,
+    context: withTextMark(op.context, text),
     createdAt: env.now().toISOString(),
     done: false,
     html: op.html !== null && op.html.length <= HTML_MAX ? op.html : null,
@@ -1145,7 +1162,7 @@ const addText = (
             (link) => LinkSchema.safeParse(link).success
           ),
     sectionId: doc.activeSectionId,
-    text: op.text.slice(0, TEXT_MAX),
+    text,
     via: op.via,
     windows: (op.windows ?? []).slice(0, WINDOWS_MAX),
   });
