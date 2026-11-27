@@ -7,6 +7,7 @@ import {
   codeAction,
   codePlace,
   codeWay,
+  isCodeCapture,
   lineOfText,
   openAddress,
   titleParts,
@@ -572,5 +573,61 @@ describe(codeAction, () => {
     ["folder", false, "Show in Folder"],
   ] as const)("says what a click does: %s, on a Mac %s", (way, mac, words) => {
     expect(codeAction("Code", way, mac)).toBe(words);
+  });
+});
+
+describe(isCodeCapture, () => {
+  const place = {
+    file: "/Users/anna/Developer/inset-shelf/src/shared/recall.ts",
+    line: null,
+    root: "/Users/anna/Developer/inset-shelf",
+  };
+
+  const from = (app: string | null, code: typeof place | null) => ({
+    app,
+    appLink: null,
+    code,
+    title: "recall.ts — inset-shelf",
+    url: null,
+  });
+
+  it("counts a selection from the file Code showed on macOS", () => {
+    expect(
+      isCodeCapture({ context: from("Code", place), via: "selection" })
+    ).toBeTruthy();
+  });
+
+  it("counts a selection from Code on Windows, where only its title is read", () => {
+    expect(
+      isCodeCapture({
+        context: from("Visual Studio Code", null),
+        via: "selection",
+      })
+    ).toBeTruthy();
+  });
+
+  it("counts a selection from a file even when the app has no row", () => {
+    expect(
+      isCodeCapture({ context: from("Zed", place), via: "selection" })
+    ).toBeTruthy();
+  });
+
+  it("leaves out a selection from any other app, and one from nowhere", () => {
+    expect(
+      isCodeCapture({ context: from("Mail", null), via: "selection" })
+    ).toBeFalsy();
+    expect(isCodeCapture({ context: null, via: "selection" })).toBeFalsy();
+  });
+
+  it("leaves out a typed note, which is the user's own words", () => {
+    expect(
+      isCodeCapture({ context: from("Code", place), via: "typed" })
+    ).toBeFalsy();
+  });
+
+  it("asks only the editors it is given", () => {
+    expect(
+      isCodeCapture({ context: from("Code", null), via: "selection" }, [])
+    ).toBeFalsy();
   });
 });

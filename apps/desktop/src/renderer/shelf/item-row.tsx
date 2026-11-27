@@ -18,7 +18,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
-import { codeAction, codeWay } from "@shared/code-editors";
+import { codeAction, codeWay, isCodeCapture } from "@shared/code-editors";
 import type { CodeEditor } from "@shared/code-editors";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
@@ -665,6 +665,7 @@ export const TextEditor = ({
   /** Where a click started the edit: the caret goes there, else to the end. */
   readonly caretAt?: ScreenPoint | null;
 }) => {
+  const code = isCodeCapture(item, use(KnownEditors));
   // Escape throws the edit away; the blur that follows must not save it.
   const cancelled = useRef(false);
   const live = useRef<LiveEdit | null>(null);
@@ -718,6 +719,7 @@ export const TextEditor = ({
       caretAt={caretAt}
       // The read text's own type, so the words stay exactly where they were.
       className={cn("min-h-0", WORDS, item.done && DONE, EDITING)}
+      code={code}
       keys={{
         onEscape: () => {
           cancelled.current = true;
@@ -1040,6 +1042,7 @@ const TextBody = ({
   | "onStopEditing"
 >) => {
   const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+  const code = isCodeCapture(item, use(KnownEditors));
 
   if (editing) {
     return (
@@ -1077,6 +1080,7 @@ const TextBody = ({
           >
             <Markdown
               className={words}
+              code={code}
               interactive
               onOpenLink={onOpenLink}
               text={item.text}
@@ -1097,6 +1101,7 @@ const TextBody = ({
         >
           <Markdown
             className="line-clamp-2"
+            code={code}
             interactive={false}
             onOpenLink={onOpenLink}
             text={item.text}

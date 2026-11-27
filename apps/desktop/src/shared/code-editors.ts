@@ -6,6 +6,7 @@ import {
   pathInProject,
 } from "./code-place";
 import type { CodePlace } from "./code-place";
+import type { TextItem } from "./shelf";
 import { cleanTitle } from "./window-title";
 
 /**
@@ -434,3 +435,17 @@ export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
 
   return mac ? "Show in Finder" : "Show in Folder";
 };
+
+/**
+ * Whether a text item is code: a selection from a code editor among
+ * `editors`, or from a file one showed. It reads and edits as code, every
+ * line's whitespace kept. The editor's name counts alone, since Windows
+ * reads no file.
+ */
+export const isCodeCapture = (
+  { context, via }: Pick<TextItem, "context" | "via">,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): boolean =>
+  via === "selection" &&
+  context !== null &&
+  (context.code !== null || codeEditor(context.app, editors) !== undefined);
