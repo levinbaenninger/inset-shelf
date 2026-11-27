@@ -958,6 +958,28 @@ const details = async (page: Page, n: number): Promise<void> => {
   await page.getByRole("button", { name: "Back to the list" }).waitFor();
 };
 
+/** Main shows the screenshot card's item (11) and says where it went, as after Add to Shelf or Annotate's Save. */
+const shotAdded = async (page: Page): Promise<void> => {
+  await page.evaluate(
+    `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), focus: { id: uuid(11), keepDetails: true, seq: 1 } })})`
+  );
+  await page.evaluate(
+    `globalThis.__emit("notice", ${JSON.stringify({ message: "Added to Office move", show: uuid(11), tone: "done" })})`
+  );
+  await page.locator("[data-sonner-toast]").first().waitFor();
+  await page.waitForTimeout(500);
+};
+
+/** The notice's Show, which brings the item it names into view. */
+const noticeShow = (page: Page) =>
+  page
+    .locator("[data-sonner-toast]")
+    .getByRole("button", { exact: true, name: "Show" });
+
+/** An item's details are on screen. */
+const detailsShown = async (page: Page): Promise<boolean> =>
+  await page.getByRole("button", { name: "Back to the list" }).isVisible();
+
 /** The drawing window's pins, and the one selected. */
 const drawingPins = (page: Page) => page.locator("span[style*='--pin-x']");
 
@@ -9944,6 +9966,59 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-focus-behind-search",
+    page: "shelf",
+  },
+  {
+    // Add to Shelf on the screenshot card, or Annotate and Save, with A's details open: they stay, and the notice offers Show.
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+    },
+    check: async (page) => {
+      const shown = await detailsShown(page);
+      const show = await noticeShow(page).count();
+
+      return shown && show === 1
+        ? null
+        : `the screenshot's item ${shown ? "kept" : "closed"} A's details, and its notice has ${show} Show buttons, not 1`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-keeps-details",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+      await noticeShow(page).click();
+      await page.locator("[data-details-view]").waitFor({ state: "detached" });
+    },
+    check: async (page) => {
+      const selected = await item(page, 11).getAttribute("aria-current");
+
+      return selected === "true"
+        ? null
+        : "Show on the screenshot's notice went back to the list without selecting its item";
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-keeps-details-show",
+    page: "shelf",
+  },
+  {
+    // With no details open, the shelf shows the screenshot's item as before, and the notice needs no Show.
+    act: async (page) => {
+      await shotAdded(page);
+    },
+    check: async (page) => {
+      const selected = await item(page, 11).getAttribute("aria-current");
+      const show = await noticeShow(page).count();
+
+      return selected === "true" && show === 0
+        ? null
+        : `on the list the screenshot's item is ${selected === "true" ? "selected" : "not selected"}, and its notice has ${show} Show buttons, not 0`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-shows-item",
     page: "shelf",
   },
   {
