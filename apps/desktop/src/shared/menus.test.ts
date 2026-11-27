@@ -315,6 +315,48 @@ describe(itemMenu, () => {
       )
     ).toMatchObject({ label: "Open in T3 Code" });
   });
+
+  it("offers to open a code item's file in its editor, and nothing new for an item from the same editor without one", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const code = {
+      file: "/Users/anna/p/recall.ts",
+      line: null,
+      root: "/Users/anna/p",
+    };
+
+    const from = (place: typeof code | null) =>
+      itemMenu(
+        {
+          ...item,
+          context: {
+            app: "Code",
+            appLink: null,
+            code: place,
+            title: "recall.ts — p",
+            url: null,
+          },
+        },
+        doc
+      );
+
+    expect(
+      from(code).find(
+        (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
+      )
+    ).toMatchObject({
+      accelerator: "CommandOrControl+O",
+      label: "Open in Code",
+    });
+    expect(
+      labels(from(code)).filter((label) => label !== "Open in Code")
+    ).toStrictEqual(labels(from(null)));
+    expect(labels(from(null))).not.toContain("Open in Code");
+  });
 });
 
 describe(pickedMenu, () => {

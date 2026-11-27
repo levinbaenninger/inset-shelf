@@ -7765,7 +7765,11 @@ const codeSource = async (page: Page, words: string) =>
       )
     );
 
-/** The source line reads `words` as text, with a code mark and `tooltip`, and no part of the home folder shows. */
+/**
+ * The source line reads `words` with a code mark and `tooltip`, and no part
+ * of the home folder shows. With a file (a tooltip), it is a button whose
+ * tooltip ends "Open in Code"; with only a title, plain text.
+ */
 const codeChecks = async (
   page: Page,
   words: string,
@@ -7782,8 +7786,18 @@ const codeChecks = async (
     return `the source line reads "${source.text}", not "${words}"`;
   }
 
-  if (source.button || !source.mark) {
-    return "the source line must be plain text with a code mark: nothing opens it yet";
+  if (!source.mark) {
+    return "the source line has no code mark";
+  }
+
+  if (source.button !== (tooltip !== null)) {
+    return tooltip === null
+      ? "a code item without a file must not open anything"
+      : "a code item with a file must open it: its source line is no button";
+  }
+
+  if (tooltip !== null && source.title?.endsWith("\nOpen in Code") !== true) {
+    return `the tooltip is "${source.title}", which doesn't end "Open in Code"`;
   }
 
   // The tooltip's 300 characters may cut the path's end, never its start.

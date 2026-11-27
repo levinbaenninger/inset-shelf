@@ -33,7 +33,7 @@ import type {
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
-import type { Service } from "@shared/web-source";
+import type { SourceLabel, Service } from "@shared/web-source";
 import {
   createContext,
   isValidElement,
@@ -52,7 +52,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
+import {
+  Clamp,
+  tooltipEndingWith,
+  tooltipText,
+  Truncated,
+  useCut,
+} from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -128,18 +134,45 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** The source line's tooltip: the whole line when it shows cut, then where it leads (the page, the app a click opens, the file), 300 characters in all; null when it would only repeat what shows. */
+/** Where a click on the source line leads: what it opens, and the action it takes, which the tooltip never cuts. */
+interface Leads {
+  readonly to: readonly (string | null)[];
+  readonly action: string | null;
+}
+
+/** The source line's tooltip: the whole line when it shows cut, then where it leads (the page, the file), then what a click does, 300 characters in all; null when it would only repeat what shows. */
 const sourceTitle = (
   shown: string,
-  opens: string | null,
+  { action, to }: Leads,
   cut: boolean
 ): string | undefined => {
   const lines = [
     ...(cut ? [shown] : []),
-    ...(opens === null || opens === shown ? [] : [opens]),
+    ...to.filter((lead) => lead !== null && lead !== shown),
   ];
 
-  return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
+  if (action === null || action === shown) {
+    return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
+  }
+
+  return lines.length === 0
+    ? action
+    : tooltipEndingWith(lines.join("\n"), action);
+};
+
+/** Where a click on the source line leads: the page, the app, or the file (from home) in its editor. */
+const leadsTo = (
+  context: ItemContext,
+  app: string | null,
+  code: SourceLabel["code"]
+): Leads => {
+  if (app === null) {
+    return { action: null, to: [context.url] };
+  }
+
+  return context.code === null
+    ? { action: `Open ${app}`, to: [] }
+    : { action: `Open in ${app}`, to: [code?.path ?? null] };
 };
 
 /** The user's home folder, from the shelf's view: a code item's path shows from "~". */
@@ -148,7 +181,8 @@ export const HomeFolder = createContext<string | null>(null);
 /**
  * Where an item came from, in one quiet line: the site and what on it for
  * pages the shelf knows, the file and project for a code editor, else the app
- * and window. A page address opens in the browser.
+ * and window. A page address opens in the browser, a code item's file in its
+ * editor.
  */
 export const SourceLine = ({
   context,
@@ -160,7 +194,7 @@ export const SourceLine = ({
   const { code, label, service } = sourceLabel(context, use(HomeFolder));
   const serviceIcon = service === null ? Link01Icon : SERVICE_ICON[service];
   const icon = code === undefined ? serviceIcon : CodeIcon;
-  // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
+  // A code editor opens its file again; a desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
   const app = openingApp(context, isMac);
   const shown = label === "" ? (context.url ?? "") : label;
   const plain = useRef<HTMLParagraphElement>(null);
@@ -173,7 +207,11 @@ export const SourceLine = ({
       <p
         className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
         ref={plain}
-        title={sourceTitle(label, code?.path ?? null, plainCut)}
+        title={sourceTitle(
+          label,
+          { action: null, to: [code?.path ?? null] },
+          plainCut
+        )}
       >
         {service === null && code === undefined ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -189,11 +227,7 @@ export const SourceLine = ({
       {...coach("item-source")}
       onClick={onOpenLink}
       ref={link}
-      title={sourceTitle(
-        shown,
-        app === null ? context.url : `Open ${app}`,
-        linkCut
-      )}
+      title={sourceTitle(shown, leadsTo(context, app, code), linkCut)}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -237,7 +271,7 @@ const LinkRow = ({
         onOpenLink(link.url);
       }}
       ref={ref}
-      title={sourceTitle(link.text, link.url, cut)}
+      title={sourceTitle(link.text, { action: null, to: [link.url] }, cut)}
       type="button"
     >
       <HugeiconsIcon
