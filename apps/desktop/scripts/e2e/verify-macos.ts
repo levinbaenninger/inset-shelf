@@ -1038,40 +1038,13 @@ const openedAtLine = async (
 };
 
 /**
- * Edits the text item that holds `from` in the shelf to read `to`: a click
- * on its words gives it the keyboard, Return opens it to edit, and the new
- * words replace all of the old. True once the shelf file holds the edit.
- */
-const editItemText = async (from: string, to: string): Promise<boolean> => {
-  enableWebAccessibility();
-  showShelfFromTray();
-
-  if (!(await clickElement("AXButton", from))) {
-    return false;
-  }
-
-  await delay(400);
-  guardedKeys(() => {
-    osa('tell application "System Events" to key code 36');
-  }, [processName]);
-  await delay(400);
-  guardedKeys(() => {
-    osa('tell application "System Events" to keystroke "a" using command down');
-  }, [processName]);
-  typeIntoShelf(to);
-
-  return await waitUntil(() =>
-    items().some((item) => item.kind === "text" && item.text === to)
-  );
-};
-
-/**
  * The line is found when the source line is clicked, never at capture
  * (src/main/open-code.ts, src/main/code-line.ts): the file opens at the line
- * the captured words are on now, at the line they moved to after an edit
- * of the file, and at no line once the item's own words were edited, even
- * to words that are in the file once. Words in the file twice open at no
- * line.
+ * the captured words are on now, and at the line they moved to after an
+ * edit of the file. Words in the file twice open at no line. An item whose
+ * own words were edited opens at no line: that is left to unit tests
+ * (src/main/open-code.test.ts), since typing into the shelf here could reach
+ * another app named Electron.
  */
 const checkCodeLineWayBack = async ({
   lines,
@@ -1098,16 +1071,6 @@ const checkCodeLineWayBack = async ({
     "after its words moved 10 lines down, a click opens at the line they are on now",
     before.split("\n")[11] === lineText(12) && moved.line === 22,
     moved.detail
-  );
-
-  // Words that are on line 40 of the file once: a look for them would open there.
-  const edited = await editItemText(lineText(12), lineText(30));
-  const afterEdit = await openedAtLine("lines.ts", lines);
-
-  record(
-    "after the item's words were edited, a click opens the file at no line",
-    edited && afterEdit.line === null,
-    `${edited ? "edited" : "not edited"}, ${afterEdit.detail}`
   );
 
   const inTwo = await openedAtLine("twice.ts", twice);
