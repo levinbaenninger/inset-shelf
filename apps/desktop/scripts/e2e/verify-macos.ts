@@ -1042,19 +1042,44 @@ const checkFailedWrite = async (): Promise<void> => {
 
 // Files pasted onto the shelf (src/main/index.ts noticeAdded): the notice comes once the disk holds them and names what was refused.
 
-/** A file and a folder on the clipboard, as Finder's Copy puts them there: a file URL each, and the path list beside them. */
+/** How many entries the clipboard holds, counted by a process of its own. */
+const clipboardEntries = (): number =>
+  Number(
+    jxa(`ObjC.import("AppKit");
+    String(Number($.NSPasteboard.generalPasteboard.pasteboardItems.count) || 0);`)
+  );
+
+const COPY_TRIES = 5;
+
+/**
+ * A file and a folder on the clipboard, as Finder's Copy puts them there: a
+ * file URL each, and the path list beside them. The process that writes them
+ * ends at once, and the system then sometimes keeps the first entry only, so
+ * the copy is counted afterwards and made again until both are there.
+ */
 const copyFileAndFolder = () => {
   const file = path.join(work, "Offer 2026-114.pdf");
   const folder = path.join(work, "Quotes");
 
   writeFileSync(file, "%PDF-1.4\n");
   mkdirSync(folder, { recursive: true });
-  jxa(`ObjC.import("AppKit");
+
+  const copied = Array.from({ length: COPY_TRIES }).some(() => {
+    jxa(`ObjC.import("AppKit");
     const board = $.NSPasteboard.generalPasteboard;
     board.clearContents;
     board.writeObjects($([$.NSURL.fileURLWithPath(${JSON.stringify(file)}), $.NSURL.fileURLWithPath(${JSON.stringify(folder)})]));
     board.setPropertyListForType($([${JSON.stringify(file)}, ${JSON.stringify(folder)}]), "NSFilenamesPboardType");
     "";`);
+
+    return clipboardEntries() === 2;
+  });
+
+  if (!copied) {
+    throw new Error(
+      `The trial could not put a file and a folder on the clipboard in ${COPY_TRIES} tries: it held ${clipboardEntries()} entries.`
+    );
+  }
 
   return { folder: path.basename(folder) };
 };
