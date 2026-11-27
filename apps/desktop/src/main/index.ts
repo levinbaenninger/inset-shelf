@@ -77,7 +77,7 @@ import type { ClipboardContents } from "./copy-gate";
 import { copySource } from "./copy-source";
 import { createDrawingSaves } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
-import { e2eLog } from "./e2e-log";
+import { e2eEnv, e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
 import { frontWindow } from "./front-window";
@@ -444,7 +444,7 @@ const start = async (): Promise<void> => {
 
   const store = await openShelfStore(dataDir, {
     fs:
-      process.env.INSET_FAIL_NEXT_WRITE === "1"
+      e2eEnv("INSET_FAIL_NEXT_WRITE") === "1"
         ? failNextWrite(nodeStoreFs)
         : nodeStoreFs,
     newSectionId: () => SectionIdSchema.parse(randomUUID()),
@@ -2502,7 +2502,7 @@ const startOrExit = async (): Promise<void> => {
 // The instance lock is keyed by userData, so the path must be final before it is taken.
 app.setPath(
   "userData",
-  process.env.INSET_USER_DATA_DIR ??
+  e2eEnv("INSET_USER_DATA_DIR") ??
     path.join(app.getPath("appData"), PRODUCT_NAME)
 );
 

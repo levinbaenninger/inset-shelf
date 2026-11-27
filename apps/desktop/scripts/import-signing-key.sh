@@ -14,7 +14,8 @@ printf '%s' "$MAC_SIGNING_P12_BASE64" | base64 --decode > "$p12"
 
 security create-keychain -p "$password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
-security unlock-keychain -p "$password" "$keychain"
+# No -p: security reads the password from stdin when it is not a terminal, keeping it out of argv.
+security unlock-keychain "$keychain" <<< "$password"
 security import "$p12" -f pkcs12 -k "$keychain" -P "$MAC_SIGNING_P12_PASSWORD" -T /usr/bin/codesign >&2
 security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
 
