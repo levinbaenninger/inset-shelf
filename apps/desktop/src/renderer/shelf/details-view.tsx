@@ -158,32 +158,48 @@ const isUndoKey = (event: KeyboardEvent): boolean =>
 /** The card surface the list's items sit on, so details read as the same material. */
 const SURFACE = "border-foreground/10 bg-background/60 rounded-lg border";
 
+/** The ring of a part of details that has the keyboard without typing in it. */
+const RING =
+  "focus-visible:ring-ring/50 rounded-lg outline-none focus-visible:ring-3";
+
 /**
  * A field's place, its card or its row: where the keyboard waits once Return
- * or Esc leaves the field's text, so Tab goes on from there, Return types in
- * it again and a second Esc goes back to the list.
+ * or Esc leaves the field's text, on the place's stop. Return there types in
+ * the field again, and a second Esc goes back to the list.
  */
 const place = {
   className:
-    "focus-visible:ring-ring/50 rounded-lg outline-none focus-visible:ring-3",
+    "has-[[data-place-stop]:focus-visible]:ring-ring/50 rounded-lg has-[[data-place-stop]:focus-visible]:ring-3",
   "data-field-place": "",
   onKeyDown: (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key === "Enter" && event.target === event.currentTarget) {
+    if (
+      event.key === "Enter" &&
+      event.target instanceof Element &&
+      event.target.matches("[data-place-stop]")
+    ) {
       event.preventDefault();
       event.currentTarget.querySelector("textarea")?.focus();
     }
   },
-  tabIndex: -1,
 } as const;
 
+/** The place's last stop, after its field and buttons, so Tab goes on past them; the place draws its ring. */
+const PlaceStop = () => (
+  <span className="sr-only" data-place-stop tabIndex={-1} />
+);
+
 const leaveField = (field: HTMLElement): void => {
-  field.closest<HTMLElement>("[data-field-place]")?.focus();
+  field
+    .closest("[data-field-place]")
+    ?.querySelector<HTMLElement>("[data-place-stop]")
+    ?.focus();
 };
 
 /** One typed-in field on its card, its words in line with the item's own at the top of details. */
 const FieldBox = ({ children }: { readonly children: ReactNode }) => (
   <div {...place} className={cn(SURFACE, place.className, "p-1.5")}>
     {children}
+    <PlaceStop />
   </div>
 );
 
@@ -573,6 +589,7 @@ const StepsEditor = ({
               <HugeiconsIcon icon={Cancel01Icon} />
             </Button>
           </span>
+          <PlaceStop />
         </li>
       ))}
     </ul>
@@ -891,6 +908,7 @@ const PinLabels = ({
             placeholder={`What pin ${index + 1} marks`}
             value={pin.label ?? ""}
           />
+          <PlaceStop />
         </li>
       ))}
     </ol>
@@ -1037,7 +1055,7 @@ const TextContent = ({
     // A click on the words edits them there, as in the open row; a link still opens. Return and Esc in the editor hand the keyboard back here, where Return edits again (use-shelf-keys.ts).
     // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Edit in the item menu (Return) edits from the keyboard; the click only says where the caret goes.
     <div
-      className={cn(SURFACE, place.className, "cursor-text px-3 py-2.5")}
+      className={cn(SURFACE, RING, "cursor-text px-3 py-2.5")}
       data-row-keys
       tabIndex={-1}
       onClick={(event) => {

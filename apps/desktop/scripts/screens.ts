@@ -9008,7 +9008,9 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     },
     check: async (page) => {
       const left = await page.evaluate(() => ({
-        row: document.activeElement?.matches("li[data-field-place]") ?? false,
+        row:
+          (document.activeElement?.matches("[data-place-stop]") ?? false) &&
+          document.activeElement?.closest("li[data-field-place]") !== null,
         within:
           document.activeElement
             ?.closest("section[aria-label]")
