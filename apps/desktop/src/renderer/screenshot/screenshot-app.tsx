@@ -79,8 +79,12 @@ const CornerButton = ({
     <div className={cn("absolute", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* A disabled button takes no pointer: the span around it still says why it is off. */}
-          {off === undefined ? button : <span className="flex">{button}</span>}
+          {/* A disabled button takes no pointer: the span around it does, among corners that let the pointer through to the picture, and says why the button is off. */}
+          {off === undefined ? (
+            button
+          ) : (
+            <span className="pointer-events-auto flex">{button}</span>
+          )}
         </TooltipTrigger>
         <TooltipContent>{off ?? label}</TooltipContent>
       </Tooltip>
