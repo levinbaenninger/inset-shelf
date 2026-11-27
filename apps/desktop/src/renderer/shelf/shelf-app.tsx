@@ -1122,12 +1122,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     composerRef.current?.focus();
   };
 
-  // Moving into the list leaves the note field, so plain keys act on the selection.
+  // The keys' way into the list and through it: one item selected and no picks, so plain keys act on it alone.
   const selectItem = (id: ItemId): void => {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
 
+    unpick();
     setSelectedId(id);
     reveal(id);
   };
@@ -1166,11 +1167,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       }
     },
     move: (offset: 1 | -1) => {
-      unpick();
-
       const next = stepSelection(ids, selectedId, offset);
 
       if (next === null) {
+        unpick();
         focusComposer();
       } else {
         selectItem(next);
