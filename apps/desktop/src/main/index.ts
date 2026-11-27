@@ -2254,7 +2254,10 @@ const start = async (): Promise<void> => {
 
   // The card's own file dropped back on the shelf goes through the card's add, so a screenshot keeps one place.
   const shotDrop = createShotDrop({
-    addFiles,
+    // The router needs no count; Double Shift's capture is what reads it.
+    addFiles: async (paths) => {
+      await addFiles(paths);
+    },
     added: shotLanded,
     attachFiles: async (id, paths) =>
       await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
