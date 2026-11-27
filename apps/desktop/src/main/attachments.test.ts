@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachmentDeps, DecodedImage } from "./attachments";
+import { exportFileName, imageFileName } from "./export-name";
 import { createShelfController } from "./shelf-controller";
 
 const uuid = (n: number) =>
@@ -345,5 +346,35 @@ describe(createAttachments, () => {
       message: "This item no longer exists.",
     });
     expect(deleted).toStrictEqual(stored);
+  });
+
+  it("keeps a dropped or picked picture's own name, on the shelf and when it is dragged back out", async () => {
+    const { attachments, controller, id } = setup(0);
+    const op = await attachments.prepareItem(
+      "/Users/someone/Desktop/chart-sample.png"
+    );
+
+    if ("problem" in op) {
+      throw new Error(op.problem);
+    }
+
+    const added = controller.item(controller.apply(op) ?? id);
+
+    await attachments.attachFilesTo(id, [
+      "/Users/someone/Desktop/chart-sample.png",
+    ]);
+
+    const [attached] = controller.item(id)?.attachments ?? [];
+
+    expect({
+      attachedDragsOutAs:
+        attached?.kind === "image" ? exportFileName(attached.name) : null,
+      itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
+      itemReads: added?.kind === "image" ? added.title : null,
+    }).toStrictEqual({
+      attachedDragsOutAs: "chart-sample.png",
+      itemDragsOutAs: "chart-sample.png",
+      itemReads: "chart-sample",
+    });
   });
 });
