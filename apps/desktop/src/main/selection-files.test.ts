@@ -314,3 +314,38 @@ describe("a hold that starts while the capture checks the files it copied", () =
     expect(clip.items()).toStrictEqual([EARLIER]);
   });
 });
+
+describe("a clipboard that can't be read after the capture", () => {
+  it("leaves the next file copy alone when the read after the capture fails", async () => {
+    // The user copied B before the failing read: a write from the old clipboard would replace it.
+    const clip = clipboard({
+      before: { 2: [list(B)] },
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: [2],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([list(B)]);
+  });
+
+  it("writes nothing and says it wasn't put back when the clipboard can't be read before time runs out", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: Array.from({ length: 200 }, (_, at) => at + 2),
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+      unchecked: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
