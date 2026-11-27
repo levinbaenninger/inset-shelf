@@ -1853,6 +1853,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             onHide={() => {
               hideShelf();
             }}
+            onLeaveDown={() => {
+              const [first] = ids;
+
+              if (first !== undefined) {
+                selectItem(first);
+              }
+            }}
             query={query}
           />
           <ShelfMenu floatOnTop={status.floatOnTop} onChoose={choose}>

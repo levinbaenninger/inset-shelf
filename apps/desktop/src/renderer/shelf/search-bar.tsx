@@ -242,17 +242,21 @@ export const DueSuggestions = ({
 /**
  * The search field: words, and `due:` filters typed or picked from the
  * calendar. Escape clears a search, and hides the shelf when there is none.
+ * ↓ goes on to the results.
  */
 export const SearchBar = ({
   here,
   inputRef,
   onChange,
   onHide,
+  onLeaveDown,
   query,
 }: {
   readonly query: string;
   readonly onChange: (query: string) => void;
   readonly onHide: () => void;
+  /** ↓ moves into the list, as ↑ does from the note field. */
+  readonly onLeaveDown: () => void;
   readonly inputRef: RefObject<HTMLInputElement | null>;
   /** Recall: the open items from the window the shelf opened beside. */
   readonly here?: ShelfHere | null;
@@ -283,6 +287,18 @@ export const SearchBar = ({
           if (event.key === "Enter" && first !== undefined) {
             event.preventDefault();
             onChange(withDueFilter(query, first));
+          }
+
+          if (
+            event.key === "ArrowDown" &&
+            !event.nativeEvent.isComposing &&
+            !event.altKey &&
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.shiftKey
+          ) {
+            event.preventDefault();
+            onLeaveDown();
           }
 
           if (event.key === "Escape") {
