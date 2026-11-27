@@ -2055,6 +2055,45 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
     });
   });
 
+  it("makes no row when the tile comes back, starts a write, and is removed again, all while Add to Shelf writes its picture file", async () => {
+    const card = await refused("item");
+    const tile = { attachmentId: tileOf(card), id: card.note };
+
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+    await settled(card);
+    card.failWrites({ ok: true });
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+
+    // The user's Undo starts a write that holds the tile; they remove it again before the picture file is written.
+    const started = new Promise<void>((resolve) => {
+      const off = card.controller.onWrite(() => {
+        off();
+        resolve();
+      });
+    });
+
+    card.controller.apply({ ...tile, type: "restoreAttachment" });
+    await started;
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+
+    await expect(adding).resolves.toBeNull();
+
+    expect({
+      dropped: card.dropped.length,
+      notices: card.notices,
+      shown: card.shown(),
+    }).toStrictEqual({
+      dropped: 1,
+      notices: [SHOT_REMOVAL_UNSAVED],
+      shown: { attached: 0, items: 0 },
+    });
+
+    end({ ok: true });
+    await settled(card);
+  });
+
   it("adds it to the shelf, once, as soon as the disk holds the removal", async () => {
     const { card, end } = await tileOffWhileItsWriteIsHeld();
 
