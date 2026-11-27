@@ -981,13 +981,13 @@ const shotChanged = async (
   page: Page,
   section: string | null
 ): Promise<void> => {
-  const items = ITEMS.flatMap((entry) =>
-    entry.id !== uuid(11)
-      ? [entry]
-      : section === null
-        ? []
-        : [{ ...entry, sectionId: section }]
-  );
+  const items = ITEMS.flatMap((entry) => {
+    if (entry.id !== uuid(11)) {
+      return [entry];
+    }
+
+    return section === null ? [] : [{ ...entry, sectionId: section }];
+  });
 
   await page.evaluate(
     `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), doc: { ...DOC, items } })})`
@@ -10036,6 +10036,7 @@ const SCENES: readonly Scene[] = [
     },
     check: async (page) => {
       const shown = await item(page, 11).isVisible();
+
       const selected =
         shown && (await item(page, 11).getAttribute("aria-current")) === "true";
 
@@ -10058,6 +10059,7 @@ const SCENES: readonly Scene[] = [
     },
     check: async (page) => {
       const shown = await detailsShown(page);
+
       const gone = await page
         .locator("[data-sonner-toast]")
         .filter({ hasText: "no longer on the shelf" })
