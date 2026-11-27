@@ -1044,7 +1044,7 @@ const start = async (): Promise<void> => {
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor,
     setTimer,
     stored: controller.stored,
-    writePicture: async (current) => await store.writeAttachment(current.png),
+    writePicture: async (png) => await store.writeAttachment(png),
   });
 
   let shotSeq = 0;

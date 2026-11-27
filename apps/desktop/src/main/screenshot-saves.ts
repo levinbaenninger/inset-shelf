@@ -67,10 +67,19 @@ export interface Shot {
 /** One drag of the card's screenshot: the screenshot it hands out, and its drop, which keeps naming that screenshot after the card moves on. */
 export interface ShotDrag<S extends Shot> {
   readonly shot: S;
+  readonly drop: ShotDrop;
+}
+
+/**
+ * What a drag's drop does, with the picture the drop brought back. It holds
+ * no picture of its own, so a drop that may never come keeps nothing large
+ * alive.
+ */
+export interface ShotDrop {
   /** Dropped on an item: attached to it, or Retry for its attachment there. */
-  readonly onItem: (id: ItemId) => Promise<ItemId | null>;
+  readonly onItem: (id: ItemId, png: Uint8Array) => Promise<ItemId | null>;
   /** Dropped on the shelf off any item: Add to Shelf. */
-  readonly onShelf: () => Promise<ItemId | null>;
+  readonly onShelf: (png: Uint8Array) => Promise<ItemId | null>;
 }
 
 /** The card window, as the save path drives it. */
@@ -87,8 +96,8 @@ export interface ShotCard {
 export interface ShotSavesDeps<S extends Shot> {
   readonly card: ShotCard;
   readonly item: (id: ItemId) => ShelfItem | undefined;
-  /** Writes the screenshot's picture file into the data folder, for a place still to be made, and returns its name there. Throws when it can't be written. */
-  readonly writePicture: (shot: S) => Promise<string>;
+  /** Writes the screenshot's picture, a PNG, into the data folder, for a place still to be made, and returns its file's name there. Throws when it can't be written. */
+  readonly writePicture: (png: Uint8Array) => Promise<string>;
   /** A picture file written for a place that was then not made: it goes. */
   readonly dropPicture: (file: string) => void;
   /** The scale of the display the pointer is on now. A picture keeps the one read when its add was pressed, before its file is written. */
@@ -144,8 +153,10 @@ interface Shown {
   readonly holder: ShelfItem;
 }
 
-interface Held<S extends Shot> {
-  readonly shot: S;
+/** A screenshot's save, from the card's first add to the last drop of a drag of it. Its picture is the card's, or the drop's. */
+interface Held {
+  readonly heightPx: number;
+  readonly widthPx: number;
   /** Every place an add put it, newest first. None is forgotten: the user's Undo can bring any of them back. */
   places: readonly Placement[];
   /** The add a save of it runs for: a second click waits for it. */
@@ -212,14 +223,18 @@ const excerpt = (text: string): string => {
  */
 export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   const { card } = deps;
-  let held: Held<S> | null = null;
+  /** The screenshot the card shows, and its save. */
+  let held: { readonly now: Held; readonly shot: S } | null = null;
+
+  /** The save is the card's: the card shows its screenshot. */
+  const isCard = (now: Held): boolean => held?.now === now;
 
   /**
    * Where the shelf shows the screenshot now: the newest place an add made
    * that is still there, or that the user's Undo brought back. Null before
    * an add placed it, and while the user has it off every one of them.
    */
-  const shown = (now: Held<S>): Shown | null => {
+  const shown = (now: Held): Shown | null => {
     for (const at of now.places) {
       const holder = deps.item(at.item);
 
@@ -240,7 +255,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * Undo. Asked while the shelf shows it nowhere: the user took it off, and
    * the shelf doesn't hold that for good yet.
    */
-  const kept = (now: Held<S>): boolean =>
+  const kept = (now: Held): boolean =>
     now.places.some((at) =>
       deps.comesBack(at.item).some((item) => within(item, at) !== undefined)
     );
@@ -249,7 +264,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * Why no new place may be made for the screenshot now: the shelf shows it,
    * or it can still come back where the user took it off. Null when one may.
    */
-  const elsewhere = (now: Held<S>): string | null => {
+  const elsewhere = (now: Held): string | null => {
     if (shown(now) !== null) {
       return SHOT_STAYS;
     }
@@ -264,18 +279,21 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * then nothing is placed, the file is gone again, and the user hears why.
    * The caller awaits nothing between this and placing.
    */
-  const pictureFor = async (now: Held<S>): Promise<ShelfImage | Unplaced> => {
+  const pictureFor = async (
+    now: Held,
+    png: Uint8Array
+  ): Promise<ShelfImage | Unplaced> => {
     // Read at the press: the pointer can be on a display with another scale by the time the file is written.
     const pixelsPerDip = deps.scale();
-    const file = await deps.writePicture(now.shot);
+    const file = await deps.writePicture(png);
     const message = elsewhere(now);
 
     if (message === null) {
       return {
         file,
-        heightPx: now.shot.heightPx,
+        heightPx: now.heightPx,
         pixelsPerDip,
-        widthPx: now.shot.widthPx,
+        widthPx: now.widthPx,
       };
     }
 
@@ -290,7 +308,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * had the screenshot off it lands without it; their Undo since is a later
    * change, and the write of that is the one that counts.
    */
-  const holding = async (now: Held<S>): Promise<WriteResult> => {
+  const holding = async (now: Held): Promise<WriteResult> => {
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- each write follows the user's last change.
       const ended = await deps.persisted();
@@ -309,10 +327,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * waited for has ended. Off the shelf, Add to Shelf stands, and reads
    * Retry when it was Add to Shelf that failed.
    */
-  const look = (
-    now: Held<S>,
-    on: Shown | null
-  ): Pick<ScreenshotView, "save"> => {
+  const look = (now: Held, on: Shown | null): Pick<ScreenshotView, "save"> => {
     if (on !== null) {
       const { at, holder } = on;
 
@@ -363,9 +378,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    */
   const retarget = (): void => {
     const view = card.view();
-    const now = held;
+    const now = held?.now;
 
-    if (view === null || now === null) {
+    if (view === null || now === undefined) {
       return;
     }
 
@@ -393,8 +408,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   // Whichever write lands the screenshot, the card goes at once.
   deps.onWrite(retarget);
 
-  /** The card's screenshot, when it is still the newest; null for an older card's request. */
-  const current = (seq: number): Held<S> | null =>
+  /** The card's screenshot and its save, when it is still the newest; null for an older card's request. */
+  const current = (seq: number) =>
     held !== null && held.shot.seq === seq ? held : null;
 
   /**
@@ -405,9 +420,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * but the user's Undo brings it back.
    */
   const ready = (
-    now: Held<S> | null,
+    now: Held | null,
     to: ShotSaveTo
-  ): { readonly now: Held<S>; readonly at: Placement | null } | null => {
+  ): { readonly now: Held; readonly at: Placement | null } | null => {
     if (now === null || now.saving !== null) {
       return null;
     }
@@ -434,7 +449,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * up waiting: from then on the shelf says how the screenshot stands, saved
    * or refused, and why.
    */
-  const follow = async (now: Held<S>): Promise<void> => {
+  const follow = async (now: Held): Promise<void> => {
     const { write } = now;
 
     if (write === null) {
@@ -451,14 +466,14 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         now.failed = { ...now.failed, message: ended.message };
       }
 
-      if (held === now) {
+      if (isCard(now)) {
         retarget();
       }
     }
   };
 
   const save = async (
-    now: Held<S>,
+    now: Held,
     to: ShotSaveTo,
     place: () => Promise<Placed>
   ): Promise<ItemId | null> => {
@@ -486,7 +501,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     now.saving = null;
 
     // Only the card that started this save says how it went; a newer card, or none, leaves it to a notice.
-    const mine = held === now && card.isVisible();
+    const mine = isCard(now) && card.isVisible();
 
     if (written.ok) {
       now.write = null;
@@ -502,7 +517,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return null;
       }
 
-      if (held === now) {
+      if (isCard(now)) {
         held = null;
         card.hide();
       }
@@ -545,9 +560,10 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * press never puts it somewhere the user didn't see.
    */
   const toItem = async (
-    state: Held<S> | null,
+    state: Held | null,
     id: ItemId,
-    dropped: boolean
+    dropped: boolean,
+    png: Uint8Array
   ): Promise<ItemId | null> => {
     const start = ready(state, "item");
 
@@ -573,7 +589,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return { ok: true };
       }
 
-      const image = await pictureFor(now);
+      const image = await pictureFor(now, png);
 
       if ("stays" in image) {
         return image;
@@ -602,7 +618,10 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   };
 
   /** The screenshot as a new item, or Retry for the row it already is. */
-  const toShelf = async (state: Held<S> | null): Promise<ItemId | null> => {
+  const toShelf = async (
+    state: Held | null,
+    png: Uint8Array
+  ): Promise<ItemId | null> => {
     const start = ready(state, "shelf");
 
     if (start === null) {
@@ -617,7 +636,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return { ok: true };
       }
 
-      const image = await pictureFor(now);
+      const image = await pictureFor(now, png);
 
       if ("stays" in image) {
         return image;
@@ -640,46 +659,51 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     });
   };
 
+  /**
+   * The drop of a drag of the screenshot. It can reach main after the card
+   * moved on: the screenshot then gets a place when it has none, and keeps
+   * the one it has, which the user hears.
+   */
+  const dropOf = (now: Held): ShotDrop => {
+    const dropped = (): Held | null => {
+      if (!isCard(now) && shown(now) !== null) {
+        deps.notify(SHOT_ON_SHELF, "failed");
+
+        return null;
+      }
+
+      return now;
+    };
+
+    return {
+      onItem: async (id, png) => await toItem(dropped(), id, true, png),
+      onShelf: async (png) => await toShelf(dropped(), png),
+    };
+  };
+
   return {
     /** Add to Shelf: the screenshot as a new item, or Retry for the row it already is. Null for an older card's press: its screenshot is gone. */
-    addToShelf: async (seq: number): Promise<ItemId | null> =>
-      await toShelf(current(seq)),
+    addToShelf: async (seq: number): Promise<ItemId | null> => {
+      const on = current(seq);
+
+      return on === null ? null : await toShelf(on.now, on.shot.png);
+    },
 
     /** The card's only Retry adding to “…”: only while the shelf shows the screenshot on `id`. */
-    addToItem: async (seq: number, id: ItemId): Promise<ItemId | null> =>
-      await toItem(current(seq), id, false),
+    addToItem: async (seq: number, id: ItemId): Promise<ItemId | null> => {
+      const on = current(seq);
+
+      return on === null ? null : await toItem(on.now, id, false, on.shot.png);
+    },
 
     /** The card's screenshot, while it is the newest. */
     current: (seq: number): S | null => current(seq)?.shot ?? null,
 
-    /**
-     * A drag of the card's screenshot, while it is the newest; null for an
-     * older card's. Its drop can reach main after the card moved on: the
-     * screenshot then gets a place when it has none, and keeps the one it
-     * has, which the user hears.
-     */
+    /** A drag of the card's screenshot, while it is the newest; null for an older card's. */
     drag: (seq: number): ShotDrag<S> | null => {
-      const now = current(seq);
+      const on = current(seq);
 
-      if (now === null) {
-        return null;
-      }
-
-      const dropped = (): Held<S> | null => {
-        if (now !== held && shown(now) !== null) {
-          deps.notify(SHOT_ON_SHELF, "failed");
-
-          return null;
-        }
-
-        return now;
-      };
-
-      return {
-        onItem: async (id) => await toItem(dropped(), id, true),
-        onShelf: async () => await toShelf(dropped()),
-        shot: now.shot,
-      };
+      return on === null ? null : { drop: dropOf(on.now), shot: on.shot };
     },
 
     /** The card is done with its screenshot (copied, saved elsewhere, dismissed): it goes. */
@@ -694,15 +718,16 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
     /** A new screenshot: the card shows it, and the last one is forgotten. */
     show: (shot: S): void => {
-      const now: Held<S> = {
+      const now: Held = {
         failed: null,
+        heightPx: shot.heightPx,
         places: [],
         saving: null,
-        shot,
+        widthPx: shot.widthPx,
         write: null,
       };
 
-      held = now;
+      held = { now, shot };
       card.show({
         heightPx: shot.heightPx,
         imageUrl: deps.imageUrl(shot),

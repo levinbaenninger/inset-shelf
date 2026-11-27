@@ -1,11 +1,11 @@
-import { realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 import type { AttachResult, ShotSaveTo } from "@shared/contracts";
 import type { ItemId } from "@shared/shelf";
 
 import { errorMessage } from "./save-error";
-import type { Shot, ShotDrag } from "./screenshot-saves";
+import type { Shot, ShotDrag, ShotDrop } from "./screenshot-saves";
 
 /** A screenshot on the card, with the name the system saved it under, or Screenshot.png. */
 type NamedShot = Shot & { readonly name: string };
@@ -57,13 +57,6 @@ const stamp = (file: string): string | null => {
   }
 };
 
-/**
- * How many drags keep their record. One drag runs at a time, so once a drag
- * starts, the one before it has ended, though its drop can still be on its
- * way: the shelf and the card reach main on channels of their own.
- */
-const DRAGS_KEPT = 2;
-
 /** What the shelf's drop says when a drag's file went the card's way: nothing, and no Undo. */
 const NOTHING: AttachResult = { attached: [], message: null };
 
@@ -78,11 +71,11 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * the shelf's plain route.
  */
 export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
-  // Each drag whose drop can still come, oldest first, by where its file is on disk, with the folder it staged its file in and the file as it was written.
+  // Each drag whose drop can still come, by where its file is on disk, with the folder it staged its file in and the file as it was written. No count of newer drags says a drop has come: the shelf and the card reach main on channels of their own.
   const drags = new Map<
     string,
     {
-      readonly drag: ShotDrag<S>;
+      readonly drop: ShotDrop;
       readonly folder: string;
       readonly written: string | null;
     }
@@ -91,8 +84,10 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
   let made = 0;
 
-  /** The drag a drop hands back the file of, alone: its drop has come, and no later one is taken for it. Null for any other drop. */
-  const claim = (paths: readonly string[]): ShotDrag<S> | null => {
+  /** The drop of the drag a drop hands back the file of, alone, and the picture the file holds: its drop has come, and no later one is taken for it. Null for any other drop. */
+  const claim = (
+    paths: readonly string[]
+  ): { readonly drop: ShotDrop; readonly png: Uint8Array } | null => {
     const [only] = paths;
 
     if (only === undefined || paths.length !== 1) {
@@ -106,6 +101,14 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       return null;
     }
 
+    let png: Uint8Array;
+
+    try {
+      png = readFileSync(file);
+    } catch {
+      return null;
+    }
+
     drags.delete(file);
 
     // An app the drag went to first may have saved the user's edit into the file: it stays until quit.
@@ -113,7 +116,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       deps.unstage(record.folder);
     }
 
-    return record.drag;
+    return { drop: record.drop, png };
   };
 
   /** Runs what a drop does after the shelf has its reply: whatever throws on the way is said once, and never escapes main's handler. */
@@ -160,7 +163,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
         return null;
       }
 
-      const { shot } = drag;
+      const { drop, shot } = drag;
 
       made += 1;
 
@@ -171,15 +174,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
         return null;
       }
 
-      drags.set(onDisk(file), { drag, folder, written: stamp(file) });
-
-      for (const old of drags.keys()) {
-        if (drags.size <= DRAGS_KEPT) {
-          break;
-        }
-
-        drags.delete(old);
-      }
+      drags.set(onDisk(file), { drop, folder, written: stamp(file) });
 
       return { file, shot };
     },
@@ -189,27 +184,27 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       id: ItemId,
       paths: readonly string[]
     ): Promise<AttachResult> => {
-      const drag = claim(paths);
+      const claimed = claim(paths);
 
-      if (drag === null) {
+      if (claimed === null) {
         return await deps.attachFiles(id, paths);
       }
 
-      land("item", async () => await drag.onItem(id));
+      land("item", async () => await claimed.drop.onItem(id, claimed.png));
 
       return NOTHING;
     },
 
     /** Files dropped on the shelf off any item: the card's Add to Shelf, or new items. */
     onShelf: (paths: readonly string[]): void => {
-      const drag = claim(paths);
+      const claimed = claim(paths);
 
-      if (drag === null) {
+      if (claimed === null) {
         settle(async () => {
           await deps.addFiles(paths);
         });
       } else {
-        land("shelf", async () => await drag.onShelf());
+        land("shelf", async () => await claimed.drop.onShelf(claimed.png));
       }
     },
   };
