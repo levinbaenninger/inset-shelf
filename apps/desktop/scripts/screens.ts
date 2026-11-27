@@ -7787,12 +7787,14 @@ const codeChecks = async (
     return "the source line must be plain text with a code mark: nothing opens it yet";
   }
 
-  // A long path loses its start to "…", never its end: the file's name stays.
+  // A long path loses its start to "…", never its end: the file's whole name stays.
+  const name = tooltip?.slice(tooltip.lastIndexOf("/") + 1) ?? "";
+
   const pathLine = source.title
     ?.split("\n")
     .find((line) =>
       line.startsWith("…")
-        ? tooltip?.endsWith(line.slice(1)) === true
+        ? line.endsWith(name) && tooltip?.endsWith(line.slice(1)) === true
         : line === tooltip
     );
 
