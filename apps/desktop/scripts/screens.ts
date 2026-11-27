@@ -9275,6 +9275,14 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     check: async (page) => {
       await page.waitForTimeout(100);
       await page.keyboard.press("Enter");
+      // The editor takes the keyboard once it is drawn.
+      await page
+        .waitForFunction(
+          "document.activeElement?.getAttribute('aria-label') === 'Edit item'",
+          null,
+          { timeout: 1000 }
+        )
+        .catch(() => null);
 
       const again = await keyboardPlace(page);
 
