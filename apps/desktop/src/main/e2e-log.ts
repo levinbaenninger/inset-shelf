@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 
+import type { CodeEditor } from "@shared/code-editors";
 import { BrowserWindow } from "electron";
 import type { Rectangle } from "electron";
 
@@ -42,6 +43,15 @@ export interface E2eDetails {
 }
 
 const logFile = process.env.INSET_E2E_LOG;
+
+/**
+ * The desktop test's stand-in editor, scripts/e2e/source.swift, whose window
+ * names a file. Only the capture's code place reads it, never recall.
+ */
+export const E2E_EDITORS: readonly CodeEditor[] =
+  logFile === undefined || logFile === ""
+    ? []
+    : [{ apps: ["source"], document: "file", title: ["file", "project"] }];
 
 export const e2eLog = (event: E2eEvent, details: E2eDetails = {}): void => {
   if (logFile === undefined || logFile === "") {

@@ -48,11 +48,14 @@ const EDITOR_NAMES: ReadonlySet<string> = new Set(
 
 const TITLE_PARTS = /\s[—–-]\s/u;
 
-/** The row for an app, or undefined. */
-export const codeEditor = (app: string | null): CodeEditor | undefined =>
+/** The row for an app among `editors`, or undefined. */
+export const codeEditor = (
+  app: string | null,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): CodeEditor | undefined =>
   app === null
     ? undefined
-    : CODE_EDITORS.find((editor) => editor.apps.includes(app));
+    : editors.find((editor) => editor.apps.includes(app));
 
 /**
  * The file's and the project's name in a window title, by the editor's row.
