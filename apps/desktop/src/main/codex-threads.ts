@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { withoutAppName } from "@shared/window-title";
 import { z } from "zod";
 
 const ThreadSchema = z.object({
@@ -34,6 +35,14 @@ export const threadNamed = (
     .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ??
   null;
 
+/** The thread a ChatGPT window shows: found by its title as read, else without the app's name Windows adds to it, which items kept by an earlier build also lack. */
+export const threadOfWindow = (
+  threads: readonly Thread[],
+  title: string
+): string | null =>
+  threadNamed(threads, title) ??
+  threadNamed(threads, withoutAppName(title, "ChatGPT"));
+
 /**
  * The ChatGPT desktop app (built on Codex) names its window after the open
  * thread, and lists its threads with their titles in ~/.codex. A thread found
@@ -52,7 +61,7 @@ export const chatGptThreadLink = async (
       "utf-8"
     );
 
-    const id = threadNamed(parseThreadIndex(text), title);
+    const id = threadOfWindow(parseThreadIndex(text), title);
 
     return id === null ? null : `codex://threads/${id}`;
   } catch {

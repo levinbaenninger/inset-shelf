@@ -79,6 +79,10 @@ const withoutName = (title: string, app: string | null): string | null => {
   return null;
 };
 
+/** A title without the app's name at its end, nothing else off: the way a thread or file is named in a window's title. */
+export const withoutAppName = (title: string, app: string | null): string =>
+  withoutName(title, app) ?? title;
+
 /**
  * The page's or file's own name, from a title read as the window has it.
  * Only a title that ends in the app's name is changed, and what else goes
