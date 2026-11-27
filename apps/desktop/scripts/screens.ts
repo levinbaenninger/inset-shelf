@@ -3505,6 +3505,75 @@ const EDIT_DOC = {
   ],
 };
 
+/** A note long enough to wrap five times, the words the lead saw jump a line when typing started. */
+const WRAP_DOC: typeof EDIT_DOC = {
+  ...EDIT_DOC,
+  items: [
+    {
+      ...base(723, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "check the flaky login test and ask anna about the retry budget before friday and also write down which retries we allow per request so the budget stays visible",
+      via: "typed",
+    },
+  ],
+};
+
+/** The first word of each line the words inside an element wrap to, read where they are drawn. */
+const lineStarts = async (locator: Locator): Promise<string[]> =>
+  z.array(z.string()).parse(
+    await locator.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const starts: string[] = [];
+      let lastTop = Number.NEGATIVE_INFINITY;
+
+      for (
+        let node = walker.nextNode();
+        node !== null;
+        node = walker.nextNode()
+      ) {
+        const text = node.textContent ?? "";
+
+        for (const match of text.matchAll(/\S+/gu)) {
+          const range = document.createRange();
+
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + 1);
+
+          const { top } = range.getBoundingClientRect();
+
+          if (top > lastTop + 4) {
+            starts.push(match[0]);
+            lastTop = top;
+          }
+        }
+      }
+
+      return starts;
+    })
+  );
+
+/** The open note's line starts at each shelf width from the narrowest to a wide one: in the editor, or as read. */
+const wrapSweep = async (page: Page, editing: boolean) => {
+  const words = editing
+    ? page.getByRole("textbox", { name: "Edit item" })
+    : item(page, 723).locator("[data-row-keys]");
+
+  const seen = new Map<number, string>();
+
+  for (let width = NARROWEST; width <= 460; width += 4) {
+    // oxlint-disable-next-line no-await-in-loop -- one width after another.
+    await page.setViewportSize({ height: 700, width });
+    // oxlint-disable-next-line no-await-in-loop -- read once the row has settled at this width.
+    await page.waitForTimeout(40);
+    // oxlint-disable-next-line no-await-in-loop -- read at this width.
+    seen.set(width, (await lineStarts(words)).join(" / "));
+  }
+
+  return seen;
+};
+
 const EditBoxSchema = z.object({
   height: z.number(),
   left: z.number(),
@@ -5223,6 +5292,29 @@ const STRESS_SCENES: readonly Scene[] = (
       data: { view: stressView(EDIT_DOC) },
       keepPointer: true,
       name: "stress-edit-in-place-note",
+    },
+    {
+      // Typing starts in a note that wraps five times, at every width: each line still begins with the word it began with as read.
+      act: async (page) => {
+        await clickToEdit(page, 723, "budget");
+      },
+      check: async (page) => {
+        const typed = await wrapSweep(page, true);
+
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(200);
+
+        const read = await wrapSweep(page, false);
+        const moved = [...read].filter(([width, lines]) => typed.get(width) !== lines);
+        const [first] = moved;
+
+        return first === undefined
+          ? null
+          : `typing in the open note breaks its lines elsewhere at ${moved.length} widths; at ${first[0]} px it reads “${first[1]}” and edits as “${typed.get(first[0])}”`;
+      },
+      data: { view: stressView(WRAP_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-wrap",
     },
     {
       // An open file without a note, before any click: the quiet Add a note… shows where the note would be.
