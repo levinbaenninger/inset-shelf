@@ -9339,6 +9339,41 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-unmatched-details",
     page: "shelf",
   },
+  {
+    // A file's note edited in its row so it no longer matches: the row leaves the results, and the keyboard goes back to the search.
+    act: async (page) => {
+      await searchFor(page, "pallets");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Note for this file'"
+      );
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.type("Crates for the move");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after a note edit that left the search's results put focus on ${placeText(left)}, not on the search`;
+    },
+    data: {
+      view: shelfView({
+        ...DOC,
+        items: ITEMS.map((each) =>
+          each.id === uuid(13)
+            ? { ...each, note: "Pallets for the move" }
+            : each
+        ),
+      }),
+    },
+    name: "shelf-keeps-place-unmatched-note",
+    page: "shelf",
+  },
 ];
 
 const SETTINGS_VIEW = {
