@@ -8,6 +8,8 @@ import {
   textMark,
 } from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
+import { copiedWords, noteTree } from "./shown-note";
+import type { Copied } from "./shown-note";
 import {
   isAppLink,
   isPageAddress,
@@ -1857,9 +1859,27 @@ export const PICTURE_KIND: Readonly<Record<ImageItem["via"], string>> = {
   screenshot: "Screenshot",
 };
 
+/**
+ * Whether Copy puts an item's words on the clipboard as the shelf shows
+ * them: a text item's, unless it is a selection that still holds the HTML it
+ * was copied with, which goes back as it was copied.
+ */
+export const copiesAsShown = (
+  item: ShelfItem
+): item is TextItem & { readonly html: null } =>
+  item.kind === "text" && item.html === null;
+
+/**
+ * A text item's words as Copy puts them on the clipboard: as the shelf shows
+ * them, as plain text and as the shelf renders them. What the shelf shows
+ * as one code block is a tree of one `code` node, which copies as code.
+ */
+export const copiedNote = (item: TextItem): Copied =>
+  copiedWords(noteTree(item.text));
+
 export const itemText = (item: ShelfItem): string => {
   if (item.kind === "text") {
-    return item.text;
+    return copiesAsShown(item) ? copiedNote(item).text : item.text;
   }
 
   if (item.kind === "file") {
@@ -2051,10 +2071,29 @@ const namedPictureHtml = (
     : `<p>${escapeHtml(name)}<br>${pictureHtml(picture)}</p>`;
 };
 
+/** Copy with Details' words and metadata as HTML: a note's words as the shelf renders them, then its page and metadata. */
+const detailsHeadHtml = (item: ShelfItem): string => {
+  const details = detailLines(item, true);
+
+  if (!copiesAsShown(item)) {
+    return `<p>${linesHtml(withDetails(withUrl(titled(item), item), details))}</p>`;
+  }
+
+  const rest = [
+    item.context?.url ?? null,
+    details.length === 0 ? null : details.join("\n"),
+  ]
+    .filter((part) => part !== null)
+    .join("\n\n");
+
+  return `${copiedNote(item).html}${rest === "" ? "" : `<p>${linesHtml(rest)}</p>`}`;
+};
+
 /**
- * Copy with Details as HTML, for an item with attachments: the same words,
- * the image item's own picture, then each attachment by name, its picture
- * inline under it when there is one.
+ * Copy with Details as HTML, for a note or an item with attachments: the
+ * same words, a note's as the shelf renders them, the image item's own
+ * picture, then each attachment by name, its picture inline under it when
+ * there is one.
  */
 export const itemDetailsHtml = (
   item: ShelfItem,
@@ -2062,7 +2101,7 @@ export const itemDetailsHtml = (
   attached: InlinePictures
 ): string =>
   [
-    `<p>${linesHtml(withDetails(withUrl(titled(item), item), detailLines(item, true)))}</p>`,
+    detailsHeadHtml(item),
     ...(own === null || item.kind !== "image"
       ? []
       : [
@@ -2070,7 +2109,7 @@ export const itemDetailsHtml = (
             ? `<p>${escapeHtml(itemText(item))}${MISSING_PICTURE}</p>`
             : `<p>${pictureHtml(own)}</p>`,
         ]),
-    "<p>Attachments:</p>",
+    ...(hasAttachments(item) ? ["<p>Attachments:</p>"] : []),
     ...item.attachments.map((attachment) =>
       namedPictureHtml(attachmentName(attachment), attached.get(attachment.id))
     ),

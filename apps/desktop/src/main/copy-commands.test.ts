@@ -503,6 +503,7 @@ describe(createCopyCommands, () => {
     });
     expect(events).toStrictEqual(["write"]);
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>Call Rieder</p>",
       "text/plain": "Call Rieder",
     });
   });
@@ -523,6 +524,7 @@ describe(createCopyCommands, () => {
     });
     expect(events).toStrictEqual(["save", "write"]);
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>Call Rieder at 9</p>",
       "text/plain": "Call Rieder at 9",
     });
   });
@@ -548,6 +550,7 @@ describe(createCopyCommands, () => {
     await expect(copying).resolves.toStrictEqual({ ok: true });
     expect(savedText(items.text)).toBe("FIRST EDIT");
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>FIRST EDIT</p><p>Before Friday</p>",
       "text/plain": "FIRST EDIT\n\nBefore Friday",
     });
     expect(controller.item(items.text)).toMatchObject({
@@ -607,6 +610,7 @@ describe(createCopyCommands, () => {
     expect(events).toStrictEqual(["save", "write"]);
     expect(savedText(items.text)).toBe("FIRST EDIT");
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>FIRST EDIT</p>",
       "text/plain": "FIRST EDIT",
     });
     // The second edit still waits for its own pause.
@@ -663,6 +667,7 @@ describe(createCopyCommands, () => {
 
     await expect(copying).resolves.toStrictEqual({ ok: true });
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>Call Rieder at 9</p>",
       "text/plain": "Call Rieder at 9",
     });
     // The copy waited for the image's note too, which was in the shelf it took.
@@ -719,6 +724,7 @@ describe(createCopyCommands, () => {
       onDisk: "UNSAVED AFTER FAILURE",
     });
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>UNSAVED AFTER FAILURE</p><p>Before Friday</p>",
       "text/plain": "UNSAVED AFTER FAILURE\n\nBefore Friday",
     });
   });
@@ -778,8 +784,14 @@ describe(createCopyCommands, () => {
     await expect(
       Promise.all(written.map(async (contents) => await formats(contents[0])))
     ).resolves.toStrictEqual([
-      { "text/plain": "Call Rieder at 9" },
-      { "text/plain": "Call Rieder at 9\n\nBefore Friday" },
+      {
+        "text/html": "<p>Call Rieder at 9</p>",
+        "text/plain": "Call Rieder at 9",
+      },
+      {
+        "text/html": "<p>Call Rieder at 9</p><p>Before Friday</p>",
+        "text/plain": "Call Rieder at 9\n\nBefore Friday",
+      },
     ]);
     await controller.flush();
     // The banner says it for the whole session: no row offers a Retry that can't work.
@@ -807,6 +819,7 @@ describe(createCopyCommands, () => {
       "text/plain": "plan.pdf",
     });
     await expect(formats(written[1]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p>Call Rieder</p><p>Before Friday</p>",
       "text/plain": "Call Rieder\n\nBefore Friday",
     });
     await expect(formats(written[2]?.[0])).resolves.toStrictEqual({

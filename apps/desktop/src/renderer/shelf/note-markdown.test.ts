@@ -1,7 +1,9 @@
+import { copiedWords, noteTree, shownUrl } from "@shared/shown-note";
 import { getSchema } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { defaultUrlTransform } from "react-markdown";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -451,6 +453,95 @@ describe(storedNote, () => {
       fast: true,
       first: `${links} done`,
     });
+  });
+});
+
+/** The words a typed note holds, as they read: each block on its own lines, a list item after its bullet. */
+const typedWords = (node: JSONContent): string => {
+  const inner = (node.content ?? []).map(typedWords);
+
+  if (node.type === "text") {
+    return node.text ?? "";
+  }
+
+  if (node.type === "hardBreak") {
+    return "\n";
+  }
+
+  if (node.type === "listItem") {
+    return `- ${inner.join("\n")}`;
+  }
+
+  if (node.type === "paragraph" || node.type === "heading") {
+    return inner.join("");
+  }
+
+  return inner.join(node.type === "bulletList" ? "\n" : "\n\n");
+};
+
+const CHARACTERS = new Map([
+  ["amp", "&"],
+  ["apos", "'"],
+  ["gt", ">"],
+  ["lt", "<"],
+  ["quot", '"'],
+]);
+
+/** What HTML reads as, whatever it is marked up and escaped with, but for where its lines break. */
+const readAs = (html: string): string =>
+  html
+    .replaceAll(/<[^>]*>/gu, "")
+    .replaceAll(
+      /&(?<name>#x[\da-f]+|#\d+|[a-z]+);/giu,
+      (whole, name: string) => {
+        if (name.startsWith("#x")) {
+          return String.fromCodePoint(Number.parseInt(name.slice(2), 16));
+        }
+
+        return name.startsWith("#")
+          ? String.fromCodePoint(Number(name.slice(1)))
+          : (CHARACTERS.get(name) ?? whole);
+      }
+    )
+    .replaceAll("\n", "");
+
+describe(copiedWords, () => {
+  it.each(TYPED)(
+    "copies the note stored as $text as it was typed, and as HTML that reads as the shelf shows it",
+    ({ doc }) => {
+      const saved = stored(doc);
+      const copy = copiedWords(noteTree(saved));
+
+      expect({ html: readAs(copy.html), text: copy.text }).toStrictEqual({
+        html: readAs(shown(saved)),
+        text: typedWords(doc),
+      });
+    }
+  );
+});
+
+describe(shownUrl, () => {
+  it.each([
+    "https://example.com/a?b#c",
+    "HTTP://EXAMPLE.COM",
+    "mailto:bob@example.com",
+    "xmpp:bob@example.com",
+    "ircs://irc.example.com",
+    // oxlint-disable-next-line no-script-url -- the shelf must not link these.
+    "javascript:alert(1)",
+    // oxlint-disable-next-line no-script-url -- the shelf must not link these.
+    "JavaScript:alert(1)",
+    "data:text/html,x",
+    "vbscript:x",
+    "file:///etc/passwd",
+    "/docs/a:b",
+    "docs?x=a:b",
+    "#a:b",
+    "notes.md",
+    "",
+    ":x",
+  ])("links %j as the shelf does", (url) => {
+    expect(shownUrl(url)).toBe(defaultUrlTransform(url));
   });
 });
 
