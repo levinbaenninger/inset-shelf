@@ -254,7 +254,9 @@ const setup = async (dir: string, blocked = false) => {
 /** Saves that read the pictures and marks from the disk, as main's do. */
 const savesReading = (
   app: Awaited<ReturnType<typeof setup>>,
-  shelf: Partial<Pick<DrawingSaveDeps, "close" | "focus" | "shotSaved">> = {}
+  shelf: Partial<
+    Pick<DrawingSaveDeps, "close" | "focus" | "shotClosed" | "shotSaved">
+  > = {}
 ) =>
   createDrawingSaves({
     added: () => {},
@@ -776,7 +778,7 @@ describe(createDrawingSaves, () => {
     expect({ image, reads }).toStrictEqual({ image: original, reads: [file] });
   });
 
-  it("leaves the shelf to main's notice once the screenshot card's Annotate closes, saved or not, and brings any other annotated image into view", async () => {
+  it("leaves the shelf to main's notice once the screenshot card's Annotate closes, saved or not, telling main which, and brings any other annotated image into view", async () => {
     const app = await setup(dir);
     const file = await app.store.writeAttachment(new Uint8Array([1, 2, 3]));
 
@@ -804,8 +806,11 @@ describe(createDrawingSaves, () => {
       focus: () => {
         shown.push("brought into view");
       },
+      shotClosed: () => {
+        shown.push("announced as closed");
+      },
       shotSaved: () => {
-        shown.push("announced");
+        shown.push("announced as saved");
       },
     });
 
@@ -846,8 +851,8 @@ describe(createDrawingSaves, () => {
     saves.hidden();
 
     expect(shown).toStrictEqual([
-      "announced",
-      "announced",
+      "announced as saved",
+      "announced as closed",
       "brought into view",
     ]);
   });
