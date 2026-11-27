@@ -422,6 +422,32 @@ describe(lineOfText, () => {
     expect(lineOfText("run();\nrun(); // note\n", "run();\n")).toBe(1);
   });
 
+  it.each([
+    [
+      "the line now holds more after it",
+      "a();\nrun(); // unrelated\n",
+      "run();\n",
+    ],
+    [
+      "the next line's indent was selected too",
+      "a();\nrun(); // unrelated\n",
+      "run();\n  ",
+    ],
+  ])(
+    "gives no line for a capture that ended its line when %s",
+    (_, file, captured) => {
+      expect(lineOfText(file, captured)).toBeNull();
+    }
+  );
+
+  it.each([
+    ["blanks now end its line", "a();\nrun();  \nb();\n", 2],
+    ["its line is now the file's last", "a();\nrun();", 2],
+    ["the same words begin another line first", "run(); // x\nrun();\t\n", 2],
+  ])("finds a capture that ended its line where %s", (_, file, line) => {
+    expect(lineOfText(file, "run();\n")).toBe(line);
+  });
+
   it("gives no line when the whole capture is in the file twice, however its trimmed form reads", () => {
     const file = source(40, { 9: "  retry();", 30: "  retry();" });
 

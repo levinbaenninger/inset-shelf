@@ -306,13 +306,25 @@ interface Found {
 // oxlint-disable-next-line unicorn/prefer-code-point -- a unit, as above.
 const unitAt = (text: string, at: number): number => text.charCodeAt(at);
 
+/** Whether only spaces or tabs stand between `at` and the end of its line in `text`. */
+const endsLine = (text: string, at: number): boolean => {
+  let index = at;
+
+  while (text[index] === " " || text[index] === "\t") {
+    index += 1;
+  }
+
+  return index === text.length || text[index] === "\n";
+};
+
 /**
- * Where `wanted` is in `text`: at one place, at more than one, or nowhere.
- * Stops at the second. One pass over `text`, never back (Knuth, Morris and
- * Pratt): no file and no capture make it slower than their two lengths,
- * where a built-in search can compare most of a long capture at each place.
+ * Where `wanted` is in `text`: at one place, at more than one, or nowhere,
+ * counting only places that end their line when `toLineEnd`. Stops at the
+ * second. One pass over `text`, never back (Knuth, Morris and Pratt): no
+ * file and no capture make it slower than their two lengths, where a
+ * built-in search can compare most of a long capture at each place.
  */
-const placeOf = (text: string, wanted: string): Found => {
+const placeOf = (text: string, wanted: string, toLineEnd = false): Found => {
   if (wanted === "") {
     return { at: -1, times: 0 };
   }
@@ -348,11 +360,14 @@ const placeOf = (text: string, wanted: string): Found => {
     }
 
     if (matched === wanted.length) {
-      if (at !== -1) {
-        return { at, times: 2 };
+      if (!toLineEnd || endsLine(text, index + 1)) {
+        if (at !== -1) {
+          return { at, times: 2 };
+        }
+
+        at = index + 1 - wanted.length;
       }
 
-      at = index + 1 - wanted.length;
       matched = border[matched - 1] ?? 0;
     }
   }
@@ -381,8 +396,9 @@ const lineAt = (text: string, index: number): number => {
  * looked for first, blanks and all, since they can tell two places apart.
  * Only when it is nowhere is it looked for without the blank lines before
  * it and the blanks after it, which leaves every line that was selected in
- * the match. No part of a capture stands in for the whole, and a capture
- * that is there twice, in either form, has no line.
+ * the match. A capture whose blanks after it held a line break ended its
+ * line, so its match must too. No part of a capture stands in for the
+ * whole, and a capture that is there twice, in either form, has no line.
  *
  * The file on disk is not the editor's buffer: a selection from unsaved
  * edits may be nowhere in it, or only where an older copy of the same lines
@@ -407,7 +423,13 @@ export const lineOfText = (text: string, captured: string): number | null => {
   }
 
   const loose =
-    exact.times === 0 && trimmed !== whole ? placeOf(file, trimmed) : exact;
+    exact.times === 0 && trimmed !== whole
+      ? placeOf(
+          file,
+          trimmed,
+          whole.slice(blankStart + trimmed.length).includes("\n")
+        )
+      : exact;
 
   return loose.times === 1 ? lineAt(file, loose.at) : null;
 };
