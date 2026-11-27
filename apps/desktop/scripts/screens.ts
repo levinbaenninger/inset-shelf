@@ -8960,12 +8960,65 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     check: async (page) => {
       const left = await keyboardPlace(page);
 
-      return left.within === "Next steps" && !left.field
+      const onAdd = await page
+        .getByRole("button", { name: "Add step" })
+        .evaluate((button) => button === document.activeElement);
+
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      return onAdd && steps === 5
         ? null
-        : `Esc in a step not typed yet left focus on ${placeText(left)}, not in Next steps`;
+        : `Esc in a step not typed yet left focus on ${placeText(left)} with ${steps} steps, not on Add step with the blank step gone`;
     },
     data: { view: shelfView() },
     name: "shelf-keeps-place-blank-step",
+    page: "shelf",
+  },
+  {
+    // A step that held words and was cleared stays as Esc leaves it, so the keyboard waits on its row, where Return types in it again and ⌘Z brings its words back.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { name: "Step 1" }).focus();
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const left = await page.evaluate(() => ({
+        row: document.activeElement?.matches("li[data-field-place]") ?? false,
+        within:
+          document.activeElement
+            ?.closest("section[aria-label]")
+            ?.getAttribute("aria-label") ?? "",
+      }));
+
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      if (!left.row || left.within !== "Next steps" || steps !== 5) {
+        return `Esc in a cleared step left focus ${left.row ? "on a step's row" : "off its row"} in “${left.within}” with ${steps} steps, not on its row with the step kept`;
+      }
+
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("ControlOrMeta+Z");
+      await page.waitForTimeout(150);
+
+      const words = await page.evaluate(() =>
+        document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.value
+          : null
+      );
+
+      return words === null || words === ""
+        ? `Return then ⌘Z on a cleared step's row left ${words === null ? "the keyboard out of the step" : "the step blank"}, not its words back`
+        : null;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-cleared-step",
     page: "shelf",
   },
   {
