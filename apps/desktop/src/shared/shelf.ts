@@ -859,6 +859,17 @@ export type MainOp =
       readonly attachmentId: AttachmentId;
       readonly name: string;
     }
+  /**
+   * The line a capture's words began on in its code file, found after the
+   * item was added (src/main/code-line.ts). It counts only while the item
+   * still names that file, and it is no edit: Undo has nothing to take back.
+   */
+  | {
+      readonly type: "setCodeLine";
+      readonly id: ItemId;
+      readonly file: string;
+      readonly line: number;
+    }
   /** An attached picture becomes an item of its own in the section new items go to, the same way. */
   | {
       readonly type: "attachmentToItem";
@@ -1149,6 +1160,32 @@ const addText = (
     via: op.via,
     windows: (op.windows ?? []).slice(0, WINDOWS_MAX),
   });
+};
+
+/** A code item's line, while the item still names the file it was found in. */
+const setCodeLine = (
+  doc: ShelfDoc,
+  op: Extract<MainOp, { readonly type: "setCodeLine" }>
+): OpResult => {
+  const context = doc.items.find((item) => item.id === op.id)?.context ?? null;
+
+  const code = context?.code ?? null;
+
+  if (
+    context === null ||
+    code === null ||
+    code.file !== op.file ||
+    code.line === op.line
+  ) {
+    return unchanged(doc);
+  }
+
+  return changed(
+    mapItem(doc, op.id, (item) => ({
+      ...item,
+      context: { ...context, code: { ...code, line: op.line } },
+    }))
+  );
 };
 
 /** Deletes a section's checked items for good. */
@@ -1757,6 +1794,10 @@ export const applyOp = (
 
     case "addText": {
       return addText(doc, op, env);
+    }
+
+    case "setCodeLine": {
+      return setCodeLine(doc, op);
     }
 
     case "addImage": {
