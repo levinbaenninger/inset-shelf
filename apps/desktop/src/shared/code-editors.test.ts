@@ -278,6 +278,10 @@ describe(openAddress, () => {
     ["a name that ends like a line", "/Users/anna/p/report:12", null],
     ["a name that ends like a line, at a line", "/Users/anna/p/report:12", 5],
     ["a name that ends like a line and a column", "/Users/anna/p/a:3:9", null],
+    // Code splits the whole path on colons and takes a number wherever one stands alone.
+    ["a number between colons in a name", "/Users/anna/p/a:12:b.ts", null],
+    ["a folder with a colon", "/Users/anna/p:3/src/a.ts", null],
+    ["a colon and no number", "/Users/anna/p/a:b.ts", 4],
     // Code opens a workspace file as a workspace, leaving the window's own.
     ["a workspace file", "/Users/anna/p/all.code-workspace", null],
     ["a workspace file at a line", "/Users/anna/p/all.code-workspace", 4],
