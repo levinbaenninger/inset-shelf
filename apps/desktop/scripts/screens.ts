@@ -2811,6 +2811,178 @@ const stepRowCheck = async (page: Page): Promise<string | null> => {
     : null;
 };
 
+const FieldLookSchema = z.object({
+  background: z.string(),
+  border: z.string(),
+  /** The filled box the field sits on: its background, or "" when it sits on the bare window. */
+  card: z.string(),
+  cursor: z.string(),
+  font: z.string(),
+  height: z.number(),
+  ring: z.string(),
+  textLeft: z.number(),
+  textTop: z.number(),
+});
+
+type FieldLook = z.infer<typeof FieldLookSchema>;
+
+/** How an in-place field looks: its tint, any ring or border, and where its words sit and in what type. */
+const fieldLook = async (locator: Locator): Promise<FieldLook> => {
+  await settleTint(locator);
+
+  return FieldLookSchema.parse(
+    await locator.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      const px = (value: string): number => Number.parseFloat(value) || 0;
+      let card = "";
+
+      for (
+        let up = element.parentElement;
+        up !== null && up.tagName !== "SECTION" && card === "";
+        up = up.parentElement
+      ) {
+        const fill = getComputedStyle(up).backgroundColor;
+
+        if (fill !== "rgba(0, 0, 0, 0)") {
+          card = fill;
+        }
+      }
+
+      const borderWidth = px(style.borderTopWidth);
+
+      return {
+        background: style.backgroundColor,
+        border:
+          borderWidth === 0 || style.borderTopColor === "rgba(0, 0, 0, 0)"
+            ? "none"
+            : `${borderWidth}px ${style.borderTopColor}`,
+        card,
+        cursor: style.cursor,
+        font: `${style.fontFamily} ${style.fontSize}/${style.lineHeight} ${style.fontWeight}`,
+        height: box.height,
+        ring:
+          style.boxShadow === "none" &&
+          (style.outlineStyle === "none" || px(style.outlineWidth) === 0)
+            ? "none"
+            : `${style.boxShadow} ${style.outlineStyle} ${style.outlineWidth}`,
+        textLeft: box.left + px(style.borderLeftWidth) + px(style.paddingLeft),
+        // From the top of its row or field, so a scroll to bring it into view moves nothing.
+        textTop:
+          box.top +
+          px(style.borderTopWidth) +
+          px(style.paddingTop) -
+          (element.closest("li, section")?.getBoundingClientRect().top ?? 0),
+      };
+    })
+  );
+};
+
+/** Lets a tint's fade finish before it is read. */
+const settleTint = async (locator: Locator): Promise<void> => {
+  await locator.page().waitForTimeout(250);
+};
+
+/** A field of details that is typed in where it is read: the words at rest, and the field typed in once it has the keyboard. */
+interface InPlaceField {
+  readonly name: string;
+  readonly rest: (page: Page) => Locator;
+  readonly typing: (page: Page) => Locator;
+  /** Starts typing: a click for words that turn into a field, focus for a field that is always one. */
+  readonly start: (page: Page) => Promise<void>;
+}
+
+const alwaysField = (name: string, label: string | RegExp): InPlaceField => ({
+  name,
+  rest: (page) => page.getByRole("textbox", { exact: true, name: label }),
+  start: async (page) => {
+    await page.getByRole("textbox", { exact: true, name: label }).focus();
+  },
+  typing: (page) => page.getByRole("textbox", { exact: true, name: label }),
+});
+
+/** Each field at rest, hovered and typed in. */
+const inPlaceLooks = async (page: Page, fields: readonly InPlaceField[]) => {
+  const looks: {
+    readonly name: string;
+    readonly rest: FieldLook;
+    readonly hover: FieldLook;
+    readonly typing: FieldLook;
+  }[] = [];
+
+  for (const field of fields) {
+    // oxlint-disable-next-line no-await-in-loop -- one field after another, each from rest.
+    await page.getByRole("heading", { name: "Details" }).focus();
+    // oxlint-disable-next-line no-await-in-loop -- the pointer away, so the field is at rest.
+    await page.mouse.move(1, 1);
+
+    // oxlint-disable-next-line no-await-in-loop -- read at rest.
+    const rest = await fieldLook(field.rest(page));
+
+    // oxlint-disable-next-line no-await-in-loop -- the pointer over it.
+    await field.rest(page).hover();
+
+    // oxlint-disable-next-line no-await-in-loop -- read hovered.
+    const hover = await fieldLook(field.rest(page));
+
+    // oxlint-disable-next-line no-await-in-loop -- the keyboard in it.
+    await field.start(page);
+    // oxlint-disable-next-line no-await-in-loop -- the pointer away, so only focus tints it.
+    await page.mouse.move(1, 1);
+
+    // oxlint-disable-next-line no-await-in-loop -- read typed in.
+    const typing = await fieldLook(field.typing(page));
+
+    looks.push({ hover, name: field.name, rest, typing });
+    // oxlint-disable-next-line no-await-in-loop -- leaves the field as it was.
+    await page.keyboard.press("Escape");
+  }
+
+  return looks;
+};
+
+/** What breaks "typed where it is read" for one field, or nothing. */
+const inPlaceProblems = (
+  looks: Awaited<ReturnType<typeof inPlaceLooks>>,
+  cue: string
+): string[] =>
+  looks.flatMap(({ hover, name, rest, typing }) => {
+    const problems: string[] = [];
+
+    if (rest.background !== "rgba(0, 0, 0, 0)") {
+      problems.push(`${name} is tinted at rest (${rest.background})`);
+    }
+
+    if (hover.background !== cue || hover.cursor !== "text") {
+      problems.push(
+        `${name} hovered shows ${hover.background} and a ${hover.cursor} cursor, not the tint ${cue} and a text cursor`
+      );
+    }
+
+    if (typing.background !== cue) {
+      problems.push(`${name} typed in is tinted ${typing.background}, not ${cue}`);
+    }
+
+    if (typing.ring !== "none" || typing.border !== "none") {
+      problems.push(
+        `${name} typed in draws a ring (${typing.ring}) or border (${typing.border})`
+      );
+    }
+
+    if (
+      Math.abs(typing.textLeft - rest.textLeft) > 0.5 ||
+      Math.abs(typing.textTop - rest.textTop) > 0.5 ||
+      Math.abs(typing.height - rest.height) > 0.5 ||
+      typing.font !== rest.font
+    ) {
+      problems.push(
+        `${name}'s words move when typing starts: (${rest.textLeft}, ${rest.textTop}) ${rest.height} px ${rest.font} → (${typing.textLeft}, ${typing.textTop}) ${typing.height} px ${typing.font}`
+      );
+    }
+
+    return problems;
+  });
+
 /** The ISO day of the calendar day that has focus, or "" when focus is elsewhere. */
 const focusedDay = async (page: Page): Promise<string> =>
   String(
@@ -8962,6 +9134,159 @@ const SCENES: readonly Scene[] = [
     check: stepRowCheck,
     data: { view: shelfView() },
     name: "shelf-details-step-editing",
+    page: "shelf",
+  },
+  {
+    // Every field of a text item's details typed in where it is read: one tint on hover and while typing, no ring, the words where they were; Description on the same filled box as the steps, its words in line with the item's.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { exact: true, name: "Step 3" }).focus();
+    },
+    check: async (page) => {
+      const cue = (
+        await fieldLook(page.getByRole("textbox", { exact: true, name: "Step 3" }))
+      ).background;
+
+      const looks = await inPlaceLooks(page, [
+        alwaysField("Description", "Description"),
+        alwaysField("Step 3", "Step 3"),
+        {
+          name: "A window's description",
+          rest: (on) =>
+            on.getByRole("button", {
+              name: /Edit the description of Office move budget$/u,
+            }),
+          start: async (on) => {
+            await on
+              .getByRole("button", {
+                name: /Edit the description of Office move budget$/u,
+              })
+              .click();
+          },
+          typing: (on) =>
+            on.getByRole("textbox", {
+              name: "Description of Office move budget",
+            }),
+        },
+      ]);
+
+      const problems = inPlaceProblems(looks, cue);
+      const description = looks.find((look) => look.name === "Description");
+      const step = looks.find((look) => look.name === "Step 3");
+
+      // Where the item's own words start: inside the box at the top of details, past its border and padding.
+      const words = {
+        left: Number(
+          await page
+            .locator("[data-details] > div")
+            .first()
+            .evaluate((element) => {
+              const style = getComputedStyle(element);
+
+              return (
+                element.getBoundingClientRect().left +
+                Number.parseFloat(style.borderLeftWidth) +
+                Number.parseFloat(style.paddingLeft)
+              );
+            })
+        ),
+      };
+
+      if (description !== undefined && step !== undefined) {
+        if (description.rest.card === "" || description.rest.card !== step.rest.card) {
+          problems.push(
+            `Description sits on ${description.rest.card === "" ? "the bare window" : description.rest.card}, the steps on ${step.rest.card}`
+          );
+        }
+
+        if (Math.abs(description.rest.textLeft - words.left) > 0.5) {
+          problems.push(
+            `Description's words start at x ${description.rest.textLeft}, the item's at ${words.left}`
+          );
+        }
+      }
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-in-place-fields",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // A picture's Title, Caption and pin labels: the same tint, no ring, the words where they were, each on a filled box.
+    act: async (page) => {
+      await details(page, 11);
+      await page.getByRole("textbox", { exact: true, name: "Title" }).focus();
+    },
+    check: async (page) => {
+      const cue = (
+        await fieldLook(page.getByRole("textbox", { exact: true, name: "Title" }))
+      ).background;
+
+      const looks = await inPlaceLooks(page, [
+        alwaysField("Title", "Title"),
+        alwaysField("Caption", "Caption, copied with the image"),
+        alwaysField("Pin 1's label", "Label for pin 1"),
+      ]);
+
+      const problems = [
+        ...inPlaceProblems(looks, cue),
+        ...looks
+          .filter((look) => look.rest.card === "")
+          .map((look) => `${look.name} sits on the bare window`),
+      ];
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-in-place-picture",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { exact: true, name: "Description" }).hover();
+      await page.waitForTimeout(250);
+    },
+    data: { view: shelfView() },
+    keepPointer: true,
+    name: "shelf-details-description-hover",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { exact: true, name: "Description" }).click();
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(250);
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-description-typing",
+    page: "shelf",
+  },
+  {
+    // Description added and not typed yet: its placeholder says what goes there.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Description/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Description"
+      );
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(250);
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", { exact: true, name: "Description" });
+      const placeholder = await field.getAttribute("placeholder");
+
+      return (await field.isVisible()) && (placeholder ?? "") !== ""
+        ? null
+        : "an empty Description shows no placeholder";
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-description-empty",
     page: "shelf",
   },
   {
