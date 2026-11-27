@@ -9906,6 +9906,36 @@ const SCENES: readonly Scene[] = [
     platforms: ["macos", "windows"],
   },
   {
+    // The ⋯ at the top: New Section, Settings and Help, which opens the docs; a window link and Keyboard Shortcuts have their own ways in.
+    act: async (page) => {
+      await page.locator("header").getByRole("button", { name: "More" }).click();
+      await page.getByRole("menu").waitFor();
+    },
+    check: async (page) => {
+      const entries = await page.getByRole("menuitem").allTextContents();
+      const gone = entries.filter((entry) =>
+        /^(?:New Window Link|Keyboard Shortcuts)/u.test(entry)
+      );
+
+      if (gone.length > 0) {
+        return `the ⋯ menu still lists ${gone.join(", ")}`;
+      }
+
+      await page.getByRole("menuitem", { name: /^Help/u }).click();
+      await page.waitForTimeout(150);
+
+      const sent = await calls(page);
+
+      return sent.some((call) => call.call === "openHelp")
+        ? null
+        : "Help in the ⋯ menu didn't open the docs";
+    },
+    data: { view: shelfView() },
+    name: "shelf-menu-help",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
     act: async (page) => {
       await page.getByRole("button", { exact: true, name: "Add" }).click();
       await page.getByRole("menuitem", { name: /^New Window Link/u }).waitFor();
