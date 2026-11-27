@@ -15,6 +15,8 @@ import { app, screen, systemPreferences } from "electron";
 import type { Rectangle } from "electron";
 import { activeWindow } from "get-windows";
 
+import { gatedLookups } from "./chat-lookups";
+import type { ChatLookups } from "./chat-lookups";
 import { chatGptThreadLink } from "./codex-threads";
 import { readWebAreas } from "./page-address";
 import type { WebArea } from "./page-address";
@@ -78,7 +80,8 @@ const fitted = (context: ItemContext): ItemContext => ({
  */
 const sourceContext = async (
   window: Omit<ItemContext, "appLink">,
-  areas: readonly WebArea[] | null
+  areas: readonly WebArea[] | null,
+  lookups: ChatLookups
 ): Promise<ItemContext> => {
   const page = shownPage(areas ?? []);
 
@@ -91,7 +94,7 @@ const sourceContext = async (
   const named = window.title === null || window.title === window.app;
 
   const threadTitle =
-    thread === null ? null : await t3ThreadTitle(thread.thread);
+    thread === null ? null : await lookups.t3Title(thread.thread);
 
   const title =
     threadTitle ??
@@ -101,7 +104,7 @@ const sourceContext = async (
     thread?.link ??
     desktopLink(window.app, url) ??
     (window.app === "ChatGPT" && areas !== null
-      ? await chatGptThreadLink(title)
+      ? await lookups.chatGptLink(title)
       : null);
 
   // On Windows a link opens only in an app that registered its scheme (T3 Code, ChatGPT, Claude); without one it is no link.
@@ -143,6 +146,8 @@ export const frontWindow = async (
     readonly page?: boolean;
     /** The page the copied selection came from, known once the copy is read. */
     readonly copiedFrom?: Promise<string | null>;
+    /** The user allowed reading other apps' chat files (T3 Code, ChatGPT) for titles and links; off when left out. */
+    readonly chatLookups?: boolean;
   } = {}
 ): Promise<FrontWindow> => {
   try {
@@ -186,7 +191,11 @@ export const frontWindow = async (
         title: orNull(isMac ? front.title : withoutAppName(front.title, owner)),
         url: "url" in front ? pageUrl(front.url) : null,
       },
-      areas
+      areas,
+      gatedLookups(options.chatLookups === true, {
+        chatGptLink: chatGptThreadLink,
+        t3Title: t3ThreadTitle,
+      })
     );
 
     return {

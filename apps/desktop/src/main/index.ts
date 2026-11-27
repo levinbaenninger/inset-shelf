@@ -66,12 +66,14 @@ import type {
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
+import { gatedLookups } from "./chat-lookups";
 import {
   clipboardContent,
   holdsAgainIn,
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
+import { createSelectionGuard, itemsConcealed } from "./clipboard-privacy";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -97,7 +99,10 @@ import { appBundlePath, createAppTile } from "./permissions/bundle";
 import { createOnboarding } from "./permissions/onboarding";
 import { createPoller } from "./permissions/poller";
 import { createOnboardingStore } from "./permissions/store";
-import { createPermissionChecks } from "./permissions/system";
+import {
+  createPermissionChecks,
+  PRIVACY_PANE_URLS,
+} from "./permissions/system";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import {
@@ -135,6 +140,7 @@ import {
   shelfTasks,
 } from "./shelf-tutorial";
 import { createShelfWindow } from "./shelf-window";
+import { t3ThreadTitle } from "./t3-threads";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
@@ -211,8 +217,21 @@ const trayIconPath = (): string => {
   );
 };
 
+/** Follows the Double Shift capture under way: did it meet a private clipboard (a password manager's copy)? */
+const selectionGuard = createSelectionGuard();
+
 /** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
 const selectionProblem = (result: SelectionResult): string | null => {
+  const marked = selectionGuard.hit();
+
+  if (marked === "original") {
+    return "The clipboard holds something marked private, such as a password, so Inset left it alone and copied nothing. Try again once it has cleared.";
+  }
+
+  if (marked === "selection") {
+    return "That selection is marked private, such as a password, so it wasn’t captured.";
+  }
+
   if (result.unchecked) {
     return "Another app kept the clipboard busy, so Inset couldn't check it was put back after copying your selection.";
   }
@@ -241,8 +260,20 @@ const withFormats = (
   items: readonly ClipboardItem[]
 ): readonly ClipboardItem[] => items.filter((item) => item.types.length > 0);
 
+/**
+ * The clipboard as it is, to be put back. A clipboard a password manager marked private (concealed or
+ * transient) is not read at all and not copied: the capture ends here, and the clipboard is left untouched.
+ * Rewriting it would be the only way to keep it, and a rewrite without the marks would let clipboard
+ * managers record the password.
+ */
 const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
   const items = withFormats(await clipboard.read());
+
+  if (await itemsConcealed(items)) {
+    selectionGuard.note();
+
+    throw new Error("The clipboard is marked private.");
+  }
 
   return await Promise.all(
     items.map(async (item) =>
@@ -255,6 +286,17 @@ const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
       )
     )
   );
+};
+
+/** The text of the copied selection; "" (nothing captured) when the app copied it marked private, as a password field does. */
+const readSelectionText = async (): Promise<string> => {
+  if (await itemsConcealed(await clipboard.read())) {
+    selectionGuard.note();
+
+    return "";
+  }
+
+  return await clipboard.readText();
 };
 
 /** The HTML on the clipboard, or "" without any. */
@@ -274,15 +316,22 @@ const readClipboardHtml = async (): Promise<string> => {
 /** Opens the chat or page an item came from in its desktop app, else (macOS only) just brings the app forward. */
 const openInApp = async (
   name: string,
-  context: ItemContext | null
+  context: ItemContext | null,
+  chatLookups: boolean
 ): Promise<void> => {
   const stored = context?.appLink ?? null;
+
+  // Reads ChatGPT's session index in ~/.codex only when the user allowed chat lookups.
+  const lookups = gatedLookups(chatLookups, {
+    chatGptLink: chatGptThreadLink,
+    t3Title: t3ThreadTitle,
+  });
 
   const link =
     (stored !== null && isAppLink(stored) ? stored : null) ??
     desktopLink(name, context?.url ?? null) ??
     (name === "ChatGPT"
-      ? await chatGptThreadLink(context?.title ?? null)
+      ? await lookups.chatGptLink(context?.title ?? null)
       : null);
 
   if (link !== null) {
@@ -759,16 +808,20 @@ const start = async (): Promise<void> => {
     }
 
     capturingSelection = true;
+    selectionGuard.begin();
 
     try {
       const capture = captureSelection({
-        clear: gate.clearForSelection,
+        clear: () => {
+          selectionGuard.cleared();
+          gate.clearForSelection();
+        },
         copy: keyMonitor.copy,
         content: clipboardContent,
         holds: holdsAgainIn,
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
-        readText: async () => await clipboard.readText(),
+        readText: readSelectionText,
         restore: gate.restore,
         snapshot: snapshotClipboard,
         now: () => performance.now(),
@@ -788,7 +841,11 @@ const start = async (): Promise<void> => {
       };
 
       // Sampled alongside the copy, while the app with the selection is in front.
-      const front = frontWindow({ copiedFrom: copiedFrom(), page: true });
+      const front = frontWindow({
+        chatLookups: settings.current().chatLookups,
+        copiedFrom: copiedFrom(),
+        page: true,
+      });
 
       const result = await capture;
 
@@ -805,7 +862,8 @@ const start = async (): Promise<void> => {
         controller.setStatus({ problem });
       }
 
-      if (result.kind === "busy") {
+      // A private clipboard or selection ends the capture here: no shelf, no item.
+      if (result.kind === "busy" || selectionGuard.hit() !== null) {
         return;
       }
 
@@ -1723,7 +1781,11 @@ const start = async (): Promise<void> => {
 
         // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
         if (url === undefined && fromApp !== null) {
-          void openInApp(fromApp, item?.context ?? null);
+          void openInApp(
+            fromApp,
+            item?.context ?? null,
+            settings.current().chatLookups
+          );
 
           return;
         }
@@ -2418,10 +2480,20 @@ const start = async (): Promise<void> => {
     {
       fitHeight: settingsWindow.fitHeight,
       getView: settingsView,
+      openPane: (pane) => {
+        // System Settings' panes exist on macOS only; the page shows no buttons elsewhere.
+        if (isMac) {
+          shell.openExternal(PRIVACY_PANE_URLS[pane]).catch(ignore);
+        }
+      },
       resetTutorial: () => {
         tutorial.reset();
         settingsServer.emit("view", settingsView());
         notify("Tutorial reset");
+      },
+      showDataFolder: () => {
+        // The folder itself, never a file in it: opening a file would hand it to another app.
+        shell.openPath(dataDir).catch(ignore);
       },
       setOpenAtLogin: (on) => {
         app.setLoginItemSettings({ openAtLogin: on });

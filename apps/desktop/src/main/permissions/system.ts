@@ -1,4 +1,5 @@
 import type { PermissionId } from "@shared/onboarding";
+import type { PrivacyPane } from "@shared/settings";
 
 /**
  * The parts of Electron the kit uses, described by their shape, so the kit
@@ -38,6 +39,15 @@ export const PANE_URLS: Readonly<Record<PermissionId, string>> = {
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
   screen:
     "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+};
+
+/** The panes the Settings window's privacy section opens: the two above, and Automation and Files & Folders. */
+export const PRIVACY_PANE_URLS: Readonly<Record<PrivacyPane, string>> = {
+  ...PANE_URLS,
+  automation:
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+  files:
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
 };
 
 /**

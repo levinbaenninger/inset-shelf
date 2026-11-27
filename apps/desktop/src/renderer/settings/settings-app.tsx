@@ -1,6 +1,6 @@
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
-import type { SettingsView } from "@shared/settings";
+import type { PrivacyPane, SettingsView } from "@shared/settings";
 import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 
@@ -74,12 +74,44 @@ const Group = ({
   </section>
 );
 
+/** A line of the privacy section: what the app is allowed to reach, why, and where to change it. */
+const AccessRow = ({
+  children,
+  pane,
+  title,
+}: {
+  readonly title: string;
+  readonly children: ReactNode;
+  /** The System Settings pane to open (macOS only). */
+  readonly pane?: PrivacyPane;
+}) => (
+  <div className="flex min-h-12 items-center justify-between gap-4 px-3 py-2.5">
+    <div className="flex flex-col gap-0.5">
+      <p className="text-sm font-medium">{title}</p>
+      <p className="text-muted-foreground text-xs leading-snug">{children}</p>
+    </div>
+    {isMac && pane !== undefined ? (
+      <Button
+        className="shrink-0"
+        onClick={() => {
+          api.openPane(pane);
+        }}
+        size="sm"
+        variant="outline"
+      >
+        Open
+      </Button>
+    ) : null}
+  </div>
+);
+
 const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
   const loginId = useId();
   const iconId = useId();
   const copyId = useId();
   const shotId = useId();
   const tipsId = useId();
+  const chatId = useId();
   const { settings } = view;
   const page = useRef<HTMLElement>(null);
 
@@ -195,6 +227,72 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
               }}
             />
           </Row>
+        </Group>
+        <Group title="Privacy & permissions">
+          {isMac ? (
+            <>
+              <AccessRow pane="accessibility" title="Accessibility">
+                Double Shift sees which key you press (only Shift is acted on;
+                nothing else is stored), copies your selection and reads the
+                window’s page address.
+              </AccessRow>
+              <AccessRow pane="screen" title="Screen Recording">
+                Window titles and window links. Pictures of other windows are
+                used only in the window picker.
+              </AccessRow>
+              <AccessRow pane="automation" title="Automation (Apple Events)">
+                Asks Safari, Chrome and other browsers for the page address of
+                the window an item came from.
+              </AccessRow>
+              <AccessRow pane="files" title="Desktop and Documents folders">
+                Screenshot cards, if on, watch the screenshot folder when it is
+                on your Desktop or in Documents.
+              </AccessRow>
+            </>
+          ) : null}
+          <AccessRow title="Clipboard">
+            Double Shift copies your selection and puts your clipboard back.
+            Items a password manager marks as private are never read, kept or
+            rewritten.
+            {isMac
+              ? " Screenshot cards, if on, watch it for new screenshots."
+              : ""}
+          </AccessRow>
+          <Row
+            label="Look up chat titles and links"
+            labelFor={chatId}
+            note="Reads ~/.codex/session_index.jsonl (ChatGPT desktop) and T3 Code’s database in ~/.t3/userdata to name a chat and reopen it. Nothing else in those apps is read, and nothing is sent anywhere. Off by default."
+          >
+            <Switch
+              checked={settings.chatLookups}
+              id={chatId}
+              onCheckedChange={(checked) => {
+                api.update({ chatLookups: checked });
+              }}
+            />
+          </Row>
+          <AccessRow title="Open at Login">
+            Only if you turn it on under General.
+          </AccessRow>
+          <AccessRow title="Network">
+            Inset Shelf contacts the network only when you check for updates:
+            GitHub Releases. No telemetry, analytics or crash reports.
+          </AccessRow>
+          <div className="flex min-h-12 items-center justify-between gap-4 px-3 py-2.5">
+            <p className="text-muted-foreground text-xs leading-snug">
+              Everything you capture is stored as plain files on this computer.
+            </p>
+            <Button
+              className="shrink-0"
+              onClick={() => {
+                api.showDataFolder();
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Show Data Folder
+            </Button>
+          </div>
         </Group>
         <Group title="Tips">
           <Row

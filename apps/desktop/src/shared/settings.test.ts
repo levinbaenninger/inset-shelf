@@ -18,4 +18,28 @@ describe(readSettings, () => {
     );
     expect(readSettings("{ broken")).toStrictEqual(DEFAULT_SETTINGS);
   });
+
+  it("leaves chat lookups and screenshot cards off for a new install", () => {
+    expect(readSettings(null)).toMatchObject({
+      chatLookups: false,
+      screenshotCards: false,
+    });
+  });
+
+  it("reads settings stored before chat lookups existed as off, keeping the stored values", () => {
+    expect(
+      readSettings(
+        JSON.stringify({
+          iconIn: "dock",
+          markDoneOnCopy: true,
+          screenshotCards: true,
+        })
+      )
+    ).toStrictEqual({
+      chatLookups: false,
+      iconIn: "dock",
+      markDoneOnCopy: true,
+      screenshotCards: true,
+    });
+  });
 });

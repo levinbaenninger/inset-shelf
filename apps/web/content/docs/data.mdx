@@ -15,6 +15,12 @@ The folder can hold two kinds of recovery copy beside `shelf.json`:
 
 If the app can't open the shelf file at all, or can't move a damaged one aside, it leaves the file where it is, makes no dated copy, and doesn't save changes to the shelf for that session. Files you drop and images you paste can still be copied into `attachments`, but the shelf won't list them after a restart. The shelf shows a notice that says why.
 
+**Settings > Privacy & permissions > Show Data Folder** opens it.
+
+These are plain files, readable by any program running as you. Full-disk encryption (FileVault on macOS, BitLocker on Windows) protects them when the computer is off or locked; encrypting them inside the app would not stop malware running as you, so the app doesn't.
+
+Text copied with Double Shift is stored as it was selected, so a password you select is stored too. Contents a password manager marks as private are skipped: the app doesn't read the clipboard then, and doesn't capture a selection copied with that mark.
+
 Quit the app and delete the folder to remove the shelf and every copy of it.
 
 The app has no account and sends your items nowhere. It goes online to check for [updates](/docs/updates); see [Privacy](/privacy) for the details.
