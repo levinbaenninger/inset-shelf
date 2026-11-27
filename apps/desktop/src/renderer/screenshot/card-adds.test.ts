@@ -8,117 +8,139 @@ const target = {
   label: "Quote from the movers",
 };
 
-const failed = (to: "shelf" | "item", only: boolean) =>
-  ({ message: "The disk is full.", only, state: "failed", to }) as const;
+const MESSAGE = "The disk is full.";
+
+/** A failed save with the screenshot nowhere on the shelf: `to` reads Retry. */
+const failed = (to: "shelf" | "item" | null) =>
+  ({ message: MESSAGE, placed: null, state: "failed", to }) as const;
+
+/** The screenshot attached to the item, not saved. */
+const onItem = { ...target, to: "item" } as const;
+
+/** The screenshot as a row of its own, not saved. */
+const onShelf = { to: "shelf" } as const;
 
 describe(cardAdds, () => {
   it("offers Add to Shelf alone when no item can be named", () => {
-    expect(
-      cardAdds({ save: { state: "idle" }, target: null }, false)
-    ).toStrictEqual({
+    expect(cardAdds({ save: { state: "idle" }, target: null })).toStrictEqual({
       line: null,
       pill: {
         add: "shelf",
+        item: null,
         label: "Add to Shelf",
         name: "Add to Shelf",
-        to: "shelf",
       },
       sole: false,
     });
   });
 
   it("names the item on a line under Add to Shelf", () => {
-    expect(cardAdds({ save: { state: "idle" }, target }, false)).toMatchObject({
-      line: { kind: "add", lead: "Add to", name: target.label, stacked: false },
-      pill: { label: "Add to Shelf", to: "shelf" },
+    expect(cardAdds({ save: { state: "idle" }, target })).toMatchObject({
+      line: {
+        item: target.id,
+        kind: "add",
+        lead: "Add to",
+        name: target.label,
+        stacked: false,
+      },
+      pill: { item: null, label: "Add to Shelf" },
     });
   });
 
   it("offers Retry on the line that failed, and keeps Add to Shelf beside it", () => {
-    expect(
-      cardAdds({ save: failed("item", false), target }, false)
-    ).toMatchObject({
+    expect(cardAdds({ save: failed("item"), target })).toMatchObject({
       line: { kind: "add", lead: "Retry adding to", stacked: true },
-      pill: { label: "Add to Shelf", to: "shelf" },
+      pill: { item: null, label: "Add to Shelf" },
       sole: false,
     });
   });
 
-  it("makes Retry the pill once the screenshot must stay on its item, and only names the item under it", () => {
+  it("makes Retry the pill once the screenshot is on its item, not saved, and only names the item under it", () => {
     expect(
-      cardAdds({ save: failed("item", true), target }, false)
+      cardAdds({
+        save: { message: MESSAGE, placed: onItem, state: "failed" },
+        target: null,
+      })
     ).toStrictEqual({
       line: { kind: "caption", lead: "adding to", name: target.label },
       pill: {
         add: `item:${target.id}`,
+        item: target.id,
         label: "Retry",
         name: "Retry adding to “Quote from the movers”",
-        to: "item",
       },
       sole: true,
     });
   });
 
-  it("brings no other add back while that only Retry saves", () => {
-    const saving = { save: { state: "saving", to: "item" }, target } as const;
-
-    expect(cardAdds(saving, true)).toMatchObject({
-      line: { kind: "caption" },
-      pill: { label: "Saving…", name: "Saving…", to: "item" },
+  it("brings no other add back while a Retry for the item saves, whatever item could be named", () => {
+    expect(
+      cardAdds({ save: { placed: onItem, state: "saving" }, target })
+    ).toStrictEqual({
+      line: { kind: "caption", lead: "adding to", name: target.label },
+      pill: {
+        add: `item:${target.id}`,
+        item: target.id,
+        label: "Saving…",
+        name: "Saving…",
+      },
       sole: true,
     });
-    expect(cardAdds(saving, false)).toMatchObject({
-      line: { kind: "saving" },
-      pill: { label: "Add to Shelf", to: "shelf" },
+  });
+
+  it("keeps Add to Shelf beside the line while a first Add to “…” saves", () => {
+    expect(
+      cardAdds({ save: { placed: null, state: "saving", to: "item" }, target })
+    ).toMatchObject({
+      line: { add: `item:${target.id}`, item: target.id, kind: "saving" },
+      pill: { item: null, label: "Add to Shelf" },
       sole: false,
     });
   });
 
-  it("offers both adds again once a Retry that was the only one fails for another reason", () => {
+  it("offers Retry alone, and no Add to “…”, while the screenshot is a row of its own, not saved", () => {
     expect(
-      cardAdds({ save: failed("item", false), target }, true)
-    ).toMatchObject({
-      line: { kind: "add" },
+      cardAdds({
+        save: { message: MESSAGE, placed: onShelf, state: "failed" },
+        target,
+      })
+    ).toStrictEqual({
+      line: null,
+      pill: { add: "shelf", item: null, label: "Retry", name: "Retry" },
+      sole: false,
+    });
+    expect(
+      cardAdds({ save: { placed: onShelf, state: "saving" }, target })
+    ).toMatchObject({ line: null, pill: { label: "Saving…" } });
+  });
+
+  it("reads Retry on the pill when Add to Shelf failed with the screenshot nowhere, and keeps Add to “…” beside it", () => {
+    expect(cardAdds({ save: failed("shelf"), target })).toMatchObject({
+      line: { kind: "add", lead: "Add to" },
+      pill: { item: null, label: "Retry" },
+    });
+  });
+
+  it("offers both adds with no Retry when the failed add can't be tried again", () => {
+    expect(cardAdds({ save: failed(null), target })).toMatchObject({
+      line: { kind: "add", lead: "Add to" },
       pill: { label: "Add to Shelf" },
       sole: false,
     });
   });
 
-  it("reads Retry on the pill when Add to Shelf failed, with or without another add", () => {
-    expect(
-      cardAdds({ save: failed("shelf", true), target: null }, false).pill
-    ).toStrictEqual({
-      add: "shelf",
-      label: "Retry",
-      name: "Retry",
-      to: "shelf",
-    });
-    expect(
-      cardAdds({ save: failed("shelf", false), target }, false)
-    ).toMatchObject({
-      line: { kind: "add", lead: "Add to" },
-      pill: { label: "Retry", to: "shelf" },
-    });
-  });
-
   it("gives Retry on the item one add, as the line and as the only pill, so the card keeps one button for it", () => {
-    const line = cardAdds({ save: failed("item", false), target }, true);
-    const pill = cardAdds({ save: failed("item", true), target }, false);
+    const line = cardAdds({ save: failed("item"), target });
+
+    const pill = cardAdds({
+      save: { message: MESSAGE, placed: onItem, state: "failed" },
+      target: null,
+    });
 
     expect(line.line).toMatchObject({ add: `item:${target.id}`, kind: "add" });
     expect(pill.pill.add).toBe(`item:${target.id}`);
     // Add to Shelf is another add: its button is never the one Retry had.
     expect(line.pill.add).toBe("shelf");
-  });
-
-  it("keeps that add while it writes, in either place", () => {
-    const saving = { save: { state: "saving", to: "item" }, target } as const;
-
-    expect(cardAdds(saving, true).pill.add).toBe(`item:${target.id}`);
-    expect(cardAdds(saving, false).line).toStrictEqual({
-      add: `item:${target.id}`,
-      kind: "saving",
-    });
   });
 
   it("makes adding to another item another add", () => {
@@ -128,7 +150,7 @@ describe(cardAdds, () => {
     };
 
     const add = (to: typeof target) =>
-      cardAdds({ save: { state: "idle" }, target: to }, false).line;
+      cardAdds({ save: { state: "idle" }, target: to }).line;
 
     expect(add(target)).toMatchObject({ add: `item:${target.id}` });
     expect(add(other)).toMatchObject({ add: `item:${other.id}` });

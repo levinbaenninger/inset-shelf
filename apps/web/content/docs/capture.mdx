@@ -3,46 +3,58 @@ title: Capture
 description: Selected text with Shift twice, screenshots, drawings, files and pasted images.
 ---
 
-Each kind of capture takes one step, and none of it asks you to fill anything in. New items go to the current section.
+New items go to the current section. You can add details when you need them.
 
 ## Selected text, with Shift twice
 
-Select text in any app and tap **Shift** twice. The shelf saves it with the app, window and page it came from, and the links inside it. A short notice beside the pointer confirms it when the shelf is hidden, and your clipboard is put back as it was.
+Select text in another app and tap **Shift** twice. The shelf saves the text, its links, and whatever it can read about [where it came from](/docs/sources). When the shelf is hidden, a short notice beside the pointer confirms the save once it reaches disk. If the save fails, the notice says why.
 
-With nothing selected, Shift twice shows or hides the shelf.
+With nothing selected and no capture notice showing, Shift twice shows or hides the shelf.
 
-A few things to know:
-
-- The app copies your selection by sending `⌘C` (`Ctrl+Insert` on Windows) to the app in front. Clipboard history tools may still record that copy.
-- An app that ignores `Ctrl+Insert` copies nothing, so there double Shift only shows or hides the shelf.
+- The app sends `⌘C` (`Ctrl+Insert` on Windows) to the app in front to copy your selection, then tries to restore your clipboard. Clipboard history tools may still record the copy.
+- In a Windows app that ignores `Ctrl+Insert`, Double Shift behaves as it does with no selection.
 - In VS Code, Cursor and some other editors, copying with nothing selected copies the whole line, so double Shift saves that line.
-- Double Shift inside the shelf only hides it, so the shelf never saves its own text.
+- Double Shift inside the shelf hides it.
+
+### Say why
+
+While the capture notice shows, tap **Shift** twice again with the same selection or with nothing selected. You can also click **Why** on the notice. Type into the one-line field and press `Return` to add the line to the item's **Description**. The keyboard returns to the app you were using, and the notice says **Why saved** once the line is on disk.
+
+Clicking away also saves the line. Press `Esc` to discard it. If the save fails, the notice keeps your words and offers **Try again**. Tap **Shift** twice again with the same selection or no selection to retry from the keyboard. If the field can't take focus, the shelf opens at the item's description.
 
 ## Screenshots
 
-Take a screenshot as usual, and a card with it appears beside the shelf. Hover it to **Copy** it or **Add to Shelf**. Its corners dismiss it, keep it on screen, annotate it or save it to Downloads, and you can drag it into another app. Unless kept, it goes away on its own after a few seconds.
+Take a screenshot and click **Add to Shelf** on the card that appears beside the shelf. If the card names an item below that button, **Add to “…”** saves the screenshot as an [attachment](/docs/attachments) on that item. The card looks first for a selected item on the visible shelf. With no visible selection, it can offer the newest item if you made it in the last two minutes.
+
+Point at the card or press `Tab` to reach its other actions. Use **Copy** beside **Add to Shelf**, or use the corners to dismiss the card, keep it on screen, annotate it, or save it to Downloads. You can also drag the screenshot into another app.
+
+The card closes after 12 seconds unless you keep it on screen, point at it, or focus a control. While a save runs, the card stays and the button says **Saving…**. If the save fails, the card shows the reason and offers **Retry** when it can still save to the same place.
 
 - On macOS that is a screenshot to the clipboard or to a file.
-- On Windows it is one that Snipping Tool (`Win+Shift+S` or `PrtScn`) or `Win+PrtScn` saves to the Screenshots folder. A screenshot that only goes to the clipboard (`Alt+PrtScn`) shows no card.
+- On Windows the card watches the Screenshots folder. Use `Win+PrtScn`, or use Snipping Tool (`Win+Shift+S` or `PrtScn`) with **Automatically save screenshots** on. A clipboard-only screenshot such as `Alt+PrtScn` shows no card.
 
 **Settings** turns the cards off.
 
 ## Drawings and numbered pins
 
-**File > New Drawing…** (`⌥⌘N`, or **+** in the note field) opens a drawing window with pen, line, arrow, rectangle, ellipse and text tools. The tick at the end of its toolbar (**Save**, `⌘↩`) adds the drawing to the shelf, and the copy button before it also puts it on the clipboard.
+**File > New Drawing…** (`⌥⌘N`, or **+** in the note field) opens a drawing window with pen, line, arrow, rectangle, ellipse and text tools. The tick at the end of its toolbar (**Save**, `⌘↩`) adds the drawing to the shelf. **Copy and Save** also puts it on the clipboard.
+
+Save or discard unsaved marks before opening another drawing. The drawing window shows the reason if a save fails.
 
 Double-click an image on the shelf to draw on it, then **Save** to replace it. The **Pin** tool (`P`) places numbered map pins:
 
 - Click to drop pin 1, 2, 3…, and drag one to move it.
-- `1`–`9` select a pin, the arrow keys nudge it (`⇧` for 10 px), and `⌫` removes it; the rest renumber.
+- `1`–`9` select a pin. The arrow keys nudge it (`⇧` for 10 px), and `⌫` removes it. The remaining pins renumber.
 - `⇧P` drops one at the pointer.
 
 Pins stay editable beside the image. Their labels are set in the item's details.
 
 ## Files and pasted images
 
-Drop files on the shelf, paste an image, or attach files with the **+** in the note field. Drag an image or file out of the shelf to drop it into another app. Images and files take a note under them.
+To make new items, drop files on an empty part of the list or on a closed row, paste a file or image while the list is open, or choose **Attach Files** from the **+** in the note field. A notice confirms what was saved and names any files the shelf couldn't add.
+
+Drag an item into another app to drop its text, image, or file. To add files to an item you already have, see [Attachments](/docs/attachments).
 
 ## Notes and prompts
 
-Type into the note field at the bottom of the shelf and press `Return`. Notes are Markdown, formatted as you type: `**bold**`, `*italic*`, `` `code` ``, lists, quotes and links. `⇧↩` starts a new line.
+Type into the note field at the bottom of the shelf and press `Return` or `⌘↩`. Notes use Markdown. Bold, italic, inline code, lists, quotes, and links format as you type. `⇧↩` starts a new line or list entry. Press it on an empty list entry to leave the list.

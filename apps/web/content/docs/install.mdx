@@ -3,7 +3,7 @@ title: Install
 description: Download a build, get past the first-launch warning and grant the permissions.
 ---
 
-Install once, then the app [updates itself](/docs/updates). The builds are not signed with a developer certificate, so each system warns once, at the first install.
+The installed app [updates itself](/docs/updates). The builds are not signed with a developer certificate, so your system may warn you the first time you open the app.
 
 ## macOS
 
@@ -19,14 +19,16 @@ xattr -dr com.apple.quarantine "/Applications/Inset Shelf.app"
 
 ### Permissions
 
-The first time it opens, a small setup window asks for two permissions. **Not now** skips one, and the app works without the permissions you skip.
+On the first run, choose **Get Started** to reach **Allow access** if the app needs permissions. You can choose **Not now** to keep using the shelf without granting the remaining access.
 
 - **Accessibility** (**Device Control and Data Access** from macOS 27), for double Shift and for a browser page's address. **Allow** shows macOS's prompt and opens the right settings page. Turn on **Inset Shelf** there, and double Shift starts listening without a restart.
 - **Screen & System Audio Recording**, for the title of the window an item came from and for window links. macOS applies it only after the app opens again, so the row then offers **Reopen to finish**.
 
-If **Inset Shelf** isn't in the list, drag the **Inset Shelf** tile from the setup window into it. **Set Up Permissions…** in the **Inset Shelf** menu opens the window again.
+If **Inset Shelf** isn't in the list, drag the **Inset Shelf** tile from the setup window into it. **Set Up Permissions…** in the **Inset Shelf** menu or the menu bar icon's menu opens the window again.
 
-The first time an item is saved from Safari, Chrome, Edge, Brave, Arc or another Chromium browser, macOS also asks for **Automation**, once per browser, so the app can read the page's address.
+macOS may also ask for **Automation** the first time the shelf reads a page address from Safari, Chrome, Edge, Brave, Arc, or another Chromium browser. Firefox and Zen use Accessibility instead.
+
+On the **Done** page, choose **Start Using Inset Shelf** or **Show Me Around**. Screenshot cards start once you finish or skip setup.
 
 ## Windows
 

@@ -3720,16 +3720,27 @@ const CARD_REASON = "Datenträger voll";
 /** Main's reason a card's save failed: a sentence of its own, here a long one. It says what went wrong first, as main's own sentences do (save-error.ts), so a long name after it can't push that out of the card's two lines. */
 const CARD_FAILURE = `${CARD_REASON}: „${LONG_WORD}“.`;
 
-/** The card as main shows it once a save failed. */
+/** The card as main shows it once a save failed and the shelf holds the screenshot nowhere: `to` reads Retry. */
 const failedCard = (
   to: "shelf" | "item" | null,
   message = CARD_FAILURE,
-  target: { readonly id: string; readonly label: string } | null = null,
-  only = false
+  target: { readonly id: string; readonly label: string } | null = null
 ) => ({
   ...SCREENSHOT_VIEW,
-  save: { message, only, state: "failed", to },
+  save: { message, placed: null, state: "failed", to },
   target,
+});
+
+/** The card as main shows it once a save failed and left the screenshot on the shelf, not saved (`placed`, src/shared/contracts.ts): Retry for that place is the only add. */
+const placedCard = (
+  placed:
+    | { readonly to: "shelf" }
+    | { readonly to: "item"; readonly id: string; readonly label: string },
+  message = CARD_FAILURE
+) => ({
+  ...SCREENSHOT_VIEW,
+  save: { message, placed, state: "failed" },
+  target: null,
 });
 
 const CardButtonSchema = z.object({
@@ -3843,6 +3854,54 @@ const failedCardCheck = (names: readonly string[]) =>
       : "the failed card lost its picture";
   };
 
+/** The failure message shows these words now: every part of them is inside its box, and the ellipsis of a cut last line isn't over them. */
+const failureShows = async (page: Page, words: string): Promise<boolean> =>
+  await page.getByRole("alert").evaluate((alert, sought) => {
+    const texts = document.createTreeWalker(alert, NodeFilter.SHOW_TEXT);
+    const box = alert.getBoundingClientRect();
+
+    // Clamped to its two lines, not scrolled: the last one ends in “…”, 12 px of room at 12 px type.
+    const ellipsis =
+      getComputedStyle(alert).overflowY !== "auto" &&
+      alert.scrollHeight > alert.clientHeight + 1
+        ? 12
+        : 0;
+
+    for (let text = texts.nextNode(); text !== null; text = texts.nextNode()) {
+      const at = text.textContent?.indexOf(sought) ?? -1;
+
+      if (at !== -1) {
+        const range = document.createRange();
+
+        range.setStart(text, at);
+        range.setEnd(text, at + sought.length);
+
+        return [...range.getClientRects()].every(
+          (rect) =>
+            rect.top >= box.top - 1 &&
+            rect.bottom <= box.bottom + 1 &&
+            (rect.bottom < box.bottom - rect.height ||
+              rect.right <= box.right - ellipsis)
+        );
+      }
+    }
+
+    return false;
+  }, words);
+
+/** At rest the failure's two lines show these words, whatever name or sentence follows. */
+const restingLinesShow = async (
+  page: Page,
+  words: string
+): Promise<string | null> =>
+  (await failureShows(page, words))
+    ? null
+    : `the failed card's two lines don't show “${words}”`;
+
+/** At rest the failure's two lines say what went wrong. */
+const reasonInView = async (page: Page): Promise<string | null> =>
+  await restingLinesShow(page, CARD_REASON);
+
 /** Tabs until the keyboard is on the failure message, or says it never got there. */
 const tabToFailure = async (page: Page): Promise<boolean> => {
   for (let key = 0; key < 12; key += 1) {
@@ -3862,25 +3921,25 @@ const tabToFailure = async (page: Page): Promise<boolean> => {
   return false;
 };
 
-/** With the keyboard on the failure message, it reads it all: whole in view, or in a box it scrolls. */
-const failureEndReached = async (page: Page): Promise<string | null> => {
-  const shown = z
-    .object({ client: z.number(), scroll: z.number(), style: z.string() })
-    .parse(
-      await page.evaluate(() => {
-        const alert = document.querySelector("[role=alert]");
+/** With the keyboard on the failure message, the End key brings its last words into view: `last` shows whole, already or once the message scrolled there. */
+const failureEndReached = async (
+  page: Page,
+  last: string
+): Promise<string | null> => {
+  await page.keyboard.press("End");
 
-        return {
-          client: alert?.clientHeight ?? 0,
-          scroll: alert?.scrollHeight ?? 0,
-          style: alert === null ? "" : getComputedStyle(alert).overflowY,
-        };
-      })
-    );
+  // The keyboard's scroll is animated: read until it has arrived.
+  for (let tries = 0; tries < 20; tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one read after another.
+    if (await failureShows(page, last)) {
+      return null;
+    }
 
-  return shown.scroll <= shown.client + 1 || shown.style === "auto"
-    ? null
-    : "the keyboard on the failure message can't reach its end";
+    // oxlint-disable-next-line no-await-in-loop -- until the scroll ends.
+    await page.waitForTimeout(50);
+  }
+
+  return `the keyboard on the failure message, with End pressed, doesn't show “${last}”`;
 };
 
 /** A plain note that runs to about nine lines at 300 wide, between short ones. */
@@ -5433,7 +5492,10 @@ const STRESS_SCENES: readonly Scene[] = (
           : `Saving… is not the size of Add to Shelf: ${JSON.stringify({ idle, savingBox })}`;
       },
       data: {
-        view: { ...SCREENSHOT_VIEW, save: { state: "saving", to: "shelf" } },
+        view: {
+          ...SCREENSHOT_VIEW,
+          save: { placed: null, state: "saving", to: "shelf" },
+        },
       },
       keepPointer: true,
       name: "stress-screenshot-saving",
@@ -5485,29 +5547,10 @@ const STRESS_SCENES: readonly Scene[] = (
           return problem;
         }
 
-        // At rest the two lines say what went wrong, whatever name follows.
-        const reasonShows = await page
-          .getByRole("alert")
-          .evaluate((alert, reason) => {
-            const text = alert.querySelector("span")?.firstChild;
-            const range = document.createRange();
+        const hidden = await reasonInView(page);
 
-            if (text === null || text === undefined) {
-              return false;
-            }
-
-            range.setStart(text, 0);
-            range.setEnd(text, reason.length);
-
-            return (
-              range.toString() === reason &&
-              range.getBoundingClientRect().bottom <=
-                alert.getBoundingClientRect().bottom
-            );
-          }, CARD_REASON);
-
-        if (!reasonShows) {
-          return `the failed card's two lines don't show “${CARD_REASON}”`;
+        if (hidden !== null) {
+          return hidden;
         }
 
         await page.getByRole("button", { name: "Retry" }).click();
@@ -5523,12 +5566,15 @@ const STRESS_SCENES: readonly Scene[] = (
       page: "screenshot",
     },
     {
+      // The still shows what End reaches: the last sentence, under the longest reason.
       act: async (page) => {
         if (!(await tabToFailure(page))) {
           throw new Error("Tab never reached the failure message");
         }
+
+        await page.keyboard.press("End");
       },
-      check: failureEndReached,
+      check: async (page) => await failureEndReached(page, "isn’t saved yet."),
       data: { view: failedCard("shelf") },
       keepPointer: true,
       name: "stress-screenshot-add-failed-focus",
@@ -6683,10 +6729,93 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
 /** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
 const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
 
-/** What the failure message says of Annotate while Retry is the only add: the words of the dimmed button's hover, as a sentence. */
-const ANNOTATE_NEXT = "Annotate it on its item, once Retry has saved it.";
+/** What the failure message ends with while the shelf holds the screenshot: the shelf action that brings the other add back and, on an item, where to annotate it (the keyboard never reaches the dimmed button's hover). */
+const ELSEWHERE = {
+  item: "The screenshot is in its item’s details, not saved yet. Annotate it there, or remove it to add it elsewhere.",
+  shelf: "Delete it on the shelf to add it elsewhere.",
+} as const;
 
-/** The failed card once Retry adding to “…” is the only add left (`only`, screenshot-saves.ts): one pill, in Add to Shelf's place, and the item named under it. */
+/** Where the screenshot on its item is acted on: the card's two lines must hold it after any of main's ordinary reasons. */
+const CARD_PLACE = "details";
+
+/** A sentence's last three words: what the keyboard must reach under the longest reason. */
+const lastWords = (sentence: string): string =>
+  sentence.split(" ").slice(-3).join(" ");
+
+/** What the dimmed Annotate says on hover while Retry is the only add. */
+const ANNOTATE_OFF = "Annotate it in its item’s details";
+
+/** How many lines the failure message takes as it shows now, and how many its words run to. */
+const failureLines = async (
+  page: Page
+): Promise<{ readonly shown: number; readonly whole: number }> =>
+  z.object({ shown: z.number(), whole: z.number() }).parse(
+    await page.evaluate(() => {
+      const alert = document.querySelector("[role=alert]");
+
+      if (alert === null) {
+        return { shown: 0, whole: 0 };
+      }
+
+      const line = Number(getComputedStyle(alert).lineHeight.replace("px", ""));
+
+      return {
+        shown: Math.round(alert.clientHeight / line),
+        whole: Math.round(alert.scrollHeight / line),
+      };
+    })
+  );
+
+/**
+ * What the card whose only add is Retry adding to “…” tells the user: the
+ * reason, then where the screenshot is and what to do there. Its hover on the
+ * dimmed Annotate says where to annotate; the keyboard never reaches a button
+ * that is off, so the message says it too, and the keyboard reads it to its end.
+ */
+const retryOnlySays = async (
+  page: Page,
+  message: string
+): Promise<string | null> => {
+  const said = (await page.getByRole("alert").textContent()) ?? "";
+
+  if (!said.startsWith(message) || !said.endsWith(ELSEWHERE.item)) {
+    return `the failure message must start with the reason and end with “${ELSEWHERE.item}”: “${said}”`;
+  }
+
+  // After one of main's ordinary reasons the two lines name the place to act. The longest reason fills them by itself: the keyboard reads on, below.
+  const placeCut =
+    message === CARD_FAILURE
+      ? await reasonInView(page)
+      : await restingLinesShow(page, CARD_PLACE);
+
+  if (placeCut !== null) {
+    return placeCut;
+  }
+
+  await page.getByRole("button", { name: "Annotate" }).hover({ force: true });
+
+  const tip = await page
+    .getByRole("tooltip")
+    .first()
+    .textContent({ timeout: 2000 })
+    .catch(() => null);
+
+  if (tip !== ANNOTATE_OFF) {
+    return `the dimmed Annotate must say “${ANNOTATE_OFF}” on hover: ${String(tip)}`;
+  }
+
+  // In steps: the tip closes on the moves after the pointer left the button.
+  await page.mouse.move(0, 0, { steps: 4 });
+  await page.getByRole("tooltip").first().waitFor({ state: "hidden" });
+
+  if (!(await tabToFailure(page))) {
+    return "Tab never reached the failure message";
+  }
+
+  return await failureEndReached(page, lastWords(ELSEWHERE.item));
+};
+
+/** The failed card once Retry adding to “…” is the only add left (`placed`, src/shared/contracts.ts): one pill, in Add to Shelf's place, and the item named under it. */
 const retryOnly = (
   name: string,
   message: string,
@@ -6733,21 +6862,10 @@ const retryOnly = (
     // Annotate would add it to the shelf: it stays in its corner, off.
     const annotate = page.getByRole("button", { name: "Annotate" });
 
-    // Its hover says when it works again. The keyboard never reaches a button that is off, so the failure message says it too, after the reason.
-    const said = (await page.getByRole("alert").textContent()) ?? "";
+    const unsaid = await retryOnlySays(page, message);
 
-    if (!said.startsWith(message) || !said.endsWith(ANNOTATE_NEXT)) {
-      return `the failure message must start with the reason and end with “${ANNOTATE_NEXT}”: “${said}”`;
-    }
-
-    if (!(await tabToFailure(page))) {
-      return "Tab never reached the failure message";
-    }
-
-    const unread = await failureEndReached(page);
-
-    if (unread !== null) {
-      return unread;
+    if (unsaid !== null) {
+      return unsaid;
     }
 
     const before = await callCount(page);
@@ -6778,8 +6896,10 @@ const retryOnly = (
     await page.evaluate(
       `globalThis.__emit("view", ${JSON.stringify({
         ...SCREENSHOT_VIEW,
-        save: { state: "saving", to: "item" },
-        target: { id: uuid(12), label },
+        save: {
+          placed: { id: uuid(12), label, to: "item" },
+          state: "saving",
+        },
       })})`
     );
 
@@ -6799,18 +6919,107 @@ const retryOnly = (
       : `the pill changed size when it read Saving…: ${JSON.stringify({ pillBox, savingBox })}`;
   },
   data: {
-    view: failedCard("item", message, { id: uuid(12), label }, true),
+    view: placedCard({ id: uuid(12), label, to: "item" }, message),
   },
+  name,
+  page: "screenshot",
+});
+
+/**
+ * The failed card once Add to Shelf left the screenshot a row of its own, not
+ * saved: Retry is the only add, and the message says how to add it elsewhere.
+ * With `whole`, its two lines hold all of it.
+ */
+const retryRow = (
+  name: string,
+  message: string,
+  whole: boolean
+): StressScene => ({
+  check: async (page) => {
+    const problem = await failedCardCheck([
+      "Retry",
+      "Annotate",
+      "Copy",
+      "Save to Downloads",
+      "Dismiss",
+      "Keep on Screen",
+    ])(page);
+
+    if (problem !== null) {
+      return problem;
+    }
+
+    if ((await page.getByRole("button", { name: /Add to/u }).count()) !== 0) {
+      return "Retry must be the card's only add while its row is on the shelf";
+    }
+
+    const said = (await page.getByRole("alert").textContent()) ?? "";
+
+    if (!said.startsWith(message) || !said.endsWith(ELSEWHERE.shelf)) {
+      return `the failure message must start with the reason and end with “${ELSEWHERE.shelf}”: “${said}”`;
+    }
+
+    const lines = await failureLines(page);
+
+    if (whole && lines.whole > lines.shown) {
+      return `at rest the message runs to ${lines.whole} lines and shows ${lines.shown}`;
+    }
+
+    return whole ? null : await reasonInView(page);
+  },
+  data: { view: placedCard({ to: "shelf" }, message) },
+  name,
+  page: "screenshot",
+});
+
+/**
+ * The keyboard on the failure message of a card whose only add is Retry: it
+ * reads every sentence. With `whole`, the lines the focused message has hold
+ * all of it; else End scrolls it to its last words, and the still shows them.
+ */
+const retryRead = (
+  name: string,
+  view: ReturnType<typeof placedCard>,
+  sentences: readonly string[],
+  whole: boolean
+): StressScene => ({
+  act: async (page) => {
+    if (!(await tabToFailure(page))) {
+      throw new Error("Tab never reached the failure message");
+    }
+
+    if (!whole) {
+      await page.keyboard.press("End");
+    }
+  },
+  check: async (page) => {
+    const said = (await page.getByRole("alert").textContent()) ?? "";
+    const missing = sentences.find((each) => !said.includes(each));
+
+    if (missing !== undefined) {
+      return `the failure message doesn't say “${missing}”: “${said}”`;
+    }
+
+    const lines = await failureLines(page);
+
+    if (whole && lines.whole > lines.shown) {
+      return `with the keyboard on it the message runs to ${lines.whole} lines and shows ${lines.shown}`;
+    }
+
+    return await failureEndReached(page, lastWords(sentences.at(-1) ?? ""));
+  },
+  data: { view },
+  keepPointer: true,
   name,
   page: "screenshot",
 });
 
 const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
 
-/** A failed Add to “…” whose Retry is the only add: the screenshot stays on its item. */
-const CARD_SOLE = failedCard("item", "The disk is full.", CARD_ITEM, true);
+/** A failed Add to “…” whose Retry is the only add: the screenshot is on its item, not saved. */
+const CARD_SOLE = placedCard({ ...CARD_ITEM, to: "item" }, "The disk is full.");
 
-/** The same card once the write that held the screenshot on its item failed too: both adds are back. */
+/** The same card once the user took the screenshot off its item (Discard changes): both adds are back. */
 const CARD_BOTH = failedCard(
   "item",
   "Saving didn’t finish in time.",
@@ -7608,7 +7817,7 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           ? null
           : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
       },
-      // The disk refused the screenshot: trying again can work, so the line offers it.
+      // The disk refused the screenshot's picture file, so nothing is on the shelf: trying again can work, so the line offers it, and Add to Shelf stays.
       data: {
         view: failedCard("item", "The disk is full.", {
           id: uuid(12),
@@ -7646,12 +7855,18 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       name: "screenshot-card-attach-full",
       page: "screenshot",
     },
-    // The screenshot was changed on its item after a failed Add to “…”: it stays there, so Retry is the one add and the one pill.
+    // A failed Add to “…” left the screenshot on its item, not saved: the shelf owns it there, so Retry is the one add and the one pill.
     retryOnly("screenshot-card-retry-only", "The disk is full.", CARD_LABEL),
-    // A write that holds it on its item is still on its way: the same card, for the other reason.
+    // The save gave up waiting for the disk: the same card, for the other reason.
     retryOnly(
-      "screenshot-card-retry-only-landing",
+      "screenshot-card-retry-only-slow",
       "Saving didn’t finish in time.",
+      CARD_LABEL
+    ),
+    // Main's longest ordinary reason: the two lines still name the place to act.
+    retryOnly(
+      "screenshot-card-retry-only-no-access",
+      "Inset can’t write to its data folder.",
       CARD_LABEL
     ),
     // One unbroken word for the item, and the longest reason.
@@ -7659,6 +7874,37 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       "stress-screenshot-retry-only",
       CARD_FAILURE,
       `${LONG_WORD.slice(0, 39)}…`
+    ),
+    // The keyboard on that card's message, with main's longest ordinary reason: where the screenshot is, and what to do with it there, in the four lines it has.
+    retryRead(
+      "screenshot-card-retry-only-read",
+      placedCard(
+        { id: uuid(12), label: CARD_LABEL, to: "item" },
+        "Inset can’t write to its data folder."
+      ),
+      [ELSEWHERE.item],
+      true
+    ),
+    // The same with the longest reason: the message scrolls to its end.
+    retryRead(
+      "stress-screenshot-retry-only-read",
+      placedCard({
+        id: uuid(12),
+        label: `${LONG_WORD.slice(0, 39)}…`,
+        to: "item",
+      }),
+      [ELSEWHERE.item],
+      false
+    ),
+    // A failed Add to Shelf left the screenshot a row of its own, not saved: Retry alone, and the two lines say how to add it elsewhere.
+    retryRow("screenshot-card-retry-row", "The disk is full.", true),
+    // The longest reason: the two lines still say what went wrong, and the keyboard reads the rest.
+    retryRow("stress-screenshot-retry-row", CARD_FAILURE, false),
+    retryRead(
+      "stress-screenshot-retry-row-read",
+      placedCard({ to: "shelf" }),
+      [ELSEWHERE.shelf],
+      false
     ),
     {
       act: async (page) => {
@@ -7687,7 +7933,7 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       page: "screenshot",
     },
     {
-      // The keyboard is on the only Retry when a late failed write gives both adds back: the picture shows it on Retry adding to “…”, now the line.
+      // The keyboard is on the only Retry when the user takes the screenshot off its item and both adds come back: the picture shows it on Retry adding to “…”, now the line.
       act: async (page) => {
         await page.keyboard.press("Tab");
         await pushCard(page, CARD_BOTH);
@@ -7971,6 +8217,19 @@ const SCENES: readonly Scene[] = [
       );
       await page.locator("[data-sonner-toast]").first().waitFor();
       await page.waitForTimeout(500);
+    },
+    check: async (page) => {
+      const reported = JSON.stringify(
+        await page.evaluate("globalThis.__noticesShown")
+      );
+
+      const expected = JSON.stringify([
+        { message: "Inset Shelf is up to date.", tone: "done" },
+      ]);
+
+      return reported === expected
+        ? null
+        : `the page must report the notice it showed once: ${reported}`;
     },
     data: { view: shelfView() },
     name: "shelf-notice-done",
