@@ -33,7 +33,7 @@ export interface ShotDropDeps<S extends NamedShot> {
   readonly dropFailed: (why: string) => void;
   /** Writes the card's picture, a PNG, as `name` into `folder`, the drag's own folder in staging, and returns the file; never a file of the user's. */
   readonly stage: (shot: S, folder: string, name: string) => string;
-  /** Removes a drag's folder from staging once its drop came back to the shelf: no other app got its file. Never throws. */
+  /** Removes a drag's folder from staging once its drop came back to the shelf and its screenshot has a place there. Never throws. */
   readonly unstage: (folder: string) => void;
 }
 
@@ -57,6 +57,20 @@ const stamp = (file: string): string | null => {
   }
 };
 
+/** A drag's staged file: the drop it goes to, the folder it was staged in, and the file as it was written. */
+interface Copy {
+  readonly drop: ShotDrop;
+  readonly folder: string;
+  readonly written: string | null;
+}
+
+/** A drop of a drag's file: where it is on disk, its record, and the picture it holds. */
+interface Claimed {
+  readonly file: string;
+  readonly copy: Copy;
+  readonly png: Uint8Array;
+}
+
 /** What the shelf's drop says when a drag's file went the card's way: nothing, and no Undo. */
 const NOTHING: AttachResult = { attached: [], message: null };
 
@@ -71,23 +85,14 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * the shelf's plain route.
  */
 export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
-  // Each drag whose drop can still come, by where its file is on disk, with the folder it staged its file in and the file as it was written. No count of newer drags says a drop has come: the shelf and the card reach main on channels of their own.
-  const drags = new Map<
-    string,
-    {
-      readonly drop: ShotDrop;
-      readonly folder: string;
-      readonly written: string | null;
-    }
-  >();
+  // Each drag whose file is still staged, by where the file is on disk, with the folder it staged the file in and the file as it was written. No count of newer drags says a drop has come: the shelf and the card reach main on channels of their own.
+  const drags = new Map<string, Copy>();
 
   // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
   let made = 0;
 
-  /** The drop of the drag a drop hands back the file of, alone, and the picture the file holds: its drop has come, and no later one is taken for it. Null for any other drop. */
-  const claim = (
-    paths: readonly string[]
-  ): { readonly drop: ShotDrop; readonly png: Uint8Array } | null => {
+  /** The drag a drop hands back the file of, alone, with the picture the file holds. Null for any other drop. */
+  const claim = (paths: readonly string[]): Claimed | null => {
     const [only] = paths;
 
     if (only === undefined || paths.length !== 1) {
@@ -95,28 +100,30 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
     }
 
     const file = onDisk(only);
-    const record = drags.get(file);
+    const copy = drags.get(file);
 
-    if (record === undefined) {
+    if (copy === undefined) {
       return null;
     }
 
-    let png: Uint8Array;
-
     try {
-      png = readFileSync(file);
+      return { copy, file, png: readFileSync(file) };
     } catch {
       return null;
     }
+  };
 
-    drags.delete(file);
-
-    // An app the drag went to first may have saved the user's edit into the file: it stays until quit.
-    if (stamp(file) === record.written) {
-      deps.unstage(record.folder);
+  /**
+   * A drag's file goes once its screenshot has a place on the shelf, unless
+   * an app the drag went to saved the user's edit into it. Until then file
+   * and record stay: another drop of the file still gives the screenshot its
+   * place.
+   */
+  const retire = ({ copy, file }: Claimed): void => {
+    if (copy.drop.placed() && stamp(file) === copy.written) {
+      drags.delete(file);
+      deps.unstage(copy.folder);
     }
-
-    return { drop: record.drop, png };
   };
 
   /** Runs what a drop does after the shelf has its reply: whatever throws on the way is said once, and never escapes main's handler. */
@@ -131,11 +138,17 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   };
 
   /** The card's add for its file: the card says how it went, and the user hears where it is. */
-  const land = (to: ShotSaveTo, add: () => Promise<ItemId | null>): void => {
+  const land = (
+    to: ShotSaveTo,
+    claimed: Claimed,
+    add: () => Promise<ItemId | null>
+  ): void => {
     settle(async () => {
       deps.dropped(to);
 
       const id = await add();
+
+      retire(claimed);
 
       if (id !== null) {
         deps.added(to, id);
@@ -190,7 +203,11 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
         return await deps.attachFiles(id, paths);
       }
 
-      land("item", async () => await claimed.drop.onItem(id, claimed.png));
+      land(
+        "item",
+        claimed,
+        async () => await claimed.copy.drop.onItem(id, claimed.png)
+      );
 
       return NOTHING;
     },
@@ -204,7 +221,11 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
           await deps.addFiles(paths);
         });
       } else {
-        land("shelf", async () => await claimed.drop.onShelf(claimed.png));
+        land(
+          "shelf",
+          claimed,
+          async () => await claimed.copy.drop.onShelf(claimed.png)
+        );
       }
     },
   };
