@@ -46,7 +46,12 @@ const EDITOR_NAMES: ReadonlySet<string> = new Set(
   CODE_EDITORS.flatMap((editor) => editor.apps)
 );
 
-const TITLE_PARTS = /\s[—–-]\s/u;
+/**
+ * The dashes an editor's title is split on, longest first. A title is split
+ * on the longest one it holds: Code writes " — " on macOS and " - " on
+ * Windows, and a file's name may hold a shorter dash than the title's own.
+ */
+const TITLE_DASHES = [" — ", " – ", " - "] as const;
 
 /** The row for an app among `editors`, or undefined. */
 export const codeEditor = (
@@ -67,10 +72,13 @@ export const titleParts = (
   title: string | null,
   app: string | null
 ): TitleParts => {
+  const clean = cleanTitle(title, app);
+  const dash = TITLE_DASHES.find((each) => clean?.includes(each) === true);
+
   const parts =
-    cleanTitle(title, app)
-      ?.split(TITLE_PARTS)
-      .map((each) => each.trim()) ?? [];
+    clean === null || dash === undefined
+      ? []
+      : clean.split(dash).map((each) => each.trim());
 
   const named = (part: TitlePart): string | null => {
     const text =

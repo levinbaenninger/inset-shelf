@@ -226,6 +226,13 @@ describe(samePlace, () => {
       "project",
     ],
     [
+      // The title's own dash is the longest one in it: a file's name may hold a shorter one.
+      "a Code file whose name holds a dash, against another file of its project",
+      source({ app: "Code", title: "Design - notes.md — inset-shelf" }),
+      source({ app: "Code", title: "README.md — inset-shelf" }),
+      "project",
+    ],
+    [
       "the same title, an unread count and an unsaved mark aside",
       source({ app: "Notes", title: "Standup" }),
       source({ app: "Notes", title: "(3) • Standup" }),
@@ -286,6 +293,11 @@ describe(samePlace, () => {
       "a Code window without a folder against one with",
       source({ app: "Code", title: "Visual Studio Code" }),
       source({ app: "Code", title: "index.ts — inset-shelf" }),
+    ],
+    [
+      "two Code files whose names hold the same words after a dash, in two projects",
+      source({ app: "Code", title: "Design - notes.md — inset-shelf" }),
+      source({ app: "Code", title: "Release - notes.md — inset-web" }),
     ],
     [
       "two Code projects in the same profile",

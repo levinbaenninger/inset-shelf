@@ -41,6 +41,13 @@ describe(titleParts, () => {
       "inset-shelf",
     ],
     ["Visual Studio Code", "index.ts - inset-shelf", "index.ts", "inset-shelf"],
+    // A file's name with a dash in it: the title's own dash is the longer one.
+    [
+      "Code",
+      "Design - notes.md — inset-shelf",
+      "Design - notes.md",
+      "inset-shelf",
+    ],
     ["Cursor", "index.ts — inset-shelf", "index.ts", "inset-shelf"],
   ] as const)("reads %s's %j", (app, title, file, project) => {
     expect(titleParts(rowOf(app), title, app)).toStrictEqual({
