@@ -590,7 +590,7 @@ const TUTORIAL_TASKS = [
   },
   {
     anchor: null,
-    how: "Press ⇧⌘4 and drag over an area. Click Add to Shelf on the card that appears beside the shelf.",
+    how: "Press ⇧⌘4 and drag over an area. Click Add to Shelf on the card that appears beside the shelf, or drag the card onto an open item.",
     id: "screenshot",
     keys: "⇧⌘4",
     title: "Capture part of the screen",

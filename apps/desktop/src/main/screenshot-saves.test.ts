@@ -23,6 +23,7 @@ import { cardAdds } from "../renderer/screenshot/card-adds";
 import { createCardClock } from "./card-clock";
 import {
   CARD_CLEARED,
+  CARD_RETARGETED,
   CARD_TARGET_GONE,
   cardLabel,
   createShotSaves,
@@ -1677,6 +1678,35 @@ describe("a screenshot dropped on an item", () => {
       adds: ["Add to Shelf"],
       annotate: true,
     });
+  });
+
+  it("refuses the only Retry's late press for the note once the shelf shows the screenshot on another item, and attaches nothing there", async () => {
+    const card = await refused("item");
+
+    const other = ItemIdSchema.parse(
+      card.controller.apply({ text: "Book the lift", type: "compose" })
+    );
+
+    TAKE_OFF["removing its tile"](card);
+    // Writes still fail: the drop on the other item places the screenshot there, not saved.
+    await card.saves.dropOnItem(1, other);
+
+    // A press of the note's only Retry that left the card before the tile came off.
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
+    expect({
+      notices: card.notices,
+      onNote: card.attachmentsOn(card.note),
+      onOther: card.attachmentsOn(other),
+    }).toStrictEqual({
+      notices: [CARD_RETARGETED],
+      onNote: 0,
+      onOther: 1,
+    });
+
+    card.failWrites({ ok: true });
+
+    await expect(card.saves.addToItem(1, other)).resolves.toBe(other);
+    expect(written(card).doubled).toStrictEqual([]);
   });
 
   it("refuses the only Retry's late press once the tile came off and its removal is saved, and attaches nothing", async () => {

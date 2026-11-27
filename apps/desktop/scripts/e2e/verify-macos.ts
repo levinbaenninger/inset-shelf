@@ -2060,6 +2060,12 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
     return;
   }
 
+  // Showing the shelf and opening the row must not have used up the failing write.
+  record(
+    `${label}: the shelf file is still unwritten before the first add`,
+    shelfMtime() === before
+  );
+
   if (first === "shelf") {
     if (!(await clickInCard("Add to Shelf"))) {
       record(`${label}: Add to Shelf can be pressed`, false);
