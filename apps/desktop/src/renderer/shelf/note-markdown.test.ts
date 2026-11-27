@@ -10,6 +10,7 @@ import {
   NOTE_EXTENSIONS,
   noteMarkdown,
   noteMarkdownManager,
+  storedNote,
 } from "./note-markdown";
 
 const markdown = noteMarkdownManager();
@@ -309,6 +310,36 @@ describe(noteMarkdown, () => {
     stored(links);
 
     expect(performance.now() - start).toBeLessThan(500);
+  });
+});
+
+describe(storedNote, () => {
+  const before =
+    "email [bob@example.com](mailto:bob@example.com) about snake\\_case";
+
+  const json = markdown.parse(before);
+  const opened = { doc: schema.nodeFromJSON(json), markdown: before };
+
+  it("stores a note opened and closed unchanged as it was, byte for byte", () => {
+    // The same note built again, as after typing and undoing it.
+    const again = markdown.parse(before);
+
+    expect({
+      typedAndUndone: storedNote(opened, schema.nodeFromJSON(again), again),
+      untouched: storedNote(opened, opened.doc, json),
+    }).toStrictEqual({ typedAndUndone: before, untouched: before });
+  });
+
+  it("stores a note changed in the field as it now reads", () => {
+    const changed = typed(
+      plain("email "),
+      linked("bob@example.com", "mailto:bob@example.com"),
+      plain(" about snake_case, done")
+    );
+
+    expect(storedNote(opened, schema.nodeFromJSON(changed), changed)).toBe(
+      "email bob@example.com about snake_case, done"
+    );
   });
 });
 

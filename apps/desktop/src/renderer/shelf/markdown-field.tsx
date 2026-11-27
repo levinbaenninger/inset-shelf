@@ -5,14 +5,13 @@ import type { Editor } from "@tiptap/react";
 import { useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
 
-import { NOTE_EXTENSIONS, noteMarkdown } from "./note-markdown";
+import { NOTE_EXTENSIONS, noteMarkdown, storedNote } from "./note-markdown";
+import type { OpenedNote } from "./note-markdown";
 
 /** The editor that has the keyboard, so the menu bar's Undo and Redo reach its own history. */
 let focusedEditor: Editor | null = null;
 
 export const editorWithFocus = (): Editor | null => focusedEditor;
-
-const toMarkdown = (editor: Editor): string => noteMarkdown(editor.getJSON());
 
 /** What a note field does with the keys a plain field would not. */
 export interface MarkdownFieldKeys {
@@ -116,6 +115,13 @@ export const MarkdownField = ({
   const latest = useRef({ keys, onBlur, onChange });
   const emitted = useRef(value);
   const editorRef = useRef<Editor | null>(null);
+  // The note as the field opened it, or as it was last set from outside.
+  const opened = useRef<OpenedNote | null>(null);
+
+  const toMarkdown = (current: Editor): string =>
+    opened.current === null
+      ? noteMarkdown(current.getJSON())
+      : storedNote(opened.current, current.state.doc, current.getJSON());
 
   useEffect(() => {
     latest.current = { keys, onBlur, onChange };
@@ -186,6 +192,9 @@ export const MarkdownField = ({
       ...NOTE_EXTENSIONS,
       Placeholder.configure({ placeholder: placeholder ?? "" }),
     ],
+    onCreate: ({ editor: current }) => {
+      opened.current = { doc: current.state.doc, markdown: value };
+    },
     onBlur: ({ editor: current }) => {
       if (focusedEditor === current) {
         focusedEditor = null;
@@ -233,6 +242,7 @@ export const MarkdownField = ({
     if (followValue && editor !== null && value !== emitted.current) {
       emitted.current = value;
       editor.commands.setContent(value, { contentType: "markdown" });
+      opened.current = { doc: editor.state.doc, markdown: value };
     }
   }, [editor, followValue, value]);
 

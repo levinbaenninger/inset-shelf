@@ -1,5 +1,6 @@
 import { Strike } from "@tiptap/extension-strike";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { JSONContent } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { z } from "zod";
@@ -479,3 +480,21 @@ Object.assign(writer, {
  */
 export const noteMarkdown = (doc: JSONContent): string =>
   writer.serialize(withWrittenText(doc)).replaceAll("  \n", "\n");
+
+/** A note as a field opened it: the Markdown it was given, and the document it shows for that. */
+export interface OpenedNote {
+  readonly markdown: string;
+  readonly doc: ProseMirrorNode;
+}
+
+/**
+ * The Markdown a field stores for its note, `doc` as JSON in `json`. While
+ * the note is still the one the field opened, that is the Markdown it was
+ * given, so a note opened and closed unchanged is stored and copied byte for
+ * byte as before, however its Markdown was written.
+ */
+export const storedNote = (
+  opened: OpenedNote,
+  doc: ProseMirrorNode,
+  json: JSONContent
+): string => (doc.eq(opened.doc) ? opened.markdown : noteMarkdown(json));

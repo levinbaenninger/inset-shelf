@@ -665,7 +665,6 @@ export const TextEditor = ({
   /** Where a click started the edit: the caret goes there, else to the end. */
   readonly caretAt?: ScreenPoint | null;
 }) => {
-  const [text, setText] = useState(item.text);
   // Escape throws the edit away; the blur that follows must not save it.
   const cancelled = useRef(false);
   const live = useRef<LiveEdit | null>(null);
@@ -731,14 +730,10 @@ export const TextEditor = ({
           backToWords();
         },
       }}
-      onBlur={(markdown) => {
-        // An untouched note keeps its own Markdown, not the field's rewrite of it.
-        finish(markdown === text ? markdown : text);
-      }}
+      onBlur={finish}
       followValue={false}
       ref={field}
       onChange={(markdown) => {
-        setText(markdown);
         edit().change(markdown);
       }}
       value={item.text}
