@@ -2084,10 +2084,13 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
 
     expect({
       dropped: card.dropped.length,
+      // No save runs and nothing is on the shelf: the card has its time again.
+      held: card.held(),
       notices: card.notices,
       shown: card.shown(),
     }).toStrictEqual({
       dropped: 1,
+      held: false,
       notices: [SHOT_REMOVAL_UNSAVED],
       shown: { attached: 0, items: 0 },
     });

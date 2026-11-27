@@ -582,9 +582,14 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return on.at.item;
     }
 
-    // Nothing failed: the screenshot is where the user's Undo put it back, and the card says how it stands there.
+    // Nothing failed and nothing was placed: the screenshot is where the user's Undo put it back, and the card says how it stands there; or it is off the shelf with its removal not saved yet, and the card has its time again.
     if ("stays" in written) {
       deps.notify(written.message, "failed");
+
+      if (mine && shown(now) === null) {
+        card.releaseSave();
+      }
+
       retarget();
 
       return null;
