@@ -59,6 +59,7 @@ export const E2E_EDITORS: readonly CodeEditor[] =
           open: {
             atLine: "inset-e2e-source://file{path}:{line}",
             file: "inset-e2e-source://file{path}",
+            scheme: "inset-e2e-source://",
           },
           title: ["file", "project"],
         },

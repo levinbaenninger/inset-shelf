@@ -151,9 +151,30 @@ describe(openCode, () => {
 
     expect(mac.asked).toStrictEqual([
       "say a.ts is no longer at this path",
-      "forward vscode://file/Users/anna/My%20Code/proj/a.ts:12",
+      "forward vscode://",
     ]);
   });
+
+  it.each([
+    ["a path with a colon", "/Users/anna/My Code/proj/a:12.ts", "a:12.ts"],
+    [
+      "a workspace file",
+      "/Users/anna/My Code/proj/all.code-workspace",
+      "all.code-workspace",
+    ],
+  ])(
+    "says %s that is gone is gone, and brings its editor forward by its scheme alone",
+    async (_, file, name) => {
+      const mac = system(false, ["vscode"]);
+
+      await openCode("Code", { ...PLACE, file }, CODE_EDITORS, mac);
+
+      expect(mac.asked).toStrictEqual([
+        `say ${name} is no longer at this path`,
+        "forward vscode://",
+      ]);
+    }
+  );
 
   it("only says a file is gone when no app takes the editor's address", async () => {
     const mac = system(false, []);
