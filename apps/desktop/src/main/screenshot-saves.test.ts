@@ -51,8 +51,12 @@ const uuid = (n: number) =>
 
 const NOW = Date.parse("2026-11-25T10:00:00.000Z");
 
-const shot = (seq: number): Shot => ({
+/** A screenshot on the card, as main holds it: named as the system saved it, or Screenshot.png. */
+type CardShot = Shot & { readonly name: string };
+
+const shot = (seq: number): CardShot => ({
   heightPx: 600,
+  name: "Screenshot.png",
   png: new Uint8Array([137, 80, 78, 71, seq]),
   seq,
   widthPx: 800,
@@ -165,7 +169,7 @@ const setup = () => {
     type: "compose",
   });
 
-  const saves = createShotSaves<Shot>({
+  const saves = createShotSaves<CardShot>({
     addItem: (image) =>
       controller.apply({
         context: null,
@@ -1749,7 +1753,7 @@ const PLAIN: AttachResult = {
 /** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, what the card said it added, and what failed on the way. The card's drags stage their files under STAGING, unless `deps` says otherwise. */
 const dropping = (
   card: ReturnType<typeof setup>,
-  deps: Partial<ShotDropDeps<Shot>> = {}
+  deps: Partial<ShotDropDeps<CardShot>> = {}
 ) => {
   const plain: unknown[] = [];
   const added: (readonly [ShotSaveTo, ItemId])[] = [];
@@ -1780,7 +1784,7 @@ const dropping = (
       dropped.push(to);
     },
     saves: card.saves,
-    stage: (_, folder) => path.join(STAGING, folder, "Screenshot.png"),
+    stage: (_, folder, name) => path.join(STAGING, folder, name),
     unstage: () => {},
     ...deps,
   });
@@ -2223,6 +2227,23 @@ describe("the card's file dropped on the shelf", () => {
       back: existsSync(back),
       elsewhere: existsSync(elsewhere),
     }).toStrictEqual({ back: false, elsewhere: true });
+  });
+
+  it("hands out a PNG named as the screenshot is, when the system saved it in another format", () => {
+    const card = setup();
+
+    // macOS saved this screenshot as a JPEG; the card holds its picture as a PNG.
+    card.saves.show({ ...shot(1), name: "Capture 2026-11-25 at 10.00.00.jpg" });
+
+    const { drop } = dropping(card);
+
+    expect(drop.drag(1)?.file).toBe(
+      path.join(
+        STAGING,
+        "screenshot-drag-1",
+        "Capture 2026-11-25 at 10.00.00.png"
+      )
+    );
   });
 
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {

@@ -429,7 +429,7 @@ const pad = (value: number): string => String(value).padStart(2, "0");
 /** Named like the system names its own: "Screenshot 2026-10-23 at 21.03.46.png" on macOS, "Screenshot 2026-10-23 210346.png" on Windows. */
 /** The newest screenshot on its card, with what dragging it out needs. */
 interface CardShot extends Shot {
-  /** What the card's drag calls its file: the name macOS saved it under, else Screenshot.png. */
+  /** The name macOS saved the screenshot under, else Screenshot.png: the card's drag hands out a PNG named after it. */
   readonly name: string;
   readonly image: NativeImage;
   /** Names its picture for the card's page, and for no other. */
@@ -2266,7 +2266,7 @@ const start = async (): Promise<void> => {
       e2eLog("shotDropped", { to });
     },
     saves: shotSaves,
-    stage: (shot, folder) => staging.write(folder, shot.name, shot.png),
+    stage: (shot, folder, name) => staging.write(folder, name, shot.png),
     unstage: (folder) => {
       try {
         staging.clear(folder);

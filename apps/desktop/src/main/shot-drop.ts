@@ -7,7 +7,10 @@ import type { ItemId } from "@shared/shelf";
 import { errorMessage } from "./save-error";
 import type { Shot, ShotDrag } from "./screenshot-saves";
 
-export interface ShotDropDeps<S extends Shot> {
+/** A screenshot on the card, with the name the system saved it under, or Screenshot.png. */
+type NamedShot = Shot & { readonly name: string };
+
+export interface ShotDropDeps<S extends NamedShot> {
   /** The card's save path (screenshot-saves.ts). */
   readonly saves: {
     /** A drag of the card's screenshot, while it is the newest; null for an older one. */
@@ -28,8 +31,8 @@ export interface ShotDropDeps<S extends Shot> {
   readonly dragFailed: (why: string) => void;
   /** A drop threw after the shelf had its reply: the user hears why, once. */
   readonly dropFailed: (why: string) => void;
-  /** Writes the card's picture into `folder`, the drag's own folder in staging, named as the screenshot is, and returns the file; never a file of the user's. */
-  readonly stage: (shot: S, folder: string) => string;
+  /** Writes the card's picture, a PNG, as `name` into `folder`, the drag's own folder in staging, and returns the file; never a file of the user's. */
+  readonly stage: (shot: S, folder: string, name: string) => string;
   /** Removes a drag's folder from staging once its drop came back to the shelf: no other app got its file. Never throws. */
   readonly unstage: (folder: string) => void;
 }
@@ -63,7 +66,7 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * gets one place on the shelf, and keeps the one it has. Any other drop takes
  * the shelf's plain route.
  */
-export const createShotDrop = <S extends Shot>(deps: ShotDropDeps<S>) => {
+export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   // Each drag whose drop can still come, oldest first, by where its file is on disk, with the folder it staged its file in.
   const drags = new Map<
     string,
@@ -115,7 +118,8 @@ export const createShotDrop = <S extends Shot>(deps: ShotDropDeps<S>) => {
 
   const staged = (shot: S, folder: string): string | null => {
     try {
-      return deps.stage(shot, folder);
+      // The card holds every screenshot as a PNG, whatever format the system saved it in.
+      return deps.stage(shot, folder, `${path.parse(shot.name).name}.png`);
     } catch (error) {
       deps.dragFailed(errorMessage(error));
 
