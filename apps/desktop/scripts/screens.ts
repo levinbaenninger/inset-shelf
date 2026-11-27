@@ -7693,6 +7693,212 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map(stress);
 
+// Code location as context, slice C4 (release/ux-rounds/plans/code-location.md, section 6)
+
+/** The home folder main reports; no part of it may show on the page. */
+const CODE_HOME = "/Users/anna";
+const CODE_ROOT = `${CODE_HOME}/Developer/inset-shelf`;
+const CODE_FILE = `${CODE_ROOT}/apps/desktop/src/shared/recall.ts`;
+
+const CODE_TOOLTIP =
+  "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
+
+const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(4)}Übersicht.tsx`;
+
+const CODE_LONG_FOLDERS =
+  "packages/kundenportal/src/features/rechnungen/ansichten";
+
+const CODE_LONG_ROOT = `${CODE_HOME}/Developer/${LONG_WORD}`;
+
+/** A thought captured from a code editor, with the file it showed, or only its title. */
+const codeItem = (
+  app: string,
+  title: string,
+  code: { file: string; line: number | null; root: string | null } | null
+) => ({
+  ...base(760, 5),
+  context: { app, appLink: null, code, title, url: null },
+  html: null,
+  kind: "text",
+  links: [],
+  text: "The pill counts done items as open",
+  via: "selection",
+});
+
+const codeView = (one: ReturnType<typeof codeItem>) => ({
+  ...shelfView(),
+  doc: { ...DOC, items: [one] },
+  home: CODE_HOME,
+});
+
+/** The code item's source line: its words without spaces, whether it is a button, its tooltip, and whether it has a mark. */
+const codeSource = async (page: Page, words: string) =>
+  z
+    .object({
+      button: z.boolean(),
+      mark: z.boolean(),
+      text: z.string(),
+      title: z.string().nullable(),
+    })
+    .nullable()
+    .parse(
+      await page.evaluate(
+        (first) => {
+          const line = [...document.querySelectorAll("p, button")].find(
+            (element) =>
+              element.querySelector("p, button") === null &&
+              (element.textContent ?? "")
+                .replaceAll(/\s/gu, "")
+                .startsWith(first)
+          );
+
+          return line === undefined
+            ? null
+            : {
+                button: line.tagName === "BUTTON",
+                mark: line.querySelector("svg") !== null,
+                text: (line.textContent ?? "").replaceAll(/\s/gu, ""),
+                title: line.getAttribute("title"),
+              };
+        },
+        words.split(" ")[0] ?? words
+      )
+    );
+
+/** The source line reads `words` as text, with a code mark and `tooltip`, and no part of the home folder shows. */
+const codeChecks = async (
+  page: Page,
+  words: string,
+  tooltip: string | null
+): Promise<string | null> => {
+  const source = await codeSource(page, words);
+  const shown = await page.evaluate("document.body.innerText");
+
+  if (source === null) {
+    return `no source line reads "${words}"`;
+  }
+
+  if (source.text !== words.replaceAll(" ", "")) {
+    return `the source line reads "${source.text}", not "${words}"`;
+  }
+
+  if (source.button || !source.mark) {
+    return "the source line must be plain text with a code mark: nothing opens it yet";
+  }
+
+  // The tooltip's 300 characters may cut the path's end, never its start.
+  const pathLine = source.title
+    ?.split("\n")
+    .find((line) => tooltip?.startsWith(line.replace(/…$/u, "")) === true);
+
+  if (tooltip !== null && pathLine?.startsWith("~/") !== true) {
+    return `the tooltip is "${source.title}", not "${tooltip}"`;
+  }
+
+  return String(shown).includes(CODE_HOME)
+    ? "the home folder shows on the page"
+    : null;
+};
+
+const CODE_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) =>
+        await codeChecks(page, "recall.ts:147 · inset-shelf", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset-shelf", {
+            file: CODE_FILE,
+            line: 147,
+            root: CODE_ROOT,
+          })
+        ),
+      },
+      name: "item-code-line",
+    },
+    {
+      check: async (page) =>
+        await codeChecks(page, "recall.ts · inset-shelf", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset-shelf", {
+            file: CODE_FILE,
+            line: null,
+            root: CODE_ROOT,
+          })
+        ),
+      },
+      name: "item-code-no-line",
+    },
+    {
+      // A workspace names no folder of the file: the title's name stands in.
+      check: async (page) =>
+        await codeChecks(page, "recall.ts · inset (Workspace)", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset (Workspace)", {
+            file: CODE_FILE,
+            line: null,
+            root: null,
+          })
+        ),
+      },
+      name: "item-code-no-root",
+    },
+    {
+      // Windows reads no file: the title alone, tidied, with no tooltip.
+      check: async (page) =>
+        await codeChecks(page, "recall.ts · inset-shelf", null),
+      data: {
+        view: codeView(
+          codeItem(
+            "Visual Studio Code",
+            "recall.ts - inset-shelf - Visual Studio Code",
+            null
+          )
+        ),
+      },
+      name: "item-code-title",
+    },
+    {
+      check: async (page) =>
+        await codeChecks(
+          page,
+          `${CODE_LONG_FILE}:9999999 · ${LONG_WORD}`,
+          `~/Developer/${LONG_WORD}/${CODE_LONG_FOLDERS}/${CODE_LONG_FILE}`
+        ),
+      data: {
+        view: codeView(
+          codeItem("Code", `${CODE_LONG_FILE} — ${LONG_WORD}`, {
+            file: `${CODE_LONG_ROOT}/${CODE_LONG_FOLDERS}/${CODE_LONG_FILE}`,
+            line: 9_999_999,
+            root: CODE_LONG_ROOT,
+          })
+        ),
+      },
+      name: "item-code-long-path",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 760);
+      },
+      check: async (page) =>
+        await codeChecks(page, "recall.ts:147 · inset-shelf", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset-shelf", {
+            file: CODE_FILE,
+            line: 147,
+            root: CODE_ROOT,
+          })
+        ),
+      },
+      name: "details-code",
+    },
+  ] satisfies readonly StressScene[]
+).map(stress);
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -10574,6 +10780,7 @@ const SCENES: readonly Scene[] = [
   ...STRESS_SCENES,
   ...DRAWING_STRESS_SCENES,
   ...PILL_SCENES,
+  ...CODE_SCENES,
   ...ATTACHMENT_SCENES,
 ];
 
