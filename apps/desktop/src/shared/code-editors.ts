@@ -38,7 +38,12 @@ export interface CodeEditor {
    * absolute path and `{line}` its line: `atLine` when a line is known, `file`
    * when not. Null when how the editor opens a file is not confirmed.
    */
-  readonly open: { readonly file: string; readonly atLine: string } | null;
+  readonly open: {
+    readonly file: string;
+    readonly atLine: string;
+    /** The ends of file names the address opens as something other than the file itself, a workspace say. */
+    readonly not?: readonly string[];
+  } | null;
 }
 
 /** What a window title names, by an editor's row. */
@@ -61,7 +66,12 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
     // editor's local file; not read from a running window with a file open.
     document: "file",
     // Code's documented way in from outside (code.visualstudio.com/docs/configure/command-line).
-    open: { atLine: "vscode://file{path}:{line}", file: "vscode://file{path}" },
+    // A workspace file opens as a workspace there, in place of the window's own.
+    open: {
+      atLine: "vscode://file{path}:{line}",
+      file: "vscode://file{path}",
+      not: [".code-workspace"],
+    },
     title: ["file", "project"],
   },
   {
@@ -244,9 +254,14 @@ export const codeLabel = (place: CodePlace, home: string | null): CodeLabel => {
   };
 };
 
+/** A name's end that an editor reads as a line, and a column, however the address encodes it. */
+const LIKE_A_LINE = /:\d+$/u;
+
 /**
  * The address that opens a code place in its editor, at `line` when given,
- * or null when the editor's row knows no way to open a file. Each part of the
+ * or null when the editor's row knows no way to open a file, or the address
+ * would open something other than this file: a name that ends like a line,
+ * or one the row says it opens as something else. Each part of the
  * path is encoded, so a space, "#", "?", "%" or a letter outside ASCII stays
  * part of the path. The only place an editor's address is built.
  */
@@ -255,7 +270,11 @@ export const openAddress = (
   place: CodePlace,
   line: number | null
 ): string | null => {
-  if (editor.open === null) {
+  if (
+    editor.open === null ||
+    LIKE_A_LINE.test(place.file) ||
+    editor.open.not?.some((end) => place.file.endsWith(end)) === true
+  ) {
     return null;
   }
 

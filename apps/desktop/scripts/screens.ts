@@ -7704,8 +7704,8 @@ const CODE_FILE = `${CODE_ROOT}/apps/desktop/src/shared/recall.ts`;
 const CODE_TOOLTIP =
   "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
 
-// Long enough that the line and the path together overrun a tooltip, and short enough that the path's room holds the name whole.
-const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(2)}Übersicht.tsx`;
+// A name longer than the room a tooltip keeps for a path: the line above the path must hold it whole.
+const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(4)}Übersicht.tsx`;
 
 const CODE_LONG_FOLDERS =
   "packages/kundenportal/src/features/rechnungen/ansichten";
@@ -7793,7 +7793,8 @@ const openedOnce = async (page: Page): Promise<string | null> => {
 const codeChecks = async (
   page: Page,
   words: string,
-  tooltip: string | null
+  tooltip: string | null,
+  cut = false
 ): Promise<string | null> => {
   const source = await codeSource(page, words);
   const shown = await page.evaluate("document.body.innerText");
@@ -7820,19 +7821,27 @@ const codeChecks = async (
     return `the tooltip is "${source.title}", which doesn't end "Open in Code"`;
   }
 
-  // A long path loses its start to "…", never its end: the file's whole name stays.
-  const name = tooltip?.slice(tooltip.lastIndexOf("/") + 1) ?? "";
+  // A line that shows cut is whole in the tooltip, name and all, so the path
+  // under it is the folder alone. It loses its start to "…", never its end.
+  const where =
+    cut && tooltip !== null
+      ? tooltip.slice(0, tooltip.lastIndexOf("/") + 1)
+      : tooltip;
 
   const pathLine = source.title
     ?.split("\n")
     .find((line) =>
       line.startsWith("…")
-        ? line.endsWith(name) && tooltip?.endsWith(line.slice(1)) === true
-        : line === tooltip
+        ? line.length > 12 && where?.endsWith(line.slice(1)) === true
+        : line === where
     );
 
   if (tooltip !== null && pathLine === undefined) {
-    return `the tooltip is "${source.title}", not "${tooltip}"`;
+    return `the tooltip is "${source.title}", which holds no line for "${where}"`;
+  }
+
+  if (cut && source.title?.split("\n").includes(words) !== true) {
+    return `the tooltip is "${source.title}", which doesn't hold the whole line "${words}"`;
   }
 
   return String(shown).includes(CODE_HOME)
@@ -7905,7 +7914,8 @@ const CODE_SCENES: readonly Scene[] = (
         await codeChecks(
           page,
           `${CODE_LONG_FILE}:9999999 · ${LONG_WORD}`,
-          `~/Developer/${LONG_WORD}/${CODE_LONG_FOLDERS}/${CODE_LONG_FILE}`
+          `~/Developer/${LONG_WORD}/${CODE_LONG_FOLDERS}/${CODE_LONG_FILE}`,
+          true
         ),
       data: {
         view: codeView(

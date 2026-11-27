@@ -25,8 +25,9 @@ export interface CodeSystem {
 /**
  * Opens a code item's file in its editor, at its line when one is stored.
  * Only an address the editor's row builds opens, and only when its scheme is
- * registered here; else the file is shown in its folder. A file that is gone
- * opens nothing: the shelf says so and the editor comes forward.
+ * registered here; else, or when the open fails, the file is shown in its
+ * folder. A file that is gone opens nothing: the shelf says so and the editor
+ * comes forward. It never rejects.
  */
 export const openCode = async (
   editor: CodeEditor | undefined,
@@ -42,7 +43,11 @@ export const openCode = async (
     system.notify(goneMessage(place));
 
     if (address !== null) {
-      await system.bringForward(address);
+      try {
+        await system.bringForward(address);
+      } catch {
+        // The shelf has said the file is gone; an editor that won't come forward changes nothing.
+      }
     }
 
     return;
@@ -50,8 +55,15 @@ export const openCode = async (
 
   if (address === null) {
     system.reveal(place.file);
-  } else {
+
+    return;
+  }
+
+  try {
     await system.open(address);
+  } catch {
+    // The system refused, or the editor went between the look and the open: the file is still shown.
+    system.reveal(place.file);
   }
 };
 

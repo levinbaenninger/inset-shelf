@@ -48,6 +48,32 @@ const system = (
 };
 
 describe(openCode, () => {
+  it("shows the file in its folder when its editor refuses to open it", async () => {
+    const mac = system(true, ["vscode"]);
+
+    await openCode(CODE, PLACE, {
+      ...mac,
+      open: async () => {
+        await Promise.reject(new Error("the handler is gone"));
+      },
+    });
+
+    expect(mac.asked).toStrictEqual(["reveal /Users/anna/My Code/proj/a.ts"]);
+  });
+
+  it("still says a file is gone when its editor can't be brought forward", async () => {
+    const mac = system(false, ["vscode"]);
+
+    await openCode(CODE, PLACE, {
+      ...mac,
+      bringForward: async () => {
+        await Promise.reject(new Error("no such app"));
+      },
+    });
+
+    expect(mac.asked).toStrictEqual(["say a.ts is no longer at this path"]);
+  });
+
   it("opens the file in its editor at its line", async () => {
     const mac = system(true, ["vscode"]);
 

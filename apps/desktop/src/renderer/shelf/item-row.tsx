@@ -144,18 +144,49 @@ interface Leads {
   readonly action: string | null;
 }
 
-/** The least of a file's path a tooltip keeps, however long the line beside it. */
-const PATH_TOOLTIP_MIN = 60;
+/** The room a tooltip keeps for a file's folder when the line beside it is too long to show whole. */
+const FOLDER_KEPT = 60;
 
-/** `text` in `room` characters, losing its start: a path's end names the file. */
+/** The least room worth giving a folder beside a whole line: under it, the folder's end says nothing. */
+const FOLDER_LEAST = 12;
+
+/** `text` in `room` characters, losing its start: a path's end is its nearest part. */
 const endOf = (text: string, room: number): string =>
   text.length > room ? `…${text.slice(1 - room)}` : text;
 
 /**
+ * The lines that say where a code item's file is, in `room` characters. A
+ * line that shows whole leaves the path to say it all, the file's name at its
+ * end. A line that shows cut is given whole first, name and all, so the path
+ * under it is the folder alone, in the room that is left. Only a line too
+ * long for the tooltip is cut, and the folder then keeps room of its own.
+ */
+const fileLines = (
+  shown: string,
+  path: string,
+  cut: boolean,
+  room: number
+): readonly string[] => {
+  if (!cut) {
+    return [endOf(path, room)];
+  }
+
+  const folder = path.slice(0, path.lastIndexOf("/") + 1);
+  const left = room - 1 - shown.length;
+
+  if (folder === "" || (left >= 0 && left < FOLDER_LEAST)) {
+    return [tooltipText(shown, room)];
+  }
+
+  const where = endOf(folder, left < 0 ? FOLDER_KEPT : left);
+
+  return [tooltipText(shown, room - 1 - where.length), where];
+};
+
+/**
  * The source line's tooltip: the whole line when it shows cut, then where it
  * leads (the page, or the file), then what a click does, 300 characters in
- * all; undefined when it would only repeat what shows. A file's path is never
- * pushed out by a long line, and loses its start, never the file's name.
+ * all; undefined when it would only repeat what shows.
  */
 const sourceTitle = (
   shown: string,
@@ -167,27 +198,18 @@ const sourceTitle = (
   const room =
     TOOLTIP_MAX - last.reduce((sum, each) => sum + each.length + 1, 0);
 
-  if (path === null || path === shown) {
-    const lines = [
-      ...(cut ? [shown] : []),
-      ...(to === null || to === shown ? [] : [to]),
-    ];
-
-    return lines.length === 0
-      ? last[0]
-      : [tooltipText(lines.join("\n"), room), ...last].join("\n");
+  if (path !== null && path !== shown) {
+    return [...fileLines(shown, path, cut, room), ...last].join("\n");
   }
 
-  const where = endOf(
-    path,
-    cut ? Math.max(PATH_TOOLTIP_MIN, room - 1 - shown.length) : room
-  );
+  const lines = [
+    ...(cut ? [shown] : []),
+    ...(to === null || to === shown ? [] : [to]),
+  ];
 
-  return [
-    ...(cut ? [tooltipText(shown, room - 1 - where.length)] : []),
-    where,
-    ...last,
-  ].join("\n");
+  return lines.length === 0
+    ? last[0]
+    : [tooltipText(lines.join("\n"), room), ...last].join("\n");
 };
 
 /** Where a click on the source line leads: the page, the app, or the file (from home) in its editor. */
