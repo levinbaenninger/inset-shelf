@@ -101,7 +101,7 @@ import { createDrawingSaves, sameTarget } from "./drawing-save";
 import type { DrawingTarget } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
-import { exportFileName } from "./export-name";
+import { exportFileName, imageFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
 import { EDITORS, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
@@ -1331,28 +1331,6 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /** Reads one added file into an operation, or says why it can’t be added. */
-  const prepareFile = async (
-    filePath: string
-  ): Promise<MainOp | { readonly problem: string }> => {
-    const upload = await attachments.prepare(filePath);
-
-    if ("problem" in upload) {
-      return upload;
-    }
-
-    return upload.kind === "image"
-      ? {
-          context: null,
-          image: upload.image,
-          pins: [],
-          source: null,
-          type: "addImage",
-          via: "paste",
-        }
-      : { context: null, file: upload.file, type: "addFile" };
-  };
-
   /**
    * Says how adding went, as Double Shift does: once the disk holds what was
    * added, and naming each file that couldn't be added and why.
@@ -1385,7 +1363,7 @@ const start = async (): Promise<void> => {
   const addFiles = async (paths: readonly string[]): Promise<void> => {
     // A file dragged out of the shelf and dropped back in is already there.
     const outside = paths.filter((filePath) => !staging.contains(filePath));
-    const prepared = await Promise.all(outside.map(prepareFile));
+    const prepared = await Promise.all(outside.map(attachments.prepareItem));
     let lastId: ItemId | null = null;
     let added = 0;
 
@@ -1488,7 +1466,7 @@ const start = async (): Promise<void> => {
 
     if (item?.kind === "image" && exported !== null) {
       shelf.webContents.startDrag({
-        file: staging.write(id, exportFileName(item.note), exported.png),
+        file: staging.write(id, imageFileName(item), exported.png),
         icon: exported.image.resize({ width: 128 }),
       });
     }

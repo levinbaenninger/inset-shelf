@@ -1,3 +1,5 @@
+import type { ImageItem } from "@shared/shelf";
+
 const NAME_MAX = 60;
 const FIRST_PRINTABLE = 0x20;
 
@@ -24,3 +26,7 @@ export const exportFileName = (note: string): string => {
 
   return `${base === "" ? "Screen area" : base}.png`;
 };
+
+/** The file an image item is dragged out as. */
+export const imageFileName = (item: ImageItem): string =>
+  exportFileName(item.note);

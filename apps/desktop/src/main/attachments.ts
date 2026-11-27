@@ -235,7 +235,27 @@ export const createAttachments = (deps: AttachmentDeps) => {
       : attachTo(id, [await storePicture(copied.image, PASTED_NAME)]);
   };
 
-  return { attachFilesTo, attachTo, pasteImageTo, prepare };
+  /** One added file as the operation that adds it as a new item, or why it can't be added. */
+  const prepareItem = async (filePath: string): Promise<MainOp | Problem> => {
+    const upload = await prepare(filePath);
+
+    if ("problem" in upload) {
+      return upload;
+    }
+
+    return upload.kind === "image"
+      ? {
+          context: null,
+          image: upload.image,
+          pins: [],
+          source: null,
+          type: "addImage",
+          via: "paste",
+        }
+      : { context: null, file: upload.file, type: "addFile" };
+  };
+
+  return { attachFilesTo, attachTo, pasteImageTo, prepare, prepareItem };
 };
 
 /**
