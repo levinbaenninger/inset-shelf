@@ -7,7 +7,7 @@ const ignore = (): void => undefined;
  * When the screenshot card goes by itself: its time runs while it shows and
  * nothing holds it. The pointer or the keyboard on it (`hover`) pauses it;
  * `hold` (Keep on Screen) stops it until the card hides. A save can also
- * hold it without changing Keep on Screen.
+ * hold it, for as long as the card shows one, without changing Keep on Screen.
  */
 export const createCardClock = (options: {
   readonly setTimer: (run: () => void, ms: number) => () => void;
@@ -69,14 +69,17 @@ export const createCardClock = (options: {
       held = true;
       stop();
     },
-    holdForSave: (): void => {
-      saveHeld = true;
-      stop();
-    },
-    releaseSave: (): void => {
-      saveHeld = false;
+    /** A save holds the card (`on`), or none does any more. Told what it already knows, it changes nothing: the time it has runs on. */
+    holdForSave: (on: boolean): void => {
+      if (on === saveHeld) {
+        return;
+      }
 
-      if (showing && !hovered && !held) {
+      saveHeld = on;
+
+      if (on) {
+        stop();
+      } else if (showing && !hovered && !held) {
         run();
       }
     },

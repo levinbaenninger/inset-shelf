@@ -21,8 +21,8 @@ export interface ScreenshotWindow {
   readonly hover: (on: boolean) => void;
   /** Keeps the card until it is used or dismissed. */
   readonly hold: () => void;
-  readonly holdForSave: () => void;
-  readonly releaseSave: () => void;
+  /** Keeps the card while it shows a save (`on`), and gives it its time again after. */
+  readonly holdForSave: (on: boolean) => void;
   readonly view: () => ScreenshotView | null;
   /** The card names another item for Add to “…”, or shows how its save stands, where it is and for as long as it had. */
   readonly update: (
@@ -156,7 +156,6 @@ export const createScreenshotWindow = (options: {
     onView: (next) => {
       listener = next;
     },
-    releaseSave: clock.releaseSave,
     show: (view, shelf) => {
       current = view;
       listener(view);

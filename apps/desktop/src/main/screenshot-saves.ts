@@ -67,10 +67,8 @@ export interface Shot {
 export interface ShotCard {
   readonly show: (view: ScreenshotView) => void;
   readonly hide: () => void;
-  /** Stops its time for a save, including while it offers Retry. */
-  readonly holdForSave: () => void;
-  /** Gives the card its time again when the user took the screenshot off the shelf during a save. */
-  readonly releaseSave: () => void;
+  /** Stops its time while it shows a save, running or failed with its Retry (`on`), and gives it its time again once it shows none. */
+  readonly holdForSave: (on: boolean) => void;
   readonly isVisible: () => boolean;
   readonly view: () => ScreenshotView | null;
   readonly update: (
@@ -424,7 +422,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
   /**
    * The card as the shelf and the disk stand now: it goes once a write landed
-   * its screenshot, and else shows what `look` reads.
+   * its screenshot, and else shows what `look` reads, with its time stopped
+   * while that is a save.
    */
   const retarget = (): void => {
     const view = card.view();
@@ -446,6 +445,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     }
 
     const next = look(now, on);
+
+    // The card stays while it shows a save, however slow the disk, and has its time whenever it shows none.
+    card.holdForSave(next.save.state !== "idle");
 
     if (!isDeepStrictEqual(next, { save: view.save, target: view.target })) {
       card.update(next);
@@ -529,8 +531,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     now.saving = to;
     now.failed = null;
     now.write = null;
-    // The card stays while its screenshot is written, however slow the disk.
-    card.holdForSave();
     retarget();
 
     const written = await reportSaveError(async () => {
@@ -560,7 +560,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       // The write landed, and the user had taken the screenshot off the shelf by then: nothing was added, and the card offers its adds again.
       if (on === null) {
         if (mine) {
-          card.releaseSave();
           retarget();
         }
 
@@ -585,11 +584,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     // Nothing failed and nothing was placed: the screenshot is where the user's Undo put it back, and the card says how it stands there; or it is off the shelf with its removal not saved yet, and the card has its time again.
     if ("stays" in written) {
       deps.notify(written.message, "failed");
-
-      if (mine && shown(now) === null) {
-        card.releaseSave();
-      }
-
       retarget();
 
       return null;

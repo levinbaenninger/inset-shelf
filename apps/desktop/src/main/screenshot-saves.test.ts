@@ -191,7 +191,6 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       },
       holdForSave: cardClock.holdForSave,
       isVisible: () => view !== null,
-      releaseSave: cardClock.releaseSave,
       show: (shown) => {
         view = shown;
         cardClock.shown();
@@ -2443,6 +2442,7 @@ describe(cardLabel, () => {
 const timed = () => {
   let pending: (() => void) | null = null;
   let expired = 0;
+  let started = 0;
 
   const clock = createCardClock({
     expire: () => {
@@ -2450,6 +2450,7 @@ const timed = () => {
     },
     setTimer: (run) => {
       pending = run;
+      started += 1;
 
       return () => {
         pending = null;
@@ -2459,6 +2460,8 @@ const timed = () => {
 
   return {
     clock,
+    /** How often its 12 seconds began. */
+    started: () => started,
     elapse: () => {
       const run = pending;
 
@@ -2508,21 +2511,30 @@ describe("the screenshot card's time", () => {
     const card = timed();
 
     card.clock.shown();
-    card.clock.holdForSave();
+    card.clock.holdForSave(true);
     card.clock.hover(true);
     card.clock.hover(false);
     expect(card.running()).toBeFalsy();
 
     card.clock.hover(true);
-    card.clock.releaseSave();
+    card.clock.holdForSave(false);
     expect(card.running()).toBeFalsy();
     card.clock.hover(false);
     expect(card.running()).toBeTruthy();
 
     card.clock.hold();
-    card.clock.holdForSave();
-    card.clock.releaseSave();
+    card.clock.holdForSave(true);
+    card.clock.holdForSave(false);
     expect(card.running()).toBeFalsy();
+  });
+
+  it("runs on with the time it has when it is told again that no save holds it", () => {
+    const card = timed();
+
+    card.clock.shown();
+    card.clock.holdForSave(false);
+
+    expect(card.started()).toBe(1);
   });
 
   it("gives a new screenshot its own time, whatever held the last one", () => {

@@ -920,7 +920,6 @@ const start = async (): Promise<void> => {
       hide: screenshotCard.hide,
       holdForSave: screenshotCard.holdForSave,
       isVisible: screenshotCard.isVisible,
-      releaseSave: screenshotCard.releaseSave,
       show: (view) => {
         screenshotCard.show(view, shelf.bounds());
       },
