@@ -1986,6 +1986,96 @@ const scales = (card: ReturnType<typeof setup>) =>
       : []
   );
 
+/** A card whose Add to “…” gave up waiting, with the tile then removed in details: the write that holds the tile is still on its way, until `end`. */
+const tileOffWhileItsWriteIsHeld = async () => {
+  const card = setup();
+
+  await card.controller.flush();
+  card.select(card.note, true);
+  card.saves.show(shot(1));
+
+  const end = card.holdWrite();
+  const adding = card.saves.addToItem(1, card.note);
+
+  await card.giveUpWaiting();
+  await adding;
+  card.controller.apply({
+    attachmentId: tileOf(card),
+    id: card.note,
+    type: "removeAttachment",
+  });
+
+  return { card, end };
+};
+
+const REMOVAL_NOT_SAVED =
+  "The shelf hasn’t saved the screenshot’s removal yet. Add it again once it has.";
+
+describe("a screenshot taken off the shelf whose removal the disk doesn't hold yet", () => {
+  it("adds nothing anew while a write on its way still holds the screenshot on the note, so Discard changes brings back the only copy", async () => {
+    const { card, end } = await tileOffWhileItsWriteIsHeld();
+
+    await expect(card.saves.addToShelf(1)).resolves.toBeNull();
+
+    expect({ notices: card.notices, shown: card.shown() }).toStrictEqual({
+      notices: [REMOVAL_NOT_SAVED],
+      shown: { attached: 0, items: 0 },
+    });
+
+    // The first write lands with the tile; the removal is refused, so the note offers Discard changes.
+    card.failWrites(DISK_REFUSES);
+    end({ ok: true });
+    await settled(card);
+    card.controller.discard(card.note);
+    card.failWrites({ ok: true });
+    await settled(card);
+
+    expect({
+      disk: card.disk().at(-1),
+      doubled: written(card).doubled,
+      shown: card.shown(),
+    }).toStrictEqual({
+      disk: { attached: 1, items: 0 },
+      doubled: [],
+      shown: { attached: 1, items: 0 },
+    });
+  });
+
+  it("adds nothing anew while the disk holds the screenshot on the note and refuses the removal", async () => {
+    const { card, end } = await tileOffWhileItsWriteIsHeld();
+
+    card.failWrites(DISK_REFUSES);
+    end({ ok: true });
+    await settled(card);
+
+    await expect(card.saves.addToShelf(1)).resolves.toBeNull();
+
+    expect({ notices: card.notices, shown: card.shown() }).toStrictEqual({
+      notices: [REMOVAL_NOT_SAVED],
+      shown: { attached: 0, items: 0 },
+    });
+  });
+
+  it("adds it to the shelf, once, as soon as the disk holds the removal", async () => {
+    const { card, end } = await tileOffWhileItsWriteIsHeld();
+
+    end({ ok: true });
+    await settled(card);
+
+    const row = await card.saves.addToShelf(1);
+
+    expect({
+      disk: card.disk().at(-1),
+      notices: card.notices,
+      row: row !== null,
+    }).toStrictEqual({
+      disk: { attached: 0, items: 1 },
+      notices: [],
+      row: true,
+    });
+  });
+});
+
 describe("the scale a screenshot is kept at", () => {
   it.each(["shelf", "item"] as const)(
     "is that of the display the pointer was on when the add to the %s was pressed, though the pointer is on another by the time the picture file is written",
