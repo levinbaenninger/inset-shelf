@@ -9,7 +9,6 @@ import {
   codeWay,
   lineOfText,
   openAddress,
-  quietlyReadable,
   titleParts,
 } from "./code-editors";
 import type { CodeEditor } from "./code-editors";
@@ -474,38 +473,6 @@ describe(lineOfText, () => {
 
   it("gives no line for a capture of only blank space", () => {
     expect(lineOfText(source(40), " \n\t\n")).toBeNull();
-  });
-});
-
-describe(quietlyReadable, () => {
-  const home = "/Users/anna";
-
-  it.each([
-    "/Users/anna/Developer/inset-shelf/src/a.ts",
-    "/private/var/folders/x1/T/inset-shelf-e2e-1/code/proj/src/a.ts",
-    "/Users/anna/DocumentsArchive/a.ts",
-    "/opt/src/proj/a.ts",
-  ])("reads %s on macOS", (file) => {
-    expect(quietlyReadable(file, home, "darwin")).toBeTruthy();
-  });
-
-  it.each([
-    "/Users/anna/Documents/proj/a.ts",
-    "/Users/anna/Desktop/a.ts",
-    "/Users/anna/Downloads/a.ts",
-    "/Users/anna/Library/Mobile Documents/com~apple~CloudDocs/a.ts",
-    "/Volumes/Backup/proj/a.ts",
-    "/Users/anna/documents/proj/a.ts",
-    "/volumes/Backup/a.ts",
-  ])("never reads %s on macOS, where a read can ask for access", (file) => {
-    expect(quietlyReadable(file, home, "darwin")).toBeFalsy();
-    expect(quietlyReadable(file, `${home}/`, "darwin")).toBeFalsy();
-  });
-
-  it("reads a Documents folder where the system asks nothing for it", () => {
-    expect(
-      quietlyReadable("/home/anna/Documents/a.ts", "/home/anna", "linux")
-    ).toBeTruthy();
   });
 });
 

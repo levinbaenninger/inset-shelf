@@ -4,7 +4,7 @@ import { z } from "zod";
 export const PATH_MAX = 4096;
 
 /** The folder `root` is, or holds, `file`: a whole path segment, never a name that only starts the same. */
-export const isAncestor = (root: string, file: string): boolean =>
+const isAncestor = (root: string, file: string): boolean =>
   file.startsWith(root.endsWith("/") ? root : `${root}/`);
 
 /** Half of a character pair on its own: read by code point, only an unpaired one is a surrogate. */

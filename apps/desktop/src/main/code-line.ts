@@ -1,57 +1,30 @@
-import { lineOfText, quietlyReadable } from "@shared/code-editors";
-import type { CodePlace } from "@shared/code-place";
+import { lineOfText } from "@shared/code-editors";
+import { TEXT_MAX } from "@shared/shelf";
 
-/** How main reads a source file on this computer; main passes Node's, tests a disk of their own. */
-export interface SourceReader {
-  readonly home: string;
-  /** `process.platform`. */
-  readonly platform: string;
-  readonly stat: (
-    file: string
-  ) => Promise<{ readonly size: number; readonly isFile: () => boolean }>;
-  /** The file's words, as UTF-8. */
-  readonly readFile: (file: string) => Promise<string>;
-}
+import type { QuietDisk } from "./quiet-disk";
 
 /** The largest source file read to find a line. */
 export const SOURCE_READ_MAX = 2 * 1024 * 1024;
 
 /**
  * The 1-based line `captured` begins on in the file as it is saved now, when
- * it is there exactly once; else null. Only a file that can be read without a
- * system prompt, and of 2 MB or less, is read. Nothing from it is kept or
- * logged: only the line leaves this function.
+ * it is there exactly once; else null. The file is read through the quiet
+ * disk (src/main/quiet-disk.ts), only when it holds 2 MB or less, and the text
+ * looked for is no longer than the shelf keeps. Nothing from the file is kept
+ * or logged: only the line leaves this function.
  */
 export const lineInFile = async (
   file: string,
   captured: string,
-  reader: SourceReader
+  disk: Pick<QuietDisk, "read">
 ): Promise<number | null> => {
-  if (!quietlyReadable(file, reader.home, reader.platform)) {
+  if (captured.length > TEXT_MAX) {
     return null;
   }
 
-  try {
-    const found = await reader.stat(file);
+  const bytes = await disk.read(file, SOURCE_READ_MAX);
 
-    if (!found.isFile() || found.size > SOURCE_READ_MAX) {
-      return null;
-    }
-
-    return lineOfText(await reader.readFile(file), captured);
-  } catch {
-    return null;
-  }
+  return bytes === null
+    ? null
+    : lineOfText(new TextDecoder().decode(bytes), captured);
 };
-
-/**
- * The line to open a code item's file at: where its words are in the file
- * now, so a line that moved is still found, else the line stored at capture.
- */
-export const lineToOpen = async (
-  place: CodePlace,
-  text: string | null,
-  reader: SourceReader
-): Promise<number | null> =>
-  (text === null ? null : await lineInFile(place.file, text, reader)) ??
-  place.line;

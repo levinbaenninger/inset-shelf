@@ -88,8 +88,7 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
-import { lineToOpen } from "./code-line";
-import type { SourceReader } from "./code-line";
+import { lineInFile } from "./code-line";
 import { chatGptThreadLink } from "./codex-threads";
 import { contained } from "./contained";
 import { createContextRecall } from "./context-recall";
@@ -829,14 +828,6 @@ const start = async (): Promise<void> => {
     toast.send({ title: message, tone, type: "notified" });
   };
 
-  /** How main reads a code item's file for the line its words are on (src/main/code-line.ts). */
-  const sourceReader: SourceReader = {
-    home,
-    platform: process.platform,
-    readFile: async (file) => await readFile(file, "utf-8"),
-    stat,
-  };
-
   /** Where main may look for a code item's file with no chance of a system prompt (src/main/quiet-disk.ts). */
   const codeDisk = quietDisk({ home });
 
@@ -846,7 +837,10 @@ const start = async (): Promise<void> => {
     place: CodePlace,
     text: string | null
   ): Promise<void> => {
-    const at = { ...place, line: await lineToOpen(place, text, sourceReader) };
+    const at = {
+      ...place,
+      line: text === null ? null : await lineInFile(place.file, text, codeDisk),
+    };
 
     await openCode(name, at, EDITORS, {
       bringForward: async (address) => {

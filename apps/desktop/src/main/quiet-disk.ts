@@ -1,4 +1,5 @@
-import { lstat, readlink, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 
 import { FsErrorSchema } from "./save-error";
 
@@ -21,12 +22,27 @@ export interface Entry {
   readonly isSymbolicLink: () => boolean;
 }
 
+/** A file opened for reading, as the policy uses it: what the opening holds, never the path again. */
+export interface OpenFile {
+  /** What the opening holds, as `fstat` says it. */
+  readonly stat: () => Promise<Entry>;
+  readonly read: (
+    into: Uint8Array,
+    offset: number,
+    length: number,
+    position: number
+  ) => Promise<{ readonly bytesRead: number }>;
+  readonly close: () => Promise<void>;
+}
+
 /** The disk calls the policy makes: Node's, or a test's that notes each path asked about. */
 export interface QuietFs {
   readonly lstat: (at: string) => Promise<Entry>;
   readonly readlink: (at: string) => Promise<string>;
   /** Only for the roots themselves. */
   readonly realpath: (at: string) => Promise<string>;
+  /** Opens a file to read: never through a link at its end, never waiting on a pipe or a device. */
+  readonly open: (at: string) => Promise<OpenFile>;
 }
 
 export type Looked =
@@ -40,6 +56,11 @@ export type Looked =
 export interface QuietDisk {
   /** What is at `file`, found without touching any place macOS could ask the user about. */
   readonly find: (file: string) => Promise<Looked>;
+  /**
+   * The bytes of the regular file at `file`, when it holds `max` or fewer,
+   * found as `find` finds it and opened once; else null. Nothing else is read.
+   */
+  readonly read: (file: string, max: number) => Promise<Uint8Array | null>;
 }
 
 const UNSURE: Looked = { kind: "unsure" };
@@ -128,7 +149,58 @@ const touch = async <T>(
 };
 
 /** The disk itself. */
-const NODE_FS: QuietFs = { lstat, readlink, realpath };
+const NODE_FS: QuietFs = {
+  lstat,
+  open: async (at) =>
+    await open(
+      at,
+      // oxlint-disable-next-line no-bitwise -- open(2) takes its flags as one number.
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    ),
+  readlink,
+  realpath,
+};
+
+/** Whether two looks at a path saw the same file: one on the same disk, at the same place on it. */
+const sameFile = (one: Entry, other: Entry): boolean =>
+  one.dev === other.dev && one.ino === other.ino;
+
+/** Reads `file` into `bytes` from `from` on, until they are full or it ends: how many bytes it gave. */
+const fill = async (
+  file: OpenFile,
+  bytes: Uint8Array,
+  from: number
+): Promise<number> => {
+  if (from === bytes.length) {
+    return from;
+  }
+
+  const { bytesRead } = await file.read(bytes, from, bytes.length - from, from);
+
+  return bytesRead === 0 ? from : await fill(file, bytes, from + bytesRead);
+};
+
+/**
+ * The bytes of an opened file, when the opening holds the regular file
+ * `looked` saw, of `max` bytes or fewer; else null. At most one byte more
+ * than it said it holds is read: a file that grew since is not read on.
+ */
+const readOpened = async (
+  file: OpenFile,
+  looked: Entry,
+  max: number
+): Promise<Uint8Array | null> => {
+  const now = await file.stat();
+
+  if (!now.isFile() || !sameFile(now, looked) || now.size > max) {
+    return null;
+  }
+
+  const bytes = new Uint8Array(now.size + 1);
+  const length = await fill(file, bytes, 0);
+
+  return length > now.size ? null : bytes.subarray(0, length);
+};
 
 /**
  * The policy over `fs`: `find` resolves a path one link at a time, and asks
@@ -231,10 +303,57 @@ export const quietDisk = (
       : await walk(policy, [...above, step], rest, links, entry);
   };
 
+  /** What is at `file`, under the policy it was looked for by. */
+  const look = async (
+    file: string
+  ): Promise<{ readonly policy: Policy; readonly looked: Looked } | null> => {
+    if (!file.startsWith("/")) {
+      return null;
+    }
+
+    const policy = await policyNow();
+
+    return {
+      looked: await walk(policy, [], file.split("/"), 0, null),
+      policy,
+    };
+  };
+
   return {
-    find: async (file) =>
-      file.startsWith("/")
-        ? await walk(await policyNow(), [], file.split("/"), 0, null)
-        : UNSURE,
+    find: async (file) => {
+      const found = await look(file);
+
+      return found?.looked ?? UNSURE;
+    },
+    read: async (file, max) => {
+      const found = await look(file);
+
+      if (
+        found?.looked.kind !== "there" ||
+        !found.looked.entry.isFile() ||
+        found.looked.entry.size > max
+      ) {
+        return null;
+      }
+
+      // The path `find` gave holds no link: opened with the policy asked again, its end not followed.
+      const opened = await touch(found.looked.path, found.policy, fs.open);
+
+      if (!opened.ok) {
+        return null;
+      }
+
+      try {
+        return await readOpened(opened.value, found.looked.entry, max);
+      } catch {
+        return null;
+      } finally {
+        try {
+          await opened.value.close();
+        } catch {
+          // Only read: a close that fails loses nothing.
+        }
+      }
+    },
   };
 };

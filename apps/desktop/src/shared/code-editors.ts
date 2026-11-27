@@ -3,7 +3,6 @@ import {
   CodePlaceSchema,
   fileName,
   fromHome,
-  isAncestor,
   pathInProject,
 } from "./code-place";
 import type { CodePlace } from "./code-place";
@@ -411,37 +410,6 @@ export const lineOfText = (text: string, captured: string): number | null => {
     exact.times === 0 && trimmed !== whole ? placeOf(file, trimmed) : exact;
 
   return loose.times === 1 ? lineAt(file, loose.at) : null;
-};
-
-/** Where macOS asks the user before an app reads a file (Files and Folders), by the home folder's own names. */
-const ASKED_IN_HOME = ["Desktop", "Documents", "Downloads", "Library"];
-
-/**
- * Whether main may read `file` with no chance of a system prompt. On macOS
- * a file under the Desktop, Documents, Downloads or Library folder, or on
- * another disk, is never read: it keeps its path and gets no line.
- */
-export const quietlyReadable = (
-  file: string,
-  home: string,
-  /** `process.platform` in main. */
-  platform: string
-): boolean => {
-  if (platform !== "darwin") {
-    return true;
-  }
-
-  const folder = home.replace(/\/$/u, "");
-
-  const asked = [
-    ...ASKED_IN_HOME.map((name) => `${folder}/${name}`),
-    "/Volumes",
-  ];
-
-  // The disk tells no capitals apart: ~/documents is ~/Documents.
-  return !asked.some((each) =>
-    isAncestor(each.toLowerCase(), file.toLowerCase())
-  );
 };
 
 /** How a click on a code item reaches its file: opened in its editor, or shown in its folder. */
