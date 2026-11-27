@@ -164,6 +164,14 @@ export interface AttachResult {
 
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
+/** The most files one drop or paste hands main by path: the page says so for more, and main refuses them. */
+export const DROPPED_PATHS_MAX = 50;
+
+const DroppedPathsSchema = z
+  .array(z.string().min(1).max(4096))
+  .min(1)
+  .max(DROPPED_PATHS_MAX);
+
 /**
  * The in-app tutorial (src/main/tutorial/, src/renderer/tutorial/), in
  * every window that shows a hint: its view, and what the page asks or reports.
@@ -183,7 +191,7 @@ const attachmentMethods = {
   addFilesTo: invoke(
     z.object({
       id: ItemIdSchema,
-      paths: z.array(z.string().min(1).max(4096)).min(1).max(50),
+      paths: DroppedPathsSchema,
     }),
     out<AttachResult>()
   ),
@@ -247,7 +255,7 @@ export const shelfContract = defineContract({
       })
     ),
     /** Files dropped or pasted into the shelf, by path; main reads them, and its notice says how it went once they are on disk. */
-    addFiles: send(z.array(z.string().min(1).max(4096)).min(1).max(50)),
+    addFiles: send(DroppedPathsSchema),
     apply: send(ShelfOpSchema),
     /** The file dialog, from the "+" in the note field. */
     attachFiles: send(z.void()),
