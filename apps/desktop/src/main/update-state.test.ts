@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   INITIAL_UPDATE_STATE,
-  settleCheck,
+  settleRequest,
   updateMenuItem,
   updateNotice,
   updateTransition,
@@ -24,59 +24,83 @@ const run = (
   return state;
 };
 
-const checking = (manual: boolean): UpdateState => ({
-  kind: "checking",
-  manual,
-});
-
+const checking: UpdateState = { kind: "checking" };
+const available: UpdateState = { kind: "available", version: "0.1.901" };
 const downloaded: UpdateState = { kind: "ready", version: "0.1.901" };
 
 describe(updateTransition, () => {
-  it("walks a found update from check to ready", () => {
+  it("walks a found update through check, download and ready, one user step each", () => {
+    expect(run([{ type: "check" }])).toStrictEqual(checking);
+    expect(
+      run([{ type: "found", version: "0.1.901" }], checking)
+    ).toStrictEqual(available);
+    expect(run([{ type: "download" }], available)).toStrictEqual({
+      kind: "downloading",
+      percent: 0,
+      version: "0.1.901",
+    });
     expect(
       run([
-        { manual: false, type: "check" },
+        { type: "check" },
         { type: "found", version: "0.1.901" },
-        { percent: 41.6, type: "progress" },
+        { type: "download" },
         { type: "downloaded" },
       ])
-    ).toStrictEqual({ kind: "ready", version: "0.1.901" });
+    ).toStrictEqual(downloaded);
+  });
+
+  it("never downloads on its own after finding an update", () => {
+    expect(
+      run([
+        { type: "check" },
+        { type: "found", version: "0.1.901" },
+        { percent: 10, type: "progress" },
+        { type: "downloaded" },
+      ])
+    ).toStrictEqual(available);
   });
 
   it("reports the rounded download progress", () => {
     expect(
       run([
-        { manual: false, type: "check" },
+        { type: "check" },
         { type: "found", version: "0.1.901" },
+        { type: "download" },
         { percent: 41.6, type: "progress" },
       ])
     ).toStrictEqual({ kind: "downloading", percent: 42, version: "0.1.901" });
   });
 
   it("is up to date when the feed has nothing newer", () => {
-    expect(
-      run([{ manual: true, type: "check" }, { type: "notFound" }])
-    ).toStrictEqual({ kind: "upToDate" });
+    expect(run([{ type: "check" }, { type: "notFound" }])).toStrictEqual({
+      kind: "upToDate",
+    });
   });
 
   it("checks again after an answer or a failure", () => {
+    expect(run([{ type: "check" }], { kind: "upToDate" })).toStrictEqual(
+      checking
+    );
     expect(
-      run([{ manual: true, type: "check" }], { kind: "upToDate" })
-    ).toStrictEqual({ kind: "checking", manual: true });
-    expect(
-      run([{ manual: false, type: "check" }], { kind: "error", message: "x" })
-    ).toStrictEqual({ kind: "checking", manual: false });
+      run([{ type: "check" }], { kind: "error", message: "x" })
+    ).toStrictEqual(checking);
   });
 
-  it("ignores a check while busy or once an update is ready", () => {
+  it("ignores a check while busy, once an update is found or once it is ready", () => {
     const busy: UpdateState = {
       kind: "downloading",
       percent: 10,
       version: "0.1.901",
     };
 
-    expect(run([{ manual: true, type: "check" }], busy)).toBe(busy);
-    expect(run([{ manual: true, type: "check" }], downloaded)).toBe(downloaded);
+    expect(run([{ type: "check" }], busy)).toBe(busy);
+    expect(run([{ type: "check" }], available)).toBe(available);
+    expect(run([{ type: "check" }], downloaded)).toBe(downloaded);
+  });
+
+  it("only downloads an update that a check found", () => {
+    expect(run([{ type: "download" }])).toStrictEqual({ kind: "idle" });
+    expect(run([{ type: "download" }], downloaded)).toBe(downloaded);
   });
 
   it("keeps a ready update when a later step fails", () => {
@@ -88,8 +112,9 @@ describe(updateTransition, () => {
   it("shows a failure while checking or downloading", () => {
     expect(
       run([
-        { manual: false, type: "check" },
+        { type: "check" },
         { type: "found", version: "0.1.901" },
+        { type: "download" },
         { message: "Code signature did not match", type: "failed" },
       ])
     ).toStrictEqual({ kind: "error", message: "Code signature did not match" });
@@ -105,8 +130,8 @@ describe(updateMenuItem, () => {
     [{ kind: "idle" }, "Check for Updates…", "checkForUpdates"],
     [{ kind: "upToDate" }, "Check for Updates…", "checkForUpdates"],
     [{ kind: "error", message: "x" }, "Check for Updates…", "checkForUpdates"],
-    [{ kind: "checking", manual: true }, "Checking for Updates…", null],
-    [{ kind: "available", version: "0.1.901" }, "Downloading v0.1.901…", null],
+    [checking, "Checking for Updates…", null],
+    [available, "Download Update to v0.1.901…", "downloadUpdate"],
     [
       { kind: "downloading", percent: 42, version: "0.1.901" },
       "Downloading v0.1.901… 42%",
@@ -129,28 +154,41 @@ describe(updateNotice, () => {
     expect(updateNotice(downloaded, downloaded)).toBeNull();
   });
 
-  it("answers a check the user asked for", () => {
-    expect(updateNotice(checking(true), { kind: "upToDate" })).toBe(
+  it("answers a check", () => {
+    expect(updateNotice(checking, { kind: "upToDate" })).toBe(
       "Inset Shelf is up to date."
     );
-    expect(
-      updateNotice(checking(true), { kind: "available", version: "0.1.901" })
-    ).toBe("Downloading version 0.1.901…");
-    expect(
-      updateNotice(checking(true), { kind: "error", message: "offline" })
-    ).toBe("Couldn’t check for updates: offline");
+    expect(updateNotice(checking, available)).toBe(
+      "Version 0.1.901 is available. Choose Download Update in the menu."
+    );
+    expect(updateNotice(checking, { kind: "error", message: "offline" })).toBe(
+      "Couldn’t check for updates: offline"
+    );
   });
 
-  it("stays quiet about background checks", () => {
-    expect(updateNotice(checking(false), { kind: "upToDate" })).toBeNull();
+  it("reports a failed download", () => {
     expect(
-      updateNotice(checking(false), { kind: "error", message: "offline" })
+      updateNotice(
+        { kind: "downloading", percent: 5, version: "0.1.901" },
+        { kind: "error", message: "offline" }
+      )
+    ).toBe("Couldn’t download the update: offline");
+  });
+
+  it("stays quiet about steps that need no answer", () => {
+    expect(updateNotice(available, checking)).toBeNull();
+    expect(
+      updateNotice(available, {
+        kind: "downloading",
+        percent: 0,
+        version: "0.1.901",
+      })
     ).toBeNull();
   });
 });
 
-describe(settleCheck, () => {
-  it("consumes a download that fails after the check succeeds", async () => {
+describe(settleRequest, () => {
+  it("consumes a request that fails", async () => {
     const unhandled: Error[] = [];
 
     const record = (reason: Error): void => {
@@ -158,12 +196,10 @@ describe(settleCheck, () => {
     };
 
     process.on("unhandledRejection", record);
-    await settleCheck(async () => {
+    await settleRequest(async () => {
       await tick();
 
-      return {
-        downloadPromise: Promise.reject(new Error("download connection reset")),
-      };
+      throw new Error("download connection reset");
     });
     await tick();
     process.off("unhandledRejection", record);

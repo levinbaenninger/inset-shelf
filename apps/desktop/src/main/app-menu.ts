@@ -46,6 +46,7 @@ export interface AppMenuActions {
   readonly openSettings: () => void;
   readonly openHelp: () => void;
   readonly checkForUpdates: () => void;
+  readonly downloadUpdate: () => void;
   readonly restartToUpdate: () => void;
 }
 

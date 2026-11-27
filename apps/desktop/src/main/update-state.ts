@@ -1,6 +1,6 @@
 export type UpdateState =
   | { readonly kind: "idle" }
-  | { readonly kind: "checking"; readonly manual: boolean }
+  | { readonly kind: "checking" }
   | { readonly kind: "available"; readonly version: string }
   | {
       readonly kind: "downloading";
@@ -11,15 +11,20 @@ export type UpdateState =
   | { readonly kind: "upToDate" }
   | { readonly kind: "error"; readonly message: string };
 
+/** Every step is a user's choice: check, then download, then restart. */
 export type UpdateEvent =
-  | { readonly type: "check"; readonly manual: boolean }
+  | { readonly type: "check" }
   | { readonly type: "found"; readonly version: string }
   | { readonly type: "notFound" }
+  | { readonly type: "download" }
   | { readonly type: "progress"; readonly percent: number }
   | { readonly type: "downloaded" }
   | { readonly type: "failed"; readonly message: string };
 
-export type UpdateAction = "checkForUpdates" | "restartToUpdate";
+export type UpdateAction =
+  | "checkForUpdates"
+  | "downloadUpdate"
+  | "restartToUpdate";
 
 export interface UpdateMenuItem {
   readonly label: string;
@@ -38,7 +43,7 @@ export const updateTransition = (
       return state.kind === "idle" ||
         state.kind === "upToDate" ||
         state.kind === "error"
-        ? { kind: "checking", manual: event.manual }
+        ? { kind: "checking" }
         : state;
     }
 
@@ -52,8 +57,14 @@ export const updateTransition = (
       return state.kind === "checking" ? { kind: "upToDate" } : state;
     }
 
+    case "download": {
+      return state.kind === "available"
+        ? { kind: "downloading", percent: 0, version: state.version }
+        : state;
+    }
+
     case "progress": {
-      return state.kind === "available" || state.kind === "downloading"
+      return state.kind === "downloading"
         ? {
             kind: "downloading",
             percent: Math.round(event.percent),
@@ -63,7 +74,7 @@ export const updateTransition = (
     }
 
     case "downloaded": {
-      return state.kind === "available" || state.kind === "downloading"
+      return state.kind === "downloading"
         ? { kind: "ready", version: state.version }
         : state;
     }
@@ -87,7 +98,10 @@ export const updateMenuItem = (state: UpdateState): UpdateMenuItem => {
     }
 
     case "available": {
-      return { action: null, label: `Downloading v${state.version}…` };
+      return {
+        action: "downloadUpdate",
+        label: `Download Update to v${state.version}…`,
+      };
     }
 
     case "downloading": {
@@ -116,7 +130,7 @@ export const updateMenuItem = (state: UpdateState): UpdateMenuItem => {
   }
 };
 
-/** What to tell the user once, when a step changes: a finished download, or the answer to a check they asked for. */
+/** What to tell the user once, when a step changes: the answer to a check, or a finished download. */
 export const updateNotice = (
   previous: UpdateState,
   next: UpdateState
@@ -125,7 +139,11 @@ export const updateNotice = (
     return `Version ${next.version} is ready. Restart Inset Shelf to update.`;
   }
 
-  if (previous.kind !== "checking" || !previous.manual) {
+  if (previous.kind === "downloading" && next.kind === "error") {
+    return `Couldn’t download the update: ${next.message}`;
+  }
+
+  if (previous.kind !== "checking") {
     return null;
   }
 
@@ -135,7 +153,7 @@ export const updateNotice = (
     }
 
     case "available": {
-      return `Downloading version ${next.version}…`;
+      return `Version ${next.version} is available. Choose Download Update in the menu.`;
     }
 
     case "error": {
@@ -155,18 +173,12 @@ export const updateNotice = (
   }
 };
 
-interface CheckResult {
-  readonly downloadPromise?: Promise<readonly string[]> | null;
-}
-
-/** Waits for a check and the download it starts. Both report failures as "error" events, so here they are only consumed. */
-export const settleCheck = async (
-  check: () => Promise<CheckResult | null>
+/** Waits for a request to the updater. Failures are reported through its "error" event, so here they are only consumed. */
+export const settleRequest = async <Result>(
+  request: () => Promise<Result>
 ): Promise<void> => {
   try {
-    const result = await check();
-
-    await result?.downloadPromise;
+    await request();
   } catch {
     // Reported through the "error" event.
   }

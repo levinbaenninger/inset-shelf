@@ -1,17 +1,17 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { app, autoUpdater as squirrel, BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
 
+import { appendCappedLog } from "./update-log";
 import {
   INITIAL_UPDATE_STATE,
-  settleCheck,
+  settleRequest,
   updateTransition,
 } from "./update-state";
 import type { UpdateEvent, UpdateState } from "./update-state";
 
-const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
 const PRODUCT_NAME = "Inset Shelf";
 
 type Listener = (next: UpdateState, previous: UpdateState) => void;
@@ -20,11 +20,13 @@ const ignore = (): void => undefined;
 
 export interface Updater {
   readonly subscribe: (next: Listener) => void;
-  /** Checks now and every few hours, downloading what it finds. */
+  /** Listens to the updater. Contacts nothing: every request below is a user's click. */
   readonly start: () => void;
   readonly state: () => UpdateState;
   /** A check the user asked for, answered with a notice. */
   readonly check: () => void;
+  /** Downloads the update a check found, once the user chooses to. */
+  readonly download: () => void;
   readonly restart: () => void;
 }
 
@@ -56,7 +58,7 @@ export const createUpdater = (): Updater => {
 
   const log = (level: string, message: string): void => {
     try {
-      appendFileSync(
+      appendCappedLog(
         logFile,
         `${new Date().toISOString()} ${level} ${message}\n`
       );
@@ -88,10 +90,10 @@ export const createUpdater = (): Updater => {
 
   const blocked = cannotUpdate();
 
-  const check = (manual: boolean): void => {
+  const check = (): void => {
     const before = state;
 
-    dispatch({ manual, type: "check" });
+    dispatch({ type: "check" });
 
     if (state === before) {
       return;
@@ -103,7 +105,19 @@ export const createUpdater = (): Updater => {
       return;
     }
 
-    void settleCheck(async () => await autoUpdater.checkForUpdates());
+    void settleRequest(async () => await autoUpdater.checkForUpdates());
+  };
+
+  const download = (): void => {
+    const before = state;
+
+    dispatch({ type: "download" });
+
+    if (state === before) {
+      return;
+    }
+
+    void settleRequest(async () => await autoUpdater.downloadUpdate());
   };
 
   const start = (): void => {
@@ -126,11 +140,9 @@ export const createUpdater = (): Updater => {
       },
     };
 
-    const feed = process.env.INSET_UPDATE_FEED_URL;
-
-    if (feed !== undefined && feed !== "") {
-      autoUpdater.setFeedURL({ provider: "generic", url: feed });
-    }
+    // Nothing is fetched or installed unless the user asks.
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
 
     autoUpdater.on("update-available", (info) => {
       dispatch({ type: "found", version: info.version });
@@ -155,17 +167,11 @@ export const createUpdater = (): Updater => {
         dispatch({ type: "downloaded" });
       });
     }
-
-    check(false);
-    setInterval(() => {
-      check(false);
-    }, CHECK_EVERY_MS).unref();
   };
 
   return {
-    check: () => {
-      check(true);
-    },
+    check,
+    download,
     restart: () => {
       if (state.kind !== "ready") {
         return;

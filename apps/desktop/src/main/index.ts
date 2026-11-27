@@ -2122,6 +2122,7 @@ const start = async (): Promise<void> => {
           },
           {
             checkForUpdates: updater.check,
+            downloadUpdate: updater.download,
             clearDone: () => {
               void commandShelf({ kind: "clearDone" });
             },
@@ -2328,6 +2329,11 @@ const start = async (): Promise<void> => {
 
       case "checkForUpdates": {
         updater.check();
+        break;
+      }
+
+      case "downloadUpdate": {
+        updater.download();
         break;
       }
 

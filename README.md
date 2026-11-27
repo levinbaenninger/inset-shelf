@@ -8,7 +8,7 @@ It is the third Inset prototype. [Inset Context Pin](https://github.com/levinbae
 
 ## Install a test build
 
-Install once, then the app updates itself. Download a build from the [latest release](https://github.com/levinbaenninger/inset-shelf/releases/latest). Every push to `main` publishes a new release, so the latest one holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
+Install once, then update when you choose to. Download a build from the [latest release](https://github.com/levinbaenninger/inset-shelf/releases/latest). Every push to `main` publishes a new release, so the latest one holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.
 
 The builds are not signed with a developer certificate, so each system warns once, at the first install.
 
@@ -31,11 +31,11 @@ The app has a Dock icon, a menu bar and the Shelf mark (a rounded frame with a l
 
 ### Updates
 
-The app checks the latest release when it starts and every four hours, and downloads a newer build in the background. When the download is ready, it says so once, and the menu bar icon's menu and the **Inset Shelf** menu offer **Restart to Update to v…**. If you don't restart, the update installs when you quit. The menu bar icon's menu always shows the running version and **Check for Updates…**.
+The app never checks for updates on its own. From the menu bar icon's menu or the **Inset Shelf** menu, choose **Check for Updates…**, then **Download Update to v…** when one is found, then **Restart to Update to v…** once it is downloaded. Each step is yours; nothing is contacted otherwise. The menu bar icon's menu always shows the running version.
 
-On macOS every build is signed with the same self-signed certificate, so the update keeps your permissions and macOS checks that the new build comes from the same signer. A build that shows version 0.1.0 has an ad-hoc signature that can't accept a signed update. Install the current build by hand once, as above, and grant the permissions again. After that it updates itself.
+On macOS every build is signed with the same self-signed certificate, so the update keeps your permissions and macOS checks that the new build comes from the same signer. A build that shows version 0.1.0 has an ad-hoc signature that can't accept a signed update. Install the current build by hand once, as above, and grant the permissions again. After that it can update from the menu.
 
-On Windows only the installer (`.exe`) updates itself. The portable `.zip` copies can't. To update one, download the new zip.
+On Windows only the installer (`.exe`) can update from the menu. The portable `.zip` copies can't. To update one, download the new zip. The Windows build isn't signed yet, so until it is the integrity check on an update is the SHA-512 in GitHub's release feed; each release also publishes a `SHA256SUMS.txt`.
 
 ### Windows
 

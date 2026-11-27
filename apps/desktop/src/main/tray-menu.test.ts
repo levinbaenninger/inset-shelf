@@ -52,6 +52,16 @@ describe(trayMenu, () => {
     });
   });
 
+  it("offers the download once a check found an update", () => {
+    expect(
+      trayMenu({ ...base, update: { kind: "available", version: "0.1.901" } })
+    ).toContainEqual({
+      action: "downloadUpdate",
+      kind: "item",
+      label: "Download Update to v0.1.901…",
+    });
+  });
+
   it("shows a download in progress as a disabled line", () => {
     expect(
       names(
