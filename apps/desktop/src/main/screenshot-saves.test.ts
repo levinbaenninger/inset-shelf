@@ -1929,16 +1929,18 @@ describe("the card's file dropped on the shelf", () => {
     card.saves.show(shot(1));
 
     const { added, drop, plain } = dropping(card);
-    const file = drop.drag(1)?.file ?? "";
     const end = card.holdWrite();
 
-    // The first drop attaches the tile; a second one, made while the pill read Saving…, is still on its way.
-    await drop.onItem(card.note, [file]);
+    // The first drag's drop attaches the tile; a second drag, made while the pill read Saving…, has its drop still on its way.
+    await drop.onItem(card.note, [drop.drag(1)?.file ?? ""]);
     await vi.waitFor(() => {
       expect(card.attachmentsOn(card.note)).toBe(1);
     });
+
+    const second = drop.drag(1)?.file ?? "";
+
     card.saves.show(shot(2));
-    await expect(drop.onItem(card.note, [file])).resolves.toStrictEqual({
+    await expect(drop.onItem(card.note, [second])).resolves.toStrictEqual({
       attached: [],
       message: null,
     });
@@ -2098,6 +2100,68 @@ describe("the card's file dropped on the shelf", () => {
       path.join(STAGING, "screenshot-drag-1", "Screenshot.png"),
       path.join(STAGING, "screenshot-drag-2", "Screenshot.png"),
     ]);
+  });
+
+  it("imports no second copy when an earlier drag's drop on an item reaches main after a newer screenshot's drag started, its path spelled another way", async () => {
+    const card = setup();
+    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain } = dropping(card, {
+      // Real files, under /var on macOS: a drop can name them under /private/var.
+      stage: (_, each) => {
+        const file = path.join(folder, `${each}.png`);
+
+        writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
+
+        return file;
+      },
+    });
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+    // The pill reads Saving…, and the picture is dragged onto the note.
+    const first = drop.drag(1)?.file ?? "";
+
+    end({ ok: true });
+    await adding;
+    // A newer screenshot shows, and its drag reaches main before the shelf hands main the note's drop.
+    card.saves.show(shot(2));
+    drop.drag(2);
+    await drop.onItem(card.note, [realpathSync.native(first)]);
+    await settled(card);
+    expect({
+      added,
+      plain,
+      save: card.view()?.save,
+      shown: card.shown(),
+      written: written(card),
+    }).toStrictEqual({
+      added: [],
+      plain: [],
+      save: { state: "idle" },
+      shown: { attached: 0, items: 1 },
+      written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("forgets a drag once two newer drags started, so its file takes the shelf's plain route", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { drop, dropped, plain } = dropping(card);
+    const first = drop.drag(1)?.file ?? "";
+
+    drop.drag(1);
+    drop.drag(1);
+    await drop.onItem(card.note, [first]);
+    expect({ dropped, plain }).toStrictEqual({
+      dropped: [],
+      plain: [{ call: "attachFiles", id: card.note, paths: [first] }],
+    });
   });
 
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {

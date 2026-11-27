@@ -42,50 +42,58 @@ const onDisk = (file: string): string => {
   }
 };
 
+/**
+ * How many drags keep their record. One drag runs at a time, so once a drag
+ * starts, the one before it has ended, though its drop can still be on its
+ * way: the shelf and the card reach main on channels of their own.
+ */
+const DRAGS_KEPT = 2;
+
 /** What a drop on the shelf is to the card. */
 type Drop =
-  /** Files from outside, or the card's file among others: the shelf's plain route. */
+  /** Files from outside, or a drag's file among others: the shelf's plain route. */
   | { readonly kind: "files" }
-  /** The card's file alone, while its card is the newest. */
+  /** A drag's file alone, while its card is the newest. */
   | { readonly kind: "card"; readonly seq: number }
-  /** The card's file alone, once its card is done with it or shows a newer screenshot. */
+  /** A drag's file alone, once its card is done with it or shows a newer screenshot. */
   | { readonly kind: "late" };
 
 /** What the shelf's drop says when the card's file went the card's way, or nowhere: nothing, and no Undo. */
 const NOTHING: AttachResult = { attached: [], message: null };
 
 /**
- * The screenshot card's drag hands out a copy of its picture, staged for the
- * drag alone, so other apps get a real file and no file of the user's is ever
- * taken for the card's. When the shelf hands that copy back, alone, while its
- * card is still the newest, the drop goes through the card's own add: a
- * screenshot keeps one place on the shelf, and the card says how it went.
- * Once its card is done with it or shows a newer screenshot, the copy adds
- * nothing: the screenshot is where its card put it, or went with its card,
- * and a plain copy would be a second place. Any other drop takes the shelf's
- * plain route.
+ * Each drag of the screenshot card hands out a copy of its picture, staged
+ * for that drag alone, so other apps get a real file and no file of the
+ * user's is ever taken for the card's. The router knows each drag by its copy,
+ * so a newer drag never takes an older one's place. When the shelf hands a
+ * copy back, alone, while its card is still the newest, the drop goes through
+ * the card's own add: a screenshot keeps one place on the shelf, and the card
+ * says how it went. Once its card is done with it or shows a newer
+ * screenshot, the copy adds nothing: the screenshot is where its card put
+ * it, or went with its card, and a plain copy would be a second place. Any
+ * other drop takes the shelf's plain route.
  */
 export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
-  // The file the card's last drag handed out, and the screenshot it is, however long its drop takes.
-  let drag: { readonly seq: number; readonly file: string } | null = null;
-  // Drags so far: each stages its file in a folder of its own, so no two drags share a file.
-  let drags = 0;
+  // The screenshot each drag whose drop can still come hands out, oldest first, by where the drag's file is on disk.
+  const drags = new Map<string, number>();
+  // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
+  let made = 0;
 
+  /** A drop is the drag's whose file it is, alone: that drag's drop has come, and no later one is taken for it. */
   const classify = (paths: readonly string[]): Drop => {
     const [only] = paths;
+    const file = only === undefined ? null : onDisk(only);
+    const seq = file === null ? undefined : drags.get(file);
 
-    if (
-      drag === null ||
-      only === undefined ||
-      paths.length !== 1 ||
-      onDisk(only) !== onDisk(drag.file)
-    ) {
+    if (file === null || seq === undefined || paths.length !== 1) {
       return { kind: "files" };
     }
 
-    return deps.saves.current(drag.seq) === null
+    drags.delete(file);
+
+    return deps.saves.current(seq) === null
       ? { kind: "late" }
-      : { kind: "card", seq: drag.seq };
+      : { kind: "card", seq };
   };
 
   /** Runs what a drop does after the shelf has its reply: whatever throws on the way is said once, and never escapes main's handler. */
@@ -113,10 +121,10 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
   };
 
   const staged = (shot: S): string | null => {
-    drags += 1;
+    made += 1;
 
     try {
-      return deps.stage(shot, `screenshot-drag-${drags}`);
+      return deps.stage(shot, `screenshot-drag-${made}`);
     } catch (error) {
       deps.dragFailed(errorMessage(error));
 
@@ -139,7 +147,15 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
         return null;
       }
 
-      drag = { file, seq };
+      drags.set(onDisk(file), seq);
+
+      for (const old of drags.keys()) {
+        if (drags.size <= DRAGS_KEPT) {
+          break;
+        }
+
+        drags.delete(old);
+      }
 
       return { file, shot };
     },
