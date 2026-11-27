@@ -1155,10 +1155,35 @@ const checkCapturedLines = async (
   return { lines, twice };
 };
 
+/** The folder holding `at` that the shelf never looks in for a code file, however capitalised (src/main/quiet-disk.ts). */
+const shutFolder = (at: string): string | undefined => {
+  const home = realpathSync(homedir());
+
+  return [
+    ...["Desktop", "Documents", "Downloads", "Library"].map((name) =>
+      path.join(home, name)
+    ),
+    "/Volumes",
+  ].find((folder) =>
+    `${at.toLowerCase()}/`.startsWith(`${folder.toLowerCase()}/`)
+  );
+};
+
 const checkCodePlace = async (): Promise<void> => {
   // Under the run's own folder in the repo, in the home folder: the only place
-  // the shelf looks for a code file (src/main/quiet-disk.ts). The repo must not
-  // be in a folder macOS asks about, Documents say.
+  // the shelf looks for a code file (src/main/quiet-disk.ts).
+  const shut = shutFolder(realpathSync(root));
+
+  if (shut !== undefined) {
+    record(
+      "the checkout is outside every folder the shelf never looks in for a code file",
+      false,
+      `it is in ${shut}`
+    );
+
+    return;
+  }
+
   const code = path.join(sourceHome, "code");
 
   mkdirSync(path.join(code, "proj", "src"), { recursive: true });
