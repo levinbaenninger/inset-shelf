@@ -220,8 +220,6 @@ const excerpt = (text: string): string => {
 export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   const { card } = deps;
   let held: Held<S> | null = null;
-  // The item Add to “…” adds to, as the card's view last said: a press that names another is refused.
-  let cardItem: ItemId | null = null;
 
   /** The newest item, while the user can still know it is the one just made. */
   const recentItem = (): ItemId | null => {
@@ -379,8 +377,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       const message =
         now.saving === null ? (refusal ?? now.failed?.message ?? null) : null;
 
-      cardItem = at.to === "item" ? at.item : null;
-
       return {
         // No one said why it isn't saved: a write of it is still on its way.
         save:
@@ -392,8 +388,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     }
 
     const target = offered();
-
-    cardItem = target?.id ?? null;
 
     if (now.saving !== null) {
       return {
@@ -414,7 +408,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         placed: null,
         state: "failed",
         // Add to “…” names another item now: its button reads that name, not Retry, so a press never goes somewhere unseen.
-        to: to === "item" && cardItem !== now.tried ? null : to,
+        to: to === "item" && target?.id !== now.tried ? null : to,
       },
       target,
     };
@@ -659,7 +653,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       }
 
       const { at, now } = start;
-      const named = at === null ? cardItem : at.item;
+      const named = at === null ? (card.view()?.target?.id ?? null) : at.item;
 
       // The card changed under the press: the screenshot never goes somewhere the user didn't see, and the user hears why.
       if (named !== id) {
