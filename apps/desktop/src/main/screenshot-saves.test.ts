@@ -43,15 +43,11 @@ const shot = (seq: number): Shot => ({
 
 const ITEM_FULL = `Nothing was attached. An item holds up to ${ATTACHMENTS_MAX}.`;
 
-const pictureAttachment = (
-  id: AttachmentId,
-  each: Shot,
-  file = `${id}.png`
-) => ({
+const pictureAttachment = (id: AttachmentId, each: Shot) => ({
   addedAt: new Date(NOW).toISOString(),
   id,
   image: {
-    file,
+    file: `${id}.png`,
     heightPx: each.heightPx,
     pixelsPerDip: 2,
     widthPx: each.widthPx,
@@ -80,6 +76,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   let attachmentWrites: Error | null = null;
   let selection: ItemId | null = null;
   let shelfVisible = false;
+  // The scale of the display the pointer is on.
+  let scale = 2;
   const notices: string[] = [];
   const saved: string[] = [];
   // The card's waits for the disk that are still running, each by what ends it.
@@ -138,21 +136,16 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   clock = NOW;
 
   const saves = createShotSaves<Shot>({
-    addItem: (each, file) =>
+    addItem: (image) =>
       controller.apply({
         context: null,
-        image: {
-          file,
-          heightPx: each.heightPx,
-          pixelsPerDip: 2,
-          widthPx: each.widthPx,
-        },
+        image,
         pins: [],
         source: null,
         type: "addImage",
         via: "screenshot",
       }),
-    attach: (each, file, id) => {
+    attach: (image, id) => {
       // A full item takes nothing, as attachResult in attachments.ts says it.
       if ((controller.item(id)?.attachments.length ?? 0) >= ATTACHMENTS_MAX) {
         return { attached: [], message: ITEM_FULL };
@@ -162,7 +155,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
 
       attached.push(id);
       controller.apply({
-        attachments: [pictureAttachment(attachment, each, file)],
+        attachments: [{ ...pictureAttachment(attachment, shot(1)), image }],
         id,
         type: "attach",
       });
@@ -215,6 +208,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     saved: (to) => {
       saved.push(to);
     },
+    scale: () => scale,
     selection: () => selection,
     setTimer: (run) => {
       waits.add(run);
@@ -275,6 +269,10 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     failWrites: (result: WriteResult) => {
       writes = result;
+    },
+    /** The pointer moves to a display with this scale. */
+    pointerOn: (display: number) => {
+      scale = display;
     },
     held: () => held,
     images: () =>

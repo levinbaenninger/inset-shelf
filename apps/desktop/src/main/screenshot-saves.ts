@@ -11,6 +11,7 @@ import type {
   Attachment,
   AttachmentId,
   ItemId,
+  ShelfImage,
   ShelfItem,
 } from "@shared/shelf";
 
@@ -85,10 +86,12 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly writePicture: (shot: S) => Promise<string>;
   /** A picture file written for a place that was then not made: it goes. */
   readonly dropPicture: (file: string) => void;
+  /** The scale of the display the pointer is on now. */
+  readonly scale: () => number;
   /** Makes the screenshot, with its picture file written, an item in the section new items go to; null when the shelf refuses it. Awaits nothing, so what the card read of the shelf just before still holds. */
-  readonly addItem: (shot: S, file: string) => ItemId | null;
+  readonly addItem: (image: ShelfImage) => ItemId | null;
   /** Attaches the screenshot, with its picture file written, to an item, and deletes the file when the item doesn't take it. Awaits nothing, as `addItem`. */
-  readonly attach: (shot: S, file: string, id: ItemId) => AttachResult;
+  readonly attach: (image: ShelfImage, id: ItemId) => AttachResult;
   /** The write of every change so far, however long the disk takes: how it ended. The card's wait for it has a limit, the write has none. */
   readonly persisted: () => Promise<WriteResult>;
   /** Runs `run` after `ms`, unless the function it returns is called first. */
@@ -256,16 +259,22 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   };
 
   /**
-   * The screenshot's picture file, written for a place still to be made.
-   * Null when the shelf shows the screenshot by then, since the user can
-   * Undo a delete while the file is written: nothing is placed, and the file
-   * is gone again. The caller awaits nothing between this and placing.
+   * The screenshot as the shelf keeps a picture, its file written for a
+   * place still to be made. Null when the shelf shows the screenshot by
+   * then, since the user can Undo a delete while the file is written:
+   * nothing is placed, and the file is gone again. The caller awaits nothing
+   * between this and placing.
    */
-  const pictureFor = async (now: Held<S>): Promise<string | null> => {
+  const pictureFor = async (now: Held<S>): Promise<ShelfImage | null> => {
     const file = await deps.writePicture(now.shot);
 
     if (shown(now) === null) {
-      return file;
+      return {
+        file,
+        heightPx: now.shot.heightPx,
+        pixelsPerDip: deps.scale(),
+        widthPx: now.shot.widthPx,
+      };
     }
 
     deps.dropPicture(file);
@@ -572,16 +581,16 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { ok: true };
         }
 
-        const file = await pictureFor(now);
+        const image = await pictureFor(now);
 
-        if (file === null) {
+        if (image === null) {
           return STAYS;
         }
 
-        const id = deps.addItem(now.shot, file);
+        const id = deps.addItem(image);
 
         if (id === null) {
-          deps.dropPicture(file);
+          deps.dropPicture(image.file);
 
           return {
             message: "The shelf couldn’t take the screenshot.",
@@ -626,13 +635,13 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           return { ok: true };
         }
 
-        const file = await pictureFor(now);
+        const image = await pictureFor(now);
 
-        if (file === null) {
+        if (image === null) {
           return STAYS;
         }
 
-        const result = deps.attach(now.shot, file, id);
+        const result = deps.attach(image, id);
 
         const tile = deps
           .item(id)

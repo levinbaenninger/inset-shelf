@@ -43,6 +43,7 @@ import type {
   MainOp,
   Picture,
   Pin,
+  ShelfImage,
   ShelfItem,
   WindowRef,
 } from "@shared/shelf";
@@ -850,20 +851,11 @@ const start = async (): Promise<void> => {
     writeAttachment: async (png) => await store.writeAttachment(png),
   });
 
-  /** The card's screenshot as the shelf keeps a picture, once its file is written, at the scale of the display the pointer is on. */
-  const shotImage = (current: CardShot, file: string) => ({
-    file,
-    heightPx: current.heightPx,
-    pixelsPerDip: screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-      .scaleFactor,
-    widthPx: current.widthPx,
-  });
-
   /** Makes the card's screenshot an item in the section new items go to; the trials' log and the tutorial's screenshot step hear of it. */
-  const addShotItem = (current: CardShot, file: string) => {
+  const addShotItem = (image: ShelfImage) => {
     const id = controller.apply({
       context: null,
-      image: shotImage(current, file),
+      image,
       pins: [],
       source: null,
       type: "addImage",
@@ -879,11 +871,9 @@ const start = async (): Promise<void> => {
   };
 
   /** The screenshot attached to an item, named as the system names a screenshot. */
-  const attachShotTo = (current: CardShot, file: string, id: ItemId) =>
+  const attachShotTo = (image: ShelfImage, id: ItemId) =>
     attachResult(
-      attachments.attachTo(id, [
-        { image: shotImage(current, file), kind: "image", name: shotName() },
-      ])
+      attachments.attachTo(id, [{ image, kind: "image", name: shotName() }])
     );
 
   /** The item selected or open in details in the shelf, or null; the page reports it. */
@@ -956,6 +946,8 @@ const start = async (): Promise<void> => {
       return state.kind === "failed" ? state.message : null;
     },
     saved: shotAdded,
+    scale: () =>
+      screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor,
     selection: () => shelfSelection,
     setTimer,
     shelfVisible: () => shelf.isVisible(),
