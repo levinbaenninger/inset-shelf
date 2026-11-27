@@ -1,18 +1,22 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { TEXT_MAX } from "@shared/shelf";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import { lineInFile } from "./code-line";
 import { quietDisk } from "./quiet-disk";
 
 // A home folder of the test's own, in a temp folder: its Documents is a folder of the test's too.
-const home = path.join(
-  realpathSync(mkdtempSync(path.join(tmpdir(), "code-line-"))),
-  "home"
-);
+const folder = realpathSync(mkdtempSync(path.join(tmpdir(), "code-line-")));
+const home = path.join(folder, "home");
 
 const disk = quietDisk({ home });
 
@@ -40,6 +44,10 @@ const LINE_12 = "export const value12 = 12;";
 const READ_MAX = 512 * 1024;
 
 describe(lineInFile, () => {
+  afterAll(() => {
+    rmSync(folder, { force: true, recursive: true });
+  });
+
   it("finds the line the captured text begins on in the saved file", async () => {
     const file = saved("dev/proj/a.ts", source(40));
 

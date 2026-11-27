@@ -19,6 +19,12 @@ import type { QuietFs } from "./quiet-disk";
 
 /** As the test was handed it: on macOS it begins at /var, a link. */
 const given = mkdtempSync(path.join(tmpdir(), "quiet-disk-"));
+
+// oxlint-disable-next-line vitest/require-top-level-describe -- both describes below share this folder.
+afterAll(() => {
+  rmSync(given, { force: true, recursive: true });
+});
+
 const base = realpathSync(given);
 const home = path.join(base, "home");
 const temp = path.join(base, "temp");
@@ -118,10 +124,6 @@ const inProtected = (touched: readonly string[]): boolean =>
   );
 
 describe(quietDisk, () => {
-  afterAll(() => {
-    rmSync(given, { force: true, recursive: true });
-  });
-
   it("finds a file in the home folder", async () => {
     const found = await disk.find(source);
 
