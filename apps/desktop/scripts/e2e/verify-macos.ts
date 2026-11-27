@@ -68,8 +68,10 @@ const EventSchema = z.object({
     })
     .optional(),
   event: z.string(),
+  fileFound: z.boolean().optional(),
   itemId: z.string().optional(),
   kind: z.string().optional(),
+  lineFound: z.boolean().optional(),
   restored: z.boolean().optional(),
   count: z.number().optional(),
   t: z.number(),
@@ -827,9 +829,11 @@ const checkSelection = async (): Promise<void> => {
 
 /**
  * A capture from an editor keeps the file its window names and the project
- * folder its title names, and a window that names no file keeps none
- * (src/shared/code-editors.ts; the source app is an editor under the test).
- * The paths are compared here and never written to the results.
+ * folder its title names, and the line its words begin on when they are in
+ * the file once; a window that names no file keeps none
+ * (src/shared/code-editors.ts, src/main/code-line.ts; the source app is an
+ * editor under the test). The paths are compared here and never written to
+ * the results.
  */
 const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
   for (let waited = 0; waited < ms; waited += 200) {
@@ -850,23 +854,35 @@ const openedInSource = (): readonly string[] =>
     ? readFileSync(sourceOpened, "utf-8").split("\n").filter(Boolean)
     : [];
 
-/** The file an address of the source app's scheme names, or null for any other address. */
-const fileOfAddress = (address: string): string | null => {
+/** The file and line an address of the source app's scheme names, or null for any other address. */
+const placeOfAddress = (
+  address: string
+): { readonly file: string; readonly line: number | null } | null => {
   try {
     const url = new URL(address);
 
-    return url.protocol === `${sourceScheme}:` && url.host === "file"
-      ? decodeURIComponent(url.pathname)
-      : null;
+    if (url.protocol !== `${sourceScheme}:` || url.host !== "file") {
+      return null;
+    }
+
+    // A ":" inside the path is encoded: only the line's is left as it is.
+    const at = /:(?<line>\d+)$/u.exec(url.pathname);
+
+    return at === null
+      ? { file: decodeURIComponent(url.pathname), line: null }
+      : {
+          file: decodeURIComponent(url.pathname.slice(0, at.index)),
+          line: Number(at.groups?.line),
+        };
   } catch {
     return null;
   }
 };
 
-/** Clicks the code item's source line, "a.ts · proj", in the shelf: the only button that names the file. */
-const clickCodeLine = async (attempts = 10): Promise<boolean> => {
+/** Clicks a code item's source line in the shelf, such as "a.ts · proj": the only button that holds `name`. */
+const clickCodeLine = async (name: string, attempts = 10): Promise<boolean> => {
   const found = jxa(`const hit = ${processElements}.findLast((e) => {
-      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => (t ?? "").includes("a.ts")); } catch { return false; }
+      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => (t ?? "").includes(${JSON.stringify(name)})); } catch { return false; }
     });
     hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
 
@@ -884,7 +900,7 @@ const clickCodeLine = async (attempts = 10): Promise<boolean> => {
 
   await delay(500);
 
-  return await clickCodeLine(attempts - 1);
+  return await clickCodeLine(name, attempts - 1);
 };
 
 /**
@@ -898,7 +914,7 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   rmSync(sourceOpened, { force: true });
   showShelfFromTray();
 
-  const clicked = await clickCodeLine();
+  const clicked = await clickCodeLine("a.ts");
 
   await waitUntil(() => openedInSource().length > 0);
 
@@ -907,7 +923,10 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   record("the code item's source line is a button", clicked);
   record(
     "a click on it opens its file in the editor it came from, by the editor's address",
-    asked.length === 1 && asked.map(fileOfAddress).every((at) => at === file),
+    asked.length === 1 &&
+      asked
+        .map(placeOfAddress)
+        .every((at) => at?.file === file && at.line === null),
     `${asked.length} address(es)`
   );
 
@@ -918,7 +937,7 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   await delay(800);
   showShelfFromTray();
 
-  const clickedGone = await clickCodeLine();
+  const clickedGone = await clickCodeLine("a.ts");
 
   await waitUntil(() => frontmost() === "source", 6000);
   // A wrong open would start the editor too, and its record could land just after.
@@ -940,6 +959,172 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   }
 };
 
+/** Line `n` of the code trial's file of 40 lines. */
+const lineText = (n: number): string => `const line${n} = codePlaceLine(${n});`;
+
+/**
+ * A click on a code item's source line opens its file at the line its words
+ * are on: the stored one, and after they moved, the one they are on now.
+ */
+const checkCodeLineWayBack = async (file: string): Promise<void> => {
+  const openAtLine = async (): Promise<number | null | undefined> => {
+    enableWebAccessibility();
+    rmSync(sourceOpened, { force: true });
+    showShelfFromTray();
+
+    const clicked = await clickCodeLine("lines.ts:12");
+
+    await waitUntil(() => openedInSource().length > 0);
+
+    const asked = openedInSource().map(placeOfAddress);
+
+    return clicked && asked.length === 1 && asked[0]?.file === file
+      ? asked[0].line
+      : undefined;
+  };
+
+  const stored = await openAtLine();
+
+  record(
+    "a click opens the file at the line its words were captured on",
+    stored === 12,
+    String(stored)
+  );
+
+  const before = readFileSync(file, "utf-8");
+
+  writeFileSync(file, `${"// moved down\n".repeat(10)}${before}`);
+
+  const moved = await openAtLine();
+
+  record(
+    "after its words moved 10 lines down, a click opens at the line they are on now",
+    before.split("\n")[11] === lineText(12) && moved === 22,
+    String(moved)
+  );
+};
+
+/**
+ * Captures `text` from the source app, all of it selected, in a window
+ * titled `title` that names `document`. Waits until its line was looked for
+ * and the item is on disk, with its line when one was found.
+ */
+const captureCode = async (
+  text: string,
+  document?: string,
+  title = "a.ts — proj"
+) => {
+  let place: AppEvent | undefined;
+
+  if (await showSource(text, "all", { document, title })) {
+    const mark = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("itemAdded", mark);
+    // The line is looked for once the item is added, then set in a step of its own.
+    place = await waitFor("codePlace", mark);
+  } else {
+    record("source app in front for the code place", false, frontmost());
+  }
+
+  // The events come with the item in memory; the shelf file is written after them.
+  const saved = () =>
+    items().find((item) => item.kind === "text" && item.text === text);
+
+  await waitUntil(
+    () =>
+      saved() !== undefined &&
+      (place?.lineFound !== true || saved()?.context?.code?.line !== null),
+    4000
+  );
+
+  return { item: saved(), place };
+};
+
+/**
+ * Words found once in their file keep their line; words that are in it
+ * twice keep only the file. Gives the file and what the log said for each.
+ */
+const checkCapturedLines = async (
+  project: string
+): Promise<{
+  readonly file: string;
+  readonly places: readonly (AppEvent | undefined)[];
+}> => {
+  // 40 lines, with the same words on lines 20 and 30.
+  const file = path.join(project, "src", "lines.ts");
+  const twice = "retryTwice(); // the same words twice";
+
+  const numbered = Array.from({ length: 40 }, (_, index) =>
+    index === 19 || index === 29 ? twice : lineText(index + 1)
+  );
+
+  writeFileSync(file, `${numbered.join("\n")}\n`);
+
+  const oneLine = await captureCode(lineText(12), file, "lines.ts — proj");
+  const oneLineCode = oneLine.item?.context?.code;
+
+  record(
+    "a capture of words on one line of its file keeps that line",
+    oneLineCode?.file === file && oneLineCode.line === 12,
+    String(oneLineCode?.line)
+  );
+
+  await delay(3000);
+
+  const inTwo = await captureCode(twice, file, "lines.ts — proj");
+  const inTwoCode = inTwo.item?.context?.code;
+
+  record(
+    "words that are in the file twice keep the file and no line",
+    inTwoCode?.file === file && inTwoCode.line === null
+  );
+
+  await delay(3000);
+
+  return { file, places: [oneLine.place, inTwo.place] };
+};
+
+/** What the trial log may say of a capture's place in the code: two booleans, never a path or a file's words. */
+const CodePlaceEventSchema = z.strictObject({
+  event: z.literal("codePlace"),
+  fileFound: z.boolean(),
+  lineFound: z.boolean(),
+  t: z.number(),
+  windows: z.number(),
+});
+
+/** The log's code place events, in order: whether each capture found its file and its line. */
+const checkCodePlaceLog = (places: readonly (AppEvent | undefined)[]): void => {
+  const told = places.map((event) => [event?.fileFound, event?.lineFound]);
+
+  record(
+    "the trial log says whether each capture found its file and its line",
+    JSON.stringify(told) ===
+      JSON.stringify([
+        [true, false],
+        [true, true],
+        [true, false],
+        [false, false],
+      ]),
+    JSON.stringify(told)
+  );
+
+  const raw = readFileSync(logFile, "utf-8")
+    .split("\n")
+    .filter((line) => line.includes('"codePlace"'));
+
+  record(
+    "and names no path and none of the file's words",
+    raw.length === places.length &&
+      raw.every(
+        (line) => CodePlaceEventSchema.safeParse(JSON.parse(line)).success
+      )
+  );
+};
+
 const checkCodePlace = async (): Promise<void> => {
   const project = path.join(realpathSync(work), "code", "proj");
   const file = path.join(project, "src", "a.ts");
@@ -947,49 +1132,31 @@ const checkCodePlace = async (): Promise<void> => {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, "export const answer = 42;\n");
 
-  const capture = async (text: string, document?: string) => {
-    if (await showSource(text, "all", { document, title: "a.ts — proj" })) {
-      const mark = events().length;
-
-      guardedKeys(() => {
-        input("double-shift");
-      });
-      await waitFor("itemAdded", mark);
-    } else {
-      record("source app in front for the code place", false, frontmost());
-    }
-
-    // The event comes with the item in memory; the shelf file is written after it.
-    const saved = () =>
-      items().find((item) => item.kind === "text" && item.text === text);
-
-    await waitUntil(() => saved() !== undefined, 4000);
-
-    return saved();
-  };
-
-  const inFile = await capture("Code place sentence in a file", file);
+  const inFile = await captureCode("Code place sentence in a file", file);
 
   record(
     "a capture from an editor keeps the file its window names",
-    inFile?.context?.code?.file === file
+    inFile.item?.context?.code?.file === file
   );
   record(
     "and the project folder its title names",
-    inFile?.context?.code?.root === project
+    inFile.item?.context?.code?.root === project
   );
-  record("and no line", inFile?.context?.code?.line === null);
+  record("and no line", inFile.item?.context?.code?.line === null);
 
   // Once the capture notice has gone, as in checkSelection.
   await delay(3000);
 
-  const noFile = await capture("Code place sentence in no file");
+  const lined = await checkCapturedLines(project);
+  const noFile = await captureCode("Code place sentence in no file");
 
   record(
     "a window that names no file keeps no place in the code",
-    noFile?.context?.app === "source" && noFile.context.code === null
+    noFile.item?.context?.app === "source" && noFile.item.context.code === null
   );
 
+  checkCodePlaceLog([inFile.place, ...lined.places, noFile.place]);
+  await checkCodeLineWayBack(lined.file);
   await checkCodeWayBack(file);
 };
 
