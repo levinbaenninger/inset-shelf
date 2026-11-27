@@ -75,7 +75,7 @@ import { fileSizeText, whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import { KnownEditors } from "./known-editors";
 import type { LiveEdit } from "./live-edits";
-import { Markdown } from "./markdown";
+import { CODE_BLOCK, Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { MarkdownFieldHandle, ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
@@ -1069,12 +1069,19 @@ const TextBody = ({
     <>
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Ten lines at most until Show more; an edit shows all of it.
-        <Clamp className={WORDS} lines={ROW_CAPS.words} what="the text">
+        // Ten lines at most until Show more; an edit shows all of it. Code is cut in its own lines, inside its block.
+        <Clamp
+          className={code ? cn(CODE_BLOCK, "pt-1.5", item.done && DONE) : WORDS}
+          lines={ROW_CAPS.words}
+          what="the text"
+        >
           {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
           {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
           <div
-            className="cursor-text rounded-sm outline-none"
+            className={cn(
+              "cursor-text rounded-sm outline-none",
+              code && "pb-1.5"
+            )}
             data-row-keys
             onClick={(event) => {
               const point = editPoint(wordsClick(event));
@@ -1086,13 +1093,16 @@ const TextBody = ({
             }}
             tabIndex={-1}
           >
-            <Markdown
-              className={words}
-              code={code}
-              interactive
-              onOpenLink={onOpenLink}
-              text={item.text}
-            />
+            {code ? (
+              <code>{item.text}</code>
+            ) : (
+              <Markdown
+                className={words}
+                interactive
+                onOpenLink={onOpenLink}
+                text={item.text}
+              />
+            )}
           </div>
         </Clamp>
       ) : (

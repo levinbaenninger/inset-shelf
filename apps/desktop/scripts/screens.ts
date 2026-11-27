@@ -13354,10 +13354,16 @@ const capProblems = async (page: Page): Promise<readonly string[]> =>
             Number(words.style.getPropertyValue("--lines")) +
             (words.dataset.spare === undefined ? 0 : 1);
 
-          const line =
-            Number(getComputedStyle(words).lineHeight.replace("px", "")) || 20;
+          const style = getComputedStyle(words);
+          const line = Number(style.lineHeight.replace("px", "")) || 20;
 
-          const shown = Math.round(words.getBoundingClientRect().height / line);
+          // The cap counts lines of the box's content: code keeps its padding.
+          const shown = Math.round(
+            (words.getBoundingClientRect().height -
+              Number.parseFloat(style.paddingTop) -
+              Number.parseFloat(style.paddingBottom)) /
+              line
+          );
 
           const opened =
             words.nextElementSibling?.getAttribute("aria-expanded") === "true";
