@@ -3,15 +3,17 @@ title: Copy with Details
 description: Copy an item back out, with its link, steps, due date and windows.
 ---
 
-Copying an item puts it back as it was captured: a saved selection pastes with its links and formatting, an image with its pins drawn in and its note, and a file as the file itself.
+**Copy** keeps the formatting and links of a saved selection. It copies an image with its pins drawn in and its note, or a file as the file itself.
 
 | Command | Keys | What it copies |
 | --- | --- | --- |
 | **Copy** | `⌘C` | The item as captured. |
-| **Copy with Link** |  | The item and the address it came from. |
-| **Copy with Details** | `⌥⌘C` | The item as Markdown, with its description, its steps as a `- [ ]` checklist, `Due:` and its linked windows. |
-| **Copy as List** | `⇧⌘C` | Several picked items, or the open items of the current section, as a numbered list with their links. |
+| **Copy with Link** |  | The item's text, source address, and any description, steps, due date, linked windows, title, or pin labels. |
+| **Copy with Details** | `⌥⌘C` | The same details, plus the source app and window, linked window descriptions, and attachment names. Steps use Markdown checkboxes such as `- [ ]`. |
+| **Copy as List** | `⇧⌘C` | A numbered list of the picked items or the selected item, with links and details. With no selection, it takes the unchecked items of the current section and skips tutorial examples. |
 
-An item without details copies exactly as before. **Settings** can mark items as done when they are copied.
+**Copy with Details** and **Copy as List** can include attached pictures when the app you paste into supports formatting. **Settings > Copying > Mark as done when copied** applies to **Copy** and **Copy as List**.
 
-`⌘`-click picks several items and `⇧`-click a range; `⌘A` picks every item shown. With several picked, `⌘C` copies them as a list. Apps that paste formatting, such as Teams or Outlook, show the first image inside the list.
+`⌘`-click picks several items, `⇧`-click picks a range, and `⌘A` picks every item shown. With several picked, `⌘C` copies them as a list. The first image item appears in the formatted list. If the list has no text entries, the first image copies on its own.
+
+If a copy fails because changes couldn't be saved, choose **Retry** to save them, then copy again.

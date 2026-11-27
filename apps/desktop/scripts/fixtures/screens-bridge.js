@@ -89,6 +89,9 @@ globalThis.__drafts = [];
 /** Each time the page told main a menu opened (true) or the last one closed (false). */
 globalThis.__menuOpen = [];
 
+/** Every notice the shelf page told main it put on screen, in order. */
+globalThis.__noticesShown = [];
+
 const nothing = Function.prototype;
 
 const withFallback = (api, fallback) =>
@@ -299,6 +302,10 @@ if (page === "shelf") {
       answerQuit: logged("answerQuit", nothing),
       menuOpen: (open) => {
         globalThis.__menuOpen.push(open);
+      },
+      // A report for the trial log, kept apart as `selection` is.
+      noticeShown: (notice) => {
+        globalThis.__noticesShown.push(notice);
       },
       newWindowLink: logged("newWindowLink", nothing),
       // `retryWorks`: the disk has room again, so Retry saves every change.

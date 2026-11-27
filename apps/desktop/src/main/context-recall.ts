@@ -8,7 +8,7 @@ import {
   stepRecall,
 } from "@shared/recall";
 import type { PlaceKey, RecallState } from "@shared/recall";
-import type { ItemId, ShelfDoc } from "@shared/shelf";
+import type { ItemContext, ItemId, ShelfDoc } from "@shared/shelf";
 import { sourceLabel } from "@shared/web-source";
 
 import { createFrontWatch } from "./front-watch";
@@ -25,6 +25,8 @@ export interface Recalled {
   readonly ids: readonly ItemId[];
   readonly label: string;
   readonly window: Rect<"screen"> | null;
+  /** The window's source, for a note typed under the from-here chip once the pill opens the shelf. */
+  readonly source: ItemContext;
 }
 
 export interface ContextRecall {
@@ -73,6 +75,7 @@ export const createContextRecall = (deps: {
           ids,
           label: sourceLabel(source).label,
           place,
+          source,
           window: bounds,
         });
       }
