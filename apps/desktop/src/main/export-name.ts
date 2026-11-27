@@ -27,6 +27,6 @@ export const exportFileName = (note: string): string => {
   return `${base === "" ? "Screen area" : base}.png`;
 };
 
-/** The file an image item is dragged out as. */
+/** The file an image item is dragged out as: named as its row reads, by its title, else its note. */
 export const imageFileName = (item: ImageItem): string =>
-  exportFileName(item.note);
+  exportFileName(item.title ?? item.note);

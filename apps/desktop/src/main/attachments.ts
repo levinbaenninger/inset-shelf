@@ -249,6 +249,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
           image: upload.image,
           pins: [],
           source: null,
+          title: upload.name,
           type: "addImage",
           via: "paste",
         }

@@ -804,6 +804,8 @@ export type MainOp =
   | {
       readonly type: "addImage";
       readonly image: ShelfImage;
+      /** A picture added from a file is titled with the file's name. */
+      readonly title?: string;
       readonly scene?: DrawingScene;
       readonly pins: readonly Pin[];
       readonly source: string | null;
@@ -1669,7 +1671,7 @@ export const applyOp = (
         pins: clampPins(op.pins, op.image),
         sectionId: doc.activeSectionId,
         source: op.source,
-        title: null,
+        title: op.title ?? null,
         via: op.via,
       };
 
