@@ -21,14 +21,6 @@ const A = "file:///Users/me/a.pdf";
 const B = "file:///Users/me/b.pdf";
 const list = (url: string) => ({ "text/uri-list": url });
 
-/** How Windows notes a copy or a cut of files beside their list: a 32-bit flag set, 1 to copy and 2 to move. */
-const DROP_EFFECT = 'electron application/osclipboard;format="Preferred DropEffect"';
-const copyOf = (url: string) => ({
-  ...list(url),
-  [DROP_EFFECT]: "\u0001\0\0\0",
-});
-const cutOf = (url: string) => ({ ...list(url), [DROP_EFFECT]: "\u0002\0\0\0" });
-
 const toSnapshot = (items: readonly Item[]): Snapshot =>
   items.map((item) =>
     Object.fromEntries(
@@ -347,5 +339,66 @@ describe("a clipboard that can't be read after the capture", () => {
     });
     expect(clip.restored).toStrictEqual([]);
     expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
+
+describe("a read the capture can't judge", () => {
+  const FINDER = {
+    "text/plain": "a.pdf",
+    "text/uri-list": A,
+  };
+
+  it("reads again, not a newer copy, when a hold cut the snapshot's file list short", async () => {
+    // Finder's text came back and the list behind it came back with nothing in it.
+    const clip = clipboard({
+      copied: [FINDER],
+      halfRead: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("calls a read with another file list, or with text beside no files, a newer copy", async () => {
+    const copiedB = clipboard({
+      before: { 2: [list(B)] },
+      copied: [list(A)],
+      initial: [EARLIER],
+    });
+
+    const copiedText = clipboard({
+      before: { 2: [{ "text/plain": "another copy" }] },
+      copied: [list(A)],
+      initial: [EARLIER],
+    });
+
+    await captureSelection(copiedB.deps);
+    await captureSelection(copiedText.deps);
+
+    expect(copiedB.restored).toStrictEqual([]);
+    expect(copiedText.restored).toStrictEqual([]);
+    expect(copiedText.items()).toStrictEqual([
+      { "text/plain": "another copy" },
+    ]);
+  });
+
+  it("leaves the clipboard as it is, and says it wasn't put back, when every read stays unclear until time runs out", async () => {
+    const clip = clipboard({
+      copied: [FINDER],
+      halfRead: Array.from({ length: 200 }, (_, at) => at + 2),
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+      unchecked: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([FINDER]);
   });
 });

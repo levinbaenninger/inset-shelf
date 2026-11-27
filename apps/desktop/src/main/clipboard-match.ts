@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 
+import { copiedFilePaths } from "./copied-files";
 import type { ClipboardContents } from "./copy-gate";
 
 /**
@@ -138,10 +139,34 @@ const textIn = async (
   return value instanceof Blob ? await value.text() : "";
 };
 
-/** The plain text and HTML in a read of the clipboard, "" for either it hasn't. */
+/** The paths of the copied files in one read of the clipboard, as the live clipboard lists them. */
+const filesIn = async (
+  read: readonly ClipboardContents[]
+): Promise<readonly string[]> =>
+  await copiedFilePaths(
+    read.map((item) => ({
+      getType: async (type: string) => {
+        const value = await item[type];
+
+        return value instanceof Blob ? value : new Blob([]);
+      },
+      types: Object.keys(item),
+    }))
+  );
+
+/**
+ * What one read of the clipboard holds: its plain text and HTML ("" for either
+ * it hasn't) and the files it lists. Judging a read by itself matters: a read
+ * made again could fall under another app's hold, and come back empty.
+ */
 export const clipboardContent = async (
   read: readonly ClipboardContents[]
-): Promise<{ readonly html: string; readonly text: string }> => ({
+): Promise<{
+  readonly files: readonly string[];
+  readonly html: string;
+  readonly text: string;
+}> => ({
+  files: await filesIn(read),
   html: await textIn(read, "text/html"),
   text: await textIn(read, "text/plain"),
 });

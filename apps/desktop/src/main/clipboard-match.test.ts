@@ -233,6 +233,21 @@ describe("holdsAgainIn with copied files", () => {
 });
 
 describe(clipboardContent, () => {
+  it("lists the files of the read itself, as the live clipboard would", async () => {
+    await expect(
+      clipboardContent([
+        {
+          "text/plain": new Blob(["a.pdf"]),
+          "text/uri-list": new Blob(["file:///Users/me/a.pdf"]),
+        },
+      ])
+    ).resolves.toStrictEqual({
+      files: ["/Users/me/a.pdf"],
+      html: "",
+      text: "a.pdf",
+    });
+  });
+
   it("reads the plain text and HTML of one read, empty for what it hasn't", async () => {
     expect({
       both: await clipboardContent([
@@ -240,8 +255,8 @@ describe(clipboardContent, () => {
       ]),
       none: await clipboardContent([]),
     }).toStrictEqual({
-      both: { html: "<b>x</b>", text: "x" },
-      none: { html: "", text: "" },
+      both: { files: [], html: "<b>x</b>", text: "x" },
+      none: { files: [], html: "", text: "" },
     });
   });
 });
