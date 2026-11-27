@@ -20,6 +20,8 @@ import { E2E_EDITORS } from "./e2e-log";
 import { NO_WINDOW, readFocusedWindow } from "./page-address";
 import type { FocusedWindow, WebArea } from "./page-address";
 import { t3ThreadTitle } from "./t3-threads";
+import { isTaskbarWindow } from "./taskbar-window";
+import type { FrontKind } from "./tray-menu";
 import { documentPath } from "./window-origin";
 
 export interface FrontWindow {
@@ -53,24 +55,39 @@ const isWindowsShell = (title: string, owner: string): boolean =>
   (title === "Program Manager" || title.trim() === "");
 
 /**
- * Windows: the shell is in front, the taskbar or the hidden icons' flyout
- * after a click on the notification area. Any Explorer window counts, since
- * the flyout's title is in the system's language.
+ * Windows: what has the focus, the taskbar or the hidden icons' flyout
+ * (opened from it) or any other window, a File Explorer folder included;
+ * null where nothing is in front or this isn't Windows.
  */
-export const shellInFront = async (): Promise<boolean> => {
+export const frontKind = async (): Promise<FrontKind | null> => {
   if (process.platform !== "win32") {
-    return false;
+    return null;
   }
 
   try {
     const front = await activeWindow();
 
-    return (
-      front !== undefined &&
-      path.win32.basename(front.owner.path).toLowerCase() === "explorer.exe"
+    if (front === undefined) {
+      return null;
+    }
+
+    const { height, width, x, y } = toDip(front.bounds);
+
+    const shell = isTaskbarWindow(
+      {
+        bounds: rect<"screen">(x, y, width, height),
+        ownerPath: front.owner.path,
+        title: front.title,
+      },
+      screen.getAllDisplays().map(({ bounds, workArea }) => ({
+        bounds,
+        workArea,
+      }))
     );
+
+    return shell ? "shell" : "other";
   } catch {
-    return false;
+    return null;
   }
 };
 

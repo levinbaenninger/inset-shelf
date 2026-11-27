@@ -104,7 +104,7 @@ import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { imageFileName, ownFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
-import { EDITORS, frontWindow, shellInFront } from "./front-window";
+import { EDITORS, frontKind, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import {
@@ -165,7 +165,7 @@ import { createShelfWindow } from "./shelf-window";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
-import { iconClick } from "./tray-menu";
+import { followFocus, iconClick } from "./tray-menu";
 import type { ShelfLeft, TrayAction } from "./tray-menu";
 import { createTutorialStore } from "./tutorial/store";
 import { createTutorial } from "./tutorial/tutorial";
@@ -2960,14 +2960,18 @@ const start = async (): Promise<void> => {
   shelf.onBlur(() => {
     const at = performance.now();
 
-    shelfLeft = { at, toShell: false };
-    void (async () => {
-      const toShell = await shellInFront();
-
-      if (shelfLeft?.at === at) {
-        shelfLeft = { at, toShell };
-      }
-    })();
+    // The shell has it until a window of the user's is seen with it: the press on the icon is the focus going to the taskbar.
+    shelfLeft = { at, toShell: true };
+    void followFocus({
+      at,
+      away: () => shelfLeft?.at === at && !shelf.isFocused(),
+      leftOther: () => {
+        shelfLeft = { at, toShell: false };
+      },
+      now: () => performance.now(),
+      probe: frontKind,
+      wait: delay,
+    });
   });
 
   /** A left click on the Windows icon: shows the shelf, brings it forward, or hides it when it was in front. */

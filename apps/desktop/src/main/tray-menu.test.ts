@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { iconClick, trayMenu, trayTooltip } from "./tray-menu";
-import type { TrayItem, TrayModel } from "./tray-menu";
+import { followFocus, iconClick, trayMenu, trayTooltip } from "./tray-menu";
+import type { FrontKind, TrayItem, TrayModel } from "./tray-menu";
 
 const base: TrayModel = {
   mac: true,
@@ -139,7 +139,7 @@ describe(iconClick, () => {
     expect(
       iconClick({
         focused: false,
-        left: { at: now - 60_000, toShell: false },
+        left: { at: now - 60_000, toShell: true },
         now,
         visible: true,
       })
@@ -160,7 +160,7 @@ describe(iconClick, () => {
     expect(
       iconClick({
         focused: false,
-        left: { at: now - 150, toShell: false },
+        left: { at: now - 150, toShell: true },
         now,
         visible: true,
       })
@@ -178,7 +178,18 @@ describe(iconClick, () => {
     ).toBe("hide");
   });
 
-  it("brings the shelf forward once another app has had the focus a while", () => {
+  it("brings the shelf forward when the focus went to an app and the icon was clicked a moment later", () => {
+    expect(
+      iconClick({
+        focused: false,
+        left: { at: now - 300, toShell: false },
+        now,
+        visible: true,
+      })
+    ).toBe("focus");
+  });
+
+  it("brings the shelf forward once the focus left the shell for a window, a File Explorer folder included", () => {
     expect(
       iconClick({
         focused: false,
@@ -187,6 +198,9 @@ describe(iconClick, () => {
         visible: true,
       })
     ).toBe("focus");
+  });
+
+  it("brings the shelf forward once the shell has had the focus a while", () => {
     expect(
       iconClick({
         focused: false,
@@ -195,5 +209,72 @@ describe(iconClick, () => {
         visible: true,
       })
     ).toBe("focus");
+  });
+});
+
+describe(followFocus, () => {
+  /** Samples the focus one after another, as the focus moves; the last holds. */
+  const run = async (
+    kinds: readonly (FrontKind | null)[],
+    shelfBackAt = Infinity
+  ) => {
+    let time = 0;
+    let sampled = 0;
+    let other = 0;
+
+    await followFocus({
+      at: 0,
+      away: () => time < shelfBackAt,
+      leftOther: () => {
+        other += 1;
+      },
+      now: () => time,
+      probe: async () => {
+        const kind = kinds[Math.min(sampled, kinds.length - 1)] ?? null;
+
+        sampled += 1;
+
+        return await Promise.resolve(kind);
+      },
+      wait: async (ms) => {
+        time += ms;
+        await Promise.resolve();
+      },
+    });
+
+    return { other, sampled, time };
+  };
+
+  it("notes a window of the user's that took the focus from the shelf", async () => {
+    const { other } = await run(["other"]);
+
+    expect(other).toBe(1);
+  });
+
+  it("notes a window the focus passed through on its way back to the shell", async () => {
+    const { other } = await run(["shell", "other", "shell"]);
+
+    expect(other).toBe(1);
+  });
+
+  it("notes nothing while the focus stays with the shell, and stops once the icon's window of time is over", async () => {
+    const { other, time } = await run(["shell"]);
+
+    expect(other).toBe(0);
+    expect(time).toBeGreaterThanOrEqual(5000);
+    expect(time).toBeLessThan(6000);
+  });
+
+  it("keeps watching through a sample that finds no window in front", async () => {
+    const { other } = await run([null, null, "other"]);
+
+    expect(other).toBe(1);
+  });
+
+  it("stops when the shelf has the focus again or another blur replaced this one", async () => {
+    const { other, sampled } = await run(["shell"], 300);
+
+    expect(other).toBe(0);
+    expect(sampled).toBeLessThan(5);
   });
 });

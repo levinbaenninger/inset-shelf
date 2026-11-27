@@ -106,24 +106,36 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
 export const trayTooltip = (isMac: boolean): string =>
   `Inset Shelf (${shortcutLabels(isMac).toggle})`;
 
-/** How the shelf last lost the keyboard: when, and whether to the Windows shell (the taskbar or the hidden icons' flyout). */
+/**
+ * How the shelf last lost the keyboard: when, and whether the focus has been
+ * with the Windows shell (the taskbar or the hidden icons' flyout) alone
+ * since, rather than with a window of the user's.
+ */
 export interface ShelfLeft {
   readonly at: number;
   readonly toShell: boolean;
 }
 
-/** Pressing the icon gives the taskbar the focus before the click arrives; a click lands well within this. */
-const PRESS_MS = 600;
+/** What has the focus: the taskbar or its flyout, or any other window. */
+export type FrontKind = "shell" | "other";
 
-/** Opening the hidden icons' flyout takes the focus too; the icon is clicked within this after. */
+/**
+ * Pressing the icon gives the taskbar the focus before the click arrives,
+ * and opening the hidden icons' flyout takes it too; the icon is clicked
+ * within this after the shelf lost the focus.
+ */
 const REACH_MS = 5000;
+
+/** How often the focus is looked at while the icon may still be clicked. */
+const SAMPLE_MS = 150;
 
 /**
  * What a click on the Windows notification-area icon does: it shows a hidden
  * shelf, brings forward one that is visible but not in front, and hides it
  * only when it was in front. The click itself takes the focus from the
- * shelf, so a shelf that lost it to the click, or to the shell on the way to
- * the icon, still counts as in front.
+ * shelf, so a shelf that lost it to the shell, on the press or on the way
+ * to the icon, still counts as in front. One that lost it to a window of
+ * the user's does not, however soon the click follows.
  */
 export const iconClick = (state: {
   readonly visible: boolean;
@@ -141,9 +153,40 @@ export const iconClick = (state: {
 
   const { left, now } = state;
 
-  const inFront =
-    left !== null &&
-    (now - left.at < PRESS_MS || (left.toShell && now - left.at < REACH_MS));
+  return left !== null && left.toShell && now - left.at < REACH_MS
+    ? "hide"
+    : "focus";
+};
 
-  return inFront ? "hide" : "focus";
+/**
+ * Looks at what has the focus after the shelf lost it, until the icon can no
+ * longer have been clicked for it, and says when a window of the user's had
+ * it: the shelf then isn't what the click leaves, whatever has the focus
+ * when the click arrives. A look that finds no window in front says nothing.
+ */
+export const followFocus = async (deps: {
+  /** When the shelf lost the focus. */
+  readonly at: number;
+  /** False once the shelf has the focus again or has lost it anew. */
+  readonly away: () => boolean;
+  readonly leftOther: () => void;
+  readonly now: () => number;
+  readonly probe: () => Promise<FrontKind | null>;
+  readonly wait: (ms: number) => Promise<void>;
+}): Promise<void> => {
+  if (!deps.away() || deps.now() - deps.at >= REACH_MS) {
+    return;
+  }
+
+  const kind = await deps.probe().catch(() => null);
+
+  if (kind === "other") {
+    deps.leftOther();
+
+    return;
+  }
+
+  await deps.wait(SAMPLE_MS);
+
+  await followFocus(deps);
 };
