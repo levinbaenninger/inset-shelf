@@ -652,7 +652,7 @@ const SPOTLIGHT_STEPS = [
   {
     anchor: "shelf-menu",
     id: "menu",
-    text: "New sections, Settings and Keyboard Shortcuts are here. The menu bar icon has them too.",
+    text: "New sections, Settings and Help are here. Help opens the guide in your browser.",
     title: "Settings and more",
   },
 ];

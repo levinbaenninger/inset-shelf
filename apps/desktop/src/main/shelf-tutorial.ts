@@ -173,7 +173,7 @@ export const shelfSpotlight = (mac: boolean): readonly SpotlightStep[] => {
       anchor: "shelf-menu",
       id: "menu",
       text: mac
-        ? "New sections, Settings and Keyboard Shortcuts are here. The menu bar icon has them too."
+        ? "New sections, Settings and Help are here. Help opens the guide in your browser."
         : "New sections, Settings, Help and Float on Top are here. The notification area icon has its own menu.",
       title: "Settings and more",
     },
