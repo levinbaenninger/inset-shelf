@@ -25,7 +25,7 @@ export interface ShotDropDeps<S extends NamedShot> {
   ) => Promise<AttachResult>;
   /** Files from outside dropped on the shelf, as new items. */
   readonly addFiles: (paths: readonly string[]) => Promise<void>;
-  /** A drag's file came back alone: it went the card's way. */
+  /** A drag's file came back to the shelf: it went the card's way. */
   readonly dropped: (to: ShotSaveTo) => void;
   /** The card's picture couldn't be staged, so no drag starts: the user hears why. */
   readonly dragFailed: (why: string) => void;
@@ -79,10 +79,10 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * for that drag alone, so other apps get a real file and no file of the
  * user's is ever taken for the card's. The router knows each drag by its copy,
  * so a newer drag never takes an older one's place. When the shelf hands a
- * copy back, alone, the drop goes through the card's save path for the
- * screenshot that drag handed out, however long the drop took: a screenshot
- * gets one place on the shelf, and keeps the one it has. Any other drop takes
- * the shelf's plain route.
+ * copy back, that file goes through the card's save path for the screenshot
+ * that drag handed out, however long the drop took: a screenshot gets one
+ * place on the shelf, and keeps the one it has. Every other file takes the
+ * shelf's plain route.
  */
 export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   // Each drag whose file is still staged, by where the file is on disk, with the folder it staged the file in and the file as it was written. No count of newer drags says a drop has come: the shelf and the card reach main on channels of their own.
@@ -91,15 +91,9 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
   let made = 0;
 
-  /** The drag a drop hands back the file of, alone, with the picture the file holds. Null for any other drop. */
-  const claim = (paths: readonly string[]): Claimed | null => {
-    const [only] = paths;
-
-    if (only === undefined || paths.length !== 1) {
-      return null;
-    }
-
-    const file = onDisk(only);
+  /** The drag a dropped file is the staged file of, with the picture the file holds. Null for any other file. */
+  const claim = (dropped: string): Claimed | null => {
+    const file = onDisk(dropped);
     const copy = drags.get(file);
 
     if (copy === undefined) {
@@ -124,6 +118,24 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       drags.delete(file);
       deps.unstage(copy.folder);
     }
+  };
+
+  /** A drop's files: each drag's file, which goes the card's way, and every other file, which takes the shelf's plain route. */
+  const sort = (paths: readonly string[]) => {
+    const cards: Claimed[] = [];
+    const plain: string[] = [];
+
+    for (const each of paths) {
+      const claimed = claim(each);
+
+      if (claimed === null) {
+        plain.push(each);
+      } else {
+        cards.push(claimed);
+      }
+    }
+
+    return { cards, plain };
   };
 
   /** Runs what a drop does after the shelf has its reply: whatever throws on the way is said once, and never escapes main's handler. */
@@ -192,40 +204,42 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       return { file, shot };
     },
 
-    /** Files dropped on an item: the card's screenshot attached through its own add, or the files attached as files. */
+    /** Files dropped on an item: each drag's file attached through its screenshot's own add, the rest attached as files. */
     onItem: async (
       id: ItemId,
       paths: readonly string[]
     ): Promise<AttachResult> => {
-      const claimed = claim(paths);
+      const { cards, plain } = sort(paths);
 
-      if (claimed === null) {
-        return await deps.attachFiles(id, paths);
+      for (const claimed of cards) {
+        land(
+          "item",
+          claimed,
+          async () => await claimed.copy.drop.onItem(id, claimed.png)
+        );
       }
 
-      land(
-        "item",
-        claimed,
-        async () => await claimed.copy.drop.onItem(id, claimed.png)
-      );
-
-      return NOTHING;
+      return cards.length > 0 && plain.length === 0
+        ? NOTHING
+        : await deps.attachFiles(id, plain);
     },
 
-    /** Files dropped on the shelf off any item: the card's Add to Shelf, or new items. */
+    /** Files dropped on the shelf off any item: each drag's file through its screenshot's Add to Shelf, the rest as new items. */
     onShelf: (paths: readonly string[]): void => {
-      const claimed = claim(paths);
+      const { cards, plain } = sort(paths);
 
-      if (claimed === null) {
-        settle(async () => {
-          await deps.addFiles(paths);
-        });
-      } else {
+      for (const claimed of cards) {
         land(
           "shelf",
           claimed,
           async () => await claimed.copy.drop.onShelf(claimed.png)
         );
+      }
+
+      if (cards.length === 0 || plain.length > 0) {
+        settle(async () => {
+          await deps.addFiles(plain);
+        });
       }
     },
   };
