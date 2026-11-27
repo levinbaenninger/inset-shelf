@@ -1,5 +1,6 @@
 import type { Rect } from "@shared/geometry";
 import type { PlaceSource } from "@shared/recall";
+import type { ItemContext } from "@shared/shelf";
 
 /**
  * Notices when another window comes to the front, for context recall.
@@ -23,7 +24,7 @@ export type Activity = "pointer" | "chord" | "key";
 
 /** The front window as recall reads it: its source, and its bounds for the pill's corner. */
 export interface FrontRead {
-  readonly source: PlaceSource;
+  readonly source: ItemContext;
   readonly bounds: Rect<"screen"> | null;
 }
 

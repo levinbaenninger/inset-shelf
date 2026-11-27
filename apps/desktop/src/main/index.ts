@@ -20,7 +20,6 @@ import type {
   Permission,
   PickerView,
   ShelfCommand,
-  ShelfHere,
   ShotSaveTo,
 } from "@shared/contracts";
 import { openedMarks } from "@shared/drawing-scene";
@@ -28,7 +27,8 @@ import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
 import { secondTap } from "@shared/pill";
-import { hereOf } from "@shared/recall";
+import { hereOf, hereWith, openingOf, typedNote } from "@shared/recall";
+import type { Opening } from "@shared/recall";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import {
   AttachmentIdSchema,
@@ -43,6 +43,7 @@ import type {
   MainOp,
   Picture,
   Pin,
+  ShelfImage,
   ShelfItem,
   WindowRef,
 } from "@shared/shelf";
@@ -666,9 +667,11 @@ const start = async (): Promise<void> => {
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
 
-  // Recall: the open items from the window the shelf opened beside, sent with the shelf's view. Not shelf data.
-  let shelfHere: ShelfHere | null = null;
+  // Recall: the window the shelf opened beside and the open items from it, sent with the shelf's view. Not shelf data.
+  let hereOpening: Opening | null = null;
   let hereSeq = 0;
+  // The window the recall pill showing now was shown for, so a click on it opens the shelf there.
+  let recalledFrom: ItemContext | null = null;
   // Set once the shelf's IPC server exists.
   let emitShelfView: () => void = ignore;
 
@@ -679,16 +682,28 @@ const start = async (): Promise<void> => {
    */
   const HERE_CHIP = true;
 
-  const viewWithHere = () => ({ ...controller.view(), here: shelfHere });
+  const viewWithHere = () => {
+    const view = controller.view();
+
+    return {
+      ...view,
+      here: hereOpening === null ? null : hereWith(hereOpening, view.doc),
+    };
+  };
 
   const setHere = (front: Awaited<ReturnType<typeof frontWindow>>): void => {
-    const found = HERE_CHIP
-      ? hereOf(controller.view().doc, front.own ? null : front.context)
-      : null;
+    const context = front.own ? null : front.context;
+    const found = HERE_CHIP ? hereOf(controller.view().doc, context) : null;
 
     hereSeq += 1;
-    shelfHere =
-      found === null ? null : { ...found, filter: false, seq: hereSeq };
+    hereOpening =
+      found === null || context === null
+        ? null
+        : openingOf(controller.view().doc, context, {
+            ...found,
+            filter: false,
+            seq: hereSeq,
+          });
     emitShelfView();
   };
 
@@ -702,6 +717,10 @@ const start = async (): Promise<void> => {
   ): Promise<void> => {
     // From the notification area, the window in front is a part of the taskbar.
     if (options.dock === false) {
+      // No window to be from: the last opening's window must not name a note typed now.
+      hereSeq += 1;
+      hereOpening = null;
+      emitShelfView();
       shelf.show(null);
 
       return;
@@ -767,7 +786,15 @@ const start = async (): Promise<void> => {
     // The click made the pill, or nothing, the window in front: the shelf opens at the place the pill was shown for.
     openRecall: ({ ids, label, window }) => {
       hereSeq += 1;
-      shelfHere = { filter: true, ids, label, seq: hereSeq };
+      hereOpening =
+        recalledFrom === null
+          ? null
+          : openingOf(controller.view().doc, recalledFrom, {
+              filter: true,
+              ids,
+              label,
+              seq: hereSeq,
+            });
       emitShelfView();
 
       if (window !== null) {
@@ -812,6 +839,7 @@ const start = async (): Promise<void> => {
     message,
     tone = "done"
   ) => {
+    e2eLog("noticeSent", { text: message, tone, via: "toast" });
     toast.send({ title: message, tone, type: "notified" });
   };
 
@@ -850,8 +878,17 @@ const start = async (): Promise<void> => {
     writeAttachment: async (png) => await store.writeAttachment(png),
   });
 
-  /** The card's screenshot became an item of its own, or the shelf refused it (null): the trials' log and the tutorial's screenshot step hear of the item. */
-  const shotItemAdded = (id: ItemId | null): ItemId | null => {
+  /** Makes the card's screenshot an item in the section new items go to; the trials' log and the tutorial's screenshot step hear of it. */
+  const addShotItem = (image: ShelfImage) => {
+    const id = controller.apply({
+      context: null,
+      image,
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "screenshot",
+    });
+
     if (id !== null) {
       e2eLog("itemAdded", { itemId: id, kind: "image", via: "screenshot" });
       tutorial.complete(SHELF_TASK_IDS.screenshot);
@@ -860,49 +897,11 @@ const start = async (): Promise<void> => {
     return id;
   };
 
-  /** Makes the card's screenshot an item in the section new items go to. */
-  const addShotItem = async (current: CardShot) => {
-    const { scaleFactor } = screen.getDisplayNearestPoint(
-      screen.getCursorScreenPoint()
-    );
-
-    return shotItemAdded(
-      controller.apply({
-        context: null,
-        image: {
-          file: await store.writeAttachment(current.png),
-          heightPx: current.heightPx,
-          pixelsPerDip: scaleFactor,
-          widthPx: current.widthPx,
-        },
-        pins: [],
-        source: null,
-        type: "addImage",
-        via: "screenshot",
-      })
-    );
-  };
-
   /** The screenshot attached to an item, named as the system names a screenshot. */
-  const attachShotTo = async (current: CardShot, id: ItemId) => {
-    const { scaleFactor } = screen.getDisplayNearestPoint(
-      screen.getCursorScreenPoint()
+  const attachShotTo = (image: ShelfImage, id: ItemId) =>
+    attachResult(
+      attachments.attachTo(id, [{ image, kind: "image", name: shotName() }])
     );
-
-    return attachResult(
-      attachments.attachTo(id, [
-        await attachments.storePicture(
-          {
-            heightPx: current.heightPx,
-            png: current.png,
-            widthPx: current.widthPx,
-          },
-          shotName(),
-          scaleFactor
-        ),
-      ])
-    );
-  };
 
   /** The item selected or open in details in the shelf, or null; the page reports it. */
   let shelfSelection: ItemId | null = null;
@@ -944,24 +943,18 @@ const start = async (): Promise<void> => {
   const shotSaves = createShotSaves<CardShot>({
     addItem: addShotItem,
     attach: attachShotTo,
-    attachmentToRow: (id, attachmentId) =>
-      shotItemAdded(
-        controller.apply({
-          attachmentId,
-          id,
-          type: "attachmentToItem",
-          via: "screenshot",
-        })
-      ),
     card: {
       hide: screenshotCard.hide,
-      hold: screenshotCard.hold,
+      holdForSave: screenshotCard.holdForSave,
       isVisible: screenshotCard.isVisible,
       show: (view) => {
         screenshotCard.show(view, shelf.bounds());
       },
       update: screenshotCard.update,
       view: screenshotCard.view,
+    },
+    dropPicture: (file) => {
+      void store.deleteAttachment(file);
     },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
@@ -970,36 +963,23 @@ const start = async (): Promise<void> => {
       notify(message, tone);
     },
     now: () => Date.now(),
-    onItsWay: controller.onItsWay,
+    comesBack: controller.comesBack,
     onWrite: controller.onWrite,
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
-    rowToAttachment: (from, id) => {
-      const attachmentId = AttachmentIdSchema.parse(randomUUID());
+    refusal: (id) => {
+      const state = controller.copyState([id], controller.snapshot().doc);
 
-      controller.apply({
-        attachmentId,
-        from,
-        id,
-        name: shotName(),
-        type: "itemToAttachment",
-      });
-
-      return {
-        attached:
-          controller
-            .item(id)
-            ?.attachments.some((each) => each.id === attachmentId) === true
-            ? [attachmentId]
-            : [],
-        message: null,
-      };
+      return state.kind === "failed" ? state.message : null;
     },
     saved: shotAdded,
+    scale: () =>
+      screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor,
     selection: () => shelfSelection,
     setTimer,
     shelfVisible: () => shelf.isVisible(),
     stored: controller.stored,
+    writePicture: async (current) => await store.writeAttachment(current.png),
   });
 
   let shotSeq = 0;
@@ -1231,12 +1211,13 @@ const start = async (): Promise<void> => {
         : { bounds: front.bounds, source: front.context };
     },
     setTimer,
-    show: (recalled) => {
+    show: ({ source, ...recalled }) => {
       const before = toast.view()?.seq;
 
       toast.send({ ...recalled, type: "recalled" });
 
       if (toast.view()?.seq !== before) {
+        recalledFrom = source;
         e2eLog("recallShown", { count: recalled.ids.length });
       }
     },
@@ -2288,7 +2269,9 @@ const start = async (): Promise<void> => {
         void addFiles(paths);
       },
       apply: (op) => {
-        controller.apply(op);
+        controller.apply(
+          op.type === "compose" ? typedNote(op, hereOpening) : op
+        );
 
         if (op.type === "toggleDone" && controller.item(op.id)?.done === true) {
           tutorial.complete(SHELF_TASK_IDS.checkOrCopy);
@@ -2340,6 +2323,9 @@ const start = async (): Promise<void> => {
       },
       menuOpen: (open) => {
         menus.set(shelf.webContents, open);
+      },
+      noticeShown: ({ message, tone }) => {
+        e2eLog("noticeShown", { text: message, tone, via: "shelf" });
       },
       nativeEdit: (action) => {
         if (action === "copy") {
@@ -2683,7 +2669,11 @@ const start = async (): Promise<void> => {
   };
 
   notify = (message, tone = "done") => {
-    if (shelf.isVisible()) {
+    const via = shelf.isVisible() ? "shelf" : "toast";
+
+    e2eLog("noticeSent", { text: message, tone, via });
+
+    if (via === "shelf") {
       shelfServer.emit("notice", { message, tone });
     } else {
       toast.send({ title: message, tone, type: "notified" });
