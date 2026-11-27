@@ -126,7 +126,7 @@ export const nodeStoreFs: StoreFs = {
   writeTemp,
 };
 
-/** Fails the next document write once; set by INSET_FAIL_NEXT_WRITE for the desktop test. */
+/** Fails the next document write once; armed by INSET_FAIL_NEXT_WRITE (e2eEnv: dev and package:e2e builds only). */
 export const failNextWrite = (fs: StoreFs): StoreFs => {
   let armed = true;
 

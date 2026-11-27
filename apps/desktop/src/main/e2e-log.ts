@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import type { Rectangle } from "electron";
 
 export type E2eEvent =
@@ -29,9 +29,18 @@ export interface E2eDetails {
   readonly unchecked?: boolean;
 }
 
-const logFile = process.env.INSET_E2E_LOG;
+/**
+ * An environment variable that only the dev run and the `package:e2e` build
+ * honour: a released app ignores it, so no other process can steer it.
+ */
+export const e2eEnv = (name: string): string | undefined =>
+  !app.isPackaged || (typeof __INSET_E2E__ !== "undefined" && __INSET_E2E__)
+    ? process.env[name]
+    : undefined;
 
 export const e2eLog = (event: E2eEvent, details: E2eDetails = {}): void => {
+  const logFile = e2eEnv("INSET_E2E_LOG");
+
   if (logFile === undefined || logFile === "") {
     return;
   }

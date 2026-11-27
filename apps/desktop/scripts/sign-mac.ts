@@ -33,10 +33,20 @@ const MACH_O_MAGIC = new Set([
   0xbe_ba_fe_ca,
 ]);
 
-const run = (command: string, args: readonly string[]): string =>
+const ENTITLEMENTS = path.resolve(
+  import.meta.dirname,
+  "../build/entitlements.mac.plist"
+);
+
+const run = (
+  command: string,
+  args: readonly string[],
+  input?: string
+): string =>
   execFileSync(command, args, {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
+    input,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
 /** The keychain holding the shared identity, unlocked, or null to sign ad hoc. */
@@ -48,12 +58,12 @@ const signingKeychain = (): string | null => {
   }
 
   if (keychain === LOCAL_KEYCHAIN && existsSync(LOCAL_PASSWORD)) {
-    run("security", [
-      "unlock-keychain",
-      "-p",
-      readFileSync(LOCAL_PASSWORD, "utf-8").trim(),
-      keychain,
-    ]);
+    // Without -p, security reads the password from a piped stdin, so it never shows in argv.
+    run(
+      "security",
+      ["unlock-keychain", keychain],
+      `${readFileSync(LOCAL_PASSWORD, "utf-8").trim()}\n`
+    );
   }
 
   return run("security", [
@@ -64,6 +74,20 @@ const signingKeychain = (): string | null => {
   ]).includes(IDENTITY)
     ? keychain
     : null;
+};
+
+/** Executables and app bundles get the entitlements; libraries and frameworks never do. */
+const needsEntitlements = (target: string): boolean => {
+  if (target.endsWith(".app")) {
+    return true;
+  }
+
+  if (target.endsWith(".framework") || /\.(?:dylib|node)$/u.test(target)) {
+    return false;
+  }
+
+  // eslint-disable-next-line no-bitwise -- file mode bits
+  return (lstatSync(target).mode & 0o111) !== 0;
 };
 
 const isMachO = (file: string): boolean => {
@@ -149,7 +173,15 @@ export default function signMac(context: AfterPackContext): void {
 
   // Inside out: a bundle's seal covers the signatures of the code it contains.
   for (const target of nestedCode(context.appOutDir)) {
-    run("codesign", ["--force", "--timestamp=none", ...identity, target]);
+    run("codesign", [
+      "--force",
+      "--timestamp=none",
+      "--options",
+      "runtime",
+      ...(needsEntitlements(target) ? ["--entitlements", ENTITLEMENTS] : []),
+      ...identity,
+      target,
+    ]);
   }
 
   run("codesign", ["--verify", "--deep", "--strict", app]);
