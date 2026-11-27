@@ -17,9 +17,9 @@ export interface SelectionDeps<S> {
    * empty one. It judges that read and makes none of its own, which a hold starting meanwhile would spoil.
    */
   readonly holds: (saved: S, current: S) => Promise<boolean>;
-  /** The plain text and HTML in a snapshot, "" for either it hasn't, the files it lists, and whether they were cut. */
+  /** The plain text and HTML in a snapshot, "" for either it hasn't, the files it lists, and whether they were cut (null when the read can't say). */
   readonly content: (snapshot: S) => Promise<{
-    readonly cut: boolean;
+    readonly cut: boolean | null;
     readonly files: readonly string[];
     readonly html: string;
     readonly text: string;
@@ -216,7 +216,8 @@ const against = (seen: string, had: string): Verdict => {
  * empty or half-read without an error, so a read shows a newer copy only by
  * showing something else, never by lacking something the capture had. After a
  * hold the text and HTML are what was copied, or another one is a newer copy.
- * Files cut are one too: the capture copies. Files carry no text or HTML to tell a newer copy by, so the read's own list
+ * Files cut are one too: the capture copies; the same files with no effect
+ * to read are unsure, since the read may have hidden a cut. Files carry no text or HTML to tell a newer copy by, so the read's own list
  * of files is compared: another list, or text where the capture had none,
  * is a newer copy; no list at all, with nothing else shown, is unsure.
  */
@@ -233,7 +234,7 @@ const verdictOn = async <S>(
   const { cut, files, html, text } = await deps.content(snapshot);
 
   // The capture only copies: files cut since were cut by the user.
-  if (cut) {
+  if (cut === true) {
     return "newer";
   }
 
@@ -257,7 +258,12 @@ const verdictOn = async <S>(
   }
 
   if (files.length > 0) {
-    return sameFiles(files, copied.files) ? "ours" : "newer";
+    if (!sameFiles(files, copied.files)) {
+      return "newer";
+    }
+
+    // The list may be the capture's while the read hid a cut of it.
+    return cut === null ? "unsure" : "ours";
   }
 
   return words(text) !== "" && words(text) !== words(copied.text)
