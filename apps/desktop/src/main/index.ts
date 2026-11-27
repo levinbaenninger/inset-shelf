@@ -100,7 +100,7 @@ import { createDrawingSaves, sameTarget } from "./drawing-save";
 import type { DrawingTarget } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
-import { exportFileName, imageFileName } from "./export-name";
+import { imageFileName, ownFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
 import { EDITORS, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
@@ -2236,11 +2236,7 @@ const start = async (): Promise<void> => {
 
     if (attachment !== undefined && exported !== null) {
       shelf.webContents.startDrag({
-        file: staging.write(
-          folder,
-          exportFileName(attachment.name),
-          exported.png
-        ),
+        file: staging.write(folder, ownFileName(attachment.name), exported.png),
         icon: exported.image.resize({ width: 128 }),
       });
     }

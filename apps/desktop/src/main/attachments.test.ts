@@ -12,7 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachmentDeps, DecodedImage } from "./attachments";
-import { exportFileName, imageFileName } from "./export-name";
+import { imageFileName, ownFileName } from "./export-name";
 import { createShelfController } from "./shelf-controller";
 
 const uuid = (n: number) =>
@@ -348,12 +348,10 @@ describe(createAttachments, () => {
     expect(deleted).toStrictEqual(stored);
   });
 
-  it("keeps a dropped or picked picture's own name, on the shelf and when it is dragged back out", async () => {
+  it("keeps a dropped or picked picture's own name, spaces and all, on the shelf and when it is dragged back out", async () => {
     const { attachments, controller, id } = setup(0);
-
-    const op = await attachments.prepareItem(
-      "/Users/someone/Desktop/chart-sample.png"
-    );
+    const file = "/Users/someone/Desktop/chart  sample.png";
+    const op = await attachments.prepareItem(file);
 
     if ("problem" in op) {
       throw new Error(op.problem);
@@ -361,21 +359,54 @@ describe(createAttachments, () => {
 
     const added = controller.item(controller.apply(op) ?? id);
 
-    await attachments.attachFilesTo(id, [
-      "/Users/someone/Desktop/chart-sample.png",
-    ]);
+    await attachments.attachFilesTo(id, [file]);
 
     const [attached] = controller.item(id)?.attachments ?? [];
 
     expect({
       attachedDragsOutAs:
-        attached?.kind === "image" ? exportFileName(attached.name) : null,
+        attached?.kind === "image" ? ownFileName(attached.name) : null,
       itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
       itemReads: added?.kind === "image" ? added.title : null,
     }).toStrictEqual({
-      attachedDragsOutAs: "chart-sample.png",
-      itemDragsOutAs: "chart-sample.png",
-      itemReads: "chart-sample",
+      attachedDragsOutAs: "chart  sample.png",
+      itemDragsOutAs: "chart  sample.png",
+      itemReads: "chart  sample",
     });
+  });
+
+  it("drags a screenshot out under its note, as before, whatever it is titled", async () => {
+    const { attachments, controller } = setup(0);
+    const picked = await attachments.prepareItem("/Users/someone/shot.png");
+
+    if ("problem" in picked || picked.type !== "addImage") {
+      throw new Error("not a picture");
+    }
+
+    const shot = controller.apply({
+      context: null,
+      image: picked.image,
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "screenshot",
+    });
+
+    if (shot === null) {
+      throw new Error("not added");
+    }
+
+    controller.apply({ id: shot, title: "Overview", type: "setTitle" });
+    controller.apply({
+      id: shot,
+      note: "Checkout regression",
+      type: "editNote",
+    });
+
+    const item = controller.item(shot);
+
+    expect(item?.kind === "image" ? imageFileName(item) : null).toBe(
+      "Checkout regression.png"
+    );
   });
 });

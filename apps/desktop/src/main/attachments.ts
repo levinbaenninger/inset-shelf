@@ -246,6 +246,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
     return upload.kind === "image"
       ? {
           context: null,
+          fileName: upload.name,
           image: upload.image,
           pins: [],
           source: null,

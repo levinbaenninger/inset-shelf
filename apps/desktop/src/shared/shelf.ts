@@ -281,8 +281,12 @@ const PictureFields = {
 
 export type Picture = z.output<z.ZodObject<typeof PictureFields>>;
 
+export const ATTACHMENT_NAME_MAX = 255;
+
 const ImageFields = {
   ...PictureFields,
+  /** The name of the file the picture was added from, without its extension: it drags out under it. Captured and pasted pictures have none. */
+  fileName: z.string().min(1).max(ATTACHMENT_NAME_MAX).optional(),
   kind: z.literal("image"),
   note: z.string().max(TEXT_MAX),
   /** The display an area or pin was captured on. */
@@ -291,8 +295,6 @@ const ImageFields = {
   title: z.string().max(TITLE_MAX).nullable(),
   via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
 };
-
-export const ATTACHMENT_NAME_MAX = 255;
 
 export const StoredFileSchema = z.object({
   bytes: z.number().int().min(0),
@@ -804,7 +806,8 @@ export type MainOp =
   | {
       readonly type: "addImage";
       readonly image: ShelfImage;
-      /** A picture added from a file is titled with the file's name. */
+      /** A picture added from a file is titled with the file's name, and keeps it to drag out under. */
+      readonly fileName?: string;
       readonly title?: string;
       readonly scene?: DrawingScene;
       readonly pins: readonly Pin[];
@@ -1675,10 +1678,13 @@ export const applyOp = (
         via: op.via,
       };
 
+      const named =
+        op.fileName === undefined ? item : { ...item, fileName: op.fileName };
+
       // An image with no marks kept has no scene at all, as on shelves from before them.
       return addItem(
         doc,
-        op.scene === undefined ? item : { ...item, scene: op.scene }
+        op.scene === undefined ? named : { ...named, scene: op.scene }
       );
     }
 

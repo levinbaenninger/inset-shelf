@@ -8,6 +8,17 @@ const UNSAFE_FILE_CHARS = /[\\/:*?"<>|]/gu;
 const TRAILING_DOTS_AND_SPACES = /[.\s]+$/u;
 const WHITESPACE_RUN = /\s+/gu;
 
+/** `text` without control characters, and with each character a file name can't hold replaced. */
+const fileSafe = (text: string): string =>
+  Array.from(text, (char) =>
+    (char.codePointAt(0) ?? 0) < FIRST_PRINTABLE ? "" : char
+  )
+    .join("")
+    .replaceAll(UNSAFE_FILE_CHARS, "-");
+
+const pngNamed = (base: string): string =>
+  `${base === "" ? "Screen area" : base}.png`;
+
 /** Names an exported image after the first line of its note. */
 export const exportFileName = (note: string): string => {
   const line =
@@ -16,17 +27,17 @@ export const exportFileName = (note: string): string => {
       .map((text) => text.replaceAll(WHITESPACE_RUN, " ").trim())
       .find((text) => text.length > 0) ?? "";
 
-  const base = Array.from(line, (char) =>
-    (char.codePointAt(0) ?? 0) < FIRST_PRINTABLE ? "" : char
-  )
-    .join("")
-    .replaceAll(UNSAFE_FILE_CHARS, "-")
-    .slice(0, NAME_MAX)
-    .replace(TRAILING_DOTS_AND_SPACES, "");
-
-  return `${base === "" ? "Screen area" : base}.png`;
+  return pngNamed(
+    fileSafe(line).slice(0, NAME_MAX).replace(TRAILING_DOTS_AND_SPACES, "")
+  );
 };
 
-/** The file an image item is dragged out as: named as its row reads, by its title, else its note. */
+/** A picture's own name as the file it drags out as: as it is, spaces and length too, but for what no file name can hold. */
+export const ownFileName = (name: string): string =>
+  pngNamed(fileSafe(name).replace(TRAILING_DOTS_AND_SPACES, ""));
+
+/** The file an image item drags out as: the name of the file it was added from, else named after its note. */
 export const imageFileName = (item: ImageItem): string =>
-  exportFileName(item.title ?? item.note);
+  item.fileName === undefined
+    ? exportFileName(item.note)
+    : ownFileName(item.fileName);
