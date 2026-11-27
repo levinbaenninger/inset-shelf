@@ -220,3 +220,20 @@ describe("a text selection that sits beside a file URL", () => {
     });
   });
 });
+
+describe("restoring a clipboard that held files", () => {
+  it("tries again when a swallowed write left another file list there", async () => {
+    const clip = clipboard({
+      copied: [list(B)],
+      initial: [list(A)],
+      swallow: 1,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.restored).toHaveLength(2);
+    expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
