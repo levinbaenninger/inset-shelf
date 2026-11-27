@@ -45,13 +45,17 @@ const bin = path.join(work, "bin");
 const userData = path.join(work, "userData");
 const logFile = path.join(work, "events.jsonl");
 const sourceBundleId = "ch.inset.e2e.source";
-const sourceApp = path.join(bin, "source.app");
+
+// The source app lives under the repo, not in the temp folder: Launch Services
+// lists an app in a temp folder too, but never opens a scheme with it.
+const sourceHome = path.join(root, "release/e2e", path.basename(work));
+const sourceApp = path.join(sourceHome, "source.app");
 
 // The scheme the source app opens files by, as an editor does (E2E_EDITORS in src/main/e2e-log.ts).
 const sourceScheme = "inset-e2e-source";
 
 // Each address the source app was asked to open, one per line (scripts/e2e/source.swift).
-const sourceOpened = path.join(bin, "opened.txt");
+const sourceOpened = path.join(sourceHome, "opened.txt");
 
 const lsregister =
   "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
@@ -3493,6 +3497,7 @@ const main = async (): Promise<void> => {
     quitApp(app);
     await exited(app);
     spawnSync(lsregister, ["-u", sourceApp]);
+    rmSync(sourceHome, { force: true, recursive: true });
 
     // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
     if (clipboardBefore === "") {
