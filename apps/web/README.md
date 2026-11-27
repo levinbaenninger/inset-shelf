@@ -16,6 +16,8 @@ Cloudflare serves `out/` as Workers static assets (`wrangler.jsonc`, no Worker s
 - Build variable: `SKIP_DEPENDENCY_INSTALL=1`
 - Build command: `pnpm install --frozen-lockfile --filter @inset/web... && pnpm run build`
 - Deploy command: `npx wrangler deploy`
-- Build watch paths, if set: `apps/web/**`, `packages/ui/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`
+- Build watch paths: `apps/web/*`, `packages/ui/*`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`
+
+For PRs that change these inputs, the required CI job waits for Cloudflare's `Workers Builds: inset-shelf` check to succeed and publish a preview URL. Later commits on the PR can reuse that preview while the website inputs are identical. If Cloudflare never reports a build, check the branch and watch paths in Workers Builds, trigger a preview for the PR head, then rerun CI.
 
 The app windows on the page are drawn in HTML with the renderer's own classes and light theme (`components/app-ui.tsx`); compare them with `vp run screens` in `apps/desktop`. `components/react-bits/` holds the free [React Bits](https://reactbits.dev) components the page uses (Grainient, ScrollReveal, LogoLoop), installed from its shadcn registry. Their license is in `components/react-bits/LICENSE.txt`, and the site serves it at `/third-party-notices.txt`.

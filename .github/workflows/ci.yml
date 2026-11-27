@@ -16,9 +16,14 @@ permissions:
 jobs:
   quality:
     name: Lint, typecheck, test, build
+    permissions:
+      checks: read
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           node-version: 24
@@ -27,6 +32,14 @@ jobs:
       - run: vp run typecheck
       - run: vp test
       - run: vp run build
+      - name: Verify website preview
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/check-website-preview.sh "$BASE_SHA" "$HEAD_SHA"
 
   package:
     name: Package (${{ matrix.name }})
