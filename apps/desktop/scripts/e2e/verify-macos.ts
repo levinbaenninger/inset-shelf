@@ -1252,13 +1252,23 @@ const inShelf = (body: string): string => {
  * The screenshots the shelf window shows: an image item's picture is a
  * button named "Select: Screenshot", an attached one's tile a button named
  * as macOS names a screenshot ("Screenshot 2026-11-26 at 10.33.02 · Picture").
+ * Null while there is no shelf window to read: a window that isn't there
+ * never counts as one that shows none.
  */
-const shelfScreenshots = (): number =>
-  Number(
-    inShelf(
-      `String(els.filter((e) => { try { return e.role() === "AXButton" && /^(Select: Screenshot|Screenshot \\d{4}-)/u.test(e.name() ?? ""); } catch { return false; } }).length)`
-    ) || "0"
+const shelfScreenshots = (): number | null => {
+  const count = inShelf(
+    `w ? String(els.filter((e) => { try { return e.role() === "AXButton" && /^(Select: Screenshot|Screenshot \\d{4}-)/u.test(e.name() ?? ""); } catch { return false; } }).length) : ""`
   );
+
+  return count === "" ? null : Number(count);
+};
+
+/** What `shelfScreenshots` read, for a check's detail. */
+const picturesSeen = (): string => {
+  const count = shelfScreenshots();
+
+  return count === null ? "no shelf window to read" : `${count} pictures`;
+};
 
 /** The buttons in the shelf window whose name starts with `prefix`: an attachment's tile is named "<name> · Picture" or "<name> · PDF". */
 const shelfButtons = (prefix: string): number =>
@@ -1422,13 +1432,25 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
   await waitFor("screenshotShown", mark);
   enableWebAccessibility();
 
-  const offered = await clickInCard(
-    first === "shelf" ? "Add to Shelf" : itemButton
+  // Both buttons are read, not only the one pressed next: a card that offers one add alone fails here.
+  const offered = await waitUntil(() => {
+    const names = cardButtons();
+
+    return names.includes("Add to Shelf") && names.includes(itemButton);
+  }, 6000);
+
+  record(
+    `${label}: the card offers both adds`,
+    offered,
+    cardButtons().join(", ")
   );
 
-  record(`${label}: the card offers both adds`, offered);
+  if (
+    !offered ||
+    !(await clickInCard(first === "shelf" ? "Add to Shelf" : itemButton))
+  ) {
+    record(`${label}: the first add can be pressed`, false);
 
-  if (!offered) {
     return;
   }
 
@@ -1455,7 +1477,7 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
   record(
     `${label}: the shelf window shows the screenshot where the refused save put it`,
     await waitUntil(() => shelfScreenshots() === 1, 6000),
-    `${shelfScreenshots()} pictures`
+    picturesSeen()
   );
 
   const takeOff =
@@ -1469,7 +1491,7 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
   record(
     `${label}: the shelf window no longer shows the screenshot before the other add is pressed`,
     await waitUntil(() => shelfScreenshots() === 0, 6000),
-    `${shelfScreenshots()} pictures`
+    picturesSeen()
   );
 
   const both = await waitUntil(() => {
@@ -1523,7 +1545,7 @@ const rerouteDirection = async (first: "shelf" | "item"): Promise<void> => {
   record(
     `${label}: the shelf window shows the screenshot once`,
     shown === 1,
-    `${shown} pictures; banner ${windowText().includes("Not saved") ? "still says Not saved" : "gone"}`
+    `${shown ?? "no shelf window, so no"} pictures; banner ${windowText().includes("Not saved") ? "still says Not saved" : "gone"}`
   );
 
   if (shown !== 1) {
