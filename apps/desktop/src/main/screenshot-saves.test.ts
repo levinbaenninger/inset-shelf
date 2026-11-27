@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +29,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { cardAdds } from "../renderer/screenshot/card-adds";
 import { createCardClock } from "./card-clock";
+import { createDragStaging } from "./exports";
 import {
   CARD_CLEARED,
   CARD_RETARGETED,
@@ -43,6 +45,9 @@ import { createShelfController } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
 import { createShotDrop } from "./shot-drop";
 import type { ShotDropDeps } from "./shot-drop";
+
+// Staging never draws a picture.
+vi.mock(import("electron"), () => ({}));
 
 const SAVE_TOO_SLOW = "Saving didn’t finish in time.";
 
@@ -387,7 +392,7 @@ const setup = () => {
 
 /** The card's picture dropped on an item, its drag started just before, as main hands the drop to the card. */
 const dropOn = async (card: ReturnType<typeof setup>, id: ItemId) =>
-  (await card.saves.drag(1)?.onItem(id)) ?? null;
+  (await card.saves.drag(1)?.drop.onItem(id, shot(1).png)) ?? null;
 
 describe("the screenshot card's save path", () => {
   it("adds the screenshot, then the card goes once the disk holds it", async () => {
@@ -1766,9 +1771,6 @@ describe("a screenshot dropped on an item", () => {
   });
 });
 
-/** Where main stages the files the card's drags hand out. */
-const STAGING = "/var/folders/7x/T/Inset Shelf";
-
 const OTHER_FILE = "/Users/anna/Desktop/offer.pdf";
 
 /** Where macOS saved the card's screenshot: the user's own file, which they can edit and drag in from Finder. */
@@ -1780,11 +1782,15 @@ const PLAIN: AttachResult = {
   message: null,
 };
 
-/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, what the card said it added, and what failed on the way. The card's drags stage their files under STAGING, unless `deps` says otherwise. */
+/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, what the card said it added, and what failed on the way. The card's drags stage their copies on disk as main stages them, unless `deps` says otherwise, and `quit` sweeps them as main does at quit. */
 const dropping = (
   card: ReturnType<typeof setup>,
   deps: Partial<ShotDropDeps<CardShot>> = {}
 ) => {
+  const staging = createDragStaging(
+    mkdtempSync(path.join(tmpdir(), "inset-temp-"))
+  );
+
   const plain: unknown[] = [];
   const added: (readonly [ShotSaveTo, ItemId])[] = [];
   const dropped: ShotSaveTo[] = [];
@@ -1814,12 +1820,23 @@ const dropping = (
       dropped.push(to);
     },
     saves: card.saves,
-    stage: (_, folder, name) => path.join(STAGING, folder, name),
-    unstage: () => {},
+    stage: (each, folder, name) => staging.write(folder, name, each.png),
+    unstage: (folder) => {
+      staging.clear(folder);
+    },
     ...deps,
   });
 
-  return { added, drop, dropped, failed, plain };
+  return {
+    added,
+    drop,
+    dropped,
+    failed,
+    plain,
+    quit: () => {
+      staging.clear();
+    },
+  };
 };
 
 describe("the card's file dropped on the shelf", () => {
@@ -2037,13 +2054,13 @@ describe("the card's file dropped on the shelf", () => {
     expect({
       added,
       dropped,
-      file,
+      handedOut: file !== USER_FILE,
       plain,
       save: card.view()?.save,
     }).toStrictEqual({
       added: [],
       dropped: [],
-      file: path.join(STAGING, "screenshot-drag-1", "Screenshot.png"),
+      handedOut: true,
       plain: [{ call: "attachFiles", id: card.note, paths: [USER_FILE] }],
       save: { state: "idle" },
     });
@@ -2158,11 +2175,12 @@ describe("the card's file dropped on the shelf", () => {
     card.saves.show(shot(1));
 
     const { drop } = dropping(card);
+    const files = [drop.drag(1)?.file ?? "", drop.drag(1)?.file ?? ""];
 
-    expect([drop.drag(1)?.file, drop.drag(1)?.file]).toStrictEqual([
-      path.join(STAGING, "screenshot-drag-1", "Screenshot.png"),
-      path.join(STAGING, "screenshot-drag-2", "Screenshot.png"),
-    ]);
+    expect({
+      apart: new Set(files.map((each) => path.dirname(each))).size,
+      names: files.map((each) => path.basename(each)),
+    }).toStrictEqual({ apart: 2, names: ["Screenshot.png", "Screenshot.png"] });
   });
 
   it("imports no second copy when an earlier drag's drop on an item reaches main after a newer screenshot's drag started, its path spelled another way", async () => {
@@ -2212,23 +2230,6 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 
-  it("forgets a drag once two newer drags started, so its file takes the shelf's plain route", async () => {
-    const card = setup();
-
-    card.saves.show(shot(1));
-
-    const { drop, dropped, plain } = dropping(card);
-    const first = drop.drag(1)?.file ?? "";
-
-    drop.drag(1);
-    drop.drag(1);
-    await drop.onItem(card.note, [first]);
-    expect({ dropped, plain }).toStrictEqual({
-      dropped: [],
-      plain: [{ call: "attachFiles", id: card.note, paths: [first] }],
-    });
-  });
-
   it("removes a drag's file once its drop came back to the shelf, and keeps the file of a drag that went elsewhere, which another app may still read", async () => {
     const card = setup();
     const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
@@ -2267,12 +2268,8 @@ describe("the card's file dropped on the shelf", () => {
 
     const { drop } = dropping(card);
 
-    expect(drop.drag(1)?.file).toBe(
-      path.join(
-        STAGING,
-        "screenshot-drag-1",
-        "Capture 2026-11-25 at 10.00.00.png"
-      )
+    expect(path.basename(drop.drag(1)?.file ?? "")).toBe(
+      "Capture 2026-11-25 at 10.00.00.png"
     );
   });
 
@@ -2319,6 +2316,131 @@ describe("the card's file dropped on the shelf", () => {
     await drop.onItem(card.note, [realpathSync.native(file)]);
     await vi.waitFor(() => {
       expect(added).toStrictEqual([["item", card.note]]);
+    });
+  });
+});
+
+describe("a drag's copy of the card's screenshot on disk", () => {
+  it.each(["item", "shelf"] as const)(
+    "gives a replaced, unplaced screenshot its one place when its drop on the %s reaches main after two drags of the newer one",
+    async (to) => {
+      const card = setup();
+
+      await card.controller.flush();
+      card.saves.show(shot(1));
+
+      const { added, drop, plain } = dropping(card);
+      const file = drop.drag(1)?.file ?? "";
+
+      // Clipboard screenshot B replaces A on the card, and two drags of B start and are canceled before the shelf hands main A's drop.
+      card.saves.show(shot(2));
+      drop.drag(2);
+      drop.drag(2);
+
+      if (to === "item") {
+        await drop.onItem(card.note, [file]);
+      } else {
+        drop.onShelf([file]);
+      }
+
+      await vi.waitFor(() => {
+        expect(added).toHaveLength(1);
+      });
+      await settled(card);
+      expect({
+        added,
+        notices: card.notices,
+        plain,
+        written: written(card),
+      }).toStrictEqual({
+        added: [[to, to === "item" ? card.note : rowOf(card)]],
+        notices: [],
+        plain: [],
+        written: {
+          doubled: [],
+          last:
+            to === "item"
+              ? { attached: 1, items: 0 }
+              : { attached: 0, items: 1 },
+        },
+      });
+    }
+  );
+
+  it("says the screenshot is already on the shelf, and imports no second copy, when its copy comes back after two drags of a newer one", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain } = dropping(card);
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+    // The pill reads Saving…, and the picture is dragged onto the note.
+    const file = drop.drag(1)?.file ?? "";
+
+    end({ ok: true });
+    await adding;
+    card.saves.show(shot(2));
+    drop.drag(2);
+    drop.drag(2);
+    await drop.onItem(card.note, [file]);
+    await settled(card);
+    expect({
+      added,
+      notices: card.notices,
+      plain,
+      shown: card.shown(),
+      written: written(card),
+    }).toStrictEqual({
+      added: [],
+      notices: [SHOT_ON_SHELF],
+      plain: [],
+      shown: { attached: 0, items: 1 },
+      written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("imports no second copy when a saved screenshot's copy comes back through a link to its folder from elsewhere, after two drags of a newer one", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain } = dropping(card);
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+    const file = drop.drag(1)?.file ?? "";
+
+    end({ ok: true });
+    await adding;
+    card.saves.show(shot(2));
+    drop.drag(2);
+    drop.drag(2);
+
+    // A link on the Desktop to the folder the drags stage their copies in.
+    const root = path.dirname(path.dirname(file));
+
+    const link = path.join(
+      mkdtempSync(path.join(tmpdir(), "inset-desktop-")),
+      "stage-link"
+    );
+
+    symlinkSync(root, link, "junction");
+    await drop.onItem(card.note, [path.join(link, path.relative(root, file))]);
+    await settled(card);
+    expect({
+      added,
+      notices: card.notices,
+      plain,
+      shown: card.shown(),
+      written: written(card),
+    }).toStrictEqual({
+      added: [],
+      notices: [SHOT_ON_SHELF],
+      plain: [],
+      shown: { attached: 0, items: 1 },
+      written: { doubled: [], last: { attached: 0, items: 1 } },
     });
   });
 });
