@@ -12,6 +12,7 @@ import type { Picture } from "@shared/shelf";
 import { nativeImage } from "electron";
 import type { NativeImage } from "electron";
 
+import { onDisk } from "./on-disk";
 import { drawPinMarks } from "./pin-mark";
 import { FsErrorSchema } from "./save-error";
 
@@ -76,9 +77,9 @@ export const createDragStaging = (tempDir: string) => {
   const roots = [root, path.join(realpathSync.native(tempDir), "Inset Shelf")];
 
   return {
-    /** True for a file this staging wrote, however the drop spells its path, so a drag back onto the shelf is not added twice. */
+    /** True for a file this staging wrote, however the drop spells its path, through any link, so a drag back onto the shelf is not added twice. */
     contains: (file: string): boolean => {
-      const where = path.resolve(file);
+      const where = onDisk(file);
 
       return roots.some((each) => where.startsWith(`${each}${path.sep}`));
     },

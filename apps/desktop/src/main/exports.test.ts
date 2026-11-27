@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdtempSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -40,6 +41,36 @@ describe(createDragStaging, () => {
       real: staging.contains(realpathSync.native(file)),
       written: staging.contains(file),
     }).toStrictEqual({ other: false, real: true, written: true });
+  });
+
+  it("knows its own file dropped through a link to its folder from elsewhere, and a file of its own already removed", () => {
+    const staging = createDragStaging(
+      mkdtempSync(path.join(tmpdir(), "inset-staging-"))
+    );
+
+    const file = staging.write(
+      "item-1",
+      "Offer.png",
+      new Uint8Array([137, 80, 78, 71])
+    );
+
+    // A link on the Desktop to the shelf's staging folder: a drop names the file through it.
+    const root = path.dirname(path.dirname(file));
+
+    const link = path.join(
+      mkdtempSync(path.join(tmpdir(), "inset-desktop-")),
+      "stage-link"
+    );
+
+    symlinkSync(root, link, "junction");
+
+    const linked = staging.contains(path.join(link, "item-1", "Offer.png"));
+
+    rmSync(file);
+    expect({ linked, removed: staging.contains(file) }).toStrictEqual({
+      linked: true,
+      removed: true,
+    });
   });
 });
 
