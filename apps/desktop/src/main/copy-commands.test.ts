@@ -1268,6 +1268,116 @@ describe(createCopyCommands, () => {
     });
   });
 
+  /** Selections as another app copied them: Copy gives them back unread, with no format left empty. */
+  const CAPTURES: readonly {
+    readonly text: string;
+    readonly html: string | null;
+  }[] = [
+    { html: null, text: "__init__" },
+    { html: null, text: "  return value\n" },
+    { html: null, text: "def __init__(self):\n    self.x = 1\n" },
+    { html: null, text: "[endpoint]: https://example.com" },
+    { html: null, text: "https://example.com\n" },
+    { html: "<b>__init__</b>", text: "__init__\n" },
+  ];
+
+  it.each(CAPTURES)(
+    "copies the selection $text exactly as it was copied",
+    async ({ html, text }) => {
+      const { commands, controller, written } = await setup();
+
+      const id = added(
+        controller.apply({
+          context: null,
+          html,
+          text,
+          type: "addText",
+          via: "selection",
+        })
+      );
+
+      await commands.copy(id);
+
+      await expect(formats(written[0]?.[0])).resolves.toStrictEqual(
+        html === null
+          ? { "text/plain": text }
+          : { "text/html": html, "text/plain": text }
+      );
+    }
+  );
+
+  it("copies a selection's words unread with its details, as a list and with its link", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: null,
+        html: null,
+        text: "__init__",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    controller.apply({ description: "Rename it", id, type: "setDescription" });
+
+    await commands.copyDetails(id);
+    await commands.copyList([id]);
+    await commands.copyWithLink(id);
+
+    const [details, list, withLink] = await Promise.all(
+      written.map(async (contents) => await formats(contents[0]))
+    );
+
+    expect({ details, list, withLink }).toStrictEqual({
+      details: { "text/plain": "__init__\n\nRename it" },
+      list: {
+        "text/html": "<ol><li>__init__<br>Rename it</li></ol>",
+        "text/plain": "1. __init__\n   Rename it",
+      },
+      withLink: { "text/plain": "__init__\n\nRename it" },
+    });
+  });
+
+  it("copies a selection edited in the shelf as the shelf shows it", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: null,
+        html: null,
+        text: "__init__",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    controller.apply({ id, text: "**init** runs", type: "editText" });
+
+    await commands.copy(id);
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<p><strong>init</strong> runs</p>",
+      "text/plain": "init runs",
+    });
+  });
+
+  it("copies a note the shelf shows as nothing as it was typed, with no empty format", async () => {
+    const { commands, controller, items, written } = await setup();
+
+    controller.apply({
+      id: items.text,
+      text: "[endpoint]: https://example.com",
+      type: "editText",
+    });
+
+    await commands.copy(items.text);
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "[endpoint]: https://example.com",
+    });
+  });
+
   it("says when the item has gone and copies nothing", async () => {
     const { commands, controller, items, written } = await setup();
 

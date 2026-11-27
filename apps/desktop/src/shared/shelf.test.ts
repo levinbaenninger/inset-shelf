@@ -534,6 +534,30 @@ describe("selections with links", () => {
     ).toBe(url);
   });
 
+  it.each(["__init__", "  return value\n", "[endpoint]: https://example.com"])(
+    "drags the selection %j out exactly as it was copied, and as the shelf shows it once edited",
+    (text) => {
+      const { doc } = apply(emptyShelf(INBOX), [
+        { context: null, html: null, text, type: "addText", via: "selection" },
+      ]);
+
+      const [item] = doc.items;
+
+      if (item === undefined) {
+        throw new Error("missing item");
+      }
+
+      const [edited] = apply(doc, [
+        { id: item.id, text: "**init** runs", type: "editText" },
+      ]).doc.items;
+
+      expect([itemText(item), itemText(edited ?? item)]).toStrictEqual([
+        text,
+        "init runs",
+      ]);
+    }
+  );
+
   it("drops the copied HTML once the text is edited", () => {
     const added = apply(emptyShelf(INBOX), [
       {
