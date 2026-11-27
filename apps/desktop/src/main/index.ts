@@ -837,18 +837,15 @@ const start = async (): Promise<void> => {
     place: CodePlace,
     text: string | null
   ): Promise<void> => {
-    const at = {
-      ...place,
-      line: text === null ? null : await lineInFile(place.file, text, codeDisk),
-    };
-
-    await openCode(name, at, EDITORS, {
+    await openCode(name, place, text, EDITORS, {
       bringForward: async (address) => {
         const editor = await app.getApplicationInfoForProtocol(address);
 
         openAppAt(editor.path);
       },
       fileIsThere: async (file) => await fileIsThere(file, codeDisk),
+      lineOf: async (file, captured) =>
+        await lineInFile(file, captured, codeDisk),
       notify: (message) => {
         notify(message, "failed");
       },

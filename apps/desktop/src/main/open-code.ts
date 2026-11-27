@@ -1,6 +1,10 @@
 import { codeEditor, openAddress } from "@shared/code-editors";
 import type { CodeEditor } from "@shared/code-editors";
-import { fellBackMessage, goneMessage } from "@shared/code-place";
+import {
+  fellBackMessage,
+  goneMessage,
+  isCapturedText,
+} from "@shared/code-place";
 import type { CodePlace } from "@shared/code-place";
 
 import type { QuietDisk } from "./quiet-disk";
@@ -9,6 +13,8 @@ import type { QuietDisk } from "./quiet-disk";
 export interface CodeSystem {
   /** Whether the file is still at its path, as far as Inset may look. */
   readonly fileIsThere: (file: string) => Promise<boolean>;
+  /** The line `captured` begins on in `file` now, when it is there once (src/main/code-line.ts); else null. */
+  readonly lineOf: (file: string, captured: string) => Promise<number | null>;
   /** Whether an app on this computer takes the address's scheme. */
   readonly registered: (address: string) => boolean;
   /** Opens an address `openAddress` built, in the app that registered its scheme. */
@@ -21,18 +27,42 @@ export interface CodeSystem {
 }
 
 /**
- * Opens a code item's file in its editor, at its line when one is given.
- * Only an item whose app has a row among `editors` starts anything: for any
- * other app nothing is looked at, opened or shown. Only an address the row
- * builds opens, and only when its scheme is registered here. A file no
- * address opens as itself is shown in its folder, as its tooltip says. When
- * the editor was to open it and can't, the file is shown in its folder and
- * the shelf says so. A file that is gone opens nothing: the shelf says so
- * and the editor comes forward.
+ * The line to open a code item's file at: where its words are in the file
+ * now, looked for only while `text` is still the text it was captured with.
+ * An item edited since, or one saved before its words were marked, opens
+ * at no line, as does one whose words are not there once or can't be read.
+ */
+const lineToOpen = async (
+  place: CodePlace,
+  text: string | null,
+  system: CodeSystem
+): Promise<number | null> => {
+  if (text === null || !isCapturedText(place, text)) {
+    return null;
+  }
+
+  try {
+    return await system.lineOf(place.file, text);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Opens a code item's file in its editor, at the line its words are on now
+ * when it holds the words it was captured with (`text`). Only an item whose
+ * app has a row among `editors` starts anything: for any other app nothing
+ * is looked at, opened or shown. Only an address the row builds opens, and
+ * only when its scheme is registered here; only then is the file read for
+ * its line. A file no address opens as itself is shown in its folder, as its
+ * tooltip says. When the editor was to open it and can't, the file is shown
+ * in its folder and the shelf says so. A file that is gone opens nothing:
+ * the shelf says so and the editor comes forward.
  */
 export const openCode = async (
   app: string | null,
   place: CodePlace,
+  text: string | null,
   editors: readonly CodeEditor[],
   system: CodeSystem
 ): Promise<void> => {
@@ -42,7 +72,7 @@ export const openCode = async (
     return;
   }
 
-  const built = openAddress(editor, place, place.line);
+  const built = openAddress(editor, place, null);
   const address = built !== null && system.registered(built) ? built : null;
 
   if (!(await system.fileIsThere(place.file))) {
@@ -63,8 +93,10 @@ export const openCode = async (
   }
 
   if (address !== null) {
+    const line = await lineToOpen(place, text, system);
+
     try {
-      await system.open(address);
+      await system.open(openAddress(editor, place, line) ?? address);
 
       return;
     } catch {

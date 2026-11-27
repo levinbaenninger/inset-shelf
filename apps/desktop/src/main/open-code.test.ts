@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { CODE_EDITORS } from "@shared/code-editors";
+import { textMark } from "@shared/code-place";
 import type { CodePlace } from "@shared/code-place";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -11,12 +12,19 @@ import type { CodeSystem } from "./open-code";
 import { quietDisk } from "./quiet-disk";
 
 /** What the shelf says when the editor was to open the file: what it tries next, since a reveal can't report that it failed. */
+/** What the system is asked when the item's words are looked for in its file. */
+const LOOK = "look for retry(1); in /Users/anna/My Code/proj/a.ts";
+
 const FELL_BACK =
   "say Couldn’t open a.ts in Code, so Inset tries to show it in its folder";
 
+/** The words the item was captured with: on line 12 of its file now. */
+const CAPTURED = "retry(1);";
+
 const PLACE: CodePlace = {
   file: "/Users/anna/My Code/proj/a.ts",
-  line: 12,
+  line: null,
+  mark: textMark(CAPTURED),
   root: "/Users/anna/My Code/proj",
 };
 
@@ -34,6 +42,11 @@ const system = (
       await Promise.resolve();
     },
     fileIsThere: async () => await Promise.resolve(there),
+    lineOf: async (file, captured) => {
+      asked.push(`look for ${captured} in ${file}`);
+
+      return await Promise.resolve(captured === CAPTURED ? 12 : null);
+    },
     notify: (message) => {
       asked.push(`say ${message}`);
     },
@@ -53,7 +66,7 @@ describe(openCode, () => {
   it("tries to show the file in its folder, and says so, when its editor refuses to open it", async () => {
     const mac = system(true, ["vscode"]);
 
-    await openCode("Code", PLACE, CODE_EDITORS, {
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, {
       ...mac,
       open: async () => {
         await Promise.reject(new Error("the handler is gone"));
@@ -61,6 +74,7 @@ describe(openCode, () => {
     });
 
     expect(mac.asked).toStrictEqual([
+      LOOK,
       FELL_BACK,
       "reveal /Users/anna/My Code/proj/a.ts",
     ]);
@@ -69,7 +83,7 @@ describe(openCode, () => {
   it("still says a file is gone when its editor can't be brought forward", async () => {
     const mac = system(false, ["vscode"]);
 
-    await openCode("Code", PLACE, CODE_EDITORS, {
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, {
       ...mac,
       bringForward: async () => {
         await Promise.reject(new Error("no such app"));
@@ -79,20 +93,58 @@ describe(openCode, () => {
     expect(mac.asked).toStrictEqual(["say a.ts is no longer at this path"]);
   });
 
-  it("opens the file in its editor at its line", async () => {
+  it("opens the file in its editor at the line its captured words are on now", async () => {
     const mac = system(true, ["vscode"]);
 
-    await openCode("Code", PLACE, CODE_EDITORS, mac);
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual([
+      LOOK,
       "open vscode://file/Users/anna/My%20Code/proj/a.ts:12",
     ]);
   });
 
-  it("opens the file alone when no line is stored", async () => {
+  it.each([
+    ["its words were edited since the capture", PLACE, "other();"],
+    [
+      "it was saved before its words were marked",
+      { ...PLACE, mark: undefined },
+      CAPTURED,
+    ],
+    ["it holds no words", PLACE, null],
+  ])(
+    "opens the file alone, looking for no line, when %s",
+    async (_, place, text) => {
+      const mac = system(true, ["vscode"]);
+
+      await openCode("Code", place, text, CODE_EDITORS, mac);
+
+      expect(mac.asked).toStrictEqual([
+        "open vscode://file/Users/anna/My%20Code/proj/a.ts",
+      ]);
+    }
+  );
+
+  it("opens the file alone when its words are not found once in it", async () => {
     const mac = system(true, ["vscode"]);
 
-    await openCode("Code", { ...PLACE, line: null }, CODE_EDITORS, mac);
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, {
+      ...mac,
+      lineOf: async () => await Promise.resolve(null),
+    });
+
+    expect(mac.asked).toStrictEqual([
+      "open vscode://file/Users/anna/My%20Code/proj/a.ts",
+    ]);
+  });
+
+  it("opens the file alone when the look for its line fails", async () => {
+    const mac = system(true, ["vscode"]);
+
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, {
+      ...mac,
+      lineOf: async () => await Promise.reject(new Error("no")),
+    });
 
     expect(mac.asked).toStrictEqual([
       "open vscode://file/Users/anna/My%20Code/proj/a.ts",
@@ -102,7 +154,7 @@ describe(openCode, () => {
   it("tries to show the file in its folder, and says so, when no app on this computer takes the editor's address", async () => {
     const mac = system(true, []);
 
-    await openCode("Code", PLACE, CODE_EDITORS, mac);
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual([FELL_BACK, `reveal ${PLACE.file}`]);
   });
@@ -115,7 +167,7 @@ describe(openCode, () => {
     async (_, file) => {
       const mac = system(true, ["vscode"]);
 
-      await openCode("Code", { ...PLACE, file }, CODE_EDITORS, mac);
+      await openCode("Code", { ...PLACE, file }, CAPTURED, CODE_EDITORS, mac);
 
       expect(mac.asked).toStrictEqual([`reveal ${file}`]);
     }
@@ -131,7 +183,7 @@ describe(openCode, () => {
       const mac = system(true, ["vscode", "zed"]);
       const known = app === "Code" ? [] : CODE_EDITORS;
 
-      await openCode(app, PLACE, known, {
+      await openCode(app, PLACE, CAPTURED, known, {
         ...mac,
         fileIsThere: async (file) => {
           mac.asked.push(`look ${file}`);
@@ -147,7 +199,7 @@ describe(openCode, () => {
   it("says a file that is gone is gone, and brings its editor forward", async () => {
     const mac = system(false, ["vscode"]);
 
-    await openCode("Code", PLACE, CODE_EDITORS, mac);
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual([
       "say a.ts is no longer at this path",
@@ -167,7 +219,7 @@ describe(openCode, () => {
     async (_, file, name) => {
       const mac = system(false, ["vscode"]);
 
-      await openCode("Code", { ...PLACE, file }, CODE_EDITORS, mac);
+      await openCode("Code", { ...PLACE, file }, CAPTURED, CODE_EDITORS, mac);
 
       expect(mac.asked).toStrictEqual([
         `say ${name} is no longer at this path`,
@@ -179,7 +231,7 @@ describe(openCode, () => {
   it("only says a file is gone when no app takes the editor's address", async () => {
     const mac = system(false, []);
 
-    await openCode("Code", PLACE, CODE_EDITORS, mac);
+    await openCode("Code", PLACE, CAPTURED, CODE_EDITORS, mac);
 
     expect(mac.asked).toStrictEqual(["say a.ts is no longer at this path"]);
   });
