@@ -9168,6 +9168,57 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-search-down-drops-picks",
     page: "shelf",
   },
+  {
+    // ↓ from the search gives the keyboard to the first result's row, and the list's own ↓ and ↑ carry it on, so Tab goes on from the result, not from the search.
+    act: async (page) => {
+      await searchFor(page, "the");
+      await page.keyboard.press("ArrowDown");
+    },
+    check: async (page) => {
+      const results = await page
+        .locator("[data-item-id]")
+        .evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-item-id") ?? "")
+        );
+
+      const steps: readonly (readonly [string, string | undefined])[] = [
+        ["↓ from the search", results[0]],
+        ["↓", results[1]],
+        ["↑", results[0]],
+      ];
+
+      for (const [index, [key, row]] of steps.entries()) {
+        if (index > 0) {
+          await page.keyboard.press(key === "↓" ? "ArrowDown" : "ArrowUp");
+        }
+
+        // The row takes the keyboard a frame after it is selected.
+        await page.waitForTimeout(50);
+
+        const place = await keyboardPlace(page);
+
+        if (place.row !== row) {
+          return `${key} left focus on ${placeText(place)}${place.row === "" ? "" : ` in row ${place.row}`}, not on row ${String(row)}`;
+        }
+      }
+
+      await page.keyboard.press("Tab");
+
+      const tabbed = await page.evaluate(() => ({
+        header: document.activeElement?.closest("header") !== null,
+        row:
+          document.activeElement?.closest<HTMLElement>("[data-item-id]")
+            ?.dataset.itemId ?? "",
+      }));
+
+      return tabbed.row === results[0] && !tabbed.header
+        ? null
+        : `Tab after ↓ from the search went to ${tabbed.header ? "the search bar" : `row “${tabbed.row}”`}, not on from the first result`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-focuses-result",
+    page: "shelf",
+  },
 ];
 
 /** ⌘F and words typed in the search field. */
