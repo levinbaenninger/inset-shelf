@@ -21,7 +21,7 @@ Only repository collaborators can open pull requests. Anyone can [report a bug o
    ```
 
 3. Open a PR against `main`. Describe the user-visible change, the commands you ran, and which platform you tried. For capture or clipboard changes, the [desktop verification instructions](#verify-on-the-real-macos-desktop) describe the permissions and clipboard effects of the macOS test.
-4. Before merge, bring the branch up to date with `main`, resolve review conversations, and obtain one approving review. Pushing code changes dismisses earlier approvals. CI also builds the macOS and Windows packages.
+4. Before merge, bring the branch up to date with `main`, resolve review conversations, and obtain one approving review. Pushing code changes dismisses earlier approvals. The macOS and Windows packages and the Cloudflare website preview must pass for the latest commit, including on docs-only changes.
 
 Contributions to the project's own code use the [MIT license](LICENSE). When bringing in third-party code or assets, identify their source and include their license notices. The [code of conduct](CODE_OF_CONDUCT.md) applies to issues and pull requests.
 
