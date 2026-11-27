@@ -1726,8 +1726,8 @@ describe("a screenshot dropped on an item", () => {
   });
 });
 
-/** The file the card's drag handed out, as main stages it. */
-const CARD_FILE = "/var/folders/7x/T/Inset Shelf/screenshot-1/Screenshot.png";
+/** Where main stages the files the card's drags hand out. */
+const STAGING = "/var/folders/7x/T/Inset Shelf";
 
 const OTHER_FILE = "/Users/anna/Desktop/offer.pdf";
 
@@ -1740,7 +1740,7 @@ const PLAIN: AttachResult = {
   message: null,
 };
 
-/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, what the card said it added, and what failed on the way. The card's drag hands out CARD_FILE, unless `deps` says otherwise. */
+/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, what the card said it added, and what failed on the way. The card's drags stage their files under STAGING, unless `deps` says otherwise. */
 const dropping = (
   card: ReturnType<typeof setup>,
   deps: Partial<ShotDropDeps<Shot>> = {}
@@ -1774,7 +1774,7 @@ const dropping = (
       dropped.push(to);
     },
     saves: card.saves,
-    stage: () => CARD_FILE,
+    stage: (_, folder) => path.join(STAGING, folder, "Screenshot.png"),
     ...deps,
   });
 
@@ -1789,10 +1789,10 @@ describe("the card's file dropped on the shelf", () => {
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    expect(drop.drag(1)?.file).toBe(CARD_FILE);
+    const file = drop.drag(1)?.file ?? "";
 
     // The shelf's drop says nothing: the card says how it went.
-    await expect(drop.onItem(card.note, [CARD_FILE])).resolves.toStrictEqual({
+    await expect(drop.onItem(card.note, [file])).resolves.toStrictEqual({
       attached: [],
       message: null,
     });
@@ -1823,10 +1823,10 @@ describe("the card's file dropped on the shelf", () => {
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    drop.drag(1);
+    const file = drop.drag(1)?.file ?? "";
 
     await expect(drop.onItem(card.note, [OTHER_FILE])).resolves.toBe(PLAIN);
-    await expect(drop.onItem(card.note, [CARD_FILE, OTHER_FILE])).resolves.toBe(
+    await expect(drop.onItem(card.note, [file, OTHER_FILE])).resolves.toBe(
       PLAIN
     );
     drop.onShelf([OTHER_FILE]);
@@ -1845,7 +1845,7 @@ describe("the card's file dropped on the shelf", () => {
       dropped: [],
       plain: [
         { call: "attachFiles", id: card.note, paths: [OTHER_FILE] },
-        { call: "attachFiles", id: card.note, paths: [CARD_FILE, OTHER_FILE] },
+        { call: "attachFiles", id: card.note, paths: [file, OTHER_FILE] },
         { call: "addFiles", paths: [OTHER_FILE] },
       ],
       save: { state: "idle" },
@@ -1978,7 +1978,7 @@ describe("the card's file dropped on the shelf", () => {
     }).toStrictEqual({
       added: [],
       dropped: [],
-      file: CARD_FILE,
+      file: path.join(STAGING, "screenshot-drag-1", "Screenshot.png"),
       plain: [{ call: "attachFiles", id: card.note, paths: [USER_FILE] }],
       save: { state: "idle" },
     });
@@ -1991,8 +1991,7 @@ describe("the card's file dropped on the shelf", () => {
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    drop.drag(1);
-    drop.onShelf([CARD_FILE]);
+    drop.onShelf([drop.drag(1)?.file ?? ""]);
     await vi.waitFor(() => {
       expect(added).toHaveLength(1);
     });
@@ -2086,6 +2085,19 @@ describe("the card's file dropped on the shelf", () => {
       failed: [["drag", "The disk is full."]],
       save: { state: "idle" },
     });
+  });
+
+  it("hands out a file of its own for each drag, so a second drag of one card never reuses the first one's", () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { drop } = dropping(card);
+
+    expect([drop.drag(1)?.file, drop.drag(1)?.file]).toStrictEqual([
+      path.join(STAGING, "screenshot-drag-1", "Screenshot.png"),
+      path.join(STAGING, "screenshot-drag-2", "Screenshot.png"),
+    ]);
   });
 
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {

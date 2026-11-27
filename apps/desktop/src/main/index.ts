@@ -2266,8 +2266,7 @@ const start = async (): Promise<void> => {
       e2eLog("shotDropped", { to });
     },
     saves: shotSaves,
-    stage: (shot) =>
-      staging.write(`screenshot-${shot.seq}`, shot.name, shot.png),
+    stage: (shot, folder) => staging.write(folder, shot.name, shot.png),
   });
 
   const attachmentHandlers = {
