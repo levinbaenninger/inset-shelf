@@ -1958,7 +1958,7 @@ const shelfMenuChordsCheck = async (
     return `${mod}+/ in ${where} didn't show Keyboard Shortcuts`;
   }
 
-  await page.keyboard.press("Escape");
+  await sheet.getByRole("button", { name: "Close" }).click();
   await sheet.waitFor({ state: "detached" });
 
   const before = await callCount(page);

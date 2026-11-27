@@ -1341,6 +1341,16 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         break;
       }
 
+      case "newWindowLink": {
+        api.newWindowLink();
+        break;
+      }
+
+      case "shortcuts": {
+        setSheetOpen(true);
+        break;
+      }
+
       case "copyList": {
         void copyList(doc.items.filter((item) => choice.ids.includes(item.id)));
         break;

@@ -26,6 +26,8 @@ export type MenuChoice =
   | { readonly kind: "renameSection"; readonly id: SectionId }
   | { readonly kind: "removeSection"; readonly id: SectionId }
   | { readonly kind: "newSection" }
+  | { readonly kind: "newWindowLink" }
+  | { readonly kind: "shortcuts" }
   | { readonly kind: "openSettings" }
   | { readonly kind: "setFloatOnTop"; readonly on: boolean }
   | { readonly kind: "openHelp" }
@@ -502,32 +504,51 @@ export const pressesAccelerator = (
   );
 };
 
+/** A key a menu answers without an entry that shows it. */
+export interface MenuKey {
+  readonly accelerator: string;
+  readonly choice: MenuChoice;
+}
+
 /**
- * The choice a key press runs while an item's menu is open: the entry that
- * shows that key, for the item the menu belongs to, whichever entry is
- * highlighted. A held key acts once.
+ * The shelf's own keys for what its menu no longer lists: a window link (+,
+ * the File menu) and Keyboard Shortcuts (the Help menu, the tray). They still
+ * work while the menu is open.
+ */
+export const SHELF_MENU_KEYS: readonly MenuKey[] = [
+  {
+    accelerator: "Shift+CommandOrControl+L",
+    choice: { kind: "newWindowLink" },
+  },
+  { accelerator: "CommandOrControl+/", choice: { kind: "shortcuts" } },
+];
+
+/**
+ * The choice a key press runs while a menu is open: the entry that shows
+ * that key, for the item the menu belongs to, whichever entry is
+ * highlighted, or else one of the menu's unseen `keys`. A held key acts once.
  */
 export const menuChoiceForKey = (
   entries: readonly MenuEntry[],
   press: MenuKeyPress,
-  mac: boolean
+  mac: boolean,
+  keys: readonly MenuKey[] = []
 ): MenuChoice | null => {
   if (press.repeat) {
     return null;
   }
 
-  for (const entry of entries) {
-    if (
-      entry.kind === "choice" &&
-      entry.enabled &&
-      entry.accelerator !== undefined &&
-      pressesAccelerator(press, entry.accelerator, mac)
-    ) {
-      return entry.choice;
-    }
-  }
+  const shown = entries.flatMap((entry) =>
+    entry.kind === "choice" && entry.enabled && entry.accelerator !== undefined
+      ? [{ accelerator: entry.accelerator, choice: entry.choice }]
+      : []
+  );
 
-  return null;
+  return (
+    [...shown, ...keys].find((key) =>
+      pressesAccelerator(press, key.accelerator, mac)
+    )?.choice ?? null
+  );
 };
 
 const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift", "AltGraph"]);

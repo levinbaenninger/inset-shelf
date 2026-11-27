@@ -33,6 +33,7 @@ import {
   menuChoiceForKey,
   pickedMenu,
   sectionMenu,
+  SHELF_MENU_KEYS,
   shelfMenu,
 } from "@shared/menus";
 import type {
@@ -40,6 +41,7 @@ import type {
   MenuChoice,
   MenuEntry,
   MenuIcon,
+  MenuKey,
 } from "@shared/menus";
 import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
@@ -219,17 +221,20 @@ const keepFocus = (event: Event): void => {
 
 /**
  * A menu's content, showing one group's entries in place when it is opened.
- * With `onKey`, the keys its entries show run them for the menu's item from
- * any page of the menu, "Move to" included, whichever entry is highlighted.
- * Return and Space choose the highlighted entry, on either page.
+ * With `onKey`, the keys its entries show, and its unseen `keys`, run them
+ * for the menu's item from any page of the menu, "Move to" included,
+ * whichever entry is highlighted. Return and Space choose the highlighted
+ * entry, on either page.
  */
 const MenuContent = ({
   entries,
+  keys,
   onChoose,
   onKey,
   ...props
 }: {
   readonly entries: readonly MenuEntry[];
+  readonly keys?: readonly MenuKey[];
   readonly onChoose: (choice: MenuChoice) => void;
   readonly onKey?: (choice: MenuChoice) => void;
 } & Omit<ComponentProps<typeof DropdownMenuContent>, "children">) => {
@@ -271,7 +276,9 @@ const MenuContent = ({
     }
 
     const choice =
-      onKey === undefined ? null : menuChoiceForKey(entries, event, isMac);
+      onKey === undefined
+        ? null
+        : menuChoiceForKey(entries, event, isMac, keys);
 
     if (choice !== null) {
       event.preventDefault();
@@ -432,6 +439,7 @@ export const PointerMenu = ({
         <MenuContent
           align={menu?.align ?? "start"}
           entries={entries}
+          keys={menu?.target.kind === "shelf" ? SHELF_MENU_KEYS : undefined}
           // A new target starts on the first page of its menu.
           key={
             menu === null
@@ -470,16 +478,25 @@ export const ShelfMenu = ({
   readonly children: ReactNode;
   readonly floatOnTop: boolean;
   readonly onChoose: (choice: MenuChoice) => void;
-}) => (
-  <DropdownMenu modal={false}>
-    <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-    <MenuContent
-      align="end"
-      entries={shelfMenu(windowMenu(floatOnTop))}
-      onChoose={onChoose}
-    />
-  </DropdownMenu>
-);
+}) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <MenuContent
+        align="end"
+        entries={shelfMenu(windowMenu(floatOnTop))}
+        keys={SHELF_MENU_KEYS}
+        onChoose={onChoose}
+        onKey={(choice) => {
+          setOpen(false);
+          onChoose(choice);
+        }}
+      />
+    </DropdownMenu>
+  );
+};
 
 export interface AddActions {
   readonly attachFiles: () => void;
