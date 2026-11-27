@@ -172,3 +172,51 @@ describe("a file copy followed by the user's own copy of another file", () => {
     expect(clip.items()).toStrictEqual([EARLIER]);
   });
 });
+
+describe("a text selection that sits beside a file URL", () => {
+  it("saves the selected text, not the file, when the text isn't the file's name", async () => {
+    const clip = clipboard({
+      copied: [{ "text/plain": "See draft", "text/uri-list": "file:///Users/me/draft.pdf" }],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "text",
+      text: "See draft",
+    });
+  });
+
+  it("saves the file when the text is its name, as Finder copies it", async () => {
+    const clip = clipboard({
+      copied: [{ "text/plain": "draft.pdf", "text/uri-list": "file:///Users/me/draft.pdf" }],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      paths: ["/Users/me/draft.pdf"],
+    });
+  });
+
+  it("saves the files when the text is their names, one to a line", async () => {
+    const clip = clipboard({
+      copied: [
+        { "text/plain": "a.pdf\r\nb.pdf", "text/uri-list": `${A}\r\n${B}` },
+      ],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      paths: ["/Users/me/a.pdf", "/Users/me/b.pdf"],
+    });
+  });
+
+  it("saves the files when there is no text at all, as Explorer copies them", async () => {
+    const clip = clipboard({ copied: [list(A)], initial: [EARLIER] });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+    });
+  });
+});

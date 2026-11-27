@@ -165,6 +165,38 @@ const stillCopied = async <S>(
   return now.length === files.length && now.every((file, at) => file === files[at]);
 };
 
+/** The last name in a path, whichever way it is separated. */
+const nameOf = (file: string): string =>
+  file.split(/[\\/]+/u).findLast((part) => part !== "") ?? "";
+
+/**
+ * Whether the text beside the files is only their names, as Finder copies a
+ * selected file, with or without its extension, or nothing. Any other text
+ * was selected in an app that put a file URL next to it: the text is the
+ * selection.
+ */
+const namesTheFiles = (text: string, files: readonly string[]): boolean => {
+  const lines = new Set(
+    text
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+  );
+
+  if (lines.size === 0) {
+    return true;
+  }
+
+  const names = files.map(nameOf);
+  const stems = names.map((name) => name.replace(/\.[^.]+$/u, ""));
+
+  return [names, stems].some(
+    (spelled) =>
+      [...lines].every((line) => spelled.includes(line)) &&
+      spelled.every((name) => lines.has(name))
+  );
+};
+
 type Baseline<S> =
   /** The clipboard as the capture left it, to tell a newer copy apart later. */
   | { readonly kind: "read"; readonly snapshot: S }
@@ -363,8 +395,8 @@ export const captureSelection = async <S>(
     }
   }
 
-  // Finder copies a file's name as text beside it: the file is what was selected.
-  if (files.length > 0) {
+  // Finder copies a file's name as text beside it: the file is what was selected. Other text beside a file URL is the selection.
+  if (files.length > 0 && namesTheFiles(text, files)) {
     return { kind: "files", paths: files, ...ended };
   }
 
