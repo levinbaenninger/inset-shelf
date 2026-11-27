@@ -1590,6 +1590,18 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   useEffect(() => api.on("command", onCommand), []);
 
+  // Show is pressed long after its notice came: the item is found as the shelf holds it now, and a deleted one leaves the shelf as it is.
+  const onShow = useEffectEvent((id: ItemId) => {
+    if (!doc.items.some((item) => item.id === id)) {
+      toast("That item is no longer on the shelf", { duration: NOTICE_MS });
+
+      return;
+    }
+
+    showItem({ id });
+    reveal(id);
+  });
+
   const onNotice = useEffectEvent(
     (message: string, tone: NoticeTone, show: ItemId | undefined) => {
       const row = nextNoticeRow();
@@ -1602,8 +1614,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           action: {
             label: "Show",
             onClick: () => {
-              showItem({ id: show });
-              reveal(show);
+              onShow(show);
             },
           },
           className: row,
