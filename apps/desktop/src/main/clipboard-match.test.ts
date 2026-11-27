@@ -232,6 +232,49 @@ describe("holdsAgainIn with copied files", () => {
   });
 });
 
+const DROP_EFFECT =
+  'electron application/osclipboard;format="Preferred DropEffect"';
+
+const withEffect = (url: string, effect: number) => [
+  {
+    [DROP_EFFECT]: new Blob([new Uint8Array([effect, 0, 0, 0])]),
+    "text/uri-list": new Blob([url]),
+  },
+];
+
+describe("holdsAgainIn with a cut and a copy of files", () => {
+  it("doesn't hold when the files are cut now and were copied, or the other way round", async () => {
+    expect({
+      cutToCopy: await holdsAgainIn(
+        withEffect("file:///a.pdf", 2),
+        withEffect("file:///a.pdf", 1)
+      ),
+      copyToCut: await holdsAgainIn(
+        withEffect("file:///a.pdf", 1),
+        withEffect("file:///a.pdf", 2)
+      ),
+      same: await holdsAgainIn(
+        withEffect("file:///a.pdf", 2),
+        withEffect("file:///a.pdf", 2)
+      ),
+    }).toStrictEqual({ copyToCut: false, cutToCopy: false, same: true });
+  });
+
+  it("doesn't hold when files are listed beside text that was alone", async () => {
+    await expect(
+      holdsAgainIn(
+        [{ "text/plain": new Blob(["draft"]) }],
+        [
+          {
+            "text/plain": new Blob(["draft"]),
+            "text/uri-list": new Blob(["file:///a.pdf"]),
+          },
+        ]
+      )
+    ).resolves.toBeFalsy();
+  });
+});
+
 describe(clipboardContent, () => {
   it("lists the files of the read itself, as the live clipboard would", async () => {
     await expect(

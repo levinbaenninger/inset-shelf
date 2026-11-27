@@ -21,6 +21,20 @@ const A = "file:///Users/me/a.pdf";
 const B = "file:///Users/me/b.pdf";
 const list = (url: string) => ({ "text/uri-list": url });
 
+/** How Windows notes a copy or a cut of files beside their list: a 32-bit flag set, 1 to copy and 2 to move. */
+const DROP_EFFECT =
+  'electron application/osclipboard;format="Preferred DropEffect"';
+
+const copyOf = (url: string) => ({
+  ...list(url),
+  [DROP_EFFECT]: "\u0001\0\0\0",
+});
+
+const cutOf = (url: string) => ({
+  ...list(url),
+  [DROP_EFFECT]: "\u0002\0\0\0",
+});
+
 const toSnapshot = (items: readonly Item[]): Snapshot =>
   items.map((item) =>
     Object.fromEntries(
@@ -400,5 +414,54 @@ describe("a read the capture can't judge", () => {
     });
     expect(clip.restored).toStrictEqual([]);
     expect(clip.items()).toStrictEqual([FINDER]);
+  });
+});
+
+describe("a cut and a copy of the same file", () => {
+  it("leaves a cut made after the capture alone, though its list is the capture's", async () => {
+    const clip = clipboard({
+      before: { 2: [cutOf(A)] },
+      copied: [copyOf(A)],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("tries again when a swallowed write left a copy of the file where the clipboard held it cut", async () => {
+    const clip = clipboard({
+      copied: [copyOf(A)],
+      initial: [cutOf(A)],
+      swallow: 1,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.restored).toHaveLength(2);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("tries again when a swallowed write left file URLs beside the text the clipboard held alone", async () => {
+    const draft = { "text/plain": "draft" };
+
+    const clip = clipboard({
+      copied: [{ ...draft, ...list(A) }],
+      initial: [draft],
+      swallow: 1,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "text",
+      restored: true,
+    });
+    expect(clip.restored).toHaveLength(2);
+    expect(clip.items()).toStrictEqual([draft]);
   });
 });
