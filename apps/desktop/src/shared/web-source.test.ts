@@ -118,6 +118,38 @@ describe(sourceLabel, () => {
     });
   });
 
+  // Read from this PC's windows (Windows 11, 2026-11-27); finding 8 of the hands-on test.
+  it("names a Notepad file by Notepad and the file, without .exe, Notepad's name or its unsaved mark", () => {
+    const notepad = { label: "Notepad · explore-notes.txt", service: null };
+
+    expect(
+      page(null, "explore-notes.txt - Notepad", "Notepad.exe")
+    ).toStrictEqual(notepad);
+    expect(
+      page(null, "*explore-notes.txt - Notepad", "Notepad.exe")
+    ).toStrictEqual(notepad);
+    expect(page(null, "explore-notes.txt", "Notepad")).toStrictEqual(notepad);
+  });
+
+  it("names an Edge page by its site and title, without Edge's profile or other tabs", () => {
+    const edge = { label: "example.com · Example Domain", service: null };
+
+    expect(
+      page(
+        "https://example.com/",
+        "Example Domain - Profile 1 - Microsoft\u200B Edge",
+        "Microsoft Edge"
+      )
+    ).toStrictEqual(edge);
+    expect(
+      page(
+        "https://example.com/",
+        "Example Domain and 1 more page - Profile 1 - Microsoft\u200B Edge",
+        "Microsoft Edge"
+      )
+    ).toStrictEqual(edge);
+  });
+
   it("reads a Windows browser's title without the browser's name", () => {
     expect(
       page(

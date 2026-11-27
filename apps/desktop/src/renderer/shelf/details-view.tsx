@@ -44,6 +44,7 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
+import { appName } from "@shared/window-title";
 import { use, useEffect, useEffectEvent, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
@@ -637,11 +638,11 @@ const windowWhere = (window: WindowRef): string => {
     return window.document.split(/[/\\]/u).at(-1) ?? window.document;
   }
 
-  return window.app ?? "";
+  return appName(window.app) ?? "";
 };
 
 const windowPlace = (window: WindowRef): string =>
-  [window.app ?? "", windowWhere(window)]
+  [appName(window.app) ?? "", windowWhere(window)]
     .filter((part, at, all) => part !== "" && all.indexOf(part) === at)
     .join(" · ");
 

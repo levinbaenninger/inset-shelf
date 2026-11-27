@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { appName, cleanTitle, withoutAppName } from "./window-title";
+import {
+  appName,
+  cleanTitle,
+  shownTitle,
+  withoutAppName,
+} from "./window-title";
 
 describe(withoutAppName, () => {
   it.each([
@@ -115,5 +120,16 @@ describe(cleanTitle, () => {
 
   it("is nothing for a title too short to name a place", () => {
     expect(cleanTitle("~", "Terminal")).toBeNull();
+  });
+});
+
+describe(shownTitle, () => {
+  it("keeps a short title, which still says what the window shows", () => {
+    expect(shownTitle("Go - Notepad", "Notepad.exe")).toBe("Go");
+  });
+
+  it("is nothing for a title that only names the app", () => {
+    expect(shownTitle("Notepad", "Notepad.exe")).toBeNull();
+    expect(shownTitle("Slack", "Slack")).toBeNull();
   });
 });

@@ -90,8 +90,8 @@ const UNREAD = /^\(\d+\)\s+/u;
 /** Marks for unsaved changes: Code's dot, and the asterisk Windows apps such as Notepad put first. */
 const DIRTY = /^[●•*]\s*/u;
 
-/** A window's title as it names what it shows: without the app's name, an unread count or an unsaved mark; null when that says nothing. */
-export const cleanTitle = (
+/** A window's title as it names what it shows: without the app's name, an unread count or an unsaved mark; null when nothing is left or it only names the app. For showing. */
+export const shownTitle = (
   title: string | null,
   app: string | null
 ): string | null => {
@@ -105,7 +105,15 @@ export const cleanTitle = (
     .replace(DIRTY, "")
     .trim();
 
-  return clean.length < 3 || clean === app || clean === appName(app)
-    ? null
-    : clean;
+  return clean === "" || clean === app || clean === appName(app) ? null : clean;
+};
+
+/** A window's title cleaned as it is shown, for telling windows apart: null when it is too short to name a place. */
+export const cleanTitle = (
+  title: string | null,
+  app: string | null
+): string | null => {
+  const clean = shownTitle(title, app);
+
+  return clean === null || clean.length < 3 ? null : clean;
 };
