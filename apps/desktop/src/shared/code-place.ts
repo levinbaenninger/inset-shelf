@@ -66,3 +66,7 @@ export const fromHome = (path: string, home: string): string | null => {
 /** What the shelf says when a code item's file has moved or been deleted since it was captured. */
 export const goneMessage = (place: CodePlace): string =>
   `${fileName(place)} is no longer at this path`;
+
+/** What the shelf says when a code item's editor was to open its file and could not, so its folder shows it. */
+export const fellBackMessage = (place: CodePlace, app: string): string =>
+  `Couldn’t open ${fileName(place)} in ${app}, so it is shown in its folder`;

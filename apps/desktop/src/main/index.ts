@@ -4,7 +4,6 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { codeEditor } from "@shared/code-editors";
 import type { CodePlace } from "@shared/code-place";
 import {
   drawingContract,
@@ -90,6 +89,7 @@ import {
   sameClipboard,
 } from "./clipboard-match";
 import { chatGptThreadLink } from "./codex-threads";
+import { contained } from "./contained";
 import { createContextRecall } from "./context-recall";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -120,6 +120,7 @@ import { createOnboardingStore } from "./permissions/store";
 import { createPermissionChecks } from "./permissions/system";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
+import { quietDisk } from "./quiet-disk";
 import {
   createQuitHold,
   drawingMarks,
@@ -684,8 +685,13 @@ const start = async (): Promise<void> => {
 
   const home = app.getPath("home");
 
-  /** What the shelf's page is shown: the shelf, what is from the window beside it, and the home folder paths show from. */
-  const pageView = () => ({ ...controller.view(), here: shelfHere, home });
+  /** What the shelf's page is shown: the shelf, what is from the window beside it, the home folder paths show from, and the editors whose items open. */
+  const pageView = () => ({
+    ...controller.view(),
+    editors: EDITORS,
+    here: shelfHere,
+    home,
+  });
 
   const setHere = (front: Awaited<ReturnType<typeof frontWindow>>): void => {
     const found = HERE_CHIP
@@ -821,18 +827,21 @@ const start = async (): Promise<void> => {
     toast.send({ title: message, tone, type: "notified" });
   };
 
+  /** Where main may look for a code item's file with no chance of a system prompt (src/main/quiet-disk.ts). */
+  const codeDisk = quietDisk({ home, temp: app.getPath("temp") });
+
   /** Opens a code item's file in the editor it came from (src/main/open-code.ts). */
   const openCodeItem = async (
     name: string | null,
     place: CodePlace
   ): Promise<void> => {
-    await openCode(codeEditor(name, EDITORS), place, {
+    await openCode(name, place, EDITORS, {
       bringForward: async (address) => {
         const editor = await app.getApplicationInfoForProtocol(address);
 
         openAppAt(editor.path);
       },
-      fileIsThere,
+      fileIsThere: async (file) => await fileIsThere(file, codeDisk),
       notify: (message) => {
         notify(message, "failed");
       },
@@ -845,6 +854,41 @@ const start = async (): Promise<void> => {
         shell.showItemInFolder(file);
       },
     });
+  };
+
+  /**
+   * Opens where an item came from, or a link in it. Run only through
+   * `contained`: a step here may throw or reject.
+   */
+  const openSource = async (id: ItemId, url?: string): Promise<void> => {
+    const item = controller.item(id);
+    const context = item?.context ?? null;
+
+    // An item from a code editor opens its file there again, by an address only main builds.
+    if (url === undefined && context !== null && context.code !== null) {
+      await openCodeItem(context.app, context.code);
+
+      return;
+    }
+
+    const fromApp = openingApp(context, isMac, EDITORS);
+
+    // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
+    if (url === undefined && fromApp !== null) {
+      await openInApp(fromApp, context);
+
+      return;
+    }
+
+    // Only the item's own page or a link in it opens: a web page, or a page from a file.
+    const target =
+      url === undefined
+        ? (context?.url ?? null)
+        : itemAddresses(item, url).find((known) => known === url);
+
+    if (target !== undefined && target !== null && isPageAddress(target)) {
+      await shell.openExternal(target);
+    }
   };
 
   // Pictures and files attached to an item after capture (attachments.ts).
@@ -2397,34 +2441,14 @@ const start = async (): Promise<void> => {
         onboarding.open("accessibility");
       },
       openLink: ({ id, url }) => {
-        const item = controller.item(id);
-        const context = item?.context ?? null;
-
-        // An item from a code editor opens its file there again, by an address only main builds.
-        if (url === undefined && context !== null && context.code !== null) {
-          void openCodeItem(context.app, context.code);
-
-          return;
-        }
-
-        const fromApp = openingApp(context, isMac);
-
-        // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
-        if (url === undefined && fromApp !== null) {
-          void openInApp(fromApp, context);
-
-          return;
-        }
-
-        // Only the item's own page or a link in it opens: a web page, or a page from a file.
-        const target =
-          url === undefined
-            ? (context?.url ?? null)
-            : itemAddresses(item, url).find((known) => known === url);
-
-        if (target !== undefined && target !== null && isPageAddress(target)) {
-          void shell.openExternal(target);
-        }
+        void contained(
+          async () => {
+            await openSource(id, url);
+          },
+          () => {
+            notify("Couldn’t open where this item came from", "failed");
+          }
+        );
       },
       openSettings: () => {
         settingsWindow.open();

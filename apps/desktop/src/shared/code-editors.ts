@@ -282,3 +282,34 @@ export const openAddress = (
     .replace("{path}", () => path)
     .replace("{line}", () => String(line));
 };
+
+/** How a click on a code item reaches its file: opened in its editor, or shown in its folder. */
+export type CodeWay = "editor" | "folder";
+
+/**
+ * What a click on a code item does. Only an item whose app has a row among
+ * `editors` reaches a file at all: null for any other. A file no address
+ * opens as itself is shown in its folder.
+ */
+export const codeWay = (
+  app: string | null,
+  place: CodePlace,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): CodeWay | null => {
+  const editor = codeEditor(app, editors);
+
+  if (editor === undefined) {
+    return null;
+  }
+
+  return openAddress(editor, place, null) === null ? "folder" : "editor";
+};
+
+/** A code item's click in the words its tooltip and its menu entry use. */
+export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
+  if (way === "editor") {
+    return `Open in ${app}`;
+  }
+
+  return mac ? "Show in Finder" : "Show in Folder";
+};

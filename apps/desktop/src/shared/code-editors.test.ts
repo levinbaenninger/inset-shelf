@@ -4,7 +4,9 @@ import {
   CODE_EDITORS,
   codeEditor,
   codeLabel,
+  codeAction,
   codePlace,
+  codeWay,
   openAddress,
   titleParts,
 } from "./code-editors";
@@ -337,5 +339,44 @@ describe(openAddress, () => {
         (editor) => editor.document === "file" && editor.open === null
       )
     ).toStrictEqual([]);
+  });
+});
+
+const at = (file: string) => ({ file, line: null, root: null });
+
+describe(codeWay, () => {
+  it("opens a file in the editor it came from", () => {
+    expect(codeWay("Code", at("/Users/anna/p/a.ts"))).toBe("editor");
+  });
+
+  it.each([
+    ["a path with a colon", "/Users/anna/p/a:12.ts"],
+    ["a workspace file", "/Users/anna/p/all.code-workspace"],
+  ])(
+    "shows %s in its folder, since no address opens it as itself",
+    (_, file) => {
+      expect(codeWay("Code", at(file))).toBe("folder");
+    }
+  );
+
+  it.each([
+    ["an app with no row", "Zed"],
+    ["no app", null],
+  ])("has no way to a file for %s", (_, app) => {
+    expect(codeWay(app, at("/Users/anna/p/a.ts"))).toBeNull();
+  });
+
+  it("knows only the editors it is given", () => {
+    expect(codeWay("Code", at("/Users/anna/p/a.ts"), [])).toBeNull();
+  });
+});
+
+describe(codeAction, () => {
+  it.each([
+    ["editor", true, "Open in Code"],
+    ["folder", true, "Show in Finder"],
+    ["folder", false, "Show in Folder"],
+  ] as const)("says what a click does: %s, on a Mac %s", (way, mac, words) => {
+    expect(codeAction("Code", way, mac)).toBe(words);
   });
 });
