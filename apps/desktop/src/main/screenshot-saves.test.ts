@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -2230,30 +2231,19 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 
-  it("removes a drag's file once its drop came back to the shelf, and keeps the file of a drag that went elsewhere, which another app may still read", async () => {
+  it("removes a drag's file once its drop came back to the shelf and gave the screenshot its place, and keeps the file of a drag that went elsewhere, which another app may still read", async () => {
     const card = setup();
-    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
 
     card.saves.show(shot(1));
 
-    const { drop } = dropping(card, {
-      stage: (_, each) => {
-        const file = path.join(folder, each, "Screenshot.png");
-
-        mkdirSync(path.dirname(file));
-        writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
-
-        return file;
-      },
-      unstage: (each) => {
-        rmSync(path.join(folder, each), { force: true, recursive: true });
-      },
-    });
-
+    const { added, drop } = dropping(card);
     const elsewhere = drop.drag(1)?.file ?? "";
     const back = drop.drag(1)?.file ?? "";
 
     await drop.onItem(card.note, [back]);
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
     expect({
       back: existsSync(back),
       elsewhere: existsSync(elsewhere),
@@ -2319,6 +2309,10 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 });
+
+/** What a file holds, or null once it is gone. */
+const onDisk = (file: string): Uint8Array | null =>
+  existsSync(file) ? new Uint8Array(readFileSync(file)) : null;
 
 describe("a drag's copy of the card's screenshot on disk", () => {
   it.each(["item", "shelf"] as const)(
@@ -2441,6 +2435,49 @@ describe("a drag's copy of the card's screenshot on disk", () => {
       plain: [],
       shown: { attached: 0, items: 1 },
       written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("keeps a replaced screenshot's copy when its drop fails on a note that filled meanwhile, and a later drop of that copy gives it its one place", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain } = dropping(card);
+    const file = drop.drag(1)?.file ?? "";
+
+    // Clipboard screenshot B replaces A on the card before main handles A's drop on the note.
+    card.saves.show(shot(2));
+
+    const pictureWritten = card.holdPicture();
+
+    await drop.onItem(card.note, [file]);
+    // The note fills while A's picture file is written.
+    card.fill(card.note);
+    pictureWritten();
+    await vi.waitFor(() => {
+      expect(card.notices).toStrictEqual([ITEM_FULL]);
+    });
+    expect({ copy: onDisk(file) }).toStrictEqual({ copy: shot(1).png });
+
+    const other = ItemIdSchema.parse(
+      card.controller.apply({ text: "Moving day", type: "compose" })
+    );
+
+    await drop.onItem(other, [file]);
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
+    await settled(card);
+    expect({
+      added,
+      attached: card.attachmentsOn(other),
+      plain,
+    }).toStrictEqual({
+      added: [["item", other]],
+      attached: 1,
+      plain: [],
     });
   });
 });
