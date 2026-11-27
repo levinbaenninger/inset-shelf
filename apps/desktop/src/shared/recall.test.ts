@@ -540,6 +540,61 @@ describe(hereWith, () => {
 
     expect(hereWith(opening(doc), doc)).toStrictEqual(opening(doc).here);
   });
+
+  it("keeps a note typed under the chip once it is checked off, as it keeps the opening's own items", () => {
+    const doc = shelf();
+    const open = opening(doc);
+
+    const after = typed(
+      doc,
+      { here: 4, text: "Ask about the flaky test", type: "compose" },
+      open
+    );
+
+    const id = after.item?.id;
+
+    const checked =
+      id === undefined
+        ? after.doc
+        : applyOp(after.doc, { id, type: "toggleDone" }, env(70), []).doc;
+
+    expect(hereWith(open, checked).ids).toStrictEqual([...open.here.ids, id]);
+  });
+
+  it("keeps a note typed beside a site's home page, which no address rule matches again", () => {
+    const home = {
+      app: "Safari",
+      appLink: null,
+      title: "Example Domain",
+      url: "https://example.com/",
+    };
+
+    const { doc } = applyOp(
+      shelf(),
+      addText("copied before the address was read", { ...home, url: null }),
+      env(50),
+      []
+    );
+
+    const open: Opening = {
+      ...opening(doc),
+      context: home,
+      here: { ...opening(doc).here, ids: itemsFrom(doc, home) },
+    };
+
+    expect(open.here.ids).toHaveLength(1);
+
+    const after = typed(
+      doc,
+      { here: 4, text: "Ask about the flaky test", type: "compose" },
+      open
+    );
+
+    expect(hereWith(open, after.doc).ids).toStrictEqual([
+      ...open.here.ids,
+      after.item?.id,
+    ]);
+  });
 });
 
 describe(hasPlaces, () => {
