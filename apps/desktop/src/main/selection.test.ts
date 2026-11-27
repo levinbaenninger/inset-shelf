@@ -357,6 +357,34 @@ otes.txt`,
     }
   );
 
+  it.each(["text/html", "text/plain"])(
+    "reads again, not a newer copy, when a hold cut the read after a held one short: %s empty",
+    async (emptied) => {
+      const clip = fakeClipboard("earlier", "x", "<b>x</b>");
+      let snapshots = 0;
+
+      await expect(
+        captureSelection({
+          ...clip.deps,
+          snapshot: async () => {
+            snapshots += 1;
+
+            const read = await clip.deps.snapshot();
+
+            if (snapshots === 2) {
+              return HELD_READ;
+            }
+
+            return snapshots === 3
+              ? read.map((item) => ({ ...item, [emptied]: new Blob([]) }))
+              : read;
+          },
+        })
+      ).resolves.toMatchObject({ restored: true, text: "x" });
+      expect(clip.content()).toBe("earlier");
+    }
+  );
+
   it("preserves a newer copy with the same text but different HTML", async () => {
     const clip = fakeClipboard("earlier", "x", "<b>x</b>", "", 1);
 
