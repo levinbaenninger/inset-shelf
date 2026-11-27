@@ -14,6 +14,7 @@ const note = (n: number, text: string): ShelfItem => ({
   description: "",
   done: false,
   due: null,
+  edited: false,
   html: null,
   id: ItemIdSchema.parse(
     `00000000-0000-4000-8000-0000000000${String(n).padStart(2, "0")}`

@@ -196,17 +196,16 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
 
   const itemData = (item: ShelfItem): Payload => {
     if (item.kind === "text") {
-      // A selection goes back as it was copied, its HTML next to its text; a note as the shelf shows it.
-      const words =
-        item.html === null
-          ? copiedNote(item)
-          : { html: item.html, text: item.text };
+      const words = copiedNote(item);
 
       return {
-        data: {
-          "text/html": htmlBlob(words.html),
-          "text/plain": text(words.text),
-        },
+        data:
+          words.html === null
+            ? { "text/plain": text(words.text) }
+            : {
+                "text/html": htmlBlob(words.html),
+                "text/plain": text(words.text),
+              },
       };
     }
 

@@ -1080,6 +1080,7 @@ const shelfWithAttachments = (attachments: readonly unknown[]) =>
         description: "",
         done: false,
         due: null,
+        edited: false,
         html: null,
         id: uuid(20),
         kind: "text",
@@ -1104,11 +1105,17 @@ describe("attachments on an item (format 4)", () => {
 
     expect(doc).toStrictEqual({
       ...v3,
-      items: v3.items.map((item) => ({
-        ...item,
-        attachments: [],
-        context: item.context === null ? null : { ...item.context, code: null },
-      })),
+      items: v3.items.map((item) => {
+        const read = {
+          ...item,
+          attachments: [],
+          context:
+            item.context === null ? null : { ...item.context, code: null },
+        };
+
+        // A text item a version 3 build kept reads as not edited in the shelf.
+        return item.kind === "text" ? { ...read, edited: false } : read;
+      }),
       schemaVersion: 4,
     });
     expect(doc === null ? [] : doc.items.map(storedFilesOf)).toStrictEqual([

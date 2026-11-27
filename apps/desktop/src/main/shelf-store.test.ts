@@ -46,6 +46,7 @@ const withNote = (doc: ShelfDoc, text: string): ShelfDoc => ({
       context: null,
       createdAt: "2026-10-22T10:00:00.000Z",
       done: false,
+      edited: false,
       id: ItemIdSchema.parse(
         `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(doc.items.length + 10)}`
       ),
@@ -840,12 +841,16 @@ describe("attachments on an item (format 4)", () => {
     }).toStrictEqual({
       initial: {
         ...v3,
-        items: v3.items.map((item) => ({
-          ...item,
-          attachments: [],
-          context:
-            item.context === null ? null : { ...item.context, code: null },
-        })),
+        items: v3.items.map((item) => {
+          const read = {
+            ...item,
+            attachments: [],
+            context:
+              item.context === null ? null : { ...item.context, code: null },
+          };
+
+          return item.kind === "text" ? { ...read, edited: false } : read;
+        }),
         schemaVersion: 4,
       },
       kept: [...new Set(named)].toSorted(),

@@ -253,6 +253,8 @@ const TextFields = {
    * once the text is edited.
    */
   html: z.string().max(HTML_MAX).nullable().default(null),
+  /** Whether the text was changed in the shelf. A selection copies as the app copied it until it is. */
+  edited: z.boolean().default(false),
   kind: z.literal("text"),
   /** The web links in a copied selection, which the item lists when it is open. */
   links: z.array(LinkSchema).max(LINKS_MAX).default([]),
@@ -999,6 +1001,7 @@ const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
       context: null,
       createdAt: env.now().toISOString(),
       done: false,
+      edited: false,
       html: null,
       id: env.newItemId(),
       kind: "text",
@@ -1126,6 +1129,7 @@ const addText = (
     context: withTextMark(op.context, text, op.text.length > TEXT_MAX),
     createdAt: env.now().toISOString(),
     done: false,
+    edited: false,
     html: op.html !== null && op.html.length <= HTML_MAX ? op.html : null,
     id: env.newItemId(),
     kind: "text",
@@ -1709,7 +1713,9 @@ export const applyOp = (
     case "editText": {
       return changed(
         mapItem(doc, op.id, (item) =>
-          item.kind === "text" ? { ...item, html: null, text: op.text } : null
+          item.kind === "text"
+            ? { ...item, edited: true, html: null, text: op.text }
+            : null
         )
       );
     }
@@ -1860,26 +1866,38 @@ export const PICTURE_KIND: Readonly<Record<ImageItem["via"], string>> = {
 };
 
 /**
- * Whether Copy puts an item's words on the clipboard as the shelf shows
- * them: a text item's, unless it is a selection that still holds the HTML it
- * was copied with, which goes back as it was copied.
+ * The shelf's rendering of a note typed or edited in it, which Copy gives as
+ * the shelf shows it. Null for a selection the app copied, which Copy gives
+ * back unread, and for a note the shelf shows as nothing. What the shelf
+ * shows as one code block is a tree of one `code` node, which copies as code.
  */
-export const copiesAsShown = (
-  item: ShelfItem
-): item is TextItem & { readonly html: null } =>
-  item.kind === "text" && item.html === null;
+const shownNote = (item: ShelfItem): Copied | null => {
+  if (item.kind !== "text" || (item.via === "selection" && !item.edited)) {
+    return null;
+  }
+
+  const shown = copiedWords(noteTree(item.text));
+
+  return shown.text.trim() === "" ? null : shown;
+};
+
+/** Whether Copy gives an item's words as the shelf renders them. */
+export const copiesAsShown = (item: ShelfItem): boolean =>
+  shownNote(item) !== null;
 
 /**
- * A text item's words as Copy puts them on the clipboard: as the shelf shows
- * them, as plain text and as the shelf renders them. What the shelf shows
- * as one code block is a tree of one `code` node, which copies as code.
+ * A text item's words as Copy and drag-out give them: a note as the shelf
+ * shows it, else the text as it was given, with the HTML the app copied
+ * beside it when it had some.
  */
-export const copiedNote = (item: TextItem): Copied =>
-  copiedWords(noteTree(item.text));
+export const copiedNote = (
+  item: TextItem
+): { readonly text: string; readonly html: string | null } =>
+  shownNote(item) ?? { html: item.html, text: item.text };
 
 export const itemText = (item: ShelfItem): string => {
   if (item.kind === "text") {
-    return copiesAsShown(item) ? copiedNote(item).text : item.text;
+    return copiedNote(item).text;
   }
 
   if (item.kind === "file") {
@@ -2074,8 +2092,9 @@ const namedPictureHtml = (
 /** Copy with Details' words and metadata as HTML: a note's words as the shelf renders them, then its page and metadata. */
 const detailsHeadHtml = (item: ShelfItem): string => {
   const details = detailLines(item, true);
+  const shown = shownNote(item);
 
-  if (!copiesAsShown(item)) {
+  if (shown === null) {
     return `<p>${linesHtml(withDetails(withUrl(titled(item), item), details))}</p>`;
   }
 
@@ -2086,7 +2105,7 @@ const detailsHeadHtml = (item: ShelfItem): string => {
     .filter((part) => part !== null)
     .join("\n\n");
 
-  return `${copiedNote(item).html}${rest === "" ? "" : `<p>${linesHtml(rest)}</p>`}`;
+  return `${shown.html}${rest === "" ? "" : `<p>${linesHtml(rest)}</p>`}`;
 };
 
 /**
