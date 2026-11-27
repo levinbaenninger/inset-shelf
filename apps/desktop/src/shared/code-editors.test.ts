@@ -577,57 +577,79 @@ describe(codeAction, () => {
 });
 
 describe(isCodeCapture, () => {
-  const place = {
-    file: "/Users/anna/Developer/inset-shelf/src/shared/recall.ts",
+  const place = (file: string) => ({
+    file: `/Users/anna/Developer/inset-shelf/${file}`,
     line: null,
     root: "/Users/anna/Developer/inset-shelf",
-  };
-
-  const from = (app: string | null, code: typeof place | null) => ({
-    app,
-    appLink: null,
-    code,
-    title: "recall.ts — inset-shelf",
-    url: null,
   });
+
+  const selection = (
+    app: string | null,
+    code: ReturnType<typeof place> | null,
+    title = "recall.ts — inset-shelf"
+  ) => ({
+    context: { app, appLink: null, code, title, url: null },
+    via: "selection" as const,
+  });
+
+  /** Code's title on Windows, where the shelf reads no file. */
+  const windows = (title: string) =>
+    selection("Visual Studio Code", null, `${title} - Visual Studio Code`);
 
   it("counts a selection from the file Code showed on macOS", () => {
     expect(
-      isCodeCapture({ context: from("Code", place), via: "selection" })
+      isCodeCapture(selection("Code", place("src/shared/recall.ts")))
     ).toBeTruthy();
   });
 
-  it("counts a selection from Code on Windows, where only its title is read", () => {
-    expect(
-      isCodeCapture({
-        context: from("Visual Studio Code", null),
-        via: "selection",
-      })
-    ).toBeTruthy();
+  it("counts a selection from Code on Windows by the file its title names", () => {
+    expect(isCodeCapture(windows("recall.ts - inset-shelf"))).toBeTruthy();
   });
 
-  it("counts a selection from a file even when the app has no row", () => {
+  it("counts a selection from a file even when the app has no row, and a file without an extension", () => {
     expect(
-      isCodeCapture({ context: from("Zed", place), via: "selection" })
+      isCodeCapture(selection("Zed", place("src/shared/recall.ts")))
     ).toBeTruthy();
+    expect(isCodeCapture(selection("Code", place("Makefile")))).toBeTruthy();
+  });
+
+  it("leaves out Markdown and plain text, read from the file or from the title", () => {
+    const prose = ["README.md", "guide.mdx", "notes.markdown", "todo.TXT"];
+
+    expect(
+      prose.flatMap((file) => [
+        isCodeCapture(selection("Code", place(`docs/${file}`))),
+        isCodeCapture(windows(`${file} - inset-shelf`)),
+      ])
+    ).toStrictEqual(Array.from({ length: 8 }, () => false));
+  });
+
+  it("leaves out a selection from an editor whose title names no file: a panel, Welcome or a new file", () => {
+    expect([
+      isCodeCapture(windows("inset-shelf")),
+      isCodeCapture(windows("Welcome - inset-shelf")),
+      isCodeCapture(windows("Untitled-1 - inset-shelf")),
+      isCodeCapture(selection("Cursor", null, "Cursor")),
+    ]).toStrictEqual([false, false, false, false]);
   });
 
   it("leaves out a selection from any other app, and one from nowhere", () => {
-    expect(
-      isCodeCapture({ context: from("Mail", null), via: "selection" })
-    ).toBeFalsy();
+    expect(isCodeCapture(selection("Mail", null))).toBeFalsy();
     expect(isCodeCapture({ context: null, via: "selection" })).toBeFalsy();
   });
 
   it("leaves out a typed note, which is the user's own words", () => {
     expect(
-      isCodeCapture({ context: from("Code", place), via: "typed" })
+      isCodeCapture({
+        ...selection("Code", place("src/shared/recall.ts")),
+        via: "typed",
+      })
     ).toBeFalsy();
   });
 
   it("asks only the editors it is given", () => {
     expect(
-      isCodeCapture({ context: from("Code", null), via: "selection" }, [])
+      isCodeCapture(windows("recall.ts - inset-shelf"), [])
     ).toBeFalsy();
   });
 });
