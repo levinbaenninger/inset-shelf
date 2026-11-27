@@ -159,6 +159,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k(TOGGLE_ACCELERATOR)], label: "Show or hide the shelf" },
         { keys: ["Esc"], label: "Close a menu, then details, then the shelf" },
         { keys: [k("CommandOrControl+,")], label: "Settings" },
+        { keys: ["Esc"], label: "Close Settings" },
         { keys: [k("CommandOrControl+/")], label: "Keyboard Shortcuts" },
       ],
       title: "Window",
