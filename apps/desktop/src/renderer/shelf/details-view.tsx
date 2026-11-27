@@ -44,7 +44,7 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
-import { appName } from "@shared/window-title";
+import { appName, windowName } from "@shared/window-title";
 import { use, useEffect, useEffectEvent, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
@@ -79,7 +79,6 @@ import {
   DueMenu,
   dueTone,
   reopenLabel,
-  windowName,
   WindowThumb,
 } from "./item-meta";
 import { LinkList, SourceLine, TextEditor } from "./item-row";

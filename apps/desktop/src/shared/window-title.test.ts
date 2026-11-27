@@ -4,6 +4,7 @@ import {
   appName,
   cleanTitle,
   shownTitle,
+  windowName,
   withoutAppName,
 } from "./window-title";
 
@@ -131,5 +132,25 @@ describe(shownTitle, () => {
   it("is nothing for a title that only names the app", () => {
     expect(shownTitle("Notepad", "Notepad.exe")).toBeNull();
     expect(shownTitle("Slack", "Slack")).toBeNull();
+  });
+});
+
+describe(windowName, () => {
+  // The window link the hands-on test made from Code and Notepad (finding 18).
+  it.each([
+    [
+      "Visual Studio Code",
+      "app.ts - demo-proj - Visual Studio Code",
+      "app.ts - demo-proj",
+    ],
+    ["Notepad.exe", "*explore-notes.txt - Notepad", "explore-notes.txt"],
+  ])("names a %s window by its cleaned title", (app, title, expected) => {
+    expect(windowName({ app, title })).toBe(expected);
+  });
+
+  it("falls back to the app's name, then to Window", () => {
+    expect(windowName({ app: "Notepad.exe", title: null })).toBe("Notepad");
+    expect(windowName({ app: "Slack", title: "Slack" })).toBe("Slack");
+    expect(windowName({ app: null, title: null })).toBe("Window");
   });
 });

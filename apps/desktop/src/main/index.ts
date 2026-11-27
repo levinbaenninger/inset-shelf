@@ -54,6 +54,7 @@ import {
   isPageAddress,
   openingApp,
 } from "@shared/web-source";
+import { windowName } from "@shared/window-title";
 import {
   app,
   BrowserWindow,
@@ -368,9 +369,9 @@ const openInApp = async (
   }
 };
 
-/** The note a new window link starts as: the windows' titles, which the user can then edit. */
+/** The note a new window link starts as: the windows' names, as details shows them, which the user can then edit. */
 const linkText = (windows: readonly WindowRef[]): string =>
-  windows.map((window) => window.title ?? window.app ?? "Window").join(" · ");
+  windows.map(windowName).join(" · ");
 
 /** Pages with a menu open, which then take every key themselves (src/renderer/lib/menu-keys.ts). */
 const menus = createMenuOpenTracker<WebContents>();

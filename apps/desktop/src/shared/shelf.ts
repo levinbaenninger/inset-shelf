@@ -19,6 +19,7 @@ import {
   LINKS_MAX,
   linksInHtml,
 } from "./web-source";
+import { appName, shownTitle, windowName } from "./window-title";
 
 const LOWER_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -1958,7 +1959,7 @@ const attachmentNames = (item: ShelfItem): readonly string[] =>
 
 /** A linked window as one line: its title, then where it reopens. */
 const windowLine = (window: WindowRef): string => {
-  const title = window.title ?? window.app ?? "Window";
+  const title = windowName(window);
   const where = window.url ?? window.document;
 
   return where === null ? title : `${title} — ${where}`;
@@ -1995,10 +1996,10 @@ export const detailLines = (
     ...(full && source !== null && (source.app ?? source.title) !== null
       ? [
           `From: ${[
-            source.app,
+            appName(source.app),
             // Where in the project, never the whole path, which can name the user.
             source.code === null
-              ? source.title
+              ? shownTitle(source.title, source.app)
               : atLine(pathInProject(source.code), source.code),
           ]
             .filter((part) => part !== null && part !== "")

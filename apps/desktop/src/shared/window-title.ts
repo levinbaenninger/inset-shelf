@@ -1,3 +1,11 @@
+/**
+ * How a window's app and title read once what the system adds to them is
+ * gone: the one cleaning a source's label, a window link's name, the window
+ * picker and recall's matching all use. It takes a title as the window has
+ * it ("Page - Microsoft Edge") and as the shelf keeps it, with the app's name
+ * already off, and gives the same for both.
+ */
+
 /** Zero-width characters; Edge writes a zero-width space inside its name. */
 const INVISIBLE = /[\u200B-\u200D\u2060\uFEFF]/gu;
 
@@ -117,3 +125,10 @@ export const cleanTitle = (
 
   return clean === null || clean.length < 3 ? null : clean;
 };
+
+/** A linked window in a few words: its cleaned title, else its app's name. */
+export const windowName = (window: {
+  readonly app: string | null;
+  readonly title: string | null;
+}): string =>
+  shownTitle(window.title, window.app) ?? appName(window.app) ?? "Window";
