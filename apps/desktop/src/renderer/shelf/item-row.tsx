@@ -2,6 +2,7 @@ import {
   ArrowRight01Icon,
   ChatGptIcon,
   ClaudeIcon,
+  CodeIcon,
   FigmaIcon,
   File01Icon,
   GithubIcon,
@@ -34,8 +35,10 @@ import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
 import {
+  createContext,
   isValidElement,
   memo,
+  use,
   useEffect,
   useMemo,
   useRef,
@@ -125,7 +128,7 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** The source line's tooltip: the whole line when it shows cut, then where a click goes, 300 characters in all; null when it would only repeat what shows. */
+/** The source line's tooltip: the whole line when it shows cut, then where it leads (the page, the app a click opens, the file), 300 characters in all; null when it would only repeat what shows. */
 const sourceTitle = (
   shown: string,
   opens: string | null,
@@ -139,10 +142,13 @@ const sourceTitle = (
   return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
 };
 
+/** The user's home folder, from the shelf's view: a code item's path shows from "~". */
+export const HomeFolder = createContext<string | null>(null);
+
 /**
  * Where an item came from, in one quiet line: the site and what on it for
- * pages the shelf knows, else the app and window. A page address opens in the
- * browser.
+ * pages the shelf knows, the file and project for a code editor, else the app
+ * and window. A page address opens in the browser.
  */
 export const SourceLine = ({
   context,
@@ -151,8 +157,9 @@ export const SourceLine = ({
   readonly context: ItemContext;
   readonly onOpenLink: () => void;
 }): ReactNode => {
-  const { label, service } = sourceLabel(context);
-  const icon = service === null ? Link01Icon : SERVICE_ICON[service];
+  const { code, label, service } = sourceLabel(context, use(HomeFolder));
+  const serviceIcon = service === null ? Link01Icon : SERVICE_ICON[service];
+  const icon = code === undefined ? serviceIcon : CodeIcon;
   // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
   const app = openingApp(context, isMac);
   const shown = label === "" ? (context.url ?? "") : label;
@@ -166,9 +173,9 @@ export const SourceLine = ({
       <p
         className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
         ref={plain}
-        title={plainCut ? tooltipText(label) : undefined}
+        title={sourceTitle(label, code?.path ?? null, plainCut)}
       >
-        {service === null ? null : (
+        {service === null && code === undefined ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
         )}
         <SourceText label={label} />
