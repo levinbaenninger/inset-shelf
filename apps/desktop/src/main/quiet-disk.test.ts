@@ -79,13 +79,17 @@ const watched = (other: Partial<QuietFs> = {}): Watched => {
 
         return await (other.readlink ?? readlink)(at);
       },
-      realpath,
+      realpath: async (at) => {
+        touched.push(at);
+
+        return await realpath(at);
+      },
     },
     touched,
   };
 };
 
-const disk = quietDisk({ home, temp });
+const disk = quietDisk({ home });
 
 /** Whether any path asked about is in one of the home folder's protected folders, however it is spelled. */
 const inProtected = (touched: readonly string[]): boolean =>
@@ -105,11 +109,21 @@ describe(quietDisk, () => {
     expect(found.kind === "there" && found.entry.isFile()).toBeTruthy();
   });
 
-  it("finds a file in the temp folder", async () => {
-    await expect(disk.find(scratch)).resolves.toMatchObject({
-      kind: "there",
-      path: scratch,
+  it("does not look in the temp folder, which can be set anywhere", async () => {
+    const { fs, touched } = watched();
+
+    await expect(quietDisk({ home }, fs).find(scratch)).resolves.toStrictEqual({
+      kind: "unsure",
     });
+    expect(touched.filter((at) => at.startsWith(temp))).toStrictEqual([]);
+  });
+
+  it("asks about no folder but the home folder and the file's own way there", async () => {
+    const { fs, touched } = watched();
+
+    await quietDisk({ home }, fs).find(source);
+
+    expect(touched.filter((at) => !source.startsWith(at))).toStrictEqual([]);
   });
 
   it("follows the system's own links on the way to a place it may look", async () => {
@@ -134,7 +148,7 @@ describe(quietDisk, () => {
     const { fs, touched } = watched();
 
     await expect(
-      quietDisk({ home, temp }, fs).find(path.join(home, name, "proj", "a.ts"))
+      quietDisk({ home }, fs).find(path.join(home, name, "proj", "a.ts"))
     ).resolves.toStrictEqual({ kind: "unsure" });
     expect(inProtected(touched)).toBeFalsy();
   });
@@ -153,21 +167,21 @@ describe(quietDisk, () => {
   ])("does not follow %s", async (_, linked) => {
     const { fs, touched } = watched();
 
-    await expect(
-      quietDisk({ home, temp }, fs).find(linked)
-    ).resolves.toStrictEqual({ kind: "unsure" });
+    await expect(quietDisk({ home }, fs).find(linked)).resolves.toStrictEqual({
+      kind: "unsure",
+    });
     expect(inProtected(touched)).toBeFalsy();
   });
 
   it.each([
-    ["a file outside the home and temp folders", elsewhere],
+    ["a file outside the home folder", elsewhere],
     ["a link out of the home folder", path.join(dev, "out", "a.ts")],
   ])("does not look at %s", async (_, outside) => {
     const { fs, touched } = watched();
 
-    await expect(
-      quietDisk({ home, temp }, fs).find(outside)
-    ).resolves.toStrictEqual({ kind: "unsure" });
+    await expect(quietDisk({ home }, fs).find(outside)).resolves.toStrictEqual({
+      kind: "unsure",
+    });
     expect(
       touched.filter((at) => at.startsWith(path.join(base, "elsewhere")))
     ).toStrictEqual([]);
@@ -177,9 +191,9 @@ describe(quietDisk, () => {
     const { fs, touched } = watched();
 
     await expect(
-      quietDisk({ home, temp }, fs).find("/Volumes/Disk/proj/a.ts")
+      quietDisk({ home }, fs).find("/Volumes/Disk/proj/a.ts")
     ).resolves.toStrictEqual({ kind: "unsure" });
-    // The home and temp folders themselves are looked at, to know where they are.
+    // The home folder itself is looked at, to know where it is.
     expect(touched.filter((at) => !at.startsWith(base))).toStrictEqual([]);
   });
 
@@ -196,9 +210,9 @@ describe(quietDisk, () => {
       },
     });
 
-    await expect(
-      quietDisk({ home, temp }, fs).find(source)
-    ).resolves.toStrictEqual({ kind: "unsure" });
+    await expect(quietDisk({ home }, fs).find(source)).resolves.toStrictEqual({
+      kind: "unsure",
+    });
     expect(touched).not.toContain(source);
   });
 
@@ -227,17 +241,14 @@ describe(quietDisk, () => {
         at === source ? await Promise.reject(refused) : await lstat(at),
     });
 
-    await expect(
-      quietDisk({ home, temp }, fs).find(source)
-    ).resolves.toStrictEqual({ kind: "unsure" });
+    await expect(quietDisk({ home }, fs).find(source)).resolves.toStrictEqual({
+      kind: "unsure",
+    });
   });
 
   it("is sure of nothing without a home folder it can find", async () => {
     await expect(
-      quietDisk({
-        home: path.join(base, "no-home"),
-        temp: path.join(base, "no-temp"),
-      }).find(source)
+      quietDisk({ home: path.join(base, "no-home") }).find(source)
     ).resolves.toStrictEqual({ kind: "unsure" });
   });
 });

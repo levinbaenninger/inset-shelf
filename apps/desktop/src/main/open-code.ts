@@ -13,7 +13,7 @@ export interface CodeSystem {
   readonly registered: (address: string) => boolean;
   /** Opens an address `openAddress` built, in the app that registered its scheme. */
   readonly open: (address: string) => Promise<void>;
-  /** Brings forward the app that registered the address's scheme, opening nothing in it. */
+  /** Brings forward the app that registered the address's scheme, opening nothing in it: the editor's row gives an address of its scheme alone. */
   readonly bringForward: (address: string) => Promise<void>;
   /** Shows the file in its folder: never opens or runs it. */
   readonly reveal: (file: string) => void;
@@ -48,9 +48,12 @@ export const openCode = async (
   if (!(await system.fileIsThere(place.file))) {
     system.notify(goneMessage(place));
 
-    if (address !== null) {
+    // Its scheme alone, which opens no file: one no address could open is brought forward too.
+    const scheme = editor.open?.scheme;
+
+    if (scheme !== undefined && system.registered(scheme)) {
       try {
-        await system.bringForward(address);
+        await system.bringForward(scheme);
       } catch {
         // The shelf has said the file is gone; an editor that won't come forward changes nothing.
       }

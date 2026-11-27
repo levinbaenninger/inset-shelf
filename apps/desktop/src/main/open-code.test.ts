@@ -10,9 +10,9 @@ import { fileIsThere, openCode } from "./open-code";
 import type { CodeSystem } from "./open-code";
 import { quietDisk } from "./quiet-disk";
 
-/** What the shelf says when the editor was to open the file and its folder shows it instead. */
+/** What the shelf says when the editor was to open the file: what it tries next, since a reveal can't report that it failed. */
 const FELL_BACK =
-  "say Couldn’t open a.ts in Code, so it is shown in its folder";
+  "say Couldn’t open a.ts in Code, so Inset tries to show it in its folder";
 
 const PLACE: CodePlace = {
   file: "/Users/anna/My Code/proj/a.ts",
@@ -50,7 +50,7 @@ const system = (
 };
 
 describe(openCode, () => {
-  it("shows the file in its folder, and says so, when its editor refuses to open it", async () => {
+  it("tries to show the file in its folder, and says so, when its editor refuses to open it", async () => {
     const mac = system(true, ["vscode"]);
 
     await openCode("Code", PLACE, CODE_EDITORS, {
@@ -99,7 +99,7 @@ describe(openCode, () => {
     ]);
   });
 
-  it("shows the file in its folder, and says so, when no app on this computer takes the editor's address", async () => {
+  it("tries to show the file in its folder, and says so, when no app on this computer takes the editor's address", async () => {
     const mac = system(true, []);
 
     await openCode("Code", PLACE, CODE_EDITORS, mac);
@@ -151,9 +151,30 @@ describe(openCode, () => {
 
     expect(mac.asked).toStrictEqual([
       "say a.ts is no longer at this path",
-      "forward vscode://file/Users/anna/My%20Code/proj/a.ts:12",
+      "forward vscode://",
     ]);
   });
+
+  it.each([
+    ["a path with a colon", "/Users/anna/My Code/proj/a:12.ts", "a:12.ts"],
+    [
+      "a workspace file",
+      "/Users/anna/My Code/proj/all.code-workspace",
+      "all.code-workspace",
+    ],
+  ])(
+    "says %s that is gone is gone, and brings its editor forward by its scheme alone",
+    async (_, file, name) => {
+      const mac = system(false, ["vscode"]);
+
+      await openCode("Code", { ...PLACE, file }, CODE_EDITORS, mac);
+
+      expect(mac.asked).toStrictEqual([
+        `say ${name} is no longer at this path`,
+        "forward vscode://",
+      ]);
+    }
+  );
 
   it("only says a file is gone when no app takes the editor's address", async () => {
     const mac = system(false, []);
@@ -175,7 +196,7 @@ describe(fileIsThere, () => {
   writeFileSync(file, "export {};\n");
   writeFileSync(kept, "export {};\n");
 
-  const disk = quietDisk({ home, temp: path.join(folder, "temp") });
+  const disk = quietDisk({ home });
 
   it("finds a file at its path", async () => {
     await expect(fileIsThere(file, disk)).resolves.toBeTruthy();

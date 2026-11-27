@@ -102,9 +102,13 @@ export const fromHome = (path: string, home: string): string | null => {
 export const goneMessage = (place: CodePlace): string =>
   `${fileName(place)} is no longer at this path`;
 
-/** What the shelf says when a code item's editor was to open its file and could not, so its folder shows it. */
+/**
+ * What the shelf says when a code item's editor was to open its file and
+ * could not: what Inset tries next. Said before the file is shown in its
+ * folder, which can't report that it failed, so never as done.
+ */
 export const fellBackMessage = (place: CodePlace, app: string): string =>
-  `Couldn’t open ${fileName(place)} in ${app}, so it is shown in its folder`;
+  `Couldn’t open ${fileName(place)} in ${app}, so Inset tries to show it in its folder`;
 
 /**
  * Whether `text` is the text a code place was captured with: only then may

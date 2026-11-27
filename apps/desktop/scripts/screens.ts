@@ -8089,9 +8089,9 @@ const CODE_SCENES: readonly Scene[] = (
           (await page.locator("[data-sonner-toast]").first().textContent()) ??
           "";
 
-        return toast.includes("so it is shown in its folder")
+        return toast.includes("so Inset tries to show it in its folder")
           ? await openedOnce(page)
-          : `the shelf says "${toast}", not that the file is shown in its folder`;
+          : `the shelf says "${toast}", not that Inset tries to show the file in its folder`;
       },
       data: {
         openNotice: {

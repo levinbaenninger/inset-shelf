@@ -41,6 +41,8 @@ export interface CodeEditor {
   readonly open: {
     readonly file: string;
     readonly atLine: string;
+    /** An address that names only the editor's scheme: it finds the app that takes the others, and opens nothing. */
+    readonly scheme: string;
     /** The ends of file names the address opens as something other than the file itself, a workspace say. */
     readonly not?: readonly string[];
   } | null;
@@ -71,6 +73,7 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
       atLine: "vscode://file{path}:{line}",
       file: "vscode://file{path}",
       not: [".code-workspace"],
+      scheme: "vscode://",
     },
     title: ["file", "project"],
   },

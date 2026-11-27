@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -884,6 +884,26 @@ const placeOfAddress = (
   }
 };
 
+/** A path as an address spells it: each part encoded, as src/shared/code-editors.ts builds one. */
+const addressPath = (at: string): string =>
+  at.split("/").map(encodeURIComponent).join("/");
+
+/**
+ * What the stand-in editor received, for a result's detail: every address,
+ * with the run's folder as "<run>" and the home folder as "~", so no user
+ * name is written to the results; "none" when it received nothing.
+ */
+const received = (asked: readonly string[]): string =>
+  asked.length === 0
+    ? "received none"
+    : `received ${asked
+        .map((address) =>
+          address
+            .replaceAll(addressPath(realpathSync(sourceHome)), "<run>")
+            .replaceAll(addressPath(homedir()), "~")
+        )
+        .join(", ")}`;
+
 /** Clicks a code item's source line in the shelf, such as "a.ts · proj": the only button that holds `name`. */
 const clickCodeLine = async (name: string, attempts = 10): Promise<boolean> => {
   const found = jxa(`const hit = ${processElements}.findLast((e) => {
@@ -947,7 +967,7 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
       asked
         .map(placeOfAddress)
         .every((at) => at?.file === file && at.line === null),
-    `${asked.length} address(es)`
+    received(asked)
   );
 
   // Gone, and with the editor quit: only the bring-forward can start it again.
@@ -964,7 +984,8 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   await delay(1000);
   record(
     "a file that is gone opens nothing",
-    clickedGone && openedInSource().length === 0
+    clickedGone && openedInSource().length === 0,
+    received(openedInSource())
   );
   record(
     "and brings its editor forward",
@@ -1146,10 +1167,16 @@ const checkCodePlaceLog = (places: readonly (AppEvent | undefined)[]): void => {
 };
 
 const checkCodePlace = async (): Promise<void> => {
-  const project = path.join(realpathSync(work), "code", "proj");
+  // Under the run's own folder in the repo, in the home folder: the only place
+  // the shelf looks for a code file (src/main/quiet-disk.ts). The repo must not
+  // be in a folder macOS asks about, Documents say.
+  const code = path.join(sourceHome, "code");
+
+  mkdirSync(path.join(code, "proj", "src"), { recursive: true });
+
+  const project = path.join(realpathSync(code), "proj");
   const file = path.join(project, "src", "a.ts");
 
-  mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, "export const answer = 42;\n");
 
   const inFile = await captureCode("Code place sentence in a file", file);
@@ -3626,70 +3653,76 @@ const main = async (): Promise<void> => {
       version: 1,
     })}\n`
   );
-  buildHelpers();
 
-  if (only === "recall") {
-    seedRecallShelf();
-  }
-
-  const seeded = SEEDED_TRIALS.get(only);
-
-  seeded?.seed();
-
-  const clipboardBefore = pbpaste();
-
-  // The card's trial and the failed paste start on a disk that refuses the first write.
-  let app = launch(failingWrite(only));
-
+  // The stand-in editor's own scope, from its first file on: whatever fails
+  // after, a build, a seed or the clipboard's read, it is forgotten and removed.
   try {
-    await checkLaunch();
+    buildHelpers();
 
-    if (only === "reopen") {
-      await showSource("", "none");
-      await checkReopenCaret();
-    } else if (only === "say-why") {
-      await checkSayWhy();
-    } else if (only === "say-why-failed") {
-      await checkSayWhyFailed();
-    } else if (only === "recall") {
-      app = await checkRecall(app);
-    } else if (only === "code") {
-      await checkCodePlace();
-    } else if (only === "card") {
-      await checkScreenshotCard();
-    } else if (only === "added" || only === "added-failed") {
-      await checkAddedNotice(only === "added-failed");
-    } else if (seeded === undefined) {
-      await checkShelfStaysInFront();
-      await checkComposer();
-      await checkSelection();
-      await checkSayWhy();
-      await checkNoFalseTaps();
-      await checkToggle();
-      await checkCopy();
-      await checkDrawing();
-      await checkSettings();
-      await checkReopenCaret();
-      app = await checkRestart(app);
-      await checkFailedWrite();
-    } else {
-      app = await seeded.run(app);
+    if (only === "recall") {
+      seedRecallShelf();
+    }
+
+    const seeded = SEEDED_TRIALS.get(only);
+
+    seeded?.seed();
+
+    const clipboardBefore = pbpaste();
+
+    // The card's trial and the failed paste start on a disk that refuses the first write.
+    let app = launch(failingWrite(only));
+
+    try {
+      await checkLaunch();
+
+      if (only === "reopen") {
+        await showSource("", "none");
+        await checkReopenCaret();
+      } else if (only === "say-why") {
+        await checkSayWhy();
+      } else if (only === "say-why-failed") {
+        await checkSayWhyFailed();
+      } else if (only === "recall") {
+        app = await checkRecall(app);
+      } else if (only === "code") {
+        await checkCodePlace();
+      } else if (only === "card") {
+        await checkScreenshotCard();
+      } else if (only === "added" || only === "added-failed") {
+        await checkAddedNotice(only === "added-failed");
+      } else if (seeded === undefined) {
+        await checkShelfStaysInFront();
+        await checkComposer();
+        await checkSelection();
+        await checkSayWhy();
+        await checkNoFalseTaps();
+        await checkToggle();
+        await checkCopy();
+        await checkDrawing();
+        await checkSettings();
+        await checkReopenCaret();
+        app = await checkRestart(app);
+        await checkFailedWrite();
+      } else {
+        app = await seeded.run(app);
+      }
+    } finally {
+      stopSource();
+      quitApp(app);
+      await exited(app);
+
+      // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
+      if (clipboardBefore === "") {
+        jxa(
+          'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
+        );
+      } else {
+        pbcopy(clipboardBefore);
+      }
     }
   } finally {
-    stopSource();
-    quitApp(app);
-    await exited(app);
     spawnSync(lsregister, ["-u", sourceApp]);
     rmSync(sourceHome, { force: true, recursive: true });
-
-    // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
-    if (clipboardBefore === "") {
-      jxa(
-        'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
-      );
-    } else {
-      pbcopy(clipboardBefore);
-    }
   }
 
   writeFileSync(
