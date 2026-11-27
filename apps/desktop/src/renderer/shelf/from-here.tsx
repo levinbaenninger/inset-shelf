@@ -35,9 +35,24 @@ export const hereText = (here: ShelfHere): string =>
   );
 
 /**
+ * The search once the opening it filtered to is gone (`had` one, has none
+ * now): `from:here` names nothing then and would hide every item, so it
+ * leaves and the other words stay. Null leaves the search as it is.
+ */
+export const withoutStaleHere = (
+  query: string,
+  here: ShelfHere | null | undefined,
+  had: boolean
+): string | null =>
+  had && (here === null || here === undefined) && parseSearch(query).here
+    ? withoutFromHere(query)
+    : null;
+
+/**
  * Recall in the list. `from:here` in the search keeps only the open items
  * from the window the shelf opened beside; an opening from the recall pill
- * starts with it, once per opening. Clearing the search shows everything.
+ * starts with it, once per opening. Clearing the search shows everything,
+ * and so does an opening beside no such window.
  */
 export const useFromHere = (
   here: ShelfHere | null | undefined,
@@ -45,6 +60,18 @@ export const useFromHere = (
   setQuery: (query: string) => void
 ): ((groups: readonly ItemGroup[]) => readonly ItemGroup[]) => {
   const [handled, setHandled] = useState<number | null>(null);
+  const [had, setHad] = useState(false);
+  const has = here !== null && here !== undefined;
+
+  if (has !== had) {
+    const cleared = withoutStaleHere(query, here, had);
+
+    setHad(has);
+
+    if (cleared !== null) {
+      setQuery(cleared);
+    }
+  }
 
   const ids = useMemo((): ReadonlySet<ItemId> => new Set(here?.ids), [here]);
 

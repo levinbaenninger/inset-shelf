@@ -2,7 +2,7 @@ import type { ShelfHere } from "@shared/contracts";
 import { ItemIdSchema } from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
-import { noteHere } from "./from-here";
+import { noteHere, withoutStaleHere } from "./from-here";
 
 const HERE: ShelfHere = {
   filter: true,
@@ -30,5 +30,18 @@ describe(noteHere, () => {
     expect(noteHere(HERE, false, null)).toBeNull();
     expect(noteHere(null, true, null)).toBeNull();
     expect(noteHere({ ...HERE, ids: [] }, true, null)).toBeNull();
+  });
+});
+
+describe(withoutStaleHere, () => {
+  it("takes from:here out of the search when the shelf opens beside no window items came from, and keeps the other words", () => {
+    expect(withoutStaleHere("from:here", null, true)).toBe("");
+    expect(withoutStaleHere("build from:here", undefined, true)).toBe("build");
+  });
+
+  it("leaves the search alone while there is an opening, or there never was one", () => {
+    expect(withoutStaleHere("from:here", HERE, true)).toBeNull();
+    expect(withoutStaleHere("from:here", null, false)).toBeNull();
+    expect(withoutStaleHere("build", null, true)).toBeNull();
   });
 });
