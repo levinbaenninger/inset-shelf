@@ -1975,6 +1975,40 @@ describe("a write that landed while the user had the screenshot off the shelf", 
   });
 });
 
+/** The scale of every picture of the screenshot the shelf shows, as a row or on the note. */
+const scales = (card: ReturnType<typeof setup>) =>
+  [
+    ...card.images(),
+    ...(card.controller.item(card.note)?.attachments ?? []),
+  ].flatMap((each) =>
+    each.kind === "image" && each.image !== null
+      ? [each.image.pixelsPerDip]
+      : []
+  );
+
+describe("the scale a screenshot is kept at", () => {
+  it.each(["shelf", "item"] as const)(
+    "is that of the display the pointer was on when the add to the %s was pressed, though the pointer is on another by the time the picture file is written",
+    async (to) => {
+      const card = setup();
+
+      await card.controller.flush();
+      card.select(card.note, true);
+      card.saves.show(shot(1));
+
+      const adding =
+        to === "shelf"
+          ? card.saves.addToShelf(1)
+          : card.saves.addToItem(1, card.note);
+
+      card.pointerOn(1);
+      await adding;
+
+      expect(scales(card)).toStrictEqual([2]);
+    }
+  );
+});
+
 describe("the reason a failed card gives", () => {
   it("keeps the reason the shelf's own Retry was refused for once the tile is removed, not the first one", async () => {
     const card = await refused("item");
