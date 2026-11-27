@@ -62,18 +62,38 @@ export const secureWebPreferences = (preload: string): WebPreferences => ({
   nodeIntegration: false,
   preload,
   sandbox: true,
-  spellcheck: true,
+  // The system checker on macOS only; elsewhere Chromium would download dictionaries from Google.
+  spellcheck: process.platform === "darwin",
   webSecurity: true,
 });
 
-export const harden = (contents: WebContents, name: string): void => {
+/** No window opens, no page navigates or redirects away, no webview attaches. */
+const denyNavigation = (contents: WebContents): void => {
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-navigate", (event) => {
+    event.preventDefault();
+  });
+  contents.on("will-redirect", (event) => {
     event.preventDefault();
   });
   contents.on("will-attach-webview", (event) => {
     event.preventDefault();
   });
+};
+
+/**
+ * Applies the denials to every webContents the app ever creates, so a window
+ * that forgets harden() (or a future one) is still locked down. Call once,
+ * before the first window.
+ */
+export const hardenEveryWebContents = (): void => {
+  app.on("web-contents-created", (_event, contents) => {
+    denyNavigation(contents);
+  });
+};
+
+export const harden = (contents: WebContents, name: string): void => {
+  denyNavigation(contents);
   contents.on("did-fail-load", (_event, code, description, url) => {
     console.error(`[${name}] failed to load ${url}: ${code} ${description}`);
   });
@@ -92,6 +112,10 @@ export const harden = (contents: WebContents, name: string): void => {
 };
 
 export const secureSession = (): void => {
+  if (process.platform !== "darwin") {
+    session.defaultSession.setSpellCheckerEnabled(false);
+  }
+
   session.defaultSession.setPermissionRequestHandler(
     (_contents, _permission, respond) => {
       respond(false);

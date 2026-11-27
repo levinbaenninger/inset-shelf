@@ -34,7 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { onMenusOpen } from "@/lib/menu-keys";
-import { filePath, shelfBridge } from "@/shared/bridge";
+import { addFiles, shelfBridge } from "@/shared/bridge";
 import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
@@ -274,20 +274,14 @@ const Excerpt = ({ item }: { readonly item: ShelfItem }) =>
 
 const deletedToast = (id: ItemId): string => `deleted-${id}`;
 
-/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). */
+/** Files dropped or pasted in: added by the preload when they are on disk (the page never sees their paths), else as image bytes (an image copied from a page). */
 const addDataFiles = async (files: readonly File[]): Promise<void> => {
-  const paths = files.flatMap((file) => {
-    const found = filePath(file);
+  const added = await addFiles(files);
 
-    return found === "" ? [] : [found];
-  });
-
-  if (paths.length > 0) {
-    const result = await api.addFiles(paths);
-
-    if (result.ok) {
+  if (added !== null) {
+    if (added.ok) {
       noticeToast(
-        paths.length === 1 ? "Added 1 file" : `Added ${paths.length} files`
+        added.count === 1 ? "Added 1 file" : `Added ${added.count} files`
       );
     }
 

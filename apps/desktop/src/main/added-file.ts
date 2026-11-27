@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { safeFileName } from "@shared/local-path";
+
 /** Pictures become image items, shown in the shelf; anything else is kept as a file. */
 const IMAGE_EXTENSIONS = new Set([
   "bmp",
@@ -33,6 +35,6 @@ export const classifyAddedFile = (filePath: string): AddedFile => {
   return {
     extension,
     kind: IMAGE_EXTENSIONS.has(extension) ? "image" : "file",
-    name: name === "" ? "File" : name.slice(0, 255),
+    name: safeFileName(name),
   };
 };

@@ -179,7 +179,7 @@ const readClipboardImage = async (): Promise<NativeImage | null> => {
 };
 
 const isScreenCapture = async (file: string): Promise<boolean> => {
-  const attributes = await run("/usr/bin/xattr", [file]);
+  const attributes = await run("/usr/bin/xattr", ["--", file]);
 
   return attributes.split("\n").includes(SCREEN_CAPTURE_MARK);
 };

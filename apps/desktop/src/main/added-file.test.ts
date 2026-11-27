@@ -17,6 +17,14 @@ describe(classifyAddedFile, () => {
     });
   });
 
+  it("never keeps a separator or a dot name as the file's name", () => {
+    expect(classifyAddedFile(String.raw`/tmp/a\..\b.txt`).name).toBe(
+      "a_.._b.txt"
+    );
+    expect(classifyAddedFile("/tmp/..").name).toBe("File");
+    expect(classifyAddedFile("/").name).toBe("File");
+  });
+
   it("stores unusual extensions under a safe one", () => {
     expect(classifyAddedFile("/tmp/notes")).toMatchObject({
       extension: "bin",
