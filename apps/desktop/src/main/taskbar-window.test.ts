@@ -22,11 +22,8 @@ const window = (
 describe(isTaskbarWindow, () => {
   it("counts the untitled taskbar", () => {
     expect(
-      isTaskbarWindow(
-        window("", rect<"screen">(0, 1032, 1920, 48)),
-        displays
-      )
-    ).toBe(true);
+      isTaskbarWindow(window("", rect<"screen">(0, 1032, 1920, 48)), displays)
+    ).toBeTruthy();
   });
 
   it("counts the hidden icons' flyout, whatever language its title is in", () => {
@@ -35,7 +32,7 @@ describe(isTaskbarWindow, () => {
         window("Überlauffenster", rect<"screen">(1500, 880, 300, 140)),
         displays
       )
-    ).toBe(true);
+    ).toBeTruthy();
   });
 
   it("counts a flyout over a taskbar that hides itself", () => {
@@ -49,7 +46,7 @@ describe(isTaskbarWindow, () => {
           },
         ]
       )
-    ).toBe(true);
+    ).toBeTruthy();
   });
 
   it("doesn't count a File Explorer folder window", () => {
@@ -58,7 +55,7 @@ describe(isTaskbarWindow, () => {
         window("Downloads", rect<"screen">(300, 200, 1100, 700)),
         displays
       )
-    ).toBe(false);
+    ).toBeFalsy();
   });
 
   it("doesn't count a maximized folder window, which ends at the taskbar", () => {
@@ -67,7 +64,7 @@ describe(isTaskbarWindow, () => {
         window("Downloads", rect<"screen">(-8, 0, 1936, 1040)),
         displays
       )
-    ).toBe(false);
+    ).toBeFalsy();
   });
 
   it("doesn't count a folder window snapped to a quarter of the screen", () => {
@@ -76,7 +73,7 @@ describe(isTaskbarWindow, () => {
         window("Downloads", rect<"screen">(960, 516, 960, 516)),
         displays
       )
-    ).toBe(false);
+    ).toBeFalsy();
   });
 
   it("doesn't count the desktop", () => {
@@ -85,15 +82,19 @@ describe(isTaskbarWindow, () => {
         window("Program Manager", rect<"screen">(0, 0, 1920, 1080)),
         displays
       )
-    ).toBe(false);
+    ).toBeFalsy();
   });
 
   it("doesn't count another app's window, even an untitled one", () => {
     expect(
       isTaskbarWindow(
-        window("", rect<"screen">(0, 1032, 1920, 48), String.raw`C:\Apps\x.exe`),
+        window(
+          "",
+          rect<"screen">(0, 1032, 1920, 48),
+          String.raw`C:\Apps\x.exe`
+        ),
         displays
       )
-    ).toBe(false);
+    ).toBeFalsy();
   });
 });

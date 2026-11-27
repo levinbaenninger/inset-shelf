@@ -19,7 +19,7 @@ const HELD_READ: Snapshot = [{ "text/plain": new Blob([]) }];
 
 const A = "file:///Users/me/a.pdf";
 const B = "file:///Users/me/b.pdf";
-const list = (url: string): Item => ({ "text/uri-list": url });
+const list = (url: string) => ({ "text/uri-list": url });
 
 const toSnapshot = (items: readonly Item[]): Snapshot =>
   items.map((item) =>
@@ -30,15 +30,14 @@ const toSnapshot = (items: readonly Item[]): Snapshot =>
 
 const toItems = async (snapshot: Snapshot): Promise<Item[]> =>
   await Promise.all(
-    snapshot.map(
-      async (item) =>
-        Object.fromEntries(
-          await Promise.all(
-            Object.entries(item).map(
-              async ([type, blob]) => [type, await blob.text()] as const
-            )
+    snapshot.map(async (item) =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(item).map(
+            async ([type, blob]) => [type, await blob.text()] as const
           )
-        ) as Item
+        )
+      )
     )
   );
 
@@ -76,12 +75,14 @@ const clipboard = (options: {
       await copiedFilePaths(
         toSnapshot(items).map((item) => ({
           getType: async (type: string) =>
-            await Promise.resolve(item[type] as Blob),
+            await Promise.resolve(item[type] ?? new Blob([])),
           types: Object.keys(item),
         }))
       ),
     readHtml: async () =>
-      await Promise.resolve(items.find((item) => "text/html" in item)?.["text/html"] ?? ""),
+      await Promise.resolve(
+        items.find((item) => "text/html" in item)?.["text/html"] ?? ""
+      ),
     readSource: async () => await Promise.resolve(""),
     readText: async () => {
       time += 1;
@@ -109,9 +110,7 @@ const clipboard = (options: {
       items = options.before?.[reads] ?? items;
 
       return await Promise.resolve(
-        options.held?.includes(reads) === true
-          ? HELD_READ
-          : toSnapshot(items)
+        options.held?.includes(reads) === true ? HELD_READ : toSnapshot(items)
       );
     },
     wait: async (ms) => {
@@ -123,7 +122,7 @@ const clipboard = (options: {
   return { deps, items: () => items, restored };
 };
 
-const EARLIER: Item = { "text/plain": "earlier" };
+const EARLIER = { "text/plain": "earlier" };
 
 describe("a file copy followed by the user's own copy of another file", () => {
   // Explorer copies files with no text: the baseline's text and HTML are empty, as a newer file copy's are.
@@ -176,7 +175,12 @@ describe("a file copy followed by the user's own copy of another file", () => {
 describe("a text selection that sits beside a file URL", () => {
   it("saves the selected text, not the file, when the text isn't the file's name", async () => {
     const clip = clipboard({
-      copied: [{ "text/plain": "See draft", "text/uri-list": "file:///Users/me/draft.pdf" }],
+      copied: [
+        {
+          "text/plain": "See draft",
+          "text/uri-list": "file:///Users/me/draft.pdf",
+        },
+      ],
       initial: [EARLIER],
     });
 
@@ -188,7 +192,12 @@ describe("a text selection that sits beside a file URL", () => {
 
   it("saves the file when the text is its name, as Finder copies it", async () => {
     const clip = clipboard({
-      copied: [{ "text/plain": "draft.pdf", "text/uri-list": "file:///Users/me/draft.pdf" }],
+      copied: [
+        {
+          "text/plain": "draft.pdf",
+          "text/uri-list": "file:///Users/me/draft.pdf",
+        },
+      ],
       initial: [EARLIER],
     });
 

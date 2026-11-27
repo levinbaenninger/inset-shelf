@@ -162,7 +162,9 @@ const stillCopied = async <S>(
 
   const now = await readFiles(deps);
 
-  return now.length === files.length && now.every((file, at) => file === files[at]);
+  return (
+    now.length === files.length && now.every((file, at) => file === files[at])
+  );
 };
 
 /** The last name in a path, whichever way it is separated. */

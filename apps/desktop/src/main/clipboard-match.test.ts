@@ -205,30 +205,30 @@ describe(holdsAgainIn, () => {
   });
 });
 
-describe("holdsAgainIn with copied files", () => {
-  const files = (...urls: string[]) => [
-    { "text/uri-list": new Blob([urls.join("\r\n")]) },
-  ];
+const files = (...urls: string[]) => [
+  { "text/uri-list": new Blob([urls.join("\r\n")]) },
+];
 
+describe("holdsAgainIn with copied files", () => {
   it("holds the same files again, however the line breaks come back", async () => {
     await expect(
       holdsAgainIn(
         files("file:///a.pdf", "file:///b.pdf"),
         files("file:///a.pdf", "file:///b.pdf")
       )
-    ).resolves.toBe(true);
+    ).resolves.toBeTruthy();
     await expect(
       holdsAgainIn(
         [{ "text/uri-list": new Blob(["file:///a.pdf\r\nfile:///b.pdf"]) }],
         [{ "text/uri-list": new Blob(["file:///a.pdf\nfile:///b.pdf"]) }]
       )
-    ).resolves.toBe(true);
+    ).resolves.toBeTruthy();
   });
 
   it("doesn't hold when another list of files is there", async () => {
     await expect(
       holdsAgainIn(files("file:///a.pdf"), files("file:///b.pdf"))
-    ).resolves.toBe(false);
+    ).resolves.toBeFalsy();
   });
 });
 

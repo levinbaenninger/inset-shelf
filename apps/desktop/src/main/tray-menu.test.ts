@@ -212,39 +212,39 @@ describe(iconClick, () => {
   });
 });
 
+/** Samples the focus one after another, as the focus moves; the last holds. */
+const run = async (
+  kinds: readonly (FrontKind | null)[],
+  shelfBackAt = Infinity
+) => {
+  let time = 0;
+  let sampled = 0;
+  let other = 0;
+
+  await followFocus({
+    at: 0,
+    away: () => time < shelfBackAt,
+    leftOther: () => {
+      other += 1;
+    },
+    now: () => time,
+    probe: async () => {
+      const kind = kinds[Math.min(sampled, kinds.length - 1)] ?? null;
+
+      sampled += 1;
+
+      return await Promise.resolve(kind);
+    },
+    wait: async (ms) => {
+      time += ms;
+      await Promise.resolve();
+    },
+  });
+
+  return { other, sampled, time };
+};
+
 describe(followFocus, () => {
-  /** Samples the focus one after another, as the focus moves; the last holds. */
-  const run = async (
-    kinds: readonly (FrontKind | null)[],
-    shelfBackAt = Infinity
-  ) => {
-    let time = 0;
-    let sampled = 0;
-    let other = 0;
-
-    await followFocus({
-      at: 0,
-      away: () => time < shelfBackAt,
-      leftOther: () => {
-        other += 1;
-      },
-      now: () => time,
-      probe: async () => {
-        const kind = kinds[Math.min(sampled, kinds.length - 1)] ?? null;
-
-        sampled += 1;
-
-        return await Promise.resolve(kind);
-      },
-      wait: async (ms) => {
-        time += ms;
-        await Promise.resolve();
-      },
-    });
-
-    return { other, sampled, time };
-  };
-
   it("notes a window of the user's that took the focus from the shelf", async () => {
     const { other } = await run(["other"]);
 

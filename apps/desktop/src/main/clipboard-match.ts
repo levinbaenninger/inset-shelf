@@ -149,16 +149,15 @@ export const clipboardContent = async (
 /** Every file list on the clipboard (a URI list per item that has one), as one text. */
 const fileListsIn = async (
   read: readonly ClipboardContents[]
-): Promise<string> =>
-  (
-    await Promise.all(
-      read.map(async (item) =>
-        "text/uri-list" in item ? await textIn([item], "text/uri-list") : ""
-      )
+): Promise<string> => {
+  const lists = await Promise.all(
+    read.map(async (item) =>
+      "text/uri-list" in item ? await textIn([item], "text/uri-list") : ""
     )
-  )
-    .map(plain)
-    .join("\n");
+  );
+
+  return lists.map(plain).join("\n");
+};
 
 /**
  * holdsAgain, judged from one read of the clipboard rather than reading it
