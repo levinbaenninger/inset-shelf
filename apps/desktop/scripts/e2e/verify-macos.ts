@@ -27,7 +27,7 @@ import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
 
-/** A trial name (`reopen`, `say-why`, `recall`, `card`, `switch`, …: see `main`) runs only that trial (README.md, Testing). */
+/** A trial name (`reopen`, `say-why`, `recall`, `card`, `code`, `switch`, …: see `main`) runs only that trial (README.md, Testing). */
 const only = process.argv[3] ?? "";
 
 const packagedApp = path.join(
@@ -159,6 +159,14 @@ const ShelfFileSchema = z.looseObject({
       context: z
         .looseObject({
           app: z.string().nullable(),
+          code: z
+            .looseObject({
+              file: z.string(),
+              line: z.number().nullable(),
+              root: z.string().nullable(),
+            })
+            .nullable()
+            .optional(),
           title: z.string().nullable(),
         })
         .nullable()
@@ -429,11 +437,15 @@ const stopSource = (): void => {
   source = undefined;
 };
 
-/** Opens the source app in front with this text, all of it selected or none, in a window with this title, full screen if asked. */
+/** Opens the source app in front with this text, all of it selected or none, in a window with this title, full screen if asked, naming a file if given. */
 const showSource = async (
   text: string,
   selection: "all" | "none",
-  window: { readonly title?: string; readonly fullScreen?: boolean } = {}
+  window: {
+    readonly title?: string;
+    readonly fullScreen?: boolean;
+    readonly document?: string;
+  } = {}
 ): Promise<boolean> => {
   stopSource();
   source = spawn(
@@ -442,7 +454,8 @@ const showSource = async (
       text,
       selection,
       window.title ?? "Source",
-      ...(window.fullScreen === true ? ["fullscreen"] : []),
+      window.fullScreen === true ? "fullscreen" : "window",
+      ...(window.document === undefined ? [] : [window.document]),
     ],
     {
       stdio: "ignore",
@@ -796,6 +809,57 @@ const checkSelection = async (): Promise<void> => {
   record(
     "right Shift works the same",
     (await waitFor("selection", right)) !== undefined
+  );
+};
+
+/**
+ * A capture from an editor keeps the file its window names and the project
+ * folder its title names, and a window that names no file keeps none
+ * (src/shared/code-editors.ts; the source app is an editor under the test).
+ * The paths are compared here and never written to the results.
+ */
+const checkCodePlace = async (): Promise<void> => {
+  const project = path.join(realpathSync(work), "code", "proj");
+  const file = path.join(project, "src", "a.ts");
+
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, "export const answer = 42;\n");
+
+  const capture = async (text: string, document?: string) => {
+    if (await showSource(text, "all", { document, title: "a.ts — proj" })) {
+      const mark = events().length;
+
+      guardedKeys(() => {
+        input("double-shift");
+      });
+      await waitFor("itemAdded", mark);
+    } else {
+      record("source app in front for the code place", false, frontmost());
+    }
+
+    return items().find((item) => item.kind === "text" && item.text === text);
+  };
+
+  const inFile = await capture("Code place sentence in a file", file);
+
+  record(
+    "a capture from an editor keeps the file its window names",
+    inFile?.context?.code?.file === file
+  );
+  record(
+    "and the project folder its title names",
+    inFile?.context?.code?.root === project
+  );
+  record("and no line", inFile?.context?.code?.line === null);
+
+  // Once the capture notice has gone, as in checkSelection.
+  await delay(3000);
+
+  const noFile = await capture("Code place sentence in no file");
+
+  record(
+    "a window that names no file keeps no place in the code",
+    noFile?.context?.app === "source" && noFile.context.code === null
   );
 };
 
@@ -3277,6 +3341,8 @@ const main = async (): Promise<void> => {
       await checkSayWhyFailed();
     } else if (only === "recall") {
       app = await checkRecall(app);
+    } else if (only === "code") {
+      await checkCodePlace();
     } else if (only === "card") {
       await checkScreenshotCard();
     } else if (only === "added" || only === "added-failed") {
