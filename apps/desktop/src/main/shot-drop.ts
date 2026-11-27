@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { AttachResult, ShotSaveTo } from "@shared/contracts";
 import type { ItemId } from "@shared/shelf";
 
+import { onDisk } from "./on-disk";
 import { errorMessage } from "./save-error";
 import type { Shot, ShotDrag, ShotDrop } from "./screenshot-saves";
 
@@ -37,15 +38,6 @@ export interface ShotDropDeps<S extends NamedShot> {
   /** Removes a drag's file from staging, still as it was written: its screenshot has a place on the shelf, or the app quits. Never throws. */
   readonly unstage: (file: string) => void;
 }
-
-/** Where a file is on disk: macOS can name a temporary file under /var or under /private/var. */
-const onDisk = (file: string): string => {
-  try {
-    return realpathSync.native(file);
-  } catch {
-    return path.resolve(file);
-  }
-};
 
 /** What bytes hold, by their SHA-256: a file's size and modification time can stay the same through an edit. */
 const digestOf = (bytes: Uint8Array): string =>
