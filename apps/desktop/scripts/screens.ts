@@ -726,8 +726,8 @@ const EXAMPLE_DOC = {
       {
         app: null,
         appLink: null,
-        title: "Inset Shelf: README",
-        url: "https://github.com/levinbaenninger/inset-shelf#readme",
+        title: "Inset Shelf docs",
+        url: "https://inset-shelf.levexis.workers.dev/docs",
       }
     ),
   ],
