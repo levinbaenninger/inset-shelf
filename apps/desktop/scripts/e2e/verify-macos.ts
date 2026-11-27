@@ -73,10 +73,8 @@ const EventSchema = z.object({
     })
     .optional(),
   event: z.string(),
-  fileFound: z.boolean().optional(),
   itemId: z.string().optional(),
   kind: z.string().optional(),
-  lineFound: z.boolean().optional(),
   restored: z.boolean().optional(),
   count: z.number().optional(),
   t: z.number(),
@@ -834,11 +832,10 @@ const checkSelection = async (): Promise<void> => {
 
 /**
  * A capture from an editor keeps the file its window names and the project
- * folder its title names, and the line its words begin on when they are in
- * the file once; a window that names no file keeps none
- * (src/shared/code-editors.ts, src/main/code-line.ts; the source app is an
- * editor under the test). The paths are compared here and never written to
- * the results.
+ * folder its title names, and no line; a window that names no file keeps
+ * none (src/shared/code-editors.ts; the source app is an editor under the
+ * test). A click finds the line (src/main/code-line.ts). The paths are
+ * compared here and written to the results only from the run's folder on.
  */
 const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
   for (let waited = 0; waited < ms; waited += 200) {
@@ -929,13 +926,11 @@ const clickCodeLine = async (name: string, attempts = 10): Promise<boolean> => {
 };
 
 /**
- * The way back (src/main/open-code.ts): a click on a code item's source line
- * opens its file in the editor it came from, through the address the
- * editor's scheme takes, here the source app's own. A file that is gone
- * opens nothing and brings the editor forward. No other editor is touched.
+ * Whether the stand-in editor takes its scheme here. Without it a click
+ * would show the file in Finder, and leave that window open: no click is
+ * tried then.
  */
-const checkCodeWayBack = async (file: string): Promise<void> => {
-  // Without its scheme the app would show the file in Finder, and leave that window open.
+const standInTakesScheme = (): boolean => {
   const handler = jxa(`ObjC.import("AppKit");
     const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString(${JSON.stringify(`${sourceScheme}://file/a`)}));
     app.isNil() ? "" : ObjC.unwrap(app.path);`);
@@ -946,10 +941,16 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
     handler === "" ? "no app takes it" : handler
   );
 
-  if (handler !== sourceApp) {
-    return;
-  }
+  return handler === sourceApp;
+};
 
+/**
+ * The way back (src/main/open-code.ts): a click on a code item's source line
+ * opens its file in the editor it came from, through the address the
+ * editor's scheme takes, here the source app's own. A file that is gone
+ * opens nothing and brings the editor forward. No other editor is touched.
+ */
+const checkCodeWayBack = async (file: string): Promise<void> => {
   enableWebAccessibility();
   rmSync(sourceOpened, { force: true });
   showShelfFromTray();
@@ -962,7 +963,7 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
 
   record("the code item's source line is a button", clicked);
   record(
-    "a click on it opens its file in the editor it came from, by the editor's address",
+    "a click on it opens its file in the editor it came from, by the editor's address, at no line where its words are not in the file",
     asked.length === 1 &&
       asked
         .map(placeOfAddress)
@@ -1004,59 +1005,129 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
 const lineText = (n: number): string => `const line${n} = codePlaceLine(${n});`;
 
 /**
- * A click on a code item's source line opens its file at the line its words
- * are on: the stored one, and after they moved, the one they are on now.
+ * Clicks the source line of the code item from `name` ("lines.ts"), with
+ * nothing the stand-in received before: the line the address it receives
+ * opens at, null for none, or undefined when it receives no address of
+ * `file`, or more than one.
  */
-const checkCodeLineWayBack = async (file: string): Promise<void> => {
-  const openAtLine = async (): Promise<number | null | undefined> => {
-    enableWebAccessibility();
-    rmSync(sourceOpened, { force: true });
-    showShelfFromTray();
+const openedAtLine = async (
+  name: string,
+  file: string
+): Promise<{
+  readonly line: number | null | undefined;
+  readonly detail: string;
+}> => {
+  enableWebAccessibility();
+  rmSync(sourceOpened, { force: true });
+  showShelfFromTray();
 
-    const clicked = await clickCodeLine("lines.ts:12");
+  const clicked = await clickCodeLine(name);
 
-    await waitUntil(() => openedInSource().length > 0);
+  await waitUntil(() => openedInSource().length > 0);
 
-    const asked = openedInSource().map(placeOfAddress);
+  const asked = openedInSource();
+  const [place] = asked.map(placeOfAddress);
 
-    return clicked && asked.length === 1 && asked[0]?.file === file
-      ? asked[0].line
-      : undefined;
+  return {
+    detail: received(asked),
+    line:
+      clicked && asked.length === 1 && place?.file === file
+        ? place.line
+        : undefined,
   };
+};
 
-  const stored = await openAtLine();
+/**
+ * Edits the text item that holds `from` in the shelf to read `to`: a click
+ * on its words gives it the keyboard, Return opens it to edit, and the new
+ * words replace all of the old. True once the shelf file holds the edit.
+ */
+const editItemText = async (from: string, to: string): Promise<boolean> => {
+  enableWebAccessibility();
+  showShelfFromTray();
+
+  if (!(await clickElement("AXButton", from))) {
+    return false;
+  }
+
+  await delay(400);
+  guardedKeys(() => {
+    osa('tell application "System Events" to key code 36');
+  }, [processName]);
+  await delay(400);
+  guardedKeys(() => {
+    osa('tell application "System Events" to keystroke "a" using command down');
+  }, [processName]);
+  typeIntoShelf(to);
+
+  return await waitUntil(() =>
+    items().some((item) => item.kind === "text" && item.text === to)
+  );
+};
+
+/**
+ * The line is found when the source line is clicked, never at capture
+ * (src/main/open-code.ts, src/main/code-line.ts): the file opens at the line
+ * the captured words are on now, at the line they moved to after an edit
+ * of the file, and at no line once the item's own words were edited, even
+ * to words that are in the file once. Words in the file twice open at no
+ * line.
+ */
+const checkCodeLineWayBack = async ({
+  lines,
+  twice,
+}: {
+  readonly lines: string;
+  readonly twice: string;
+}): Promise<void> => {
+  const stored = await openedAtLine("lines.ts", lines);
 
   record(
-    "a click opens the file at the line its words were captured on",
-    stored === 12,
-    String(stored)
+    "a click opens the file at the line its captured words are on",
+    stored.line === 12,
+    stored.detail
   );
 
-  const before = readFileSync(file, "utf-8");
+  const before = readFileSync(lines, "utf-8");
 
-  writeFileSync(file, `${"// moved down\n".repeat(10)}${before}`);
+  writeFileSync(lines, `${"// moved down\n".repeat(10)}${before}`);
 
-  const moved = await openAtLine();
+  const moved = await openedAtLine("lines.ts", lines);
 
   record(
     "after its words moved 10 lines down, a click opens at the line they are on now",
-    before.split("\n")[11] === lineText(12) && moved === 22,
-    String(moved)
+    before.split("\n")[11] === lineText(12) && moved.line === 22,
+    moved.detail
+  );
+
+  // Words that are on line 40 of the file once: a look for them would open there.
+  const edited = await editItemText(lineText(12), lineText(30));
+  const afterEdit = await openedAtLine("lines.ts", lines);
+
+  record(
+    "after the item's words were edited, a click opens the file at no line",
+    edited && afterEdit.line === null,
+    `${edited ? "edited" : "not edited"}, ${afterEdit.detail}`
+  );
+
+  const inTwo = await openedAtLine("twice.ts", twice);
+
+  record(
+    "words that are in the file twice open it at no line",
+    inTwo.line === null,
+    inTwo.detail
   );
 };
 
 /**
  * Captures `text` from the source app, all of it selected, in a window
- * titled `title` that names `document`. Waits until its line was looked for
- * and the item is on disk, with its line when one was found.
+ * titled `title` that names `document`. Waits until the item is on disk.
  */
 const captureCode = async (
   text: string,
   document?: string,
   title = "a.ts — proj"
 ) => {
-  let place: AppEvent | undefined;
-
   if (await showSource(text, "all", { document, title })) {
     const mark = events().length;
 
@@ -1064,106 +1135,61 @@ const captureCode = async (
       input("double-shift");
     });
     await waitFor("itemAdded", mark);
-    // The line is looked for once the item is added, then set in a step of its own.
-    place = await waitFor("codePlace", mark);
   } else {
     record("source app in front for the code place", false, frontmost());
   }
 
-  // The events come with the item in memory; the shelf file is written after them.
+  // The event comes with the item in memory; the shelf file is written after it.
   const saved = () =>
     items().find((item) => item.kind === "text" && item.text === text);
 
-  await waitUntil(
-    () =>
-      saved() !== undefined &&
-      (place?.lineFound !== true || saved()?.context?.code?.line !== null),
-    4000
-  );
+  await waitUntil(() => saved() !== undefined, 4000);
 
-  return { item: saved(), place };
+  return saved();
 };
 
 /**
- * Words found once in their file keep their line; words that are in it
- * twice keep only the file. Gives the file and what the log said for each.
+ * A capture reads no file and stores no line, whether its words are in the
+ * file once or twice: the line is found when it is clicked. Gives the two
+ * files, of 40 lines each: one with the captured words on line 12, one with
+ * them on lines 20 and 30.
  */
 const checkCapturedLines = async (
   project: string
-): Promise<{
-  readonly file: string;
-  readonly places: readonly (AppEvent | undefined)[];
-}> => {
-  // 40 lines, with the same words on lines 20 and 30.
-  const file = path.join(project, "src", "lines.ts");
-  const twice = "retryTwice(); // the same words twice";
+): Promise<{ readonly lines: string; readonly twice: string }> => {
+  const lines = path.join(project, "src", "lines.ts");
+  const twice = path.join(project, "src", "twice.ts");
+  const twiceWords = "retryTwice(); // the same words twice";
 
-  const numbered = Array.from({ length: 40 }, (_, index) =>
-    index === 19 || index === 29 ? twice : lineText(index + 1)
-  );
+  const numbered = (n: number): string =>
+    `${Array.from({ length: 40 }, (_, index) =>
+      n === 2 && (index === 19 || index === 29)
+        ? twiceWords
+        : lineText(index + 1)
+    ).join("\n")}\n`;
 
-  writeFileSync(file, `${numbered.join("\n")}\n`);
+  writeFileSync(lines, numbered(1));
+  writeFileSync(twice, numbered(2));
 
-  const oneLine = await captureCode(lineText(12), file, "lines.ts — proj");
-  const oneLineCode = oneLine.item?.context?.code;
+  const inOne = await captureCode(lineText(12), lines, "lines.ts — proj");
 
   record(
-    "a capture of words on one line of its file keeps that line",
-    oneLineCode?.file === file && oneLineCode.line === 12,
-    String(oneLineCode?.line)
+    "a capture of words on one line of its file keeps the file and no line",
+    inOne?.context?.code?.file === lines && inOne.context.code.line === null
   );
 
   await delay(3000);
 
-  const inTwo = await captureCode(twice, file, "lines.ts — proj");
-  const inTwoCode = inTwo.item?.context?.code;
+  const inTwo = await captureCode(twiceWords, twice, "twice.ts — proj");
 
   record(
-    "words that are in the file twice keep the file and no line",
-    inTwoCode?.file === file && inTwoCode.line === null
+    "a capture of words that are in the file twice keeps the file and no line",
+    inTwo?.context?.code?.file === twice && inTwo.context.code.line === null
   );
 
   await delay(3000);
 
-  return { file, places: [oneLine.place, inTwo.place] };
-};
-
-/** What the trial log may say of a capture's place in the code: two booleans, never a path or a file's words. */
-const CodePlaceEventSchema = z.strictObject({
-  event: z.literal("codePlace"),
-  fileFound: z.boolean(),
-  lineFound: z.boolean(),
-  t: z.number(),
-  windows: z.number(),
-});
-
-/** The log's code place events, in order: whether each capture found its file and its line. */
-const checkCodePlaceLog = (places: readonly (AppEvent | undefined)[]): void => {
-  const told = places.map((event) => [event?.fileFound, event?.lineFound]);
-
-  record(
-    "the trial log says whether each capture found its file and its line",
-    JSON.stringify(told) ===
-      JSON.stringify([
-        [true, false],
-        [true, true],
-        [true, false],
-        [false, false],
-      ]),
-    JSON.stringify(told)
-  );
-
-  const raw = readFileSync(logFile, "utf-8")
-    .split("\n")
-    .filter((line) => line.includes('"codePlace"'));
-
-  record(
-    "and names no path and none of the file's words",
-    raw.length === places.length &&
-      raw.every(
-        (line) => CodePlaceEventSchema.safeParse(JSON.parse(line)).success
-      )
-  );
+  return { lines, twice };
 };
 
 const checkCodePlace = async (): Promise<void> => {
@@ -1183,13 +1209,13 @@ const checkCodePlace = async (): Promise<void> => {
 
   record(
     "a capture from an editor keeps the file its window names",
-    inFile.item?.context?.code?.file === file
+    inFile?.context?.code?.file === file
   );
   record(
     "and the project folder its title names",
-    inFile.item?.context?.code?.root === project
+    inFile?.context?.code?.root === project
   );
-  record("and no line", inFile.item?.context?.code?.line === null);
+  record("and no line", inFile?.context?.code?.line === null);
 
   // Once the capture notice has gone, as in checkSelection.
   await delay(3000);
@@ -1199,12 +1225,13 @@ const checkCodePlace = async (): Promise<void> => {
 
   record(
     "a window that names no file keeps no place in the code",
-    noFile.item?.context?.app === "source" && noFile.item.context.code === null
+    noFile?.context?.app === "source" && noFile.context.code === null
   );
 
-  checkCodePlaceLog([inFile.place, ...lined.places, noFile.place]);
-  await checkCodeLineWayBack(lined.file);
-  await checkCodeWayBack(file);
+  if (standInTakesScheme()) {
+    await checkCodeLineWayBack(lined);
+    await checkCodeWayBack(file);
+  }
 };
 
 const checkNoFalseTaps = async (): Promise<void> => {
