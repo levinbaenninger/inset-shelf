@@ -6,6 +6,7 @@ import type {
   ActionResult,
   DetailField,
   ItemAction,
+  NoticeTone,
   NotSavedItem,
   ShelfCommand,
   ShelfStatus,
@@ -280,6 +281,31 @@ const HeaderButton = ({
 
 const noticeToast = (message: string): void => {
   toast.success(message, { duration: NOTICE_MS });
+};
+
+/** About a second of frames for a notice to render before the page stops looking. */
+const NOTICE_RENDER_FRAMES = 60;
+
+/**
+ * Tells main, for the trial log, once a toast with the notice's words is on
+ * the page. A notice that never renders is never reported, so the log tells
+ * it apart from one the page showed.
+ */
+const reportNoticeShown = (
+  notice: { readonly message: string; readonly tone: NoticeTone },
+  frames = NOTICE_RENDER_FRAMES
+): void => {
+  requestAnimationFrame(() => {
+    const shown = [...document.querySelectorAll("[data-sonner-toast]")].some(
+      (element) => element.textContent?.includes(notice.message)
+    );
+
+    if (shown) {
+      api.noticeShown(notice);
+    } else if (frames > 1) {
+      reportNoticeShown(notice, frames - 1);
+    }
+  });
 };
 
 /**
@@ -1544,6 +1570,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         } else {
           noticeToast(message);
         }
+
+        reportNoticeShown({ message, tone });
       }),
     []
   );
