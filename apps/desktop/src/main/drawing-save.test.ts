@@ -136,6 +136,7 @@ const setup = async (dir: string, blocked = false) => {
     added: () => {},
     focus: () => {},
     shotSaved: () => {},
+    shotClosed: () => {},
     clearStaging: () => {},
     close: () => {
       window.visible = false;
@@ -262,6 +263,7 @@ const savesReading = (
     added: () => {},
     focus: () => {},
     shotSaved: () => {},
+    shotClosed: () => {},
     clearStaging: () => {},
     close: () => {},
     controller: app.controller,
@@ -731,6 +733,7 @@ describe(createDrawingSaves, () => {
       added: () => {},
       focus: () => {},
       shotSaved: () => {},
+      shotClosed: () => {},
       clearStaging: () => {},
       close: () => {},
       controller: app.controller,
@@ -1116,6 +1119,7 @@ const noteWith = async (app: Awaited<ReturnType<typeof setup>>, held = 1) => {
       focused.push(shown);
     },
     shotSaved: () => {},
+    shotClosed: () => {},
     controller: app.controller,
     copies: {
       copy: async () => await Promise.resolve({ ok: true }),

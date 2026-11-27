@@ -1785,6 +1785,10 @@ const start = async (): Promise<void> => {
         controller.focus(id);
       }
     },
+    // Nothing shows the shelf then: as after Add to Shelf, the notice is the native one while it is hidden.
+    shotClosed: (id) => {
+      shotLanded("shelf", id);
+    },
     readFile: async (file) => {
       try {
         return new Uint8Array(await readFile(file));
