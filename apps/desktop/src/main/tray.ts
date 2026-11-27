@@ -57,27 +57,45 @@ const toMenuItem = (
 
 export const createTray = (options: TrayOptions): ShelfTray => {
   const tray = new Tray(nativeImage.createFromPath(options.iconPath()));
+  const windows = process.platform === "win32";
+  const tooltip = trayTooltip(process.platform === "darwin");
 
   const updateIcon = (): void => {
     tray.setImage(nativeImage.createFromPath(options.iconPath()));
   };
 
-  const refresh = (): void => {
-    tray.setContextMenu(
-      Menu.buildFromTemplate(
-        trayMenu(options.model()).map((item) => toMenuItem(item, options.run))
-      )
+  const buildMenu = (): Menu =>
+    Menu.buildFromTemplate(
+      trayMenu(options.model()).map((item) => toMenuItem(item, options.run))
     );
+
+  // Windows pops the menu on a right-click, built then; elsewhere the menu is the icon's.
+  const refresh = (): void => {
+    if (!windows) {
+      tray.setContextMenu(buildMenu());
+    }
   };
 
-  tray.setToolTip(trayTooltip(process.platform === "darwin"));
+  tray.setToolTip(tooltip);
   refresh();
   nativeTheme.on("updated", updateIcon);
 
-  // On Windows a click on a notification-area icon opens its app; the menu is on a right-click.
-  if (process.platform === "win32") {
+  if (windows) {
+    // A click on a notification-area icon opens its app; the menu is on a right-click.
     tray.on("click", () => {
       options.click();
+    });
+
+    // Windows shows the icon's tooltip again while the pointer rests on it, over the menu
+    // that opened beside it ("About Inset Shelf" hidden): the menu opens without one.
+    tray.on("right-click", () => {
+      const menu = buildMenu();
+
+      tray.setToolTip("");
+      menu.once("menu-will-close", () => {
+        tray.setToolTip(tooltip);
+      });
+      tray.popUpContextMenu(menu);
     });
   }
 
