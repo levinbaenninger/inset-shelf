@@ -1875,22 +1875,18 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 
-  it("attaches any other file as before, and a drop of several files with the card's among them too", async () => {
+  it("attaches any other file as before", async () => {
     const card = setup();
 
     card.saves.show(shot(1));
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    const file = drop.drag(1)?.file ?? "";
-
+    drop.drag(1);
     await expect(drop.onItem(card.note, [OTHER_FILE])).resolves.toBe(PLAIN);
-    await expect(drop.onItem(card.note, [file, OTHER_FILE])).resolves.toBe(
-      PLAIN
-    );
     drop.onShelf([OTHER_FILE]);
     await vi.waitFor(() => {
-      expect(plain).toHaveLength(3);
+      expect(plain).toHaveLength(2);
     });
     expect({
       added,
@@ -1904,7 +1900,6 @@ describe("the card's file dropped on the shelf", () => {
       dropped: [],
       plain: [
         { call: "attachFiles", id: card.note, paths: [OTHER_FILE] },
-        { call: "attachFiles", id: card.note, paths: [file, OTHER_FILE] },
         { call: "addFiles", paths: [OTHER_FILE] },
       ],
       save: { state: "idle" },
@@ -2478,6 +2473,33 @@ describe("a drag's copy of the card's screenshot on disk", () => {
       added: [["item", other]],
       attached: 1,
       plain: [],
+    });
+  });
+
+  it("gives the card's copy its own add when it comes in a drop of several files, and attaches the rest as files", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain } = dropping(card);
+    const file = drop.drag(1)?.file ?? "";
+
+    await expect(drop.onItem(card.note, [file, OTHER_FILE])).resolves.toBe(
+      PLAIN
+    );
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
+    await settled(card);
+    expect({
+      added,
+      attached: card.attachmentsOn(card.note),
+      plain,
+    }).toStrictEqual({
+      added: [["item", card.note]],
+      attached: 1,
+      plain: [{ call: "attachFiles", id: card.note, paths: [OTHER_FILE] }],
     });
   });
 });
