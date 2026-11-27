@@ -2,9 +2,7 @@
 
 Date: 2026-11-27 · Scope: `apps/desktop` (Electron app), `.github` (build and release), `apps/web` (site).
 
-Why: colleagues testing the app were uneasy about the access it asks for and about installing an
-external app that updates itself. This review lists what the app can reach, what is already sound,
-what is weak, and what changes in this branch.
+Why: colleagues testing the app were uneasy about the access it asks for and about installing an external app that updates itself. This review lists what the app can reach, what is already sound, what is weak, and what changes in this branch.
 
 ## What the app can reach
 
@@ -32,9 +30,7 @@ No telemetry, analytics or crash reporting was found. All captured data stays in
 
 ## Findings
 
-Severity: **High**: a realistic path to code running with the app's grants, or data leaving the machine.
-**Medium**: weakens a trust boundary or the user's control. **Low**: defence in depth.
-Rows marked † were added or corrected by the Gemini 4 Neon review.
+Severity: **High**: a realistic path to code running with the app's grants, or data leaving the machine. **Medium**: weakens a trust boundary or the user's control. **Low**: defence in depth. Rows marked † were added or corrected by the Gemini 4 Neon review.
 
 | # | Severity | Finding | Fix in this branch |
 | --- | --- | --- | --- |
@@ -59,15 +55,11 @@ Rows marked † were added or corrected by the Gemini 4 Neon review.
 
 ## Decisions
 
-- The key hook stays: Double Shift is the app's core. It only acts on Shift; other keys reset the detector and
-  are never stored. Documented in Settings and `SECURITY.md`.
+- The key hook stays: Double Shift is the app's core. It only acts on Shift; other keys reset the detector and are never stored. Documented in Settings and `SECURITY.md`.
 - No opt-in periodic update check (Gemini): "update only when the user asks" means zero background traffic.
-- Windows updates still download in-app; until the build is signed, the docs say the integrity check is the
-  SHA-512 in GitHub's feed and point to `SHA256SUMS.txt`.
+- Windows updates still download in-app; until the build is signed, the docs say the integrity check is the SHA-512 in GitHub's feed and point to `SHA256SUMS.txt`.
 
 ## Review log
 
-- Gemini 4 Neon review of the analysis (2026-11-27): corrected F2, F3, F4, F5, F7 severities and scope; added
-  F9–F13, F15 and the CI issues in F8; changed decisions on periodic checks, tag-only releases, cookie
-  encryption and the screenshot-cards default. All accepted.
+- Gemini 4 Neon review of the analysis (2026-11-27): corrected F2, F3, F4, F5, F7 severities and scope; added F9–F13, F15 and the CI issues in F8; changed decisions on periodic checks, tag-only releases, cookie encryption and the screenshot-cards default. All accepted.
 - Gemini 4 Neon review of the changes: _pending_
