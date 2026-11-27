@@ -94,7 +94,22 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
   // The picture files the card wrote for a place it then didn't make, and took away again.
   const dropped: string[] = [];
   let view: ScreenshotView | null = null;
-  let held = false;
+  // The card's 12 seconds while they run: the test lets them pass by hand.
+  let time: (() => void) | null = null;
+
+  // The card's own clock, wired as screenshot-window.ts wires it.
+  const cardClock = createCardClock({
+    expire: () => {
+      view = null;
+    },
+    setTimer: (run) => {
+      time = run;
+
+      return () => {
+        time = null;
+      };
+    },
+  });
 
   const controller = createShelfController({
     deleteAttachment: async (file) => {
@@ -171,19 +186,15 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     card: {
       hide: () => {
         view = null;
-        held = false;
+        cardClock.hidden();
         events.push("hide");
       },
-      holdForSave: () => {
-        held = true;
-      },
+      holdForSave: cardClock.holdForSave,
       isVisible: () => view !== null,
-      releaseSave: () => {
-        held = false;
-      },
+      releaseSave: cardClock.releaseSave,
       show: (shown) => {
         view = shown;
-        held = false;
+        cardClock.shown();
       },
       update: (change) => {
         if (view !== null) {
@@ -279,7 +290,15 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     pointerOn: (display: number) => {
       scale = display;
     },
-    held: () => held,
+    /** The card shows, and its time is stopped. */
+    held: () => view !== null && time === null,
+    /** The card's 12 seconds pass, unless its time is stopped. */
+    elapse: () => {
+      const run = time;
+
+      time = null;
+      run?.();
+    },
     images: () =>
       controller.snapshot().doc.items.filter((each) => each.kind === "image"),
     /** How many attachments an item holds now. */
@@ -2296,6 +2315,88 @@ describe("a card whose save landed after the user deleted its screenshot's row",
     expect({ held: card.held(), save: card.view()?.save }).toStrictEqual({
       held: false,
       save: { state: "idle" },
+    });
+  });
+});
+
+describe("the screenshot card's time after the shelf changed under an add", () => {
+  it("stays stopped while the card reads Saving… for a tile the user's Undo brought back after its add was turned away", async () => {
+    const card = await refused("item");
+    const tile = { attachmentId: tileOf(card), id: card.note };
+
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+    card.failWrites({ ok: true });
+    await settled(card);
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+
+    // The user's Undo starts a write that holds the tile; they remove it again before the picture file is written.
+    const write = new EventTarget();
+
+    const off = card.controller.onWrite(() => {
+      off();
+      write.dispatchEvent(new Event("start"));
+    });
+
+    const started = once(write, "start");
+
+    card.controller.apply({ ...tile, type: "restoreAttachment" });
+    await started;
+    card.controller.apply({ ...tile, type: "removeAttachment" });
+    await adding;
+
+    const turnedAway = { held: card.held(), save: card.view()?.save };
+
+    // Their Undo again, with the first write still on its way.
+    card.controller.apply({ ...tile, type: "restoreAttachment" });
+
+    const reads = card.view()?.save.state;
+
+    card.elapse();
+
+    expect({ reads, shows: card.view() !== null, turnedAway }).toStrictEqual({
+      reads: "saving",
+      shows: true,
+      turnedAway: { held: false, save: { state: "idle" } },
+    });
+
+    end({ ok: true });
+    await settled(card);
+  });
+
+  it("runs again, and runs out, once a row the user's Undo brought back during an add is deleted again and the card offers both adds", async () => {
+    const card = await refused("shelf");
+    const row = rowOf(card);
+
+    card.controller.apply({ id: row, type: "remove" });
+    card.failWrites({ ok: true });
+    await settled(card);
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToItem(1, card.note);
+
+    // The user's Undo while the picture file is written: the add is turned away, and the card reads Saving… for the row.
+    card.controller.apply({ id: row, type: "undoRemove" });
+    await adding;
+
+    const restored = { held: card.held(), save: card.view()?.save };
+
+    card.controller.apply({ id: row, type: "remove" });
+    end({ ok: true });
+    await settled(card);
+
+    const offered = { held: card.held(), save: card.view()?.save };
+
+    card.elapse();
+
+    expect({ offered, restored, shows: card.view() !== null }).toStrictEqual({
+      offered: { held: false, save: { state: "idle" } },
+      restored: {
+        held: true,
+        save: { placed: { to: "shelf" }, state: "saving" },
+      },
+      shows: false,
     });
   });
 });
