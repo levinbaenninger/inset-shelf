@@ -284,48 +284,80 @@ export const openAddress = (
     .replace("{line}", () => String(line));
 };
 
-/** Line breaks as Windows, old Macs and the rest write them, made one. */
-const oneLineBreak = (text: string): string => text.replaceAll(/\r\n?/gu, "\n");
+/** Line breaks as Windows, old Macs and the rest write them, made one. Text without a CR is left as it is. */
+const oneLineBreak = (text: string): string =>
+  text.includes("\r") ? text.replaceAll(/\r\n?/gu, "\n") : text;
 
-/** A first line shorter than this is too common to name one place in a file. */
-const FIRST_LINE_MIN = 8;
+/** The blank lines a capture can begin with: a drag begun at the end of the line above copies that line's break first. */
+const BLANK_START = /^(?:[ \t]*\n)+/u;
 
-/** Where `wanted` is in `text` when it is there exactly once, else -1. Stops at the second. */
-const onlyIndex = (text: string, wanted: string): number => {
-  const first = text.indexOf(wanted);
+/** Where a text was found: `at` its first place, `times` how often, counted to two. */
+interface Found {
+  readonly at: number;
+  readonly times: 0 | 1 | 2;
+}
 
-  return first === -1 || text.includes(wanted, first + 1) ? -1 : first;
+/** Where `wanted` is in `text`: at one place, at more than one, or nowhere. Stops at the second. */
+const placeOf = (text: string, wanted: string): Found => {
+  const at = wanted === "" ? -1 : text.indexOf(wanted);
+
+  if (at === -1) {
+    return { at, times: 0 };
+  }
+
+  return { at, times: text.includes(wanted, at + 1) ? 2 : 1 };
+};
+
+/** The 1-based line the character at `index` is on: its breaks are counted, and no list of lines is built. */
+const lineAt = (text: string, index: number): number => {
+  let line = 1;
+
+  for (
+    let next = text.indexOf("\n");
+    next !== -1 && next < index;
+    next = text.indexOf("\n", next + 1)
+  ) {
+    line += 1;
+  }
+
+  return line;
 };
 
 /**
  * The 1-based line where `captured` begins in `text`, when it is there
- * exactly once; else null. Line endings count as one. When the whole capture
- * is not there, its first line is looked for alone, trimmed, if it holds 8
- * characters or more: an editor can copy the lines after it with other
- * indentation. More than one match is no match.
+ * exactly once; else null. Line endings count as one. The whole capture is
+ * looked for first, blanks and all, since they can tell two places apart.
+ * Only when it is nowhere is it looked for without the blank lines before
+ * it and the blanks after it, which leaves every line that was selected in
+ * the match. No part of a capture stands in for the whole, and a capture
+ * that is there twice, in either form, has no line.
+ *
+ * The file on disk is not the editor's buffer: a selection from unsaved
+ * edits may be nowhere in it, or only where an older copy of the same lines
+ * stands. Without the editor's own cursor this can't be told apart, which
+ * is why only a single match of everything selected counts.
  */
 export const lineOfText = (text: string, captured: string): number | null => {
   const file = oneLineBreak(text);
+  const whole = oneLineBreak(captured);
+  const blankStart = BLANK_START.exec(whole)?.[0].length ?? 0;
+  const trimmed = whole.slice(blankStart).trimEnd();
 
-  // A drag begun at the end of the line above copies that line's break first.
-  const wanted = oneLineBreak(captured)
-    .replace(/^(?:[ \t]*\n)+/u, "")
-    .trimEnd();
-
-  const firstLine = wanted.split("\n", 1)[0]?.trim() ?? "";
-
-  if (firstLine === "") {
+  if (trimmed === "") {
     return null;
   }
 
-  const lookedFor =
-    file.includes(wanted) || firstLine.length < FIRST_LINE_MIN
-      ? wanted
-      : firstLine;
+  const exact = placeOf(file, whole);
 
-  const at = onlyIndex(file, lookedFor);
+  if (exact.times === 1) {
+    // The line that holds the capture's first text, not a break copied before it.
+    return lineAt(file, exact.at + blankStart);
+  }
 
-  return at === -1 ? null : file.slice(0, at).split("\n").length;
+  const loose =
+    exact.times === 0 && trimmed !== whole ? placeOf(file, trimmed) : exact;
+
+  return loose.times === 1 ? lineAt(file, loose.at) : null;
 };
 
 /** Where macOS asks the user before an app reads a file (Files and Folders), by the home folder's own names. */

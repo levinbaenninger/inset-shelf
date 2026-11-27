@@ -388,7 +388,16 @@ describe(lineOfText, () => {
     ).toBe(12);
   });
 
-  it("finds the line by an indented first line when the lines after it were copied with other indentation", () => {
+  it("gives no line when only the capture's first line is in the file", () => {
+    // A copy from an unsaved buffer: its second line is not on disk, and its first is also a comment elsewhere.
+    const file = source(40, { 7: "// const total = items.length;" });
+
+    expect(
+      lineOfText(file, "const total = items.length;\nreturn total + 1;")
+    ).toBeNull();
+  });
+
+  it("gives no line when the lines after the first were copied with other indentation", () => {
     const file = source(40, {
       21: "    const total = items.length;",
       22: "    return total;",
@@ -396,19 +405,65 @@ describe(lineOfText, () => {
 
     expect(
       lineOfText(file, "  const total = items.length;\nreturn total;")
-    ).toBe(21);
+    ).toBeNull();
   });
 
-  it("gives no line by a first line shorter than 8 characters", () => {
-    const file = source(40, { 21: "  go();", 22: "  return 1;" });
+  it("tells two places apart by the blanks the capture holds", () => {
+    // The same words twice: only the selected one ends in two blanks.
+    const file = source(40, { 9: "\tretry();", 30: "\tretry();  " });
 
-    expect(lineOfText(file, "go();\nreturn 2;")).toBeNull();
+    expect(lineOfText(file, "\tretry();  ")).toBe(30);
+    expect(
+      lineOfText(`\uFEFF${file.replaceAll("\n", "\r\n")}`, "\tretry();  ")
+    ).toBe(30);
   });
 
-  it("gives no line by a first line that is in the file twice", () => {
-    const file = source(40, { 5: "  if (ready) {", 25: "  if (ready) {" });
+  it("finds a whole selected line by its line break, before trimming loses it", () => {
+    // Selecting the whole line run(); copies its break: only line 1 holds that.
+    expect(lineOfText("run();\nrun(); // note\n", "run();\n")).toBe(1);
+  });
 
-    expect(lineOfText(file, "if (ready) {\n start(1);")).toBeNull();
+  it("gives no line when the whole capture is in the file twice, however its trimmed form reads", () => {
+    const file = source(40, { 9: "  retry();", 30: "  retry();" });
+
+    expect(lineOfText(file, "  retry();")).toBeNull();
+  });
+
+  it("finds a capture whose blank end is not in the file, by all the lines it selected", () => {
+    const file = source(40, {
+      21: "  const total = 1;",
+      22: "  return total;",
+    });
+
+    expect(lineOfText(file, "  const total = 1;\n  return total;   \n\n")).toBe(
+      21
+    );
+  });
+
+  it("gives no line when the capture without its blank ends is in the file twice", () => {
+    const file = source(40, { 9: "retry();", 30: "retry();" });
+
+    expect(lineOfText(file, "retry();  \n")).toBeNull();
+  });
+
+  it("gives no line for a capture whose two places in the file overlap", () => {
+    expect(lineOfText("go();\ngo();\ngo();\n", "go();\ngo();")).toBeNull();
+  });
+
+  it("finds a capture just after a place that began the same way", () => {
+    const file = source(40, {
+      21: "  retry(1);",
+      22: "  retry(1);",
+      23: "  done();",
+    });
+
+    expect(lineOfText(file, "  retry(1);\n  done();")).toBe(22);
+  });
+
+  it("finds a line near the end of a file of 100,000 lines", () => {
+    expect(
+      lineOfText(source(100_000), "export const value99990 = 99990;")
+    ).toBe(99_990);
   });
 
   it("starts at the first line that holds text, not a line break copied before it", () => {
