@@ -585,6 +585,13 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     }
   };
 
+  /** Save or Retry closes the window on the marks: the save announces the screenshot's item itself, so the window's hide doesn't. */
+  const closeOn = (put: Put): void => {
+    unannounced = null;
+    deps.close();
+    landed(put);
+  };
+
   /** The user's own Save: the window closes at once; a copy waits for its own save. */
   const saveAndClose = async (
     input: DrawingSaveInput,
@@ -610,10 +617,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       }
     }
 
-    // Save announces the screenshot's item itself, so the window's hide doesn't.
-    unannounced = null;
-    deps.close();
-    landed(put);
+    closeOn(put);
     deps.show(copied, saving);
 
     return { ok: true };
@@ -640,8 +644,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       return written;
     }
 
-    deps.close();
-    landed(put);
+    closeOn(put);
 
     return { ok: true };
   };
