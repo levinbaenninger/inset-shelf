@@ -143,7 +143,7 @@ const simplest = (markdown: MarkdownManager, block: string): string => {
  * A hard break is written as two spaces and a newline; the shelf shows a plain
  * newline as a break anyway (remark-breaks), so notes keep plain newlines.
  * Block by block, so a long note costs little more per keystroke than a short
- * one; if the blocks read differently together, TipTap's own Markdown is kept.
+ * one; if the blocks read differently together, the note is simplified whole.
  */
 export const noteMarkdown = (
   markdown: MarkdownManager,
@@ -160,5 +160,5 @@ export const noteMarkdown = (
   return JSON.stringify(markdown.parse(joined)) ===
     JSON.stringify(markdown.parse(whole))
     ? joined
-    : whole;
+    : simplest(markdown, whole);
 };

@@ -15,11 +15,21 @@ const linked = (text: string, href: string): JSONContent => ({
   type: "text",
 });
 
-/** One typed line as the field holds it. */
-const typed = (...runs: readonly JSONContent[]): JSONContent => ({
-  content: [{ content: [...runs], type: "paragraph" }],
+/** One typed line, empty for a blank one. */
+const line = (...runs: readonly JSONContent[]): JSONContent =>
+  runs.length === 0
+    ? { type: "paragraph" }
+    : { content: [...runs], type: "paragraph" };
+
+/** A note as the field holds it, block by block. */
+const note = (...blocks: readonly JSONContent[]): JSONContent => ({
+  content: [...blocks],
   type: "doc",
 });
+
+/** A one-line note as the field holds it. */
+const typed = (...runs: readonly JSONContent[]): JSONContent =>
+  note(line(...runs));
 
 /** Opened for editing and closed again, as an edit in place does. */
 const reopened = (stored: string): string =>
@@ -68,6 +78,28 @@ describe(noteMarkdown, () => {
     expect(noteMarkdown(markdown, typed(plain("*not bold*")))).toBe(
       String.raw`*not bold\*`
     );
+  });
+
+  it("stores a note of several blocks as typed, blank lines and lists included", () => {
+    const email = line(
+      plain("email "),
+      linked("bob@example.com", "mailto:bob@example.com")
+    );
+
+    const list = {
+      content: [{ content: [email], type: "listItem" }],
+      type: "bulletList",
+    };
+
+    expect(
+      [
+        note(email, line(), line(plain("snake_case"))),
+        note(list, line(plain("snake_case"))),
+      ].map((doc) => noteMarkdown(markdown, doc))
+    ).toStrictEqual([
+      "email bob@example.com\n\n\n\nsnake_case",
+      "- email bob@example.com\n\nsnake_case",
+    ]);
   });
 
   it.each([
