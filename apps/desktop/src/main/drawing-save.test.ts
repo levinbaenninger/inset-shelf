@@ -254,7 +254,7 @@ const setup = async (dir: string, blocked = false) => {
 /** Saves that read the pictures and marks from the disk, as main's do. */
 const savesReading = (
   app: Awaited<ReturnType<typeof setup>>,
-  shelf: Partial<Pick<DrawingSaveDeps, "focus" | "shotSaved">> = {}
+  shelf: Partial<Pick<DrawingSaveDeps, "close" | "focus" | "shotSaved">> = {}
 ) =>
   createDrawingSaves({
     added: () => {},
@@ -776,7 +776,7 @@ describe(createDrawingSaves, () => {
     expect({ image, reads }).toStrictEqual({ image: original, reads: [file] });
   });
 
-  it("leaves the shelf to main's notice after Save on the screenshot card's Annotate, and brings any other annotated image into view", async () => {
+  it("leaves the shelf to main's notice once the screenshot card's Annotate closes, saved or not, and brings any other annotated image into view", async () => {
     const app = await setup(dir);
     const file = await app.store.writeAttachment(new Uint8Array([1, 2, 3]));
 
@@ -794,8 +794,13 @@ describe(createDrawingSaves, () => {
     }
 
     const shown: string[] = [];
+    // The window's hide, as main hears of it: after Save, Cancel or its close button alike.
+    const window = { hidden: (): void => {} };
 
     const saves = savesReading(app, {
+      close: () => {
+        window.hidden();
+      },
       focus: () => {
         shown.push("brought into view");
       },
@@ -804,8 +809,10 @@ describe(createDrawingSaves, () => {
       },
     });
 
-    /** Annotate opens the image, from the card or not, and Save puts the marks on it. */
-    const annotateAndSave = async (screenshot: boolean) => {
+    window.hidden = saves.hidden;
+
+    /** Annotate opens the image, from the card or not. */
+    const annotate = async (screenshot: boolean) => {
       const item = app.controller.item(id);
 
       if (item?.kind !== "image") {
@@ -816,6 +823,10 @@ describe(createDrawingSaves, () => {
         screenshot ? { id, kind: "item", screenshot } : { id, kind: "item" },
         await saves.opening(item)
       );
+    };
+
+    /** Save puts the marks on it and closes the window. */
+    const save = async () => {
       await saves.save({
         copy: false,
         forQuit: false,
@@ -825,10 +836,20 @@ describe(createDrawingSaves, () => {
       });
     };
 
-    await annotateAndSave(true);
-    await annotateAndSave(false);
+    await annotate(true);
+    await save();
+    // Cancel.
+    await annotate(true);
+    saves.hidden();
+    await annotate(false);
+    await save();
+    saves.hidden();
 
-    expect(shown).toStrictEqual(["announced", "brought into view"]);
+    expect(shown).toStrictEqual([
+      "announced",
+      "announced",
+      "brought into view",
+    ]);
   });
 
   describe("the marks kept beside the picture (feedback round 13)", () => {

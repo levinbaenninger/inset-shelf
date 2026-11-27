@@ -44,6 +44,8 @@ export interface DrawingWindow {
   readonly onView: (listener: (view: DrawingView) => void) => void;
   /** Closing with marks on the page: the page asks before throwing them away. */
   readonly onCloseRequest: (listener: () => void) => void;
+  /** The window hid: after a Save, Cancel or its close button. */
+  readonly onHidden: (listener: () => void) => void;
   readonly allowClose: () => void;
 }
 
@@ -70,6 +72,7 @@ export const createDrawingWindow = (options: {
 
   let onView: (view: DrawingView) => void = ignore;
   let onCloseRequest: () => void = ignore;
+  let onHidden: () => void = ignore;
 
   const window = new BrowserWindow({
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
@@ -101,6 +104,7 @@ export const createDrawingWindow = (options: {
   const hide = (): void => {
     markClean();
     hideWindow(window, { handOff: options.handOff, raise });
+    onHidden();
   };
 
   raise();
@@ -170,6 +174,9 @@ export const createDrawingWindow = (options: {
     },
     load: async () => {
       await window.loadURL(options.url);
+    },
+    onHidden: (listener) => {
+      onHidden = listener;
     },
     onCloseRequest: (listener) => {
       onCloseRequest = listener;

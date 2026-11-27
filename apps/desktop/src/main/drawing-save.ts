@@ -101,7 +101,7 @@ export interface DrawingSaveDeps {
   readonly added: (id: ItemId, via: "annotation" | "drawing") => void;
   /** The shelf selects an item and brings it into view, as after a capture, which also leaves details. */
   readonly focus: (id: ItemId) => void;
-  /** Marks on the screenshot card's item: the shelf says where the screenshot went, and open details stay. */
+  /** The screenshot card's item, once its Annotate closes, saved or not: the shelf says where the screenshot went, and open details stay. */
   readonly shotSaved: (id: ItemId) => void;
   /** After the user's own Save: the shelf shows the item, and says so when a copy failed or a copied drawing never reached the disk. */
   readonly show: (
@@ -125,6 +125,8 @@ export interface DrawingSaves {
   readonly opening: (picture: Picture) => Promise<DrawingOpening>;
   /** The window opens on a picture, with what was read for it, or on a blank page. */
   readonly open: (target: DrawingTarget, opening?: DrawingOpening) => void;
+  /** The window has hidden, after Save, Cancel or its close button. */
+  readonly hidden: () => void;
   /** The picture the window opened on, to draw the marks into; the same bytes however often it saves. */
   readonly image: () => Promise<Uint8Array | null>;
   /** The page's Save, Copy and Save, or Retry in a held quit (`forQuit`). */
@@ -222,6 +224,8 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
   // The picture the window opened on, which the page shows under its marks; null for a blank page.
   let openedPicture: ShelfImage | null = null;
   let quitStop: AbortSignal | null = null;
+  // The screenshot card's item while its Annotate is open: closed without a Save, the window's hide still announces it.
+  let unannounced: ItemId | null = null;
   // The item as a held quit's save left it: the marks count as on the shelf only while the shelf still holds exactly that.
   let applied: ShelfItem | null = null;
   let error: string | null = null;
@@ -604,6 +608,8 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       }
     }
 
+    // Save announces the screenshot's item itself, so the window's hide doesn't.
+    unannounced = null;
     deps.close();
     landed(put);
     deps.show(copied, saving);
@@ -688,9 +694,19 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     forQuit: (stop) => {
       quitStop = stop;
     },
+    hidden: () => {
+      const id = unannounced;
+
+      unannounced = null;
+
+      if (id !== null && deps.controller.item(id) !== undefined) {
+        deps.shotSaved(id);
+      }
+    },
     image: async () => await base,
     open: (to, opening) => {
       opened = to;
+      unannounced = to.kind === "item" && to.screenshot === true ? to.id : null;
       made = null;
       applied = null;
       error = null;

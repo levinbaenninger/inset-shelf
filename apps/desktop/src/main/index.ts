@@ -2493,6 +2493,8 @@ const start = async (): Promise<void> => {
     drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
+  drawing.onHidden(drawingSaves.hidden);
+
   const screenshotServer = serveContract(
     screenshotContract,
     {
