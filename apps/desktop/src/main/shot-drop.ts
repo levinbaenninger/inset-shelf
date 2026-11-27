@@ -79,10 +79,15 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   /** The drag a drop hands back the file of, alone: its drop has come, and no later one is taken for it. Null for any other drop. */
   const claim = (paths: readonly string[]): ShotDrag<S> | null => {
     const [only] = paths;
-    const file = only === undefined || paths.length !== 1 ? null : onDisk(only);
-    const record = file === null ? undefined : drags.get(file);
 
-    if (file === null || record === undefined) {
+    if (only === undefined || paths.length !== 1) {
+      return null;
+    }
+
+    const file = onDisk(only);
+    const record = drags.get(file);
+
+    if (record === undefined) {
       return null;
     }
 
