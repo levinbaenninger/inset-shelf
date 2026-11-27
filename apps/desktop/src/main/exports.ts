@@ -2,6 +2,7 @@ import {
   copyFileSync,
   mkdirSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -12,6 +13,7 @@ import { nativeImage } from "electron";
 import type { NativeImage } from "electron";
 
 import { drawPinMarks } from "./pin-mark";
+import { FsErrorSchema } from "./save-error";
 
 export interface ExportedImage {
   readonly image: NativeImage;
@@ -103,6 +105,40 @@ export const createDragStaging = (tempDir: string) => {
       writeFileSync(file, png);
 
       return file;
+    },
+  };
+};
+
+/**
+ * The screenshot card's drags stage their copies here, apart from the
+ * shelf's own, which are swept as a whole: an app a copy went to can save
+ * the user's edit into it, or a file of theirs beside it, and those stay.
+ */
+export const createShotStaging = (tempDir: string) => {
+  const root = path.join(tempDir, "Inset Shelf Screenshots");
+
+  return {
+    /** Writes `png` as `name` into the drag's own folder, and returns the file. */
+    write: (folder: string, name: string, png: Uint8Array): string => {
+      const file = path.join(root, folder, name);
+
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, png);
+
+      return file;
+    },
+    /** Removes a copy, and its folder once nothing else is in it. */
+    remove: (file: string): void => {
+      rmSync(file, { force: true });
+
+      try {
+        rmdirSync(path.dirname(file));
+      } catch (error) {
+        // A file the user saved beside the copy keeps the folder.
+        if (FsErrorSchema.safeParse(error).data?.code !== "ENOTEMPTY") {
+          throw error;
+        }
+      }
     },
   };
 };

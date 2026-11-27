@@ -102,7 +102,7 @@ import type { DrawingTarget } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
-import { createDragStaging, exportImage } from "./exports";
+import { createDragStaging, createShotStaging, exportImage } from "./exports";
 import { EDITORS, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
@@ -647,6 +647,7 @@ const start = async (): Promise<void> => {
   await tutorial.load();
 
   const staging = createDragStaging(app.getPath("temp"));
+  const shotStaging = createShotStaging(app.getPath("temp"));
 
   staging.clear();
 
@@ -1884,6 +1885,8 @@ const start = async (): Promise<void> => {
     keyMonitor.stop();
     screenshots.stop();
     staging.clear();
+    // oxlint-disable-next-line no-use-before-define -- the app quits only after the card's drags are wired.
+    shotDrop.sweep();
     globalShortcut.unregisterAll();
     app.exit(0);
   };
@@ -2281,12 +2284,12 @@ const start = async (): Promise<void> => {
       e2eLog("shotDropped", { to });
     },
     saves: shotSaves,
-    stage: (shot, folder, name) => staging.write(folder, name, shot.png),
-    unstage: (folder) => {
+    stage: (shot, folder, name) => shotStaging.write(folder, name, shot.png),
+    unstage: (file) => {
       try {
-        staging.clear(folder);
+        shotStaging.remove(file);
       } catch (error) {
-        // Windows keeps a file another app has open; the sweep at quit and at startup takes it.
+        // Windows keeps a file another app has open: it stays in the temporary folder.
         console.warn(
           `A dragged screenshot's copy couldn't be removed: ${errorMessage(error)}`
         );

@@ -1,10 +1,16 @@
-import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { createDragStaging } from "./exports";
+import { createDragStaging, createShotStaging } from "./exports";
 
 // Staging never draws a picture.
 vi.mock(import("electron"), () => ({}));
@@ -34,5 +40,45 @@ describe(createDragStaging, () => {
       real: staging.contains(realpathSync.native(file)),
       written: staging.contains(file),
     }).toStrictEqual({ other: false, real: true, written: true });
+  });
+});
+
+const PNG = new Uint8Array([137, 80, 78, 71]);
+
+describe(createShotStaging, () => {
+  it("removes a drag's copy with its folder, and keeps a file another app saved beside the copy, folder and all", () => {
+    const staging = createShotStaging(
+      mkdtempSync(path.join(tmpdir(), "inset-staging-"))
+    );
+
+    const alone = staging.write("drag-1", "Screenshot.png", PNG);
+    const copy = staging.write("drag-2", "Screenshot.png", PNG);
+    // Preview's Save As puts the user's file beside the copy it opened.
+    const theirs = path.join(path.dirname(copy), "Screenshot marked.png");
+
+    writeFileSync(theirs, PNG);
+    staging.remove(alone);
+    staging.remove(copy);
+    expect({
+      alone: existsSync(path.dirname(alone)),
+      copy: existsSync(copy),
+      theirs: existsSync(theirs),
+    }).toStrictEqual({ alone: false, copy: false, theirs: true });
+  });
+
+  it("keeps its copies out of the shelf's own staging, which is swept whole at startup and at quit", () => {
+    const temp = mkdtempSync(path.join(tmpdir(), "inset-staging-"));
+    const copy = createShotStaging(temp).write("drag-1", "Screenshot.png", PNG);
+    const shelf = createDragStaging(temp);
+
+    shelf.write("item-1", "Offer.png", PNG);
+    shelf.clear();
+    expect({
+      copy: existsSync(copy),
+      filtered: shelf.contains(copy),
+    }).toStrictEqual({
+      copy: true,
+      filtered: false,
+    });
   });
 });

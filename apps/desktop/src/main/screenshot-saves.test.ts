@@ -1,12 +1,12 @@
 import { once } from "node:events";
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +30,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { cardAdds } from "../renderer/screenshot/card-adds";
 import { createCardClock } from "./card-clock";
-import { createDragStaging } from "./exports";
+import { createShotStaging } from "./exports";
 import {
   CARD_CLEARED,
   CARD_RETARGETED,
@@ -1788,7 +1788,7 @@ const dropping = (
   card: ReturnType<typeof setup>,
   deps: Partial<ShotDropDeps<CardShot>> = {}
 ) => {
-  const staging = createDragStaging(
+  const staging = createShotStaging(
     mkdtempSync(path.join(tmpdir(), "inset-temp-"))
   );
 
@@ -1822,9 +1822,7 @@ const dropping = (
     },
     saves: card.saves,
     stage: (each, folder, name) => staging.write(folder, name, each.png),
-    unstage: (folder) => {
-      staging.clear(folder);
-    },
+    unstage: staging.remove,
     ...deps,
   });
 
@@ -1835,7 +1833,7 @@ const dropping = (
     failed,
     plain,
     quit: () => {
-      staging.clear();
+      drop.sweep();
     },
   };
 };
@@ -2181,22 +2179,12 @@ describe("the card's file dropped on the shelf", () => {
 
   it("imports no second copy when an earlier drag's drop on an item reaches main after a newer screenshot's drag started, its path spelled another way", async () => {
     const card = setup();
-    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
 
     await card.controller.flush();
     card.saves.show(shot(1));
 
-    const { added, drop, plain } = dropping(card, {
-      // Real files, under /var on macOS: a drop can name them under /private/var.
-      stage: (_, each) => {
-        const file = path.join(folder, `${each}.png`);
-
-        writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
-
-        return file;
-      },
-    });
-
+    // The copies are real files, under /var on macOS: a drop can name them under /private/var.
+    const { added, drop, plain } = dropping(card);
     const end = card.holdWrite();
     const adding = card.saves.addToShelf(1);
     // The pill reads Saving…, and the picture is dragged onto the note.
@@ -2258,52 +2246,36 @@ describe("the card's file dropped on the shelf", () => {
     );
   });
 
-  it("keeps a drag's file when another app saved an edit into it before it came back to the shelf", async () => {
-    const card = setup();
-    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
-
-    card.saves.show(shot(1));
-
-    const { drop } = dropping(card, {
-      stage: (_, each) => {
-        const file = path.join(folder, each, "Screenshot.png");
-
-        mkdirSync(path.dirname(file));
-        writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
-
-        return file;
-      },
-      unstage: (each) => {
-        rmSync(path.join(folder, each), { force: true, recursive: true });
-      },
-    });
-
-    const file = drop.drag(1)?.file ?? "";
-
-    // The drag went to Preview, which saved the user's marks into the copy; its proxy icon then brings it back.
-    writeFileSync(file, new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
-    await drop.onItem(card.note, [file]);
-    expect({ kept: existsSync(file) }).toStrictEqual({ kept: true });
-  });
-
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {
     const card = setup();
-    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
-    const file = path.join(folder, "Screenshot.png");
 
-    writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
     card.saves.show(shot(1));
 
-    const { added, drop } = dropping(card, { stage: () => file });
+    const { added, drop } = dropping(card);
 
     // macOS keeps temporary files under /var, a link to /private/var: the drop can name either.
-    drop.drag(1);
-    await drop.onItem(card.note, [realpathSync.native(file)]);
+    await drop.onItem(card.note, [
+      realpathSync.native(drop.drag(1)?.file ?? ""),
+    ]);
     await vi.waitFor(() => {
       expect(added).toStrictEqual([["item", card.note]]);
     });
   });
 });
+
+/** Another app saves the user's marks into a file: as many bytes as before, and its modification time put back. Returns what the file holds now. */
+const editInPlace = (file: string): Uint8Array => {
+  const { atime, mtime } = statSync(file);
+
+  const marked = new Uint8Array(readFileSync(file)).map((byte, at) =>
+    at === 4 ? 255 - byte : byte
+  );
+
+  writeFileSync(file, marked);
+  utimesSync(file, atime, mtime);
+
+  return marked;
+};
 
 /** What a file holds, or null once it is gone. */
 const onDisk = (file: string): Uint8Array | null =>
@@ -2501,6 +2473,53 @@ describe("a drag's copy of the card's screenshot on disk", () => {
       attached: 1,
       plain: [{ call: "attachFiles", id: card.note, paths: [OTHER_FILE] }],
     });
+  });
+
+  it("brings a copy another app saved an edit into in as a new picture, the edit kept on disk after quit", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain, quit } = dropping(card);
+    const file = drop.drag(1)?.file ?? "";
+
+    // The drag went to Preview, which saved the user's marks into the copy; its proxy icon then brings it back.
+    const marked = editInPlace(file);
+    const answer = await drop.onItem(card.note, [file]);
+
+    await settled(card);
+    quit();
+    expect({
+      added,
+      answer,
+      kept: onDisk(file),
+      plain,
+      save: card.view()?.save,
+    }).toStrictEqual({
+      added: [],
+      answer: PLAIN,
+      kept: marked,
+      plain: [{ call: "attachFiles", id: card.note, paths: [file] }],
+      save: { state: "idle" },
+    });
+  });
+
+  it("keeps a copy another app saved an edit into at quit, and removes a canceled drag's copy, still as it was staged", () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { drop, quit } = dropping(card);
+    const edited = drop.drag(1)?.file ?? "";
+    const canceled = drop.drag(1)?.file ?? "";
+    const marked = editInPlace(edited);
+
+    quit();
+    expect({
+      canceled: onDisk(canceled),
+      edited: onDisk(edited),
+    }).toStrictEqual({ canceled: null, edited: marked });
   });
 });
 
