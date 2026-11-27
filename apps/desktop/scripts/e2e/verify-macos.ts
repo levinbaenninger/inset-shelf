@@ -8,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -45,6 +46,16 @@ const userData = path.join(work, "userData");
 const logFile = path.join(work, "events.jsonl");
 const sourceBundleId = "ch.inset.e2e.source";
 const sourceApp = path.join(bin, "source.app");
+
+// The scheme the source app opens files by, as an editor does (E2E_EDITORS in src/main/e2e-log.ts).
+const sourceScheme = "inset-e2e-source";
+
+// Each address the source app was asked to open, one per line (scripts/e2e/source.swift).
+const sourceOpened = path.join(bin, "opened.txt");
+
+const lsregister =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
 const CLIPBOARD_SENTINEL = "inset-shelf-e2e-clipboard";
 
 const EventSchema = z.object({
@@ -496,12 +507,14 @@ const buildHelpers = (): void => {
   mkdirSync(path.join(sourceApp, "Contents/MacOS"), { recursive: true });
   writeFileSync(
     path.join(sourceApp, "Contents/Info.plist"),
-    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${sourceBundleId}</string><key>CFBundleExecutable</key><string>source</string><key>CFBundleName</key><string>source</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${sourceBundleId}</string><key>CFBundleExecutable</key><string>source</string><key>CFBundleName</key><string>source</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>${sourceBundleId}</string><key>CFBundleURLSchemes</key><array><string>${sourceScheme}</string></array></dict></array></dict></plist>`
   );
 
   swift("input", path.join(bin, "input"));
   swift("windows", path.join(bin, "windows"));
   swift("source", path.join(sourceApp, "Contents/MacOS/source"));
+  // The scheme counts as registered only once Launch Services knows the bundle; the run's end forgets it.
+  execFileSync(lsregister, ["-f", sourceApp]);
 };
 
 const launch = (env: Record<string, string> = {}): ChildProcess => {
@@ -831,6 +844,95 @@ const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
   return test();
 };
 
+/** The addresses the source app was asked to open, oldest first. */
+const openedInSource = (): readonly string[] =>
+  existsSync(sourceOpened)
+    ? readFileSync(sourceOpened, "utf-8").split("\n").filter(Boolean)
+    : [];
+
+/** The file an address of the source app's scheme names, or null for any other address. */
+const fileOfAddress = (address: string): string | null => {
+  try {
+    const url = new URL(address);
+
+    return url.protocol === `${sourceScheme}:` && url.host === "file"
+      ? decodeURIComponent(url.pathname)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Clicks the code item's source line, "a.ts · proj", in the shelf. */
+const clickCodeLine = async (attempts = 10): Promise<boolean> => {
+  const found = jxa(`const hit = ${processElements}.findLast((e) => {
+      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => /^a\\.ts\\b/u.test(t ?? "")); } catch { return false; }
+    });
+    hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
+
+  if (found !== "") {
+    const [x = "0", y = "0"] = found.split(" ");
+
+    input("click", x, y);
+
+    return true;
+  }
+
+  if (attempts <= 1) {
+    return false;
+  }
+
+  await delay(500);
+
+  return await clickCodeLine(attempts - 1);
+};
+
+/**
+ * The way back (src/main/open-code.ts): a click on a code item's source line
+ * opens its file in the editor it came from, through the address the
+ * editor's scheme takes, here the source app's own. A file that is gone
+ * opens nothing and brings the editor forward. No other editor is touched.
+ */
+const checkCodeWayBack = async (file: string): Promise<void> => {
+  enableWebAccessibility();
+  rmSync(sourceOpened, { force: true });
+  showShelfFromTray();
+
+  const clicked = await clickCodeLine();
+
+  await waitUntil(() => openedInSource().length > 0);
+
+  const asked = openedInSource();
+
+  record("the code item's source line is a button", clicked);
+  record(
+    "a click on it opens its file in the editor it came from, by the editor's address",
+    asked.length === 1 && asked.map(fileOfAddress).every((at) => at === file),
+    `${asked.length} address(es)`
+  );
+
+  // Gone, and with the editor quit: only the bring-forward can start it again.
+  rmSync(file);
+  stopSource();
+  rmSync(sourceOpened, { force: true });
+  await delay(800);
+  showShelfFromTray();
+
+  const clickedGone = await clickCodeLine();
+
+  await waitUntil(() => frontmost() === "source", 6000);
+  record(
+    "a file that is gone opens nothing",
+    clickedGone && openedInSource().length === 0
+  );
+  record(
+    "and brings its editor forward",
+    frontmost() === "source",
+    frontmost()
+  );
+  osa(`tell application id "${sourceBundleId}" to quit`);
+};
+
 const checkCodePlace = async (): Promise<void> => {
   const project = path.join(realpathSync(work), "code", "proj");
   const file = path.join(project, "src", "a.ts");
@@ -880,6 +982,8 @@ const checkCodePlace = async (): Promise<void> => {
     "a window that names no file keeps no place in the code",
     noFile?.context?.app === "source" && noFile.context.code === null
   );
+
+  await checkCodeWayBack(file);
 };
 
 const checkNoFalseTaps = async (): Promise<void> => {
@@ -3381,6 +3485,7 @@ const main = async (): Promise<void> => {
     stopSource();
     quitApp(app);
     await exited(app);
+    spawnSync(lsregister, ["-u", sourceApp]);
 
     // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
     if (clipboardBefore === "") {
