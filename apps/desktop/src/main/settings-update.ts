@@ -10,7 +10,7 @@ export interface SettingsReach {
   /** The rest of the app that follows the settings: screenshot cards, recall. */
   readonly follow: () => void;
   readonly placeIcon: (place: IconPlace) => void;
-  readonly window: Pick<SettingsWindow, "open">;
+  readonly window: Pick<SettingsWindow, "isOpen" | "open">;
   /** Settings shows the settings as they are now. */
   readonly showView: () => void;
 }
@@ -28,9 +28,14 @@ export const updateSettings = async (
   const { iconIn } = reach.current();
 
   if (iconIn !== before) {
+    // Turning into an accessory can send the app's windows away, so Settings comes back, unless Esc or its × closed it while the change saved.
+    const open = reach.window.isOpen();
+
     reach.placeIcon(iconIn);
-    // Turning into an accessory can send the app's windows away.
-    reach.window.open();
+
+    if (open) {
+      reach.window.open();
+    }
   }
 
   reach.showView();
