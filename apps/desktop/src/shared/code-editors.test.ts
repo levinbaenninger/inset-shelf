@@ -273,6 +273,21 @@ describe(openAddress, () => {
     ).toBe("vscode://file/Users/anna/p/a.ts:12");
   });
 
+  it.each([
+    // An editor reads a colon and a number at an address's end as a line, encoded or not.
+    ["a name that ends like a line", "/Users/anna/p/report:12", null],
+    ["a name that ends like a line, at a line", "/Users/anna/p/report:12", 5],
+    ["a name that ends like a line and a column", "/Users/anna/p/a:3:9", null],
+    // Code opens a workspace file as a workspace, leaving the window's own.
+    ["a workspace file", "/Users/anna/p/all.code-workspace", null],
+    ["a workspace file at a line", "/Users/anna/p/all.code-workspace", 4],
+  ])(
+    "gives no address for %s, which it could not open as itself",
+    (_, file, line) => {
+      expect(openAddress(code, { file, line, root: null }, line)).toBeNull();
+    }
+  );
+
   it("opens the file alone when no line is known", () => {
     expect(
       openAddress(

@@ -511,7 +511,7 @@ const buildHelpers = (): void => {
   mkdirSync(path.join(sourceApp, "Contents/MacOS"), { recursive: true });
   writeFileSync(
     path.join(sourceApp, "Contents/Info.plist"),
-    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${sourceBundleId}</string><key>CFBundleExecutable</key><string>source</string><key>CFBundleName</key><string>source</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>${sourceBundleId}</string><key>CFBundleURLSchemes</key><array><string>${sourceScheme}</string></array></dict></array></dict></plist>`
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${sourceBundleId}</string><key>CFBundleExecutable</key><string>source</string><key>CFBundleName</key><string>source</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleTypeRole</key><string>Editor</string><key>CFBundleURLName</key><string>${sourceBundleId}</string><key>CFBundleURLSchemes</key><array><string>${sourceScheme}</string></array></dict></array></dict></plist>`
   );
 
   swift("input", path.join(bin, "input"));
@@ -898,6 +898,21 @@ const clickCodeLine = async (attempts = 10): Promise<boolean> => {
  * opens nothing and brings the editor forward. No other editor is touched.
  */
 const checkCodeWayBack = async (file: string): Promise<void> => {
+  // Without its scheme the app would show the file in Finder, and leave that window open.
+  const handler = jxa(`ObjC.import("AppKit");
+    const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString(${JSON.stringify(`${sourceScheme}://file/a`)}));
+    app.isNil() ? "" : ObjC.unwrap(app.path);`);
+
+  record(
+    "the stand-in editor takes its scheme",
+    handler === sourceApp,
+    handler === "" ? "no app takes it" : handler
+  );
+
+  if (handler !== sourceApp) {
+    return;
+  }
+
   enableWebAccessibility();
   rmSync(sourceOpened, { force: true });
   showShelfFromTray();
