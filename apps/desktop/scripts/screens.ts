@@ -2828,13 +2828,13 @@ type FieldLook = z.infer<typeof FieldLookSchema>;
 
 /** How an in-place field looks: its tint, any ring or border, and where its words sit and in what type. */
 const fieldLook = async (locator: Locator): Promise<FieldLook> => {
-  await settleTint(locator);
+  // Lets a tint's fade finish before it is read.
+  await locator.page().waitForTimeout(250);
 
   return FieldLookSchema.parse(
     await locator.evaluate((element) => {
       const style = getComputedStyle(element);
       const box = element.getBoundingClientRect();
-      const px = (value: string): number => Number.parseFloat(value) || 0;
       let card = "";
 
       for (
@@ -2849,7 +2849,7 @@ const fieldLook = async (locator: Locator): Promise<FieldLook> => {
         }
       }
 
-      const borderWidth = px(style.borderTopWidth);
+      const borderWidth = Number(style.borderTopWidth.replace("px", ""));
 
       return {
         background: style.backgroundColor,
@@ -2863,24 +2863,23 @@ const fieldLook = async (locator: Locator): Promise<FieldLook> => {
         height: box.height,
         ring:
           style.boxShadow === "none" &&
-          (style.outlineStyle === "none" || px(style.outlineWidth) === 0)
+          (style.outlineStyle === "none" ||
+            Number(style.outlineWidth.replace("px", "")) === 0)
             ? "none"
             : `${style.boxShadow} ${style.outlineStyle} ${style.outlineWidth}`,
-        textLeft: box.left + px(style.borderLeftWidth) + px(style.paddingLeft),
+        textLeft:
+          box.left +
+          Number(style.borderLeftWidth.replace("px", "")) +
+          Number(style.paddingLeft.replace("px", "")),
         // From the top of its row or field, so a scroll to bring it into view moves nothing.
         textTop:
           box.top +
-          px(style.borderTopWidth) +
-          px(style.paddingTop) -
+          Number(style.borderTopWidth.replace("px", "")) +
+          Number(style.paddingTop.replace("px", "")) -
           (element.closest("li, section")?.getBoundingClientRect().top ?? 0),
       };
     })
   );
-};
-
-/** Lets a tint's fade finish before it is read. */
-const settleTint = async (locator: Locator): Promise<void> => {
-  await locator.page().waitForTimeout(250);
 };
 
 /** A field of details that is typed in where it is read: the words at rest, and the field typed in once it has the keyboard. */
@@ -2960,7 +2959,9 @@ const inPlaceProblems = (
     }
 
     if (typing.background !== cue) {
-      problems.push(`${name} typed in is tinted ${typing.background}, not ${cue}`);
+      problems.push(
+        `${name} typed in is tinted ${typing.background}, not ${cue}`
+      );
     }
 
     if (typing.ring !== "none" || typing.border !== "none") {
@@ -3740,7 +3741,9 @@ const wrapSweep = async (page: Page, editing: boolean) => {
     // oxlint-disable-next-line no-await-in-loop -- read once the row has settled at this width.
     await page.waitForTimeout(40);
     // oxlint-disable-next-line no-await-in-loop -- read at this width.
-    seen.set(width, (await lineStarts(words)).join(" / "));
+    const starts = await lineStarts(words);
+
+    seen.set(width, starts.join(" / "));
   }
 
   return seen;
@@ -5477,7 +5480,11 @@ const STRESS_SCENES: readonly Scene[] = (
         await page.waitForTimeout(200);
 
         const read = await wrapSweep(page, false);
-        const moved = [...read].filter(([width, lines]) => typed.get(width) !== lines);
+
+        const moved = [...read].filter(
+          ([width, lines]) => typed.get(width) !== lines
+        );
+
         const [first] = moved;
 
         return first === undefined
@@ -9143,9 +9150,9 @@ const SCENES: readonly Scene[] = [
       await page.getByRole("textbox", { exact: true, name: "Step 3" }).focus();
     },
     check: async (page) => {
-      const cue = (
-        await fieldLook(page.getByRole("textbox", { exact: true, name: "Step 3" }))
-      ).background;
+      const { background: cue } = await fieldLook(
+        page.getByRole("textbox", { exact: true, name: "Step 3" })
+      );
 
       const looks = await inPlaceLooks(page, [
         alwaysField("Description", "Description"),
@@ -9172,36 +9179,35 @@ const SCENES: readonly Scene[] = [
 
       const problems = inPlaceProblems(looks, cue);
       const description = looks.find((look) => look.name === "Description");
-      const step = looks.find((look) => look.name === "Step 3");
+      const stepLook = looks.find((look) => look.name === "Step 3");
 
       // Where the item's own words start: inside the box at the top of details, past its border and padding.
-      const words = {
-        left: Number(
-          await page
-            .locator("[data-details] > div")
-            .first()
-            .evaluate((element) => {
-              const style = getComputedStyle(element);
+      const wordsLeft = await page
+        .locator("[data-details] > div")
+        .first()
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
 
-              return (
-                element.getBoundingClientRect().left +
-                Number.parseFloat(style.borderLeftWidth) +
-                Number.parseFloat(style.paddingLeft)
-              );
-            })
-        ),
-      };
+          return (
+            element.getBoundingClientRect().left +
+            Number(style.borderLeftWidth.replace("px", "")) +
+            Number(style.paddingLeft.replace("px", ""))
+          );
+        });
 
-      if (description !== undefined && step !== undefined) {
-        if (description.rest.card === "" || description.rest.card !== step.rest.card) {
+      if (description !== undefined && stepLook !== undefined) {
+        if (
+          description.rest.card === "" ||
+          description.rest.card !== stepLook.rest.card
+        ) {
           problems.push(
-            `Description sits on ${description.rest.card === "" ? "the bare window" : description.rest.card}, the steps on ${step.rest.card}`
+            `Description sits on ${description.rest.card === "" ? "the bare window" : description.rest.card}, the steps on ${stepLook.rest.card}`
           );
         }
 
-        if (Math.abs(description.rest.textLeft - words.left) > 0.5) {
+        if (Math.abs(description.rest.textLeft - wordsLeft) > 0.5) {
           problems.push(
-            `Description's words start at x ${description.rest.textLeft}, the item's at ${words.left}`
+            `Description's words start at x ${description.rest.textLeft}, the item's at ${wordsLeft}`
           );
         }
       }
@@ -9220,9 +9226,9 @@ const SCENES: readonly Scene[] = [
       await page.getByRole("textbox", { exact: true, name: "Title" }).focus();
     },
     check: async (page) => {
-      const cue = (
-        await fieldLook(page.getByRole("textbox", { exact: true, name: "Title" }))
-      ).background;
+      const { background: cue } = await fieldLook(
+        page.getByRole("textbox", { exact: true, name: "Title" })
+      );
 
       const looks = await inPlaceLooks(page, [
         alwaysField("Title", "Title"),
@@ -9246,7 +9252,9 @@ const SCENES: readonly Scene[] = [
   {
     act: async (page) => {
       await details(page, 10);
-      await page.getByRole("textbox", { exact: true, name: "Description" }).hover();
+      await page
+        .getByRole("textbox", { exact: true, name: "Description" })
+        .hover();
       await page.waitForTimeout(250);
     },
     data: { view: shelfView() },
@@ -9257,7 +9265,9 @@ const SCENES: readonly Scene[] = [
   {
     act: async (page) => {
       await details(page, 10);
-      await page.getByRole("textbox", { exact: true, name: "Description" }).click();
+      await page
+        .getByRole("textbox", { exact: true, name: "Description" })
+        .click();
       await page.mouse.move(1, 1);
       await page.waitForTimeout(250);
     },
@@ -9272,13 +9282,18 @@ const SCENES: readonly Scene[] = [
       await page.getByRole("button", { name: "Add a field" }).click();
       await page.getByRole("menuitem", { name: /^Description/u }).click();
       await page.waitForFunction(
-        () => document.activeElement?.getAttribute("aria-label") === "Description"
+        () =>
+          document.activeElement?.getAttribute("aria-label") === "Description"
       );
       await page.getByRole("heading", { name: "Details" }).focus();
       await page.waitForTimeout(250);
     },
     check: async (page) => {
-      const field = page.getByRole("textbox", { exact: true, name: "Description" });
+      const field = page.getByRole("textbox", {
+        exact: true,
+        name: "Description",
+      });
+
       const placeholder = await field.getAttribute("placeholder");
 
       return (await field.isVisible()) && (placeholder ?? "") !== ""
@@ -9301,7 +9316,9 @@ const SCENES: readonly Scene[] = [
       await page.waitForTimeout(150);
     },
     check: async (page) => {
-      const steps = await page.getByRole("textbox", { name: /^Step \d/u }).count();
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
 
       return steps === 5
         ? null
