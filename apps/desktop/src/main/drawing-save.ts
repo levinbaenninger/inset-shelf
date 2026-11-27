@@ -125,7 +125,7 @@ export interface DrawingSaveState {
 export interface DrawingSaves {
   /** Reads what Annotate opens a picture on; changes nothing, so the caller can check the window is still free once it has. */
   readonly opening: (picture: Picture) => Promise<DrawingOpening>;
-  /** The window opens on a picture, with what was read for it, or on a blank page. */
+  /** The window opens on a picture, with what was read for it, or on a blank page; a screenshot card's Annotate it replaces is announced. */
   readonly open: (target: DrawingTarget, opening?: DrawingOpening) => void;
   /** The window has hidden, after Save, Cancel or its close button. */
   readonly hidden: () => void;
@@ -585,6 +585,17 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     }
   };
 
+  /** The screenshot card's Annotate ended without a Save: main still says where the screenshot went, if it is still on the shelf. */
+  const closedUnsaved = (): void => {
+    const id = unannounced;
+
+    unannounced = null;
+
+    if (id !== null && deps.controller.item(id) !== undefined) {
+      deps.shotClosed(id);
+    }
+  };
+
   /** Save or Retry closes the window on the marks: the save announces the screenshot's item itself, so the window's hide doesn't. */
   const closeOn = (put: Put): void => {
     unannounced = null;
@@ -699,17 +710,11 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     forQuit: (stop) => {
       quitStop = stop;
     },
-    hidden: () => {
-      const id = unannounced;
-
-      unannounced = null;
-
-      if (id !== null && deps.controller.item(id) !== undefined) {
-        deps.shotClosed(id);
-      }
-    },
+    hidden: closedUnsaved,
     image: async () => await base,
     open: (to, opening) => {
+      // A clean window takes the next drawing without hiding.
+      closedUnsaved();
       opened = to;
       unannounced = to.kind === "item" && to.screenshot === true ? to.id : null;
       made = null;

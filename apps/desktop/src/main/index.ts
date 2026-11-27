@@ -2116,15 +2116,15 @@ const start = async (): Promise<void> => {
       : null;
   };
 
-  /** Opens a picture to draw on, an image item's or an attached one, with the marks a save kept beside it to edit again. */
+  /** Opens a picture to draw on, an image item's or an attached one, with the marks a save kept beside it to edit again. False when the window stays as it was. */
   const openPicture = async (
     target: Extract<DrawingTarget, { readonly kind: "item" | "attachment" }>,
     pinMode = false
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const before = pictureAt(target);
 
     if (before === null || drawingTaken(target)) {
-      return;
+      return false;
     }
 
     const opening = await drawingSaves.opening(before.picture);
@@ -2132,16 +2132,14 @@ const start = async (): Promise<void> => {
 
     // Anything can happen while the marks are read: the window and the picture are checked again, as they are now.
     if (now === null || drawingTaken(target)) {
-      return;
+      return false;
     }
 
     if (
       now.picture.image.file !== before.picture.image.file ||
       now.picture.scene?.file !== before.picture.scene?.file
     ) {
-      await openPicture(target, pinMode);
-
-      return;
+      return await openPicture(target, pinMode);
     }
 
     const { picture } = opening;
@@ -2165,6 +2163,8 @@ const start = async (): Promise<void> => {
       ),
       pinMode,
     });
+
+    return true;
   };
 
   /** Opens an image item to draw on, with the marks a save kept beside it to edit again. */
@@ -2537,7 +2537,14 @@ const start = async (): Promise<void> => {
           }
 
           controller.focus(id, { keepDetails: true });
-          await openPicture({ id, kind: "item", screenshot: true });
+
+          // Unsaved marks that took the window meanwhile keep it; the screenshot is only saved then.
+          if (
+            !(await openPicture({ id, kind: "item", screenshot: true })) &&
+            controller.item(id) !== undefined
+          ) {
+            shotAdded("shelf", id);
+          }
         })();
       },
       copy: (seq) => {
