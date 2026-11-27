@@ -3486,70 +3486,76 @@ const main = async (): Promise<void> => {
       version: 1,
     })}\n`
   );
-  buildHelpers();
 
-  if (only === "recall") {
-    seedRecallShelf();
-  }
-
-  const seeded = SEEDED_TRIALS.get(only);
-
-  seeded?.seed();
-
-  const clipboardBefore = pbpaste();
-
-  // The card's trial and the failed paste start on a disk that refuses the first write.
-  let app = launch(failingWrite(only));
-
+  // The stand-in editor's own scope, from its first file on: whatever fails
+  // after, a build, a seed or the clipboard's read, it is forgotten and removed.
   try {
-    await checkLaunch();
+    buildHelpers();
 
-    if (only === "reopen") {
-      await showSource("", "none");
-      await checkReopenCaret();
-    } else if (only === "say-why") {
-      await checkSayWhy();
-    } else if (only === "say-why-failed") {
-      await checkSayWhyFailed();
-    } else if (only === "recall") {
-      app = await checkRecall(app);
-    } else if (only === "code") {
-      await checkCodePlace();
-    } else if (only === "card") {
-      await checkScreenshotCard();
-    } else if (only === "added" || only === "added-failed") {
-      await checkAddedNotice(only === "added-failed");
-    } else if (seeded === undefined) {
-      await checkShelfStaysInFront();
-      await checkComposer();
-      await checkSelection();
-      await checkSayWhy();
-      await checkNoFalseTaps();
-      await checkToggle();
-      await checkCopy();
-      await checkDrawing();
-      await checkSettings();
-      await checkReopenCaret();
-      app = await checkRestart(app);
-      await checkFailedWrite();
-    } else {
-      app = await seeded.run(app);
+    if (only === "recall") {
+      seedRecallShelf();
+    }
+
+    const seeded = SEEDED_TRIALS.get(only);
+
+    seeded?.seed();
+
+    const clipboardBefore = pbpaste();
+
+    // The card's trial and the failed paste start on a disk that refuses the first write.
+    let app = launch(failingWrite(only));
+
+    try {
+      await checkLaunch();
+
+      if (only === "reopen") {
+        await showSource("", "none");
+        await checkReopenCaret();
+      } else if (only === "say-why") {
+        await checkSayWhy();
+      } else if (only === "say-why-failed") {
+        await checkSayWhyFailed();
+      } else if (only === "recall") {
+        app = await checkRecall(app);
+      } else if (only === "code") {
+        await checkCodePlace();
+      } else if (only === "card") {
+        await checkScreenshotCard();
+      } else if (only === "added" || only === "added-failed") {
+        await checkAddedNotice(only === "added-failed");
+      } else if (seeded === undefined) {
+        await checkShelfStaysInFront();
+        await checkComposer();
+        await checkSelection();
+        await checkSayWhy();
+        await checkNoFalseTaps();
+        await checkToggle();
+        await checkCopy();
+        await checkDrawing();
+        await checkSettings();
+        await checkReopenCaret();
+        app = await checkRestart(app);
+        await checkFailedWrite();
+      } else {
+        app = await seeded.run(app);
+      }
+    } finally {
+      stopSource();
+      quitApp(app);
+      await exited(app);
+
+      // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
+      if (clipboardBefore === "") {
+        jxa(
+          'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
+        );
+      } else {
+        pbcopy(clipboardBefore);
+      }
     }
   } finally {
-    stopSource();
-    quitApp(app);
-    await exited(app);
     spawnSync(lsregister, ["-u", sourceApp]);
     rmSync(sourceHome, { force: true, recursive: true });
-
-    // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
-    if (clipboardBefore === "") {
-      jxa(
-        'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
-      );
-    } else {
-      pbcopy(clipboardBefore);
-    }
   }
 
   writeFileSync(
