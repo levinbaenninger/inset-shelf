@@ -18,7 +18,10 @@ import { isDeepStrictEqual } from "node:util";
 
 import { z } from "zod";
 
+import { saveErrorText } from "../../src/main/save-error.ts";
 import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
+import { noticeFate } from "../../src/shared/notice-fate.ts";
+import type { NoticeFate } from "../../src/shared/notice-fate.ts";
 
 // Drives Inset Shelf on the real macOS desktop: real Shift taps, real clicks
 // and drags, the real clipboard. Keys are only sent while the test's own
@@ -63,6 +66,7 @@ const EventSchema = z.object({
   count: z.number().optional(),
   t: z.number(),
   text: z.string().optional(),
+  tone: z.string().optional(),
   via: z.string().optional(),
   windows: z.number(),
 });
@@ -1055,10 +1059,61 @@ const copyFileAndFolder = () => {
   return { folder: path.basename(folder) };
 };
 
+/** Polls the trial log after `mark` until the notice with exactly these words was shown, or time runs out. */
+const waitForNotice = async (
+  message: string,
+  mark: number,
+  deadline = Date.now() + 8000
+): Promise<NoticeFate> => {
+  const fate = noticeFate(events().slice(mark), message);
+
+  if (fate.kind === "shown" || Date.now() > deadline) {
+    return fate;
+  }
+
+  await delay(200);
+
+  return await waitForNotice(message, mark, deadline);
+};
+
+const fateText = (fate: NoticeFate): string => {
+  if (fate.kind === "shown") {
+    return `shown by the ${fate.via}`;
+  }
+
+  if (fate.kind === "sentNotShown") {
+    return `sent to the ${fate.via}, never shown there`;
+  }
+
+  return fate.sent.length === 0
+    ? "no notice sent"
+    : `not sent; sent instead ${JSON.stringify(fate.sent)}`;
+};
+
+/**
+ * Passes when the trial log says the notice with exactly these words was on
+ * screen. The accessibility tree can miss a notice that shows for a moment,
+ * so its read is only detail.
+ */
+const recordNotice = async (
+  check: string,
+  message: string,
+  mark: number
+): Promise<void> => {
+  const fate = await waitForNotice(message, mark);
+  const seen = await windowShows(message, 2);
+
+  record(
+    check,
+    fate.kind === "shown",
+    `${fateText(fate)}; accessibility tree ${seen ? "saw it" : "did not see it"}`
+  );
+};
+
 /**
  * Pastes a file and a folder into the shelf. On a good disk the notice says
  * "Added 1 of 2." and names the folder; with `failing` (INSET_FAIL_NEXT_WRITE=1)
- * it says no Added at all, and the banner says the save failed.
+ * it says the disk is full and no Added at all, and the banner says the save failed.
  */
 const checkAddedNotice = async (failing: boolean): Promise<void> => {
   const { folder } = copyFileAndFolder();
@@ -1067,6 +1122,9 @@ const checkAddedNotice = async (failing: boolean): Promise<void> => {
   enableWebAccessibility();
   showShelfFromTray();
   await delay(800);
+
+  const mark = events().length;
+
   menuItem("Edit", "Paste");
 
   if (failing) {
@@ -1074,17 +1132,33 @@ const checkAddedNotice = async (failing: boolean): Promise<void> => {
       "a paste whose save fails says so",
       await windowShows("Not saved to disk")
     );
+    // The first write of shelf.json fails as a full disk does (src/main/shelf-store.ts failNextWrite).
+    await recordNotice(
+      "a paste whose save fails says why in a notice",
+      saveErrorText("ENOSPC"),
+      mark
+    );
+
+    const added = events()
+      .slice(mark)
+      .filter(
+        (event) =>
+          event.event === "noticeSent" && (event.text ?? "").includes("Added 1")
+      );
+
     record(
       "a paste whose save fails never says Added",
-      !windowText().includes("Added 1")
+      added.length === 0,
+      `${added.length === 0 ? "no Added notice sent" : JSON.stringify(added.map((event) => event.text))}; accessibility tree ${windowText().includes("Added 1") ? "shows Added 1" : "shows no Added"}`
     );
 
     return;
   }
 
-  record(
+  await recordNotice(
     "pasted files are confirmed once saved, naming the folder refused",
-    await windowShows(`Added 1 of 2. ${folder} is a folder, not a file.`)
+    `Added 1 of 2. ${folder} is a folder, not a file.`,
+    mark
   );
   record(
     "the file became one item",
