@@ -732,7 +732,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   const dropping = useFileDrops(
     () => drag.draggingOut() || attachDrop.draggingOut(),
-    () => details.item?.id ?? null
+    () => details.item ?? null
   );
 
   /** What a tile does, in a row or in details. */
@@ -1744,7 +1744,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     <div
       className={cn(
         "shelf-panel text-foreground flex h-svh flex-col rounded-xl",
-        dropRing(dropping, attachDrop.target)
+        dropRing(dropping, attachDrop.target, detailsItem)
       )}
       onPointerDownCapture={onPanelPointerDown}
     >
