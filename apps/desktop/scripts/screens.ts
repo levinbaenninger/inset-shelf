@@ -7703,8 +7703,8 @@ const CODE_FILE = `${CODE_ROOT}/apps/desktop/src/shared/recall.ts`;
 const CODE_TOOLTIP =
   "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
 
-// Long enough that the line and the path together overrun a tooltip: the path's end must still be in it.
-const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(5)}Übersicht.tsx`;
+// Long enough that the line and the path together overrun a tooltip, and short enough that the path's room holds the name whole.
+const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(2)}Übersicht.tsx`;
 
 const CODE_LONG_FOLDERS =
   "packages/kundenportal/src/features/rechnungen/ansichten";
