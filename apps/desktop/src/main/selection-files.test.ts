@@ -73,8 +73,6 @@ const clipboard = (options: {
   readonly rejected?: readonly number[];
   readonly filesHeld?: readonly number[];
   readonly halfRead?: readonly number[];
-  /** Whether the app runs on Windows, where Explorer notes every copy or cut of files beside their list. */
-  readonly windows?: boolean;
 }) => {
   let items = options.initial;
   let reads = 0;
@@ -87,8 +85,7 @@ const clipboard = (options: {
     clear: () => {
       items = [];
     },
-    content: async (read) =>
-      await clipboardContent(read, options.windows ?? false),
+    content: clipboardContent,
     copy: () => {
       items = options.copied;
     },
@@ -436,25 +433,20 @@ describe("a cut and a copy of the same file", () => {
     expect(clip.items()).toStrictEqual([cutOf(A)]);
   });
 
-  it("reads again, not writes, when a read lists the file and hides whether it was cut, until the cut shows", async () => {
-    // A clipboard manager held the clipboard while the effect was read: the list came back alone.
+  it("puts the clipboard back at once when files are listed with no effect, as an app that never notes one copies them", async () => {
     const clip = clipboard({
-      before: { 2: [list(A)], 3: [cutOf(A)] },
-      copied: [copyOf(A)],
+      copied: [list(A)],
       initial: [EARLIER],
-      windows: true,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
       kind: "files",
-      restored: false,
-      unchecked: false,
+      restored: true,
     });
-    expect(clip.restored).toStrictEqual([]);
-    expect(clip.items()).toStrictEqual([cutOf(A)]);
+    expect(clip.items()).toStrictEqual([EARLIER]);
   });
 
-  it("reads again when the effect came back with no bytes, whichever system it runs on", async () => {
+  it("reads again when the effect is listed but came back with no bytes, until the cut shows", async () => {
     const clip = clipboard({
       before: { 2: [{ ...list(A), [DROP_EFFECT]: "" }], 3: [cutOf(A)] },
       copied: [copyOf(A)],
@@ -469,10 +461,9 @@ describe("a cut and a copy of the same file", () => {
 
   it("writes nothing and says it wasn't put back when the effect stays hidden until time runs out", async () => {
     const clip = clipboard({
-      before: { 2: [list(A)] },
+      before: { 2: [{ ...list(A), [DROP_EFFECT]: "" }] },
       copied: [copyOf(A)],
       initial: [EARLIER],
-      windows: true,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
@@ -481,21 +472,7 @@ describe("a cut and a copy of the same file", () => {
       unchecked: false,
     });
     expect(clip.restored).toStrictEqual([]);
-    expect(clip.items()).toStrictEqual([list(A)]);
-  });
-
-  it("puts the clipboard back on Windows when the read shows the effect", async () => {
-    const clip = clipboard({
-      copied: [copyOf(A)],
-      initial: [EARLIER],
-      windows: true,
-    });
-
-    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
-      kind: "files",
-      restored: true,
-    });
-    expect(clip.items()).toStrictEqual([EARLIER]);
+    expect(clip.items()).toStrictEqual([{ ...list(A), [DROP_EFFECT]: "" }]);
   });
 
   it("tries again when a swallowed write left a copy of the file where the clipboard held it cut", async () => {

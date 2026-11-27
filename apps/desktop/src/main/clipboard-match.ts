@@ -148,19 +148,15 @@ const isMove = (low: number): boolean => Math.floor(low / 2) % 2 === 1;
 
 /**
  * Whether the files in a read were cut (true), copied (false), or the read
- * can't say (null): the effect came back with no bytes, or, where Explorer
- * always notes one (`expected`), not at all. A read that notes no effect
- * elsewhere, as a copy from macOS, is a copy.
+ * can't say (null). The read's formats are the clipboard's own list: an effect
+ * missing from it was never set, and an app has to set one to cut, so the
+ * files are a copy. An effect listed but read back empty was cut short by
+ * another app's hold, and is not known.
  */
 const filesCut = async (
-  read: readonly ClipboardContents[],
-  expected: boolean
+  read: readonly ClipboardContents[]
 ): Promise<boolean | null> => {
   const effect = read.find((item) => DROP_EFFECT in item)?.[DROP_EFFECT];
-
-  if (effect === undefined) {
-    return expected ? null : false;
-  }
 
   if (!(effect instanceof Blob)) {
     return false;
@@ -190,12 +186,10 @@ const filesIn = async (
  * What one read of the clipboard holds: its plain text and HTML ("" for either
  * it hasn't), the files it lists, and whether they were cut, null when the
  * read can't say. Judging a read by itself matters: a read made again could
- * fall under another app's hold, and come back empty. On Windows every list
- * of files comes with its effect, so a list without one was read in part.
+ * fall under another app's hold, and come back empty.
  */
 export const clipboardContent = async (
-  read: readonly ClipboardContents[],
-  windows = process.platform === "win32"
+  read: readonly ClipboardContents[]
 ): Promise<{
   readonly cut: boolean | null;
   readonly files: readonly string[];
@@ -205,7 +199,7 @@ export const clipboardContent = async (
   const files = await filesIn(read);
 
   return {
-    cut: await filesCut(read, windows && files.length > 0),
+    cut: await filesCut(read),
     files,
     html: await textIn(read, "text/html"),
     text: await textIn(read, "text/plain"),
@@ -239,7 +233,7 @@ export const holdsAgainIn = async (
     return false;
   }
 
-  if ((await filesCut(saved, false)) !== (await filesCut(current, false))) {
+  if ((await filesCut(saved)) !== (await filesCut(current))) {
     return false;
   }
 
