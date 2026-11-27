@@ -66,7 +66,7 @@ import type { DetailsUndo } from "./details-view";
 import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
-import { focusRow, HomeFolder, ItemRow } from "./item-row";
+import { HomeFolder, ItemRow } from "./item-row";
 import { keptItems } from "./kept-items";
 import { KnownEditors } from "./known-editors";
 import { lookAt } from "./made-items";
@@ -76,6 +76,7 @@ import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
 import { QuitPromptDialog } from "./quit-prompt";
 import { useRowActions } from "./row-actions";
+import { focusRow } from "./row-look";
 import {
   DueSuggestions,
   NoMatches,

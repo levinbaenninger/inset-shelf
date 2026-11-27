@@ -6,7 +6,7 @@ import type { RefObject } from "react";
 import { toast } from "sonner";
 
 import type { DetailsUndo, FieldRequest, StepsReset } from "./details-view";
-import { focusRow } from "./item-row";
+import { focusRow } from "./row-look";
 
 /** Removals and label edits in details that ⌘Z can still put back. */
 const UNDO_DEPTH = 20;

@@ -25,3 +25,18 @@ export const contextMenuAt =
       y: event.clientY,
     });
   };
+
+/**
+ * Focus on an item's row itself, where Return edits, Space checks off and ⌫
+ * deletes. False when the row is gone or hidden.
+ */
+export const focusRow = (row: Element | null): boolean => {
+  const target =
+    row?.querySelector<HTMLElement>("[data-row-keys]") ??
+    row?.querySelector<HTMLElement>("[data-details-button]") ??
+    null;
+
+  target?.focus({ preventScroll: true });
+
+  return target !== null && document.activeElement === target;
+};
