@@ -8956,10 +8956,59 @@ const SCENES: readonly Scene[] = [
       await page.waitForFunction(
         () => document.activeElement?.getAttribute("aria-label") === "Step 1"
       );
+      // Typed in, so the step stays once the keyboard leaves it.
+      await page.keyboard.type("Confirm the date");
     },
     check: stepRowCheck,
     data: { view: shelfView() },
     name: "shelf-details-step-editing",
+    page: "shelf",
+  },
+  {
+    // A step added and left untyped goes once the keyboard leaves it, so the list never shows a blank step beside Add step.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page.getByRole("textbox", { name: /^Step \d/u }).count();
+
+      return steps === 5
+        ? null
+        : `${steps} steps show after a blank one was left, not the 5 typed`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-left-blank",
+    page: "shelf",
+  },
+  {
+    // Next steps added from Add and left untyped: no blank step and no empty box, only Add step.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const field = page.getByRole("region", { name: "Next steps" });
+      const steps = await field.getByRole("textbox").count();
+      const box = await field.locator("ul").isVisible();
+
+      return steps === 0 && !box
+        ? null
+        : `Next steps left untyped shows ${steps} blank step fields${box ? " and an empty box" : ""}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-steps-left-blank",
     page: "shelf",
   },
   {
