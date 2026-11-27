@@ -2933,7 +2933,10 @@ const start = async (): Promise<void> => {
   shelf.onShown((bounds) => {
     shelfServer.emit("shown", null);
     toast.send({ type: "shelfShown" });
-    e2eLog("shelfShown", { bounds });
+    e2eLog("shelfShown", {
+      bounds,
+      workArea: screen.getDisplayMatching(bounds).workArea,
+    });
     refreshTray();
     shotSaves.retarget();
   });

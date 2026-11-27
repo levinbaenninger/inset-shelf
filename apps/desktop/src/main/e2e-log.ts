@@ -33,6 +33,8 @@ export type E2eEvent =
 
 export interface E2eDetails {
   readonly bounds?: Rectangle;
+  /** The work area of the display the shelf opened on. */
+  readonly workArea?: Rectangle;
   readonly itemId?: string;
   readonly kind?: string;
   readonly via?: string;
