@@ -1652,10 +1652,18 @@ describe("a capture's words, known again when its file is opened", () => {
     ).toBeTruthy();
   });
 
-  it("knows the words the shelf kept, when the capture was longer than it keeps", () => {
-    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX + 5))]);
+  it("knows a capture's words when they are as long as the shelf keeps", () => {
+    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX))]);
 
     expect(asCaptured(doc)).toBeTruthy();
+  });
+
+  it("knows no words for a capture longer than the shelf keeps, so a click looks for no line", () => {
+    // The words kept are only the selection's start: the whole of it may be nowhere in the file.
+    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX + 5))]);
+
+    expect(asCaptured(doc)).toBeFalsy();
+    expect(doc.items[0]?.context?.code).toMatchObject({ file, line: null });
   });
 
   it("keeps nothing of the words but a mark that survives the shelf's own file", () => {

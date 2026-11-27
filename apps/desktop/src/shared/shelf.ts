@@ -1124,12 +1124,18 @@ const imageItem = (
   ...made,
 });
 
-/** The context of a capture whose kept text is `text`: its place in the code knows that text for its own. */
+/**
+ * The context of a capture whose kept text is `text`: its place in the code
+ * knows that text for its own. Not when the shelf kept only the selection's
+ * start (`clipped`): the whole of it may be nowhere in the file, so a click
+ * looks for no line.
+ */
 const withTextMark = (
   context: ItemContext | null,
-  text: string
+  text: string,
+  clipped: boolean
 ): ItemContext | null =>
-  context === null || context.code === null
+  context === null || context.code === null || clipped
     ? context
     : { ...context, code: { ...context.code, mark: textMark(text) } };
 
@@ -1148,7 +1154,7 @@ const addText = (
   return addItem(doc, {
     ...NO_META,
     color: null,
-    context: withTextMark(op.context, text),
+    context: withTextMark(op.context, text, op.text.length > TEXT_MAX),
     createdAt: env.now().toISOString(),
     done: false,
     html: op.html !== null && op.html.length <= HTML_MAX ? op.html : null,
