@@ -341,6 +341,7 @@ const env = (): OpEnv => {
 const PR: ItemContext = {
   app: "Safari",
   appLink: null,
+  code: null,
   title: "Fix the build",
   url: "https://github.com/acme/app/pull/12",
 };

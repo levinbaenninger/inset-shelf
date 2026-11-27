@@ -190,6 +190,27 @@ const ItemBaseV1 = {
   sectionId: SectionIdSchema,
 };
 
+/** The folder `root` is, or holds, `file`: a whole path segment, never a name that only starts the same. */
+const isAncestor = (root: string, file: string): boolean =>
+  file.startsWith(root.endsWith("/") ? root : `${root}/`);
+
+/** Where in the code an item came from, read from the system, never from a page. */
+export const CodePlaceSchema = z
+  .object({
+    /** The file the editor's window showed, absolute. */
+    file: z.string().min(1).max(PATH_MAX),
+    /** The project folder: the ancestor of `file` that the window's title names. Null when it names none. */
+    root: z.string().min(1).max(PATH_MAX).nullable(),
+    /** The 1-based line the captured text began on. Not read yet: always null. */
+    line: z.number().int().min(1).max(9_999_999).nullable(),
+  })
+  .refine(({ file, root }) => root === null || isAncestor(root, file), {
+    message: "The project folder does not hold the file.",
+    path: ["root"],
+  });
+
+export type CodePlace = z.output<typeof CodePlaceSchema>;
+
 /** Where an item came from: the app in front, its window title and, for a browser, the page. */
 export const ContextSchema = z.object({
   app: z.string().max(APP_NAME_MAX).nullable(),
@@ -198,6 +219,8 @@ export const ContextSchema = z.object({
    * thread, a Claude chat, a Notion page. Only known app schemes.
    */
   appLink: z.string().refine(isAppLink).nullable().default(null),
+  /** The file and project a code editor showed (src/shared/code-editors.ts). */
+  code: CodePlaceSchema.nullable().default(null),
   title: z.string().max(WINDOW_TITLE_MAX).nullable(),
   url: z
     .url({ protocol: /^(?:https?|file)$/u })

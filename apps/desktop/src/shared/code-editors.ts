@@ -1,3 +1,5 @@
+import { CodePlaceSchema } from "./shelf";
+import type { CodePlace } from "./shelf";
 import { cleanTitle } from "./window-title";
 
 /** What one part of an editor's window title names. */
@@ -8,6 +10,8 @@ export interface CodeEditor {
   readonly apps: readonly string[];
   /** The parts of the cleaned title in order, split on a dash with spaces. Later parts are ignored. */
   readonly title: readonly TitlePart[];
+  /** What the window's document attribute (AXDocument) names on macOS: the open file, or null when that is not confirmed. */
+  readonly document: "file" | null;
 }
 
 /** What a window title names, by an editor's row. */
@@ -25,11 +29,15 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
     // "Code" on macOS, "Visual Studio Code" on Windows. Its title can go on
     // with a folder location and a profile after the project.
     apps: ["Code", "Visual Studio Code"],
+    // From Code's bundle, which sets the window's document to the active
+    // editor's local file; not read from a running window with a file open.
+    document: "file",
     title: ["file", "project"],
   },
   {
     // Inferred from Code, which it forks; not read from a running Cursor.
     apps: ["Cursor"],
+    document: null,
     title: ["file", "project"],
   },
 ];
@@ -73,4 +81,32 @@ export const titleParts = (
   };
 
   return { file: named("file"), project: named("project") };
+};
+
+/**
+ * Where in the code a window is: the file its document names, and the
+ * deepest folder above it that the title names as the project. Only for an
+ * editor whose document is confirmed to be the file; reads no disk.
+ */
+export const codePlace = (
+  editor: CodeEditor | undefined,
+  document: string | null,
+  title: string | null,
+  app: string | null
+): CodePlace | null => {
+  if (editor?.document !== "file" || document?.startsWith("/") !== true) {
+    return null;
+  }
+
+  const { project } = titleParts(editor, title, app);
+  const folders = document.split("/").slice(0, -1);
+  const deepest = project === null ? -1 : folders.lastIndexOf(project);
+
+  const parsed = CodePlaceSchema.safeParse({
+    file: document,
+    line: null,
+    root: deepest < 1 ? null : folders.slice(0, deepest + 1).join("/"),
+  });
+
+  return parsed.success ? parsed.data : null;
 };

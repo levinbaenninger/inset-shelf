@@ -513,7 +513,13 @@ describe("selections with links", () => {
 
     const { doc } = apply(emptyShelf(INBOX), [
       {
-        context: { app: "Zen", appLink: null, title: "Anmeldung", url },
+        context: {
+          app: "Zen",
+          appLink: null,
+          code: null,
+          title: "Anmeldung",
+          url,
+        },
         html: null,
         text: "Anmeldung",
         type: "addText",
@@ -867,6 +873,7 @@ describe(itemsAsList, () => {
           context: {
             app: "Chrome",
             appLink: null,
+            code: null,
             title: "Pricing",
             url: "https://example.com/pricing",
           },

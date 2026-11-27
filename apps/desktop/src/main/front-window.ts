@@ -111,7 +111,7 @@ const sourceContext = async (
       ? appLink
       : null;
 
-  return fitted({ app: window.app, appLink: openable, title, url });
+  return fitted({ ...window, appLink: openable, title, url });
 };
 
 /** The pages a window shows: its web areas, read with `pid`, and the page the copied text came from. */
@@ -188,6 +188,7 @@ export const frontWindow = async (
     const context = await sourceContext(
       {
         app: owner,
+        code: null,
         title: orNull(isMac ? front.title : withoutAppName(front.title, owner)),
         url: "url" in front ? pageUrl(front.url) : null,
       },

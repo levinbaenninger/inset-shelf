@@ -258,7 +258,10 @@ describe(itemMenu, () => {
 
     const from = (app: string, url: string | null) =>
       itemMenu(
-        { ...item, context: { app, appLink: null, title: "Chat", url } },
+        {
+          ...item,
+          context: { app, appLink: null, code: null, title: "Chat", url },
+        },
         doc
       ).find(
         (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
@@ -287,7 +290,7 @@ describe(itemMenu, () => {
       appLink: string | null = null
     ) =>
       itemMenu(
-        { ...item, context: { app, appLink, title: "Chat", url } },
+        { ...item, context: { app, appLink, code: null, title: "Chat", url } },
         doc,
         false
       ).find(
