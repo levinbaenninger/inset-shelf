@@ -76,7 +76,7 @@ import { KnownEditors } from "./known-editors";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
-import type { ScreenPoint } from "./markdown-field";
+import type { MarkdownFieldHandle, ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
 import { bindRow } from "./row-actions";
@@ -708,6 +708,19 @@ export const TextEditor = ({
     onDone();
   };
 
+  const field = useRef<MarkdownFieldHandle>(null);
+
+  // Return and Esc hand the keyboard back to the words, in the row or in details, where Return edits again.
+  const backToWords = (): void => {
+    const words =
+      field.current?.element()?.closest("[data-item-id], [data-details]") ??
+      null;
+
+    requestAnimationFrame(() => {
+      focusRow(words);
+    });
+  };
+
   return (
     <MarkdownField
       ariaLabel="Edit item"
@@ -720,14 +733,19 @@ export const TextEditor = ({
           cancelled.current = true;
           live.current?.cancel();
           onDone();
+          backToWords();
         },
-        onSubmit: finish,
+        onSubmit: (markdown) => {
+          finish(markdown);
+          backToWords();
+        },
       }}
       onBlur={(markdown) => {
         // An untouched note keeps its own Markdown, not the field's rewrite of it.
         finish(markdown === text ? markdown : text);
       }}
       followValue={false}
+      ref={field}
       onChange={(markdown) => {
         setText(markdown);
         edit().change(markdown);
