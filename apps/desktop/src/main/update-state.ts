@@ -118,7 +118,9 @@ export const updateMenuItem = (state: UpdateState): UpdateMenuItem => {
 
 /** A message that ends as a sentence does, with one full stop. */
 const sentence = (message: string): string =>
-  /[.!?…]$/u.test(message.trimEnd()) ? message.trimEnd() : `${message.trimEnd()}.`;
+  /[.!?…]$/u.test(message.trimEnd())
+    ? message.trimEnd()
+    : `${message.trimEnd()}.`;
 
 /** What to tell the user once, when a step changes: a finished download, or the answer to a check they asked for. */
 export const updateNotice = (

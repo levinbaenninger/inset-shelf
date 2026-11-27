@@ -145,13 +145,17 @@ describe(updateNotice, () => {
     expect(
       updateNotice(checking(true), {
         kind: "error",
-        message: "this copy came from a zip. Install it with the Setup file to get updates",
+        message:
+          "this copy came from a zip. Install it with the Setup file to get updates",
       })
     ).toBe(
       "Couldn’t check for updates: this copy came from a zip. Install it with the Setup file to get updates."
     );
     expect(
-      updateNotice(checking(true), { kind: "error", message: "Code signature did not match." })
+      updateNotice(checking(true), {
+        kind: "error",
+        message: "Code signature did not match.",
+      })
     ).toBe("Couldn’t check for updates: Code signature did not match.");
   });
 

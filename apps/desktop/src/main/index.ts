@@ -2958,11 +2958,13 @@ const start = async (): Promise<void> => {
     const at = performance.now();
 
     shelfLeft = { at, toShell: false };
-    void shellInFront().then((toShell) => {
+    void (async () => {
+      const toShell = await shellInFront();
+
       if (shelfLeft?.at === at) {
         shelfLeft = { at, toShell };
       }
-    });
+    })();
   });
 
   /** A left click on the Windows icon: shows the shelf, brings it forward, or hides it when it was in front. */

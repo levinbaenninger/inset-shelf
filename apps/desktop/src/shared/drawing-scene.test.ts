@@ -85,7 +85,12 @@ describe(openedMarks, () => {
 });
 
 describe(drawingTitle, () => {
-  const image = { heightPx: 10, pixelsPerDip: 1, url: "inset://x", widthPx: 10 };
+  const image = {
+    heightPx: 10,
+    pixelsPerDip: 1,
+    url: "inset://x",
+    widthPx: 10,
+  };
 
   it("names an image being marked up Annotate, as the page's header does", () => {
     expect(drawingTitle({ image, marks: [] })).toBe("Annotate");

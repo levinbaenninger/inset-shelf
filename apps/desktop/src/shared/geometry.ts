@@ -82,6 +82,7 @@ export const dockShelf = (
   const width = Math.min(SHELF_WIDTH_DIP, workArea.width);
   const right = workArea.x + workArea.width;
   const bottom = workArea.y + workArea.height;
+
   const height = Math.min(
     SHELF_HEIGHT_DIP,
     workArea.height - 2 * SHELF_GAP_DIP

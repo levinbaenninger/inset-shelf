@@ -52,10 +52,7 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
    * Alt+Ctrl+S), and its menus can't set that text. There the keys go after
    * the label, written as the shelf's menu and shortcut sheet write them.
    */
-  const withKeys = (
-    label: string,
-    accelerator: string
-  ): { readonly label: string; readonly accelerator?: string } => {
+  const withKeys = (label: string, accelerator: string) => {
     if (!model.shortcutsRegistered) {
       return { label };
     }
@@ -143,6 +140,7 @@ export const iconClick = (state: {
   }
 
   const { left, now } = state;
+
   const inFront =
     left !== null &&
     (now - left.at < PRESS_MS || (left.toShell && now - left.at < REACH_MS));

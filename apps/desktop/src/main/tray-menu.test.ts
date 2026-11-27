@@ -130,9 +130,9 @@ describe(iconClick, () => {
   const now = 100_000;
 
   it("shows a hidden shelf", () => {
-    expect(
-      iconClick({ focused: false, left: null, now, visible: false })
-    ).toBe("show");
+    expect(iconClick({ focused: false, left: null, now, visible: false })).toBe(
+      "show"
+    );
   });
 
   it("brings forward a shelf that is visible behind the window in front", () => {
