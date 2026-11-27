@@ -6,7 +6,7 @@ import type { QuietDisk } from "./quiet-disk";
 /**
  * The largest source file read to find a line. The search runs on main: at
  * this size its worst case, a CRLF file with the capture at its end, found
- * only once trimmed, took 5 ms and at most 7.2 on an M4 Pro (1 MB took up
+ * only once trimmed, took 5 ms and at most 8 on an M4 Pro (1 MB took up
  * to 11.7). A larger file opens at no line.
  */
 export const SOURCE_READ_MAX = 512 * 1024;
