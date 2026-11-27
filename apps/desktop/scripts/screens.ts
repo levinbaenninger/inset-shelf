@@ -8837,13 +8837,15 @@ const placeText = (focus: z.infer<typeof PlaceSchema>): string =>
 
 /**
  * Left with `key`, a field in details keeps the keyboard on its own place
- * (`within`), off the text so the details' keys work: Tab goes on from there,
- * Return types in it again, and a second Esc goes back to the item's row.
+ * (`within`), off the text so the details' keys work: Tab goes on from there
+ * to `next`, past the field and its place, Return types in it again, and a
+ * second Esc goes back to the item's row.
  */
 const keepsPlace = async (
   page: Page,
   key: string,
   within: string,
+  next: string,
   field: () => Promise<void>
 ): Promise<string | null> => {
   const left = await keyboardPlace(page);
@@ -8856,8 +8858,8 @@ const keepsPlace = async (
 
   const tabbed = await keyboardPlace(page);
 
-  if (!tabbed.inDetails || tabbed.label === "Back to the list") {
-    return `Tab after ${key} in ${within} went to ${placeText(tabbed)}, not on from ${within}`;
+  if (tabbed.label !== next) {
+    return `Tab after ${key} in ${within} went to ${placeText(tabbed)}, not on to “${next}”`;
   }
 
   await field();
@@ -8911,9 +8913,15 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
       await page.keyboard.press("Enter");
     },
     check: async (page) =>
-      await keepsPlace(page, "Return", "Title", async () => {
-        await titleBox(page).focus();
-      }),
+      await keepsPlace(
+        page,
+        "Return",
+        "Title",
+        "Caption, copied with the image",
+        async () => {
+          await titleBox(page).focus();
+        }
+      ),
     data: { view: shelfView() },
     name: "shelf-keeps-place-title",
     page: "shelf",
@@ -8926,9 +8934,15 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
       await page.keyboard.press("Escape");
     },
     check: async (page) =>
-      await keepsPlace(page, "Esc", "Next steps", async () => {
-        await stepBox(page).focus();
-      }),
+      await keepsPlace(
+        page,
+        "Esc",
+        "Next steps",
+        "Book the lift for the delivery day",
+        async () => {
+          await stepBox(page).focus();
+        }
+      ),
     data: { view: shelfView() },
     name: "shelf-keeps-place-step",
     page: "shelf",
@@ -8940,9 +8954,15 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
       await page.keyboard.press("Escape");
     },
     check: async (page) =>
-      await keepsPlace(page, "Esc", "Description", async () => {
-        await descriptionBox(page).focus();
-      }),
+      await keepsPlace(
+        page,
+        "Esc",
+        "Description",
+        "Ask Rieder whether 21 November is possible",
+        async () => {
+          await descriptionBox(page).focus();
+        }
+      ),
     data: { view: shelfView() },
     name: "shelf-keeps-place-description",
     page: "shelf",
@@ -9149,7 +9169,9 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     // Items picked before a search let go once ↓ selects the first result, so Delete then removes only that one.
     act: async (page) => {
       await select(page, 12);
-      await page.evaluate(`globalThis.__emit("command", { kind: "selectAll" })`);
+      await page.evaluate(
+        `globalThis.__emit("command", { kind: "selectAll" })`
+      );
       await searchFor(page, "the");
       await page.keyboard.press("ArrowDown");
     },
