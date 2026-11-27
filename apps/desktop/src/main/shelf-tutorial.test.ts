@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { shelfMenu } from "@shared/menus";
 import { ItemIdSchema } from "@shared/shelf";
 import type { ItemId } from "@shared/shelf";
 import { shortcutLabels } from "@shared/shortcut";
@@ -101,6 +102,35 @@ describe("Inset Shelf's tutorial", () => {
       steps: 6,
       tasks: Object.values(SHELF_TASK_IDS).toSorted(),
     });
+  });
+
+  it("names at the ⋯ stop only what that menu holds, Help among them", () => {
+    const words = [
+      "Float on Top",
+      "Help",
+      "Keyboard Shortcuts",
+      "New Window Link",
+      "Settings",
+    ];
+
+    const named = (mac: boolean) => {
+      const stop = shelfSpotlight(mac).find((step) => step.id === "menu");
+      const labels = new Set(
+        shelfMenu(mac ? null : { floatOnTop: false }).flatMap((entry) =>
+          entry.kind === "choice" ? [entry.label.replace("…", "")] : []
+        )
+      );
+      const said = words.filter((word) => stop?.text.includes(word));
+
+      return { missing: said.filter((word) => !labels.has(word)), said };
+    };
+
+    for (const mac of [true, false]) {
+      expect(named(mac)).toMatchObject({
+        missing: [],
+        said: expect.arrayContaining(["Help"]),
+      });
+    }
   });
 
   it("writes the examples' keys for the system, and gives one a source line", () => {
