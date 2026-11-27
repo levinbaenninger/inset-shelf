@@ -108,3 +108,44 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
 
 export const trayTooltip = (isMac: boolean): string =>
   `Inset Shelf (${shortcutLabels(isMac).toggle})`;
+
+/** How the shelf last lost the keyboard: when, and whether to the Windows shell (the taskbar or the hidden icons' flyout). */
+export interface ShelfLeft {
+  readonly at: number;
+  readonly toShell: boolean;
+}
+
+/** Pressing the icon gives the taskbar the focus before the click arrives; a click lands well within this. */
+const PRESS_MS = 600;
+
+/** Opening the hidden icons' flyout takes the focus too; the icon is clicked within this after. */
+const REACH_MS = 5000;
+
+/**
+ * What a click on the Windows notification-area icon does: it shows a hidden
+ * shelf, brings forward one that is visible but not in front, and hides it
+ * only when it was in front. The click itself takes the focus from the
+ * shelf, so a shelf that lost it to the click, or to the shell on the way to
+ * the icon, still counts as in front.
+ */
+export const iconClick = (state: {
+  readonly visible: boolean;
+  readonly focused: boolean;
+  readonly left: ShelfLeft | null;
+  readonly now: number;
+}): "show" | "focus" | "hide" => {
+  if (!state.visible) {
+    return "show";
+  }
+
+  if (state.focused) {
+    return "hide";
+  }
+
+  const { left, now } = state;
+  const inFront =
+    left !== null &&
+    (now - left.at < PRESS_MS || (left.toShell && now - left.at < REACH_MS));
+
+  return inFront ? "hide" : "focus";
+};

@@ -52,6 +52,28 @@ const isWindowsShell = (title: string, owner: string): boolean =>
   path.win32.basename(owner).toLowerCase() === "explorer.exe" &&
   (title === "Program Manager" || title.trim() === "");
 
+/**
+ * Windows: the shell is in front, the taskbar or the hidden icons' flyout
+ * after a click on the notification area. Any Explorer window counts, since
+ * the flyout's title is in the system's language.
+ */
+export const shellInFront = async (): Promise<boolean> => {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  try {
+    const front = await activeWindow();
+
+    return (
+      front !== undefined &&
+      path.win32.basename(front.owner.path).toLowerCase() === "explorer.exe"
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** Only web pages and pages opened from a file are kept as links. */
 const pageUrl = (url: string | undefined): string | null => {
   const parsed = ContextSchema.shape.url.safeParse(orNull(url));

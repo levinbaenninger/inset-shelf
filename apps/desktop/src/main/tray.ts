@@ -10,6 +10,8 @@ export interface TrayOptions {
   readonly iconPath: () => string;
   readonly model: () => TrayModel;
   readonly run: (action: TrayAction) => void;
+  /** Windows: a left click on the icon; the menu is on a right-click. */
+  readonly click: () => void;
 }
 
 export interface ShelfTray {
@@ -75,7 +77,7 @@ export const createTray = (options: TrayOptions): ShelfTray => {
   // On Windows a click on a notification-area icon opens its app; the menu is on a right-click.
   if (process.platform === "win32") {
     tray.on("click", () => {
-      options.run("toggleShelf");
+      options.click();
     });
   }
 

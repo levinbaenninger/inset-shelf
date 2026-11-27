@@ -103,7 +103,7 @@ import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { imageFileName, ownFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
-import { EDITORS, frontWindow } from "./front-window";
+import { EDITORS, frontWindow, shellInFront } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import {
@@ -164,7 +164,8 @@ import { createShelfWindow } from "./shelf-window";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
-import type { TrayAction } from "./tray-menu";
+import { iconClick } from "./tray-menu";
+import type { ShelfLeft, TrayAction } from "./tray-menu";
 import { createTutorialStore } from "./tutorial/store";
 import { createTutorial } from "./tutorial/tutorial";
 import { updateNotice } from "./update-state";
@@ -2941,6 +2942,53 @@ const start = async (): Promise<void> => {
     }
   );
 
+  // How the shelf last lost the keyboard: the click on the notification-area icon takes it before it arrives.
+  let shelfLeft: ShelfLeft | null = null;
+
+  shelf.onBlur(() => {
+    const at = performance.now();
+
+    shelfLeft = { at, toShell: false };
+    void shellInFront().then((toShell) => {
+      if (shelfLeft?.at === at) {
+        shelfLeft = { at, toShell };
+      }
+    });
+  });
+
+  /** A left click on the Windows icon: shows the shelf, brings it forward, or hides it when it was in front. */
+  const clickIcon = (): void => {
+    const action = iconClick({
+      focused: shelf.isFocused(),
+      left: shelfLeft,
+      now: performance.now(),
+      visible: shelf.isVisible(),
+    });
+
+    e2eLog("trayClicked", { kind: action });
+
+    switch (action) {
+      case "hide": {
+        shelf.hide();
+        break;
+      }
+
+      case "focus": {
+        shelf.focus();
+        break;
+      }
+
+      case "show": {
+        void showShelf({ dock: isMac });
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  };
+
   const run = (action: TrayAction): void => {
     switch (action) {
       // The tray's menu takes the keyboard while it is open, so the shelf is never in front then: Hide goes by what is on screen.
@@ -3019,6 +3067,7 @@ const start = async (): Promise<void> => {
           update: updater.state(),
           version: app.getVersion(),
         }),
+        click: clickIcon,
         run,
       });
     } else if (!wantsTray && tray !== null) {

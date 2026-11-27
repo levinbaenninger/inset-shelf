@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { trayMenu, trayTooltip } from "./tray-menu";
+import { iconClick, trayMenu, trayTooltip } from "./tray-menu";
 import type { TrayItem, TrayModel } from "./tray-menu";
 
 const base: TrayModel = {
@@ -123,5 +123,77 @@ describe("trayMenu on Windows", () => {
 describe(trayTooltip, () => {
   it("names the app and its shortcut", () => {
     expect(trayTooltip(true)).toBe("Inset Shelf (⌃⌥S)");
+  });
+});
+
+describe(iconClick, () => {
+  const now = 100_000;
+
+  it("shows a hidden shelf", () => {
+    expect(
+      iconClick({ focused: false, left: null, now, visible: false })
+    ).toBe("show");
+  });
+
+  it("brings forward a shelf that is visible behind the window in front", () => {
+    expect(
+      iconClick({
+        focused: false,
+        left: { at: now - 60_000, toShell: false },
+        now,
+        visible: true,
+      })
+    ).toBe("focus");
+    expect(iconClick({ focused: false, left: null, now, visible: true })).toBe(
+      "focus"
+    );
+  });
+
+  it("hides the shelf when it is in front", () => {
+    expect(iconClick({ focused: true, left: null, now, visible: true })).toBe(
+      "hide"
+    );
+  });
+
+  // Windows hands the taskbar the focus as the icon is pressed, before the click arrives.
+  it("hides the shelf that the click on the icon itself took the focus from", () => {
+    expect(
+      iconClick({
+        focused: false,
+        left: { at: now - 150, toShell: false },
+        now,
+        visible: true,
+      })
+    ).toBe("hide");
+  });
+
+  it("hides the shelf that lost the focus to the hidden icons' flyout on the way to the icon", () => {
+    expect(
+      iconClick({
+        focused: false,
+        left: { at: now - 2500, toShell: true },
+        now,
+        visible: true,
+      })
+    ).toBe("hide");
+  });
+
+  it("brings the shelf forward once another app has had the focus a while", () => {
+    expect(
+      iconClick({
+        focused: false,
+        left: { at: now - 2500, toShell: false },
+        now,
+        visible: true,
+      })
+    ).toBe("focus");
+    expect(
+      iconClick({
+        focused: false,
+        left: { at: now - 60_000, toShell: true },
+        now,
+        visible: true,
+      })
+    ).toBe("focus");
   });
 });
