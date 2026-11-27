@@ -283,3 +283,85 @@ describe("labels for desktop apps", () => {
     });
   });
 });
+
+describe("labels for code editors", () => {
+  const file =
+    "/Users/anna/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
+
+  const root = "/Users/anna/Developer/inset-shelf";
+  const title = "recall.ts — inset-shelf";
+
+  it("names the file at its line and the project, with a code mark and the path from home", () => {
+    expect(
+      sourceLabel(
+        { app: "Code", code: { file, line: 147, root }, title, url: null },
+        "/Users/anna"
+      )
+    ).toStrictEqual({
+      code: {
+        path: "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts",
+      },
+      label: "recall.ts:147 · inset-shelf",
+      service: null,
+    });
+  });
+
+  it("names the file alone when no line is stored", () => {
+    expect(
+      sourceLabel(
+        { app: "Code", code: { file, line: null, root }, title, url: null },
+        "/Users/anna"
+      ).label
+    ).toBe("recall.ts · inset-shelf");
+  });
+
+  it("names the project as the title does when the file is in no folder of that name", () => {
+    expect(
+      sourceLabel(
+        {
+          app: "Code",
+          code: { file, line: null, root: null },
+          title: "recall.ts — inset (Workspace)",
+          url: null,
+        },
+        "/Users/anna"
+      ).label
+    ).toBe("recall.ts · inset (Workspace)");
+  });
+
+  it("never shows the whole path when the home folder is not known", () => {
+    const label = sourceLabel({
+      app: "Code",
+      code: { file, line: 147, root },
+      title,
+      url: null,
+    });
+
+    expect(label.code?.path).toBe("apps/desktop/src/shared/recall.ts");
+    expect(JSON.stringify(label)).not.toContain("/Users/anna");
+  });
+
+  it.each([
+    ["Code", "● recall.ts — inset-shelf"],
+    ["Cursor", "recall.ts — inset-shelf"],
+    // Windows: no code place is read there, the title is all there is.
+    ["Visual Studio Code", "recall.ts - inset-shelf - Visual Studio Code"],
+  ])(
+    "tidies the title of %s without a code place into the file and the project",
+    (app, raw) => {
+      expect(
+        sourceLabel({ app, code: null, title: raw, url: null })
+      ).toStrictEqual({
+        code: { path: null },
+        label: "recall.ts · inset-shelf",
+        service: null,
+      });
+    }
+  );
+
+  it("keeps the app and the title when the title names no file and project", () => {
+    expect(
+      sourceLabel({ app: "Code", title: "Welcome", url: null })
+    ).toStrictEqual({ label: "Code · Welcome", service: null });
+  });
+});
