@@ -21,7 +21,7 @@ The builds are not signed with a developer certificate, so macOS and Windows eac
 | `⇧ ⇧` with nothing selected | Shows or hides the shelf. |
 | `⌃⌥S` (`Ctrl+Alt+S` on Windows) | Shows the shelf, or hides it when it is in front. |
 
-In the shelf, type a note and press `Return`. Take a screenshot and a card offers to add it. Select an item to read all of it, click its words to edit them, and press `→` for its details: a description, next steps, a due date, linked windows and up to 12 attachments. When you come back to a window that open items came from, a small pill says so.
+In the shelf, type a note and press `Return`. Take a screenshot and a card offers to add it. Select an item to read all of it, click its words to edit them, and press `→` for its details: a description, next steps, a due date, linked windows and up to 12 attachments. When you come back to a window that open items came from, a small pill says so, and a click on it shows only those items. A note you type while they show belongs to that window too: a chip under the note field names it, and its × leaves the window off until you open the shelf or that filter again.
 
 `⌘/` (`Ctrl+/` on Windows) lists every key. The shelf is stored in `shelf.json`, with its pictures and files beside it, in `~/Library/Application Support/Inset Shelf` on macOS and `%APPDATA%\Inset Shelf` on Windows.
 
