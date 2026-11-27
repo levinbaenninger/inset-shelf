@@ -550,7 +550,7 @@ describe(menuChoiceForKey, () => {
   });
 });
 
-describe("SHELF_MENU_KEYS", () => {
+describe("the keys the shelf's menu answers unseen", () => {
   it("starts a window link and shows Keyboard Shortcuts from the shelf's menu, which shows neither", () => {
     for (const [mac, modifier, entries] of [
       [true, { metaKey: true }, shelfMenu()],

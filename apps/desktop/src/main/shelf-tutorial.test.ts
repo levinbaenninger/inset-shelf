@@ -9,7 +9,6 @@ import { DRAWING_TOOL_KEYS, shortcutSheet } from "@shared/shortcuts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { HELP_URL } from "./app-menu";
-
 import {
   removeShelfExamples,
   SHELF_TASK_IDS,

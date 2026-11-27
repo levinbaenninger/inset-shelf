@@ -1939,13 +1939,11 @@ const shelfMenuChordsCheck = async (
     await page.getByRole("menu").waitFor();
     await page.keyboard.press(combo);
 
-    return page
+    return await page
       .getByRole("menu")
       .waitFor({ state: "detached", timeout: 1000 })
-      .then(
-        () => true,
-        () => false
-      );
+      .then(() => true)
+      .catch(() => false);
   };
 
   if (!(await closesOn(`${mod}+/`))) {
@@ -10123,18 +10121,23 @@ const SCENES: readonly Scene[] = [
             .getByRole("button", { name: "More" })
             .click();
         })) ??
-        (await shelfMenuChordsCheck(page, "the menu on empty space", async () => {
-          const list = await boxOf(page.locator(".shelf-list").first());
-          const last = await boxOf(
-            page.locator(".shelf-list > section").last()
-          );
+        (await shelfMenuChordsCheck(
+          page,
+          "the menu on empty space",
+          async () => {
+            const list = await boxOf(page.locator(".shelf-list").first());
 
-          await page.mouse.click(
-            list.left + 60,
-            Math.min(last.bottom + 24, list.bottom - 8),
-            { button: "right" }
-          );
-        }))
+            const last = await boxOf(
+              page.locator(".shelf-list > section").last()
+            );
+
+            await page.mouse.click(
+              list.left + 60,
+              Math.min(last.bottom + 24, list.bottom - 8),
+              { button: "right" }
+            );
+          }
+        ))
       );
     },
     data: { view: shelfView(SHORT_DOC) },
