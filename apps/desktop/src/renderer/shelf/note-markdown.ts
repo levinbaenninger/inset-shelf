@@ -169,6 +169,8 @@ interface Spot {
   readonly ahead: string;
   readonly lineStart: boolean;
   readonly startsListItem: boolean;
+  /** In a link's words, which a bracket of their own would end or break. */
+  readonly inLink: boolean;
 }
 
 const AHEAD = 34;
@@ -203,19 +205,31 @@ const SYNTAX = new Map<
     "]",
     {
       escaped: "\\]",
-      needed: ({ next }) =>
-        next === "(" || next === "[" || next === ":" || next === MARKUP,
+      needed: ({ inLink, next }) =>
+        inLink ||
+        next === "(" ||
+        next === "[" ||
+        next === ":" ||
+        next === MARKUP,
     },
   ],
   [
     "[",
     {
       escaped: "\\[",
-      needed: ({ ahead, startsListItem, lineStart }) =>
-        startsListItem && lineStart && TASK_BOX.test(ahead),
+      needed: ({ ahead, inLink, startsListItem, lineStart }) =>
+        inLink || (startsListItem && lineStart && TASK_BOX.test(ahead)),
     },
   ],
 ]);
+
+/** Where a text node is written: first in a list item, or in a link's words. */
+interface Place {
+  readonly startsListItem: boolean;
+  readonly inLink: boolean;
+}
+
+const NOWHERE: Place = { inLink: false, startsListItem: false };
 
 /**
  * One text node written as Markdown: a character is escaped only where a
@@ -224,7 +238,7 @@ const SYNTAX = new Map<
 const written = (
   { after, chars, runs }: Piece,
   paired: (char: string) => boolean,
-  startsListItem: boolean
+  { inLink, startsListItem }: Place
 ): string => {
   let out = "";
   let lineStart = true;
@@ -253,9 +267,10 @@ const written = (
     out +=
       syntax?.needed({
         ahead: chars.slice(at, at + AHEAD).join(""),
-        startsListItem,
+        inLink,
         lineStart,
         next: chars[at + 1] ?? after,
+        startsListItem,
       }) === true
         ? syntax.escaped
         : char;
@@ -275,12 +290,26 @@ const CLOSES_ADDRESS = /^[!),.:?]*\s/u;
 const ENDS_ADDRESS = /^[!),.:?]*$/u;
 
 const LinkMarkSchema = z.object({
-  attrs: z.object({ href: z.string() }),
+  attrs: z.object({ href: z.string(), title: z.string().nullish() }),
   type: z.literal("link"),
 });
 
 const marksOf = (node: JSONContent | undefined): readonly JSONContent[] =>
   node?.marks ?? [];
+
+/** Where a text node links to, when a link is all the formatting it has. */
+const onlyLink = (
+  node: JSONContent | undefined
+): z.output<typeof LinkMarkSchema>["attrs"] | null => {
+  const [only, ...others] = marksOf(node);
+  const link = LinkMarkSchema.safeParse(only);
+
+  return node?.type === "text" && others.length === 0 && link.success
+    ? link.data.attrs
+    : null;
+};
+
+const isLink = (mark: JSONContent): boolean => mark.type === "link";
 
 const isPlainText = (node: JSONContent | undefined): boolean =>
   node?.type === "text" && marksOf(node).length === 0;
@@ -330,21 +359,49 @@ const isOwnAddress = (
   index: number
 ): boolean => {
   const node = content[index];
-  const [only, ...others] = marksOf(node);
-  const link = LinkMarkSchema.safeParse(only);
+  const link = onlyLink(node);
   const text = node?.text ?? "";
 
   return (
-    link.success &&
-    others.length === 0 &&
-    linksItself(text, link.data.attrs.href) &&
+    link !== null &&
+    // Bare, it would lose its title.
+    (link.title ?? null) === null &&
+    linksItself(text, link.href) &&
     opensAddress(content[index - 1]) &&
     closesAddress(content[index + 1], content[index + 2]) &&
-    written(piece(text, "", ""), () => true, false) === text
+    written(piece(text, "", ""), () => true, NOWHERE) === text
   );
 };
 
+/**
+ * The Markdown each explicit link of an opened note was written with, by
+ * its words, where it goes and its title: `[words](address)` or
+ * `<address>`, whose words are the link's only formatting.
+ */
+type KeptLinks = ReadonlyMap<string, string>;
+
+const linkKey = (node: JSONContent | undefined): string | null => {
+  const link = onlyLink(node);
+
+  return link === null
+    ? null
+    : JSON.stringify([node?.text ?? "", link.href, link.title ?? null]);
+};
+
+/** Text written into the note as it is: a link the edit did not change, as the note was opened with it. */
+const VERBATIM = new WeakSet<JSONContent>();
+
+const verbatim = (markdown: string): JSONContent => {
+  const node = { text: markdown, type: "text" };
+
+  VERBATIM.add(node);
+
+  return node;
+};
+
 const sameMarks = (a: JSONContent, b: JSONContent): boolean =>
+  !VERBATIM.has(a) &&
+  !VERBATIM.has(b) &&
   JSON.stringify(marksOf(a)) === JSON.stringify(marksOf(b));
 
 /** Neighbouring text nodes with the same formatting as one, as the note reads. */
@@ -384,28 +441,43 @@ const beside = (node: JSONContent | undefined): string => {
 };
 
 /**
- * A block's words written as Markdown. A paired character is escaped where it
- * could pair with another in the block, or with formatting written in it.
+ * A block's words written as Markdown. A link the edit did not change is
+ * written as it was. A paired character is escaped where it could pair with
+ * another in the block, or with formatting written in it.
  */
 const writtenInline = (
   content: readonly JSONContent[],
-  startsListItem: boolean
+  startsListItem: boolean,
+  kept: KeptLinks
 ): JSONContent[] => {
   const inline = joined(
-    content.map((node, index) =>
-      isOwnAddress(content, index) ? { text: node.text, type: "text" } : node
-    )
+    joined(content).map((node, index, nodes) => {
+      const was = kept.get(linkKey(node) ?? "");
+
+      if (was !== undefined) {
+        return verbatim(was);
+      }
+
+      return isOwnAddress(nodes, index)
+        ? { text: node.text, type: "text" }
+        : node;
+    })
   );
 
-  const pieces = inline.map((node, index) =>
-    node.type === "text" && !isCode(node)
-      ? piece(
-          node.text ?? "",
-          beside(inline[index - 1]),
-          beside(inline[index + 1])
-        )
-      : null
-  );
+  const pieces = inline.map((node, index) => {
+    if (node.type !== "text" || isCode(node) || VERBATIM.has(node)) {
+      return null;
+    }
+
+    // A formatted node is written between its own markup.
+    const edge = marksOf(node).length > 0 ? MARKUP : null;
+
+    return piece(
+      node.text ?? "",
+      edge ?? beside(inline[index - 1]),
+      edge ?? beside(inline[index + 1])
+    );
+  });
 
   const pairing = new Map<string, number>();
 
@@ -428,13 +500,20 @@ const writtenInline = (
 
     return each === null || each === undefined
       ? node
-      : { ...node, text: written(each, paired, startsListItem) };
+      : {
+          ...node,
+          text: written(each, paired, {
+            inLink: marksOf(node).some(isLink),
+            startsListItem,
+          }),
+        };
   });
 };
 
 /** `node` with every block's words written as Markdown; code blocks keep theirs. */
 const withWrittenText = (
   node: JSONContent,
+  kept: KeptLinks,
   startsListItem = false
 ): JSONContent => {
   if (node.type === "codeBlock" || node.content === undefined) {
@@ -442,13 +521,16 @@ const withWrittenText = (
   }
 
   if (node.type === "paragraph" || node.type === "heading") {
-    return { ...node, content: writtenInline(node.content, startsListItem) };
+    return {
+      ...node,
+      content: writtenInline(node.content, startsListItem, kept),
+    };
   }
 
   return {
     ...node,
     content: node.content.map((child, index) =>
-      withWrittenText(child, node.type === "listItem" && index === 0)
+      withWrittenText(child, kept, node.type === "listItem" && index === 0)
     ),
   };
 };
@@ -470,6 +552,51 @@ Object.assign(writer, {
   encodeTextForMarkdown: (text: string): string => text,
 });
 
+/** Written as a link and nothing else: `[words](address)` or `<address>`, not a bare address. */
+const EXPLICIT_LINK = /^[<[]/u;
+
+/** The Markdown of every explicit link in a note's Markdown, however deep. */
+const linkSources = (markdown: string): ReadonlySet<string> => {
+  const sources = new Set<string>();
+
+  // Each callback returns nothing, so the walk has nothing to wait for.
+  void writer.instance.walkTokens(writer.instance.lexer(markdown), (token) => {
+    if (token.type === "link" && EXPLICIT_LINK.test(token.raw)) {
+      sources.add(token.raw);
+    }
+  });
+
+  return sources;
+};
+
+/**
+ * The explicit links of a note's Markdown, each kept only when it reads back
+ * on its own as one link whose words carry no other formatting.
+ */
+const keptLinks = (markdown: string): KeptLinks => {
+  const kept = new Map<string, string>();
+
+  for (const source of linkSources(markdown)) {
+    const [block, ...blocks] = writer.parse(source).content ?? [];
+    const [node, ...nodes] = joined(block?.content ?? []);
+    const key = linkKey(node);
+
+    if (
+      block?.type === "paragraph" &&
+      blocks.length === 0 &&
+      nodes.length === 0 &&
+      key !== null &&
+      !kept.has(key)
+    ) {
+      kept.set(key, source);
+    }
+  }
+
+  return kept;
+};
+
+const NO_LINKS: KeptLinks = new Map();
+
 /**
  * The note a field holds, as the Markdown stored for it: what was typed, with
  * a character escaped only where the shelf, or the field when the note is
@@ -478,8 +605,11 @@ Object.assign(writer, {
  * A hard break is written as two spaces and a newline; the shelf shows a plain
  * newline as a break anyway (remark-breaks), so notes keep plain newlines.
  */
-export const noteMarkdown = (doc: JSONContent): string =>
-  writer.serialize(withWrittenText(doc)).replaceAll("  \n", "\n");
+export const noteMarkdown = (
+  doc: JSONContent,
+  kept: KeptLinks = NO_LINKS
+): string =>
+  writer.serialize(withWrittenText(doc, kept)).replaceAll("  \n", "\n");
 
 /** A note as a field opened it: the Markdown it was given, and the document it shows for that. */
 export interface OpenedNote {
@@ -487,14 +617,33 @@ export interface OpenedNote {
   readonly doc: ProseMirrorNode;
 }
 
+/** Each opened note's explicit links, read at its first change and not at every keystroke. */
+const linksOpened = new WeakMap<OpenedNote, KeptLinks>();
+
+const linksOf = (opened: OpenedNote): KeptLinks => {
+  const known = linksOpened.get(opened);
+
+  if (known !== undefined) {
+    return known;
+  }
+
+  const kept = keptLinks(opened.markdown);
+
+  linksOpened.set(opened, kept);
+
+  return kept;
+};
+
 /**
  * The Markdown a field stores for its note, `doc` as JSON in `json`. While
  * the note is still the one the field opened, that is the Markdown it was
  * given, so a note opened and closed unchanged is stored and copied byte for
- * byte as before, however its Markdown was written.
+ * byte as before, however its Markdown was written. Once it has changed, each
+ * explicit link the change left as it was is still written as it was.
  */
 export const storedNote = (
   opened: OpenedNote,
   doc: ProseMirrorNode,
   json: JSONContent
-): string => (doc.eq(opened.doc) ? opened.markdown : noteMarkdown(json));
+): string =>
+  doc.eq(opened.doc) ? opened.markdown : noteMarkdown(json, linksOf(opened));
