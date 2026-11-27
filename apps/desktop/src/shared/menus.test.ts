@@ -6,6 +6,7 @@ import {
   menuChoiceForKey,
   pickedMenu,
   sectionMenu,
+  SHELF_MENU_KEYS,
   shelfMenu,
 } from "./menus";
 import type { MenuEntry, MenuKeyPress } from "./menus";
@@ -546,6 +547,27 @@ describe(menuChoiceForKey, () => {
         true
       )
     ).toStrictEqual({ ids: [doc.items[0]?.id, image.id], kind: "copyList" });
+  });
+});
+
+describe("SHELF_MENU_KEYS", () => {
+  it("starts a window link and shows Keyboard Shortcuts from the shelf's menu, which shows neither", () => {
+    for (const [mac, modifier, entries] of [
+      [true, { metaKey: true }, shelfMenu()],
+      [false, { ctrlKey: true }, shelfMenu({ floatOnTop: false })],
+    ] as const) {
+      expect(
+        menuChoiceForKey(
+          entries,
+          press("l", { ...modifier, shiftKey: true }),
+          mac,
+          SHELF_MENU_KEYS
+        )
+      ).toStrictEqual({ kind: "newWindowLink" });
+      expect(
+        menuChoiceForKey(entries, press("/", modifier), mac, SHELF_MENU_KEYS)
+      ).toStrictEqual({ kind: "shortcuts" });
+    }
   });
 });
 

@@ -1923,6 +1923,58 @@ const swallowedKeysCheck = async (page: Page): Promise<string | null> => {
 };
 
 /**
+ * The shelf's menu, opened by `open`, still answers ⌘/ and ⇧⌘L though it
+ * shows neither: it closes, and Keyboard Shortcuts shows or a window link
+ * starts.
+ */
+const shelfMenuChordsCheck = async (
+  page: Page,
+  where: string,
+  open: () => Promise<void>
+): Promise<string | null> => {
+  const mod = await commandKey(page);
+
+  const closesOn = async (combo: string): Promise<boolean> => {
+    await open();
+    await page.getByRole("menu").waitFor();
+    await page.keyboard.press(combo);
+
+    return page
+      .getByRole("menu")
+      .waitFor({ state: "detached", timeout: 1000 })
+      .then(
+        () => true,
+        () => false
+      );
+  };
+
+  if (!(await closesOn(`${mod}+/`))) {
+    return `${mod}+/ in ${where} left the menu open`;
+  }
+
+  const sheet = page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+
+  if (!(await sheet.isVisible())) {
+    return `${mod}+/ in ${where} didn't show Keyboard Shortcuts`;
+  }
+
+  await page.keyboard.press("Escape");
+  await sheet.waitFor({ state: "detached" });
+
+  const before = await callCount(page);
+
+  if (!(await closesOn(`Shift+${mod}+l`))) {
+    return `Shift+${mod}+L in ${where} left the menu open`;
+  }
+
+  const sent = await calls(page, before);
+
+  return sent.some((call) => call.call === "newWindowLink")
+    ? null
+    : `Shift+${mod}+L in ${where} sent ${JSON.stringify(sent)}, not newWindowLink`;
+};
+
+/**
  * The other menus answer the keys they show, and only those: the ⋯ at the
  * top, the details header's ⋯ (⌥⌘C on the open item), details' Add… and the
  * note field's +.
@@ -10048,6 +10100,45 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-menu-help",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // With the ⋯ or a right-click on empty space open, ⇧⌘L and ⌘/ still start a window link and show Keyboard Shortcuts: the menu closes and the key runs, though no entry shows it.
+    act: async (page) => {
+      await page
+        .locator("header")
+        .getByRole("button", { name: "More" })
+        .click();
+      await page.getByRole("menu").waitFor();
+    },
+    check: async (page) => {
+      await page.keyboard.press("Escape");
+      await menuClosed(page);
+
+      return (
+        (await shelfMenuChordsCheck(page, "the ⋯ at the top", async () => {
+          await page
+            .locator("header")
+            .getByRole("button", { name: "More" })
+            .click();
+        })) ??
+        (await shelfMenuChordsCheck(page, "the menu on empty space", async () => {
+          const list = await boxOf(page.locator(".shelf-list").first());
+          const last = await boxOf(
+            page.locator(".shelf-list > section").last()
+          );
+
+          await page.mouse.click(
+            list.left + 60,
+            Math.min(last.bottom + 24, list.bottom - 8),
+            { button: "right" }
+          );
+        }))
+      );
+    },
+    data: { view: shelfView(SHORT_DOC) },
+    name: "shelf-menu-chords",
     page: "shelf",
     platforms: ["macos", "windows"],
   },
