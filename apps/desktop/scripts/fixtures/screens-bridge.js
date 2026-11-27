@@ -270,7 +270,7 @@ if (page === "shelf") {
     },
     nothing
   );
-  globalThis.insetFiles = { pathFor: () => "" };
+  globalThis.insetFiles = { add: () => Promise.resolve(null) };
 }
 
 if (page === "picker") {

@@ -14,6 +14,7 @@ import {
   parseComposer,
   SectionIdSchema,
   ShelfDocSchema,
+  StoredFileSchema,
   UNDO_MAX,
   fitText,
   withPinLabel,
@@ -494,7 +495,7 @@ describe("selections with links", () => {
     );
   });
 
-  it("keeps a page opened from a file as the selection's source", () => {
+  it("loads an item saved with a file: page address, without the address", () => {
     const url =
       "file:///Users/levin/Design-Expo/03_Standmaterial/Anforderung.html";
 
@@ -508,9 +509,25 @@ describe("selections with links", () => {
       },
     ]);
 
+    const item = parseShelfDocument(JSON.stringify(doc))?.items[0];
+
+    expect(item?.context?.url).toBeNull();
+    expect(item?.context?.app).toBe("Zen");
+  });
+
+  it("rejects stored file names that are not one plain name", () => {
+    const stored = `${uuid(60)}.txt`;
+
+    for (const name of ["", ".", "..", "a/b", String.raw`a\b`, "a\0b"]) {
+      expect(
+        StoredFileSchema.safeParse({ bytes: 1, name, stored }).success
+      ).toBeFalsy();
+    }
+
     expect(
-      parseShelfDocument(JSON.stringify(doc))?.items[0]?.context?.url
-    ).toBe(url);
+      StoredFileSchema.safeParse({ bytes: 1, name: "Report.txt", stored })
+        .success
+    ).toBeTruthy();
   });
 
   it("drops the copied HTML once the text is edited", () => {

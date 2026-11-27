@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isValidDay, matchesDue, parseSearch } from "./due";
+import { isSafeFileName } from "./local-path";
 import {
   isAppLink,
   isPageAddress,
@@ -212,13 +213,19 @@ export const ContextSchema = z.object({
    * Opens the item where it was in its desktop app: a ChatGPT or T3 Code
    * thread, a Claude chat, a Notion page. Only known app schemes.
    */
-  appLink: z.string().refine(isAppLink).nullable().default(null),
+  // A link that is no longer an allowed shape (or t3code-dev outside development) is dropped, so the item itself still loads.
+  appLink: z
+    .string()
+    .nullable()
+    .transform((link) => (link !== null && isAppLink(link) ? link : null))
+    .default(null),
   title: z.string().max(WINDOW_TITLE_MAX).nullable(),
+  // Items saved with a file: page address (older versions) still load; only the address is dropped, because pages open in the browser as http(s) alone.
   url: z
     .url({ protocol: /^(?:https?|file)$/u })
     .max(PAGE_URL_MAX)
-    .refine(isPageAddress)
-    .nullable(),
+    .nullable()
+    .transform((url) => (url !== null && isPageAddress(url) ? url : null)),
 });
 
 export type ItemContext = z.output<typeof ContextSchema>;
@@ -295,7 +302,7 @@ const ImageFields = {
 export const StoredFileSchema = z.object({
   bytes: z.number().int().min(0),
   /** The name the file had, used again when it is dragged or copied out. */
-  name: z.string().min(1).max(255),
+  name: z.string().min(1).max(255).refine(isSafeFileName),
   stored: AttachmentFileSchema,
 });
 

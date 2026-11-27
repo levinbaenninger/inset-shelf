@@ -3,6 +3,7 @@ import { z } from "zod";
 import { StrokeMarksSchema } from "./drawing-scene";
 import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
+import { isLocalAbsolutePath } from "./local-path";
 import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
 import type { OnboardingView } from "./onboarding";
 import { SettingsSchema } from "./settings";
@@ -168,9 +169,26 @@ export const shelfContract = defineContract({
      * the menu takes every key, so main holds back the menu bar's keys.
      */
     menuOpen: send(z.boolean()),
-    /** Files dropped or pasted into the shelf, by path; main reads them. */
+    /**
+     * Files dropped or pasted into the shelf, by path. NOT reachable from the
+     * page: the shelf preload hides this method (HIDDEN_METHODS in
+     * src/preload/shelf.ts) and exposes insetFiles.add(files: File[]) instead,
+     * which turns each File into its path with webUtils.getPathForFile (only
+     * a file the user dropped or picked has one). The path strings exist only
+     * between the preload and main; main re-checks each is an absolute local
+     * path and a regular file.
+     */
     addFiles: invoke(
-      z.array(z.string().min(1).max(4096)).min(1).max(50),
+      z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(4096)
+            .refine(isLocalAbsolutePath, "Not an absolute local path")
+        )
+        .min(1)
+        .max(50),
       out<ActionResult>()
     ),
     apply: send(ShelfOpSchema),

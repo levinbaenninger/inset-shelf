@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  allowDevAppLinks,
   desktopApp,
   desktopLink,
   isAppLink,
@@ -48,26 +49,27 @@ describe(webUrl, () => {
 });
 
 describe(isPageAddress, () => {
-  it("keeps web pages and pages opened from a file", () => {
+  it("keeps http and https pages", () => {
     expect(isPageAddress("https://claude.ai/chat/1")).toBeTruthy();
-    expect(
-      isPageAddress(
-        "file:///Users/levin/Design-Expo/03_Standmaterial/Anforderung.html"
-      )
-    ).toBeTruthy();
-    expect(isPageAddress("file:///Users/a%20b/%C3%BC.html")).toBeTruthy();
+    expect(isPageAddress("http://example.com/a?b=c")).toBeTruthy();
   });
 
-  it("skips an app's own shell, other hosts and other schemes", () => {
-    expect(
-      isPageAddress("file:///Applications/T3 Code.app/Contents/index.html")
-    ).toBeFalsy();
-    expect(
-      isPageAddress("file:///opt/app/resources/app.asar/dist/index.html")
-    ).toBeFalsy();
-    expect(isPageAddress("file://server/share/page.html")).toBeFalsy();
-    expect(isPageAddress("app://-/index.html")).toBeFalsy();
-    expect(isPageAddress("not a url")).toBeFalsy();
+  it("refuses files, scripts, data, shares and other schemes", () => {
+    const script = ["java", "script:alert(1)"].join("");
+
+    const accepted = [
+      "file:///Users/a%20b/%C3%BC.html",
+      "file:///Applications/T3 Code.app/Contents/index.html",
+      "file://server/share/page.html",
+      "file:////server/share/page.html",
+      script,
+      "data:text/html,<script>1</script>",
+      String.raw`\\server\share\a.html`,
+      "app://-/index.html",
+      "not a url",
+    ].filter((address) => isPageAddress(address));
+
+    expect(accepted).toStrictEqual([]);
   });
 });
 
@@ -233,13 +235,48 @@ describe(t3Thread, () => {
 });
 
 describe(isAppLink, () => {
-  it("allows only the desktop apps' own links", () => {
-    expect(
-      isAppLink("codex://threads/01a0a981-8186-7a92-af7d-c414d6adda1a")
-    ).toBeTruthy();
-    expect(isAppLink("t3code://threads/a/b")).toBeTruthy();
-    expect(isAppLink("file:///etc/passwd")).toBeFalsy();
-    expect(isAppLink("https://example.com")).toBeFalsy();
+  const uuid = "01a0a981-8186-7a92-af7d-c414d6adda1a";
+
+  afterEach(() => {
+    allowDevAppLinks(false);
+  });
+
+  it("allows only the exact shapes the shelf makes", () => {
+    const refused = [
+      `codex://threads/${uuid}`,
+      `claude://claude.ai/chat/${uuid}`,
+      `claude://claude.ai/project/${uuid}`,
+      `t3code://threads/local-env/${uuid}`,
+      "notion://www.notion.so/Plan-0123abcd?pvs=4#section",
+    ].filter((link) => !isAppLink(link));
+
+    expect(refused).toStrictEqual([]);
+  });
+
+  it("refuses other paths, hosts, schemes and odd characters", () => {
+    const accepted = [
+      "t3code://threads/a/b",
+      `codex://settings/${uuid}`,
+      `codex://threads/${uuid}/extra`,
+      `claude://evil.example/chat/${uuid}`,
+      `claude://claude.ai/chat/${uuid}?x=1`,
+      "notion://www.notion.so/a b",
+      String.raw`notion://www.notion.so/a\b`,
+      "notion://evil.example/page",
+      "file:///etc/passwd",
+      "https://example.com",
+    ].filter((link) => isAppLink(link));
+
+    expect(accepted).toStrictEqual([]);
+  });
+
+  it("accepts t3code-dev only when development links are allowed", () => {
+    const link = `t3code-dev://threads/local-env/${uuid}`;
+
+    expect(isAppLink(link)).toBeFalsy();
+    allowDevAppLinks(true);
+    expect(isAppLink(link)).toBeTruthy();
+    expect(isAppLink("t3code-dev://threads/a/b")).toBeFalsy();
   });
 });
 

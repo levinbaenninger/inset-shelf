@@ -22,6 +22,7 @@ import type {
 import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
+import { isLocalAbsolutePath } from "@shared/local-path";
 import type { OnboardingView } from "@shared/onboarding";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
@@ -34,6 +35,7 @@ import type {
 } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
+  allowDevAppLinks,
   desktopLink,
   isAppLink,
   isPageAddress,
@@ -147,6 +149,7 @@ import {
   pageUrl,
   preloadPath,
   rendererRoot,
+  hardenEveryWebContents,
   secureSession,
 } from "./window-security";
 
@@ -305,22 +308,39 @@ const heldMenuTemplate = (
   );
 
 /**
- * Reopens a linked window: its page in the browser, its file in its app,
+ * Reopens a linked window: its page in the browser, its file revealed in
+ * Finder or Explorer (never opened, so a script or app document cannot run),
  * else its app brought forward. Every target was read by main when the
- * window was linked, never sent by a page.
+ * window was linked, never sent by a page, and is checked again here.
  */
 const reopenWindow = (window: WindowRef): void => {
   if (window.url !== null && /^https?:\/\//u.test(window.url)) {
     void shell.openExternal(window.url);
-  } else if (window.document !== null) {
-    void shell.openPath(window.document);
-  } else if (window.appPath !== null) {
+
+    return;
+  }
+
+  if (window.document !== null && isLocalAbsolutePath(window.document)) {
+    shell.showItemInFolder(window.document);
+
+    return;
+  }
+
+  if (window.appPath !== null) {
     if (isMac) {
-      openAppAt(window.appPath);
-    } else {
-      void shell.openPath(window.appPath);
+      // Only an absolute *.app bundle is opened; anything else falls back to the app's name.
+      if (openAppAt(window.appPath)) {
+        return;
+      }
+    } else if (isLocalAbsolutePath(window.appPath)) {
+      // Never executed: the app's file is only shown.
+      shell.showItemInFolder(window.appPath);
+
+      return;
     }
-  } else if (window.app !== null && isMac) {
+  }
+
+  if (window.app !== null && isMac) {
     openApp(window.app);
   }
 };
@@ -414,6 +434,9 @@ const start = async (): Promise<void> => {
     credits: "A prototype for the Inset capture experiments.",
   });
   secureSession();
+  hardenEveryWebContents();
+  // T3 Code's development scheme is an app link only in a development run.
+  allowDevAppLinks(!app.isPackaged);
 
   // Item 8: Windows has no menu bar for the frameless shelf to take the menu's
   // keys from, so every window reads them itself and runs the entry.
@@ -901,7 +924,10 @@ const start = async (): Promise<void> => {
   /** Adds files in the order given; the last one added is shown. */
   const addFiles = async (paths: readonly string[]): Promise<ActionResult> => {
     // A file dragged out of the shelf and dropped back in is already there.
-    const outside = paths.filter((filePath) => !staging.contains(filePath));
+    const outside = paths.filter(
+      (filePath) => isLocalAbsolutePath(filePath) && !staging.contains(filePath)
+    );
+
     const prepared = await Promise.all(outside.map(prepareFile));
     let lastId: ItemId | null = null;
 
@@ -1702,7 +1728,7 @@ const start = async (): Promise<void> => {
           return;
         }
 
-        // Only the item's own page or a link in it opens: a web page, or a page from a file.
+        // Only the item's own page or a link in it opens, and only as a web page (http or https).
         const target =
           url === undefined
             ? (item?.context?.url ?? null)

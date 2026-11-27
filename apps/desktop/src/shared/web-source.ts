@@ -82,27 +82,12 @@ export const webUrl = (raw: string): string | null => {
 };
 
 /**
- * Where an item's page can be: a web address, or a page opened from a file
- * on this computer (file:///…/index.html). A file inside an app's bundle is
- * the app's own shell, not a page the user opened.
+ * Where an item's page can be: an http or https address, nothing else. A
+ * local file (file:), script, data or network-share address is never opened;
+ * items saved earlier with a file: address lose only that address when they
+ * are read (ContextSchema in src/shared/shelf.ts).
  */
-export const isPageAddress = (raw: string): boolean => {
-  if (webUrl(raw) !== null) {
-    return true;
-  }
-
-  try {
-    const url = new URL(raw.trim());
-
-    return (
-      url.protocol === "file:" &&
-      url.host === "" &&
-      !/\.app\/|\.asar\//iu.test(url.pathname)
-    );
-  } catch {
-    return false;
-  }
-};
+export const isPageAddress = (raw: string): boolean => webUrl(raw) !== null;
 
 /**
  * The web links in copied HTML, in order, each once. Only absolute http and
@@ -169,11 +154,39 @@ const isServiceApp = (app: string): app is keyof typeof APP_SERVICE =>
 export const desktopApp = (app: string | null): string | null =>
   app !== null && isServiceApp(app) ? app : null;
 
-/** Links that open something inside a desktop app; the only ones the shelf opens besides web pages. */
-const APP_LINK = /^(?:claude|codex|notion|t3code|t3code-dev):\/\/\S+$/u;
+const UUID = "[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}";
+const NOTION_PATH = "[\\w.~%-]+(?:/[\\w.~%-]+)*/?";
+const NOTION_TAIL = "(?:\\?[\\w.~%=&/-]*)?(?:#[\\w.~%=&/-]*)?";
 
+/**
+ * The exact shapes of the links the shelf makes (desktopLink, t3Thread,
+ * chatGptThreadLink); anything else, whatever its scheme, is no app link.
+ */
+const APP_LINKS: readonly RegExp[] = [
+  new RegExp(`^claude://claude\\.ai/(?:chat|project)/${UUID}$`, "u"),
+  new RegExp(`^codex://threads/${UUID}$`, "u"),
+  new RegExp(`^notion://www\\.notion\\.so/${NOTION_PATH}${NOTION_TAIL}$`, "u"),
+  new RegExp(`^t3code://threads/[\\w-]+/${UUID}$`, "u"),
+];
+
+const DEV_APP_LINK = new RegExp(`^t3code-dev://threads/[\\w-]+/${UUID}$`, "u");
+
+let devAppLinks = false;
+
+/**
+ * Lets T3 Code's development scheme (t3code-dev://) count as an app link.
+ * Shared code can't see whether the app is packaged, so main turns this on
+ * at startup in a development run only; it stays off everywhere else.
+ */
+export const allowDevAppLinks = (allowed: boolean): void => {
+  devAppLinks = allowed;
+};
+
+/** Links that open something inside a desktop app; the only ones the shelf opens besides web pages. */
 export const isAppLink = (link: string): boolean =>
-  link.length <= 2000 && APP_LINK.test(link);
+  link.length <= 2000 &&
+  (APP_LINKS.some((pattern) => pattern.test(link)) ||
+    (devAppLinks && DEV_APP_LINK.test(link)));
 
 const T3_PAGE =
   /^(?<scheme>t3code(?:-dev)?):\/\/app\/#\/(?<environment>[\w-]+)\/(?<thread>[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})$/u;
