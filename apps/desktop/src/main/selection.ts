@@ -151,6 +151,20 @@ const pollText = async <S>(
   return await pollText(deps, quietUntil, until);
 };
 
+/** Whether the clipboard still lists the files the capture read; trivially so for a capture of text. */
+const stillCopied = async <S>(
+  deps: SelectionDeps<S>,
+  files: readonly string[]
+): Promise<boolean> => {
+  if (files.length === 0) {
+    return true;
+  }
+
+  const now = await readFiles(deps);
+
+  return now.length === files.length && now.every((file, at) => file === files[at]);
+};
+
 type Baseline<S> =
   /** The clipboard as the capture left it, to tell a newer copy apart later. */
   | { readonly kind: "read"; readonly snapshot: S }
@@ -164,11 +178,17 @@ type Baseline<S> =
 /**
  * The clipboard right after the capture. A read under a hold says nothing:
  * what comes back after the hold is the capture only if it is exactly what
- * was copied, text and HTML; anything else is a newer copy to leave alone.
+ * was copied, text and HTML, or the same files; anything else is a newer
+ * copy to leave alone. Files carry no text or HTML to tell a newer copy by,
+ * so their list is read again, whether the first read held or not.
  */
 const baseline = async <S>(
   deps: SelectionDeps<S>,
-  copied: { readonly html: string; readonly text: string },
+  copied: {
+    readonly files: readonly string[];
+    readonly html: string;
+    readonly text: string;
+  },
   until: number
 ): Promise<Baseline<S>> => {
   const first = await deps.snapshot().catch(() => null);
@@ -178,7 +198,9 @@ const baseline = async <S>(
   }
 
   if (deps.readable(first)) {
-    return { kind: "read", snapshot: first };
+    return (await stillCopied(deps, copied.files))
+      ? { kind: "read", snapshot: first }
+      : { kind: "newer" };
   }
 
   const later = await readSnapshot(deps, until, RESTORE_RETRY_MS);
@@ -190,7 +212,9 @@ const baseline = async <S>(
   // Judged from that one read: a second read could fall under a hold that starts meanwhile.
   const { html, text } = await deps.content(later);
 
-  return text === copied.text && html === copied.html
+  return text === copied.text &&
+    html === copied.html &&
+    (await stillCopied(deps, copied.files))
     ? { kind: "read", snapshot: later }
     : { kind: "newer" };
 };
@@ -308,7 +332,7 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const left = await baseline(deps, { html, text }, until);
+  const left = await baseline(deps, { files, html, text }, until);
 
   let ended: PutBackResult;
 
