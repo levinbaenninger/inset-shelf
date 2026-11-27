@@ -27,6 +27,7 @@ import {
   CARD_TARGET_GONE,
   cardLabel,
   createShotSaves,
+  SHOT_ON_SHELF,
   SHOT_REMOVAL_UNSAVED,
   SHOT_STAYS,
 } from "./screenshot-saves";
@@ -359,6 +360,10 @@ const setup = () => {
   };
 };
 
+/** The card's picture dropped on an item, its drag started just before, as main hands the drop to the card. */
+const dropOn = async (card: ReturnType<typeof setup>, id: ItemId) =>
+  (await card.saves.drag(1)?.onItem(id)) ?? null;
+
 describe("the screenshot card's save path", () => {
   it("adds the screenshot, then the card goes once the disk holds it", async () => {
     const card = setup();
@@ -506,7 +511,7 @@ describe("a drop on an item, and the only Retry for it", () => {
     card.saves.show(shot(1));
     card.failWrites({ message: "The disk is full.", ok: false });
 
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBeNull();
+    await expect(dropOn(card, card.note)).resolves.toBeNull();
     expect(card.view()?.save).toMatchObject({
       placed: { id: card.note, to: "item" },
       state: "failed",
@@ -526,7 +531,7 @@ describe("a drop on an item, and the only Retry for it", () => {
     card.runOut();
 
     expect(card.view()).toBeNull();
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBe(card.note);
+    await expect(dropOn(card, card.note)).resolves.toBe(card.note);
     expect(card.attached).toStrictEqual([card.note]);
     expect(card.notices).toStrictEqual([]);
   });
@@ -537,7 +542,7 @@ describe("a drop on an item, and the only Retry for it", () => {
     card.saves.show(shot(1));
     card.controller.apply({ id: card.note, type: "remove" });
 
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBeNull();
+    await expect(dropOn(card, card.note)).resolves.toBeNull();
     expect({ attached: card.attached, save: card.view()?.save }).toStrictEqual({
       attached: [],
       save: { message: ITEM_GONE, placed: null, state: "failed", to: null },
@@ -550,14 +555,14 @@ describe("a drop on an item, and the only Retry for it", () => {
     await card.controller.flush();
     card.saves.show(shot(1));
     card.failWrites({ message: "The disk is full.", ok: false });
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
 
     expect(card.controller.discard(card.note)).toBeTruthy();
     expect(card.attachmentsOn(card.note)).toBe(0);
 
     card.failWrites({ ok: true });
 
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBe(card.note);
+    await expect(dropOn(card, card.note)).resolves.toBe(card.note);
     expect(card.attachmentsOn(card.note)).toBe(1);
     expect(card.view()).toBeNull();
   });
@@ -567,7 +572,7 @@ describe("a drop on an item, and the only Retry for it", () => {
 
     card.saves.show(shot(1));
     card.failWrites({ message: "The disk is full.", ok: false });
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
     card.controller.apply({ id: card.note, type: "remove" });
     card.failWrites({ ok: true });
 
@@ -587,7 +592,7 @@ describe("a drop on an item, and the only Retry for it", () => {
 
     card.saves.show(shot(1));
 
-    const adding = card.saves.dropOnItem(1, card.note);
+    const adding = dropOn(card, card.note);
 
     card.fill(card.note);
 
@@ -606,7 +611,7 @@ describe("a drop on an item, and the only Retry for it", () => {
     await card.controller.flush();
     card.saves.show(shot(1));
     card.failWrites({ message: "The disk is full.", ok: false });
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
     card.controller.discard(card.note);
     card.failWrites({ ok: true });
     card.fill(card.note);
@@ -631,9 +636,7 @@ const refused = async (first: "item" | "shelf") => {
   await card.controller.flush();
   card.saves.show(shot(1));
   card.failWrites({ message: "The disk is full.", ok: false });
-  await (first === "item"
-    ? card.saves.dropOnItem(1, card.note)
-    : card.saves.addToShelf(1));
+  await (first === "item" ? dropOn(card, card.note) : card.saves.addToShelf(1));
 
   return card;
 };
@@ -643,9 +646,7 @@ const pressOther = async (
   card: Awaited<ReturnType<typeof refused>>,
   first: "item" | "shelf"
 ) =>
-  await (first === "item"
-    ? card.saves.addToShelf(1)
-    : card.saves.dropOnItem(1, card.note));
+  await (first === "item" ? card.saves.addToShelf(1) : dropOn(card, card.note));
 
 describe("the place a refused save put the screenshot", () => {
   it("shows the screenshot where the refused save put it, not saved", async () => {
@@ -733,7 +734,7 @@ describe("a screenshot a refused save put on the shelf", () => {
 
     card.failWrites({ ok: true });
 
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBe(card.note);
+    await expect(dropOn(card, card.note)).resolves.toBe(card.note);
     expect(card.shown()).toStrictEqual({ attached: 1, items: 0 });
     expect(written(card)).toStrictEqual({
       doubled: [],
@@ -807,7 +808,7 @@ describe("a screenshot the user or a later write touched in its place", () => {
     const row = await writeOnRow(card);
 
     // A drop on the note that reached main after the card went.
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
 
     expect(card.images()).toMatchObject([{ id: row, note: "the red banner" }]);
     expect(card.shown()).toStrictEqual({ attached: 0, items: 1 });
@@ -838,7 +839,7 @@ describe("a screenshot the user or a later write touched in its place", () => {
     const row = await writeOnRow(card);
 
     // A drop on the note while the card still offered Retry for the row.
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
 
     expect(card.images()).toMatchObject([{ id: row, note: "the red banner" }]);
     expect(card.notices).toStrictEqual([SHOT_STAYS]);
@@ -926,7 +927,7 @@ describe("a screenshot the user or a later write touched in its place", () => {
     expect(card.view()).toBeNull();
 
     // A drop that was already on its way moves nothing.
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
 
     expect(card.shown()).toStrictEqual({ attached: 0, items: 1 });
     expect(card.images()).toMatchObject([{ id: row }]);
@@ -955,7 +956,7 @@ describe("a screenshot the user or a later write touched in its place", () => {
     });
     card.controller.apply({ id: row, type: "remove" });
     card.failWrites({ ok: true });
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
     // The user's own Undo of their own delete: both now hold the picture, and nothing written is lost.
     card.controller.apply({ type: "undoRemove" });
 
@@ -974,9 +975,7 @@ const waitedOut = async (first: "item" | "shelf") => {
   const end = card.holdWrite();
 
   const adding =
-    first === "item"
-      ? card.saves.dropOnItem(1, card.note)
-      : card.saves.addToShelf(1);
+    first === "item" ? dropOn(card, card.note) : card.saves.addToShelf(1);
 
   await card.giveUpWaiting();
   await adding;
@@ -1052,7 +1051,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
     const { card, end } = await waitedOut("shelf");
 
     // A drop on the note while the first write is still on its way.
-    const moving = card.saves.dropOnItem(1, card.note);
+    const moving = dropOn(card, card.note);
 
     card.failWrites(DISK_REFUSES);
     end({ ok: true });
@@ -1224,7 +1223,7 @@ describe("a save that gave up waiting while its write was still on its way", () 
     card.controller.apply({ id: rowOf(card), type: "remove" });
     // The newer save: a drop on the note, and the screenshot's file can't be written.
     card.failAttachments(DISK_FULL);
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
     card.failWrites(NO_ACCESS);
     end(NO_ACCESS);
     await ahead;
@@ -1414,7 +1413,7 @@ describe("the adds the card shows after the shelf changed under it", () => {
         onOther: card.attachmentsOn(other),
       }).toStrictEqual({ notices: 1, onOther: 0 });
 
-      await expect(card.saves.dropOnItem(1, other)).resolves.toBe(other);
+      await expect(dropOn(card, other)).resolves.toBe(other);
       expect({
         onOther: card.attachmentsOn(other),
         view: card.view(),
@@ -1475,7 +1474,7 @@ describe("the adds the card shows after the shelf changed under it", () => {
     card.saves.show(shot(1));
 
     const end = card.holdWrite();
-    const adding = card.saves.dropOnItem(1, card.note);
+    const adding = dropOn(card, card.note);
 
     await placedOnShelf(card);
     card.controller.apply({
@@ -1500,7 +1499,7 @@ describe("the adds the card shows after the shelf changed under it", () => {
     card.controller.apply({ id: row, type: "remove" });
     card.failAttachments(DISK_FULL);
 
-    const adding = card.saves.dropOnItem(1, card.note);
+    const adding = dropOn(card, card.note);
 
     // The user's Undo of their delete, while the picture file is on its way.
     card.controller.apply({ type: "undoRemove" });
@@ -1553,8 +1552,8 @@ describe("the adds the card shows after the shelf changed under it", () => {
     card.saves.show(shot(1));
 
     const [first, second] = await Promise.all([
-      card.saves.dropOnItem(1, card.note),
-      card.saves.dropOnItem(1, card.note),
+      dropOn(card, card.note),
+      dropOn(card, card.note),
     ]);
 
     expect(first).toBe(card.note);
@@ -1570,7 +1569,7 @@ describe("a screenshot dropped on an item", () => {
 
     card.saves.show(shot(1));
 
-    const dropping = card.saves.dropOnItem(1, card.note);
+    const dropping = dropOn(card, card.note);
     const saving = card.view()?.save;
 
     await expect(dropping).resolves.toBe(card.note);
@@ -1592,7 +1591,7 @@ describe("a screenshot dropped on an item", () => {
 
     card.failWrites({ ok: true });
 
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBe(card.note);
+    await expect(dropOn(card, card.note)).resolves.toBe(card.note);
     expect({
       attached: card.attachmentsOn(card.note),
       written: written(card),
@@ -1611,7 +1610,7 @@ describe("a screenshot dropped on an item", () => {
 
     card.failWrites({ ok: true });
 
-    await expect(card.saves.dropOnItem(1, other)).resolves.toBeNull();
+    await expect(dropOn(card, other)).resolves.toBeNull();
     await expect(card.saves.addToShelf(1)).resolves.toBeNull();
     expect({
       notices: card.notices,
@@ -1632,8 +1631,8 @@ describe("a screenshot dropped on an item", () => {
 
     card.failWrites({ ok: true });
 
-    await expect(card.saves.dropOnItem(1, rowOf(card))).resolves.toBeNull();
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBeNull();
+    await expect(dropOn(card, rowOf(card))).resolves.toBeNull();
+    await expect(dropOn(card, card.note)).resolves.toBeNull();
     expect({
       notices: card.notices,
       shown: card.shown(),
@@ -1650,7 +1649,7 @@ describe("a screenshot dropped on an item", () => {
     late.runOut();
     late.failAttachments(DISK_FULL);
 
-    await expect(late.saves.dropOnItem(1, late.note)).resolves.toBeNull();
+    await expect(dropOn(late, late.note)).resolves.toBeNull();
     expect({
       attached: late.attachmentsOn(late.note),
       notices: late.notices,
@@ -1668,7 +1667,7 @@ describe("a screenshot dropped on an item", () => {
     card.saves.show(shot(1));
     card.failAttachments(DISK_FULL);
 
-    await expect(card.saves.dropOnItem(1, card.note)).resolves.toBeNull();
+    await expect(dropOn(card, card.note)).resolves.toBeNull();
     expect(card.view()?.save).toStrictEqual({
       message: "The disk is full.",
       placed: null,
@@ -1690,7 +1689,7 @@ describe("a screenshot dropped on an item", () => {
 
     TAKE_OFF["removing its tile"](card);
     // Writes still fail: the drop on the other item places the screenshot there, not saved.
-    await card.saves.dropOnItem(1, other);
+    await dropOn(card, other);
 
     // A press of the note's only Retry that left the card before the tile came off.
     await expect(card.saves.addToItem(1, card.note)).resolves.toBeNull();
@@ -1852,33 +1851,51 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 
-  it("imports nothing for an older card's file once a newer screenshot shows", async () => {
-    const card = setup();
+  it.each(["item", "shelf"] as const)(
+    "gives an older card's screenshot its one place when its drop on the %s reaches main after a newer screenshot shows, and leaves the newer card on screen",
+    async (to) => {
+      const card = setup();
 
-    card.saves.show(shot(1));
+      await card.controller.flush();
+      card.saves.show(shot(1));
 
-    const { drop, dropped, plain } = dropping(card);
-    const file = drop.drag(1)?.file;
+      const { added, drop, plain } = dropping(card);
+      const file = drop.drag(1)?.file ?? "";
 
-    card.saves.show(shot(2));
+      // A newer screenshot shows while the shelf hands main the drop.
+      card.saves.show(shot(2));
 
-    await expect(drop.onItem(card.note, [file ?? ""])).resolves.toStrictEqual({
-      attached: [],
-      message: null,
-    });
-    drop.onShelf([file ?? ""]);
-    expect({
-      dropped,
-      plain,
-      save: card.view()?.save,
-      shown: card.shown(),
-    }).toStrictEqual({
-      dropped: [],
-      plain: [],
-      save: { state: "idle" },
-      shown: { attached: 0, items: 0 },
-    });
-  });
+      if (to === "item") {
+        await drop.onItem(card.note, [file]);
+      } else {
+        drop.onShelf([file]);
+      }
+
+      await vi.waitFor(() => {
+        expect(added).toHaveLength(1);
+      });
+      await settled(card);
+      expect({
+        added,
+        card: { save: card.view()?.save, seq: card.view()?.seq },
+        notices: card.notices,
+        plain,
+        written: written(card),
+      }).toStrictEqual({
+        added: [[to, to === "item" ? card.note : rowOf(card)]],
+        card: { save: { state: "idle" }, seq: 2 },
+        notices: [],
+        plain: [],
+        written: {
+          doubled: [],
+          last:
+            to === "item"
+              ? { attached: 1, items: 0 }
+              : { attached: 0, items: 1 },
+        },
+      });
+    }
+  );
 
   it("imports no second copy when the card's file is dropped on an item after its Add to Shelf saved it", async () => {
     const card = setup();
@@ -1910,12 +1927,14 @@ describe("the card's file dropped on the shelf", () => {
     expect({
       added,
       dropped,
+      notices: card.notices,
       plain,
       shown: card.shown(),
       written: written(card),
     }).toStrictEqual({
       added: [],
-      dropped: [],
+      dropped: ["item"],
+      notices: [SHOT_ON_SHELF],
       plain: [],
       shown: { attached: 0, items: 1 },
       written: { doubled: [], last: { attached: 0, items: 1 } },
@@ -1949,12 +1968,14 @@ describe("the card's file dropped on the shelf", () => {
     expect({
       added,
       attached: card.attachmentsOn(card.note),
+      notices: card.notices,
       plain,
       written: written(card),
     }).toStrictEqual({
       // The first drop's own add, once its write landed.
       added: [["item", card.note]],
       attached: 1,
+      notices: [SHOT_ON_SHELF],
       plain: [],
       written: { doubled: [], last: { attached: 1, items: 0 } },
     });
@@ -2134,12 +2155,14 @@ describe("the card's file dropped on the shelf", () => {
     await settled(card);
     expect({
       added,
+      notices: card.notices,
       plain,
       save: card.view()?.save,
       shown: card.shown(),
       written: written(card),
     }).toStrictEqual({
       added: [],
+      notices: [SHOT_ON_SHELF],
       plain: [],
       save: { state: "idle" },
       shown: { attached: 0, items: 1 },
@@ -2208,7 +2231,7 @@ describe("a screenshot the user's Undo brought back to a place an earlier add ma
 
     card.controller.apply({ id: row, type: "remove" });
     // Refused at the shelf's write: the screenshot is on the note, not saved.
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
     card.controller.apply({ type: "undoRemove" });
     await settled(card);
     card.controller.apply({
@@ -2237,7 +2260,7 @@ describe("a screenshot the user's Undo brought back to a place an earlier add ma
     const card = await refused("shelf");
 
     card.controller.apply({ id: rowOf(card), type: "remove" });
-    await card.saves.dropOnItem(1, card.note);
+    await dropOn(card, card.note);
     // The user's own Undo, after the new add put the screenshot on the note: the shelf shows both because they asked for both.
     card.controller.apply({ type: "undoRemove" });
     await settled(card);
@@ -2258,7 +2281,7 @@ describe("a screenshot the user's Undo brought back to a place an earlier add ma
 
     card.controller.apply({ id: row, type: "remove" });
 
-    const adding = card.saves.dropOnItem(1, card.note);
+    const adding = dropOn(card, card.note);
 
     // The user's Undo of their delete, while the picture file is on its way.
     card.controller.apply({ type: "undoRemove" });
@@ -2434,7 +2457,7 @@ describe("a write that landed while the user had the screenshot off the shelf", 
     await settled(card);
 
     const end = card.holdWrite();
-    const adding = card.saves.dropOnItem(1, card.note);
+    const adding = dropOn(card, card.note);
 
     await placedOnShelf(card);
     TAKE_OFF["removing its tile"](card);
@@ -2496,7 +2519,7 @@ const tileOffWhileItsWriteIsHeld = async () => {
   card.saves.show(shot(1));
 
   const end = card.holdWrite();
-  const adding = card.saves.dropOnItem(1, card.note);
+  const adding = dropOn(card, card.note);
 
   await card.giveUpWaiting();
   await adding;
@@ -2729,9 +2752,7 @@ describe("the scale a screenshot is kept at", () => {
       card.saves.show(shot(1));
 
       const adding =
-        to === "shelf"
-          ? card.saves.addToShelf(1)
-          : card.saves.dropOnItem(1, card.note);
+        to === "shelf" ? card.saves.addToShelf(1) : dropOn(card, card.note);
 
       card.pointerOn(1);
       await adding;
@@ -2839,7 +2860,7 @@ describe("the screenshot card's time after the shelf changed under an add", () =
     await settled(card);
 
     const end = card.holdWrite();
-    const adding = card.saves.dropOnItem(1, card.note);
+    const adding = dropOn(card, card.note);
 
     // The user's Undo while the picture file is written: the add is turned away, and the card reads Saving… for the row.
     card.controller.apply({ id: row, type: "undoRemove" });

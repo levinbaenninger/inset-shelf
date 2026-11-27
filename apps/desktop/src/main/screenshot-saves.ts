@@ -47,6 +47,10 @@ const missedNotice = (named: ItemId | null, exists: boolean): string => {
 export const SHOT_STAYS =
   "The screenshot stays where it was added. Retry saves it there.";
 
+/** A drop of a drag of the card's screenshot that reached main after the card moved on, while the shelf shows it in a place an add made. */
+export const SHOT_ON_SHELF =
+  "The screenshot is already on the shelf, so nothing was added.";
+
 /** A press of an add while the shelf shows the screenshot nowhere, but it can still come back where the user took it off without their Undo: a new place now could end beside the old one, which Discard changes brings back. */
 export const SHOT_REMOVAL_UNSAVED =
   "The shelf hasn’t saved the screenshot’s removal yet. Add it again once it has.";
@@ -58,6 +62,15 @@ export interface Shot {
   readonly png: Uint8Array;
   readonly widthPx: number;
   readonly heightPx: number;
+}
+
+/** One drag of the card's screenshot: the screenshot it hands out, and its drop, which keeps naming that screenshot after the card moves on. */
+export interface ShotDrag<S extends Shot> {
+  readonly shot: S;
+  /** Dropped on an item: attached to it, or Retry for its attachment there. */
+  readonly onItem: (id: ItemId) => Promise<ItemId | null>;
+  /** Dropped on the shelf off any item: Add to Shelf. */
+  readonly onShelf: () => Promise<ItemId | null>;
 }
 
 /** The card window, as the save path drives it. */
@@ -385,18 +398,16 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     held !== null && held.shot.seq === seq ? held : null;
 
   /**
-   * The card's screenshot when a press may save it to `to`, with its place
-   * on the shelf if it has one: it is still the newest, no save of it runs (a
-   * second click waits for the first), and the shelf shows it nowhere else.
-   * Where it is, it stays, and the user hears why. Off the shelf, it is added
-   * anew only once nothing but the user's Undo brings it back.
+   * The screenshot when a press or a drop may save it to `to`, with its place
+   * on the shelf if it has one: no save of it runs (a second click waits for
+   * the first), and the shelf shows it nowhere else. Where it is, it stays,
+   * and the user hears why. Off the shelf, it is added anew only once nothing
+   * but the user's Undo brings it back.
    */
   const ready = (
-    seq: number,
+    now: Held<S> | null,
     to: ShotSaveTo
   ): { readonly now: Held<S>; readonly at: Placement | null } | null => {
-    const now = current(seq);
-
     if (now === null || now.saving !== null) {
       return null;
     }
@@ -532,12 +543,11 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * press never puts it somewhere the user didn't see.
    */
   const toItem = async (
-    seq: number,
+    state: Held<S> | null,
     id: ItemId,
     dropped: boolean
   ): Promise<ItemId | null> => {
-    // Null for an older card's request too: its screenshot is gone.
-    const start = ready(seq, "item");
+    const start = ready(state, "item");
 
     if (start === null) {
       return null;
@@ -589,56 +599,86 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     });
   };
 
-  return {
-    /** Add to Shelf: the screenshot as a new item, or Retry for the row it already is. */
-    addToShelf: async (seq: number): Promise<ItemId | null> => {
-      const start = ready(seq, "shelf");
+  /** The screenshot as a new item, or Retry for the row it already is. */
+  const toShelf = async (state: Held<S> | null): Promise<ItemId | null> => {
+    const start = ready(state, "shelf");
 
-      if (start === null) {
-        return null;
+    if (start === null) {
+      return null;
+    }
+
+    const { at, now } = start;
+
+    return await save(now, "shelf", async () => {
+      // Its row is on the shelf: Retry saves that row, and never makes a second.
+      if (at !== null) {
+        return { ok: true };
       }
 
-      const { at, now } = start;
+      const image = await pictureFor(now);
 
-      return await save(now, "shelf", async () => {
-        // Its row is on the shelf: Retry saves that row, and never makes a second.
-        if (at !== null) {
-          return { ok: true };
-        }
+      if ("stays" in image) {
+        return image;
+      }
 
-        const image = await pictureFor(now);
+      const id = deps.addItem(image);
 
-        if ("stays" in image) {
-          return image;
-        }
+      if (id === null) {
+        deps.dropPicture(image.file);
 
-        const id = deps.addItem(image);
+        return {
+          message: "The shelf couldn’t take the screenshot.",
+          ok: false,
+        };
+      }
 
-        if (id === null) {
-          deps.dropPicture(image.file);
+      now.places = [{ item: id, to: "shelf" }, ...now.places];
 
-          return {
-            message: "The shelf couldn’t take the screenshot.",
-            ok: false,
-          };
-        }
+      return { ok: true };
+    });
+  };
 
-        now.places = [{ item: id, to: "shelf" }, ...now.places];
-
-        return { ok: true };
-      });
-    },
+  return {
+    /** Add to Shelf: the screenshot as a new item, or Retry for the row it already is. Null for an older card's press: its screenshot is gone. */
+    addToShelf: async (seq: number): Promise<ItemId | null> =>
+      await toShelf(current(seq)),
 
     /** The card's only Retry adding to “…”: only while the shelf shows the screenshot on `id`. */
     addToItem: async (seq: number, id: ItemId): Promise<ItemId | null> =>
-      await toItem(seq, id, false),
-
-    /** The screenshot dropped on an item: attached to it, or Retry for its attachment there. */
-    dropOnItem: async (seq: number, id: ItemId): Promise<ItemId | null> =>
-      await toItem(seq, id, true),
+      await toItem(current(seq), id, false),
 
     /** The card's screenshot, while it is the newest. */
     current: (seq: number): S | null => current(seq)?.shot ?? null,
+
+    /**
+     * A drag of the card's screenshot, while it is the newest; null for an
+     * older card's. Its drop can reach main after the card moved on: the
+     * screenshot then gets a place when it has none, and keeps the one it
+     * has, which the user hears.
+     */
+    drag: (seq: number): ShotDrag<S> | null => {
+      const now = current(seq);
+
+      if (now === null) {
+        return null;
+      }
+
+      const dropped = (): Held<S> | null => {
+        if (now !== held && shown(now) !== null) {
+          deps.notify(SHOT_ON_SHELF, "failed");
+
+          return null;
+        }
+
+        return now;
+      };
+
+      return {
+        onItem: async (id) => await toItem(dropped(), id, true),
+        onShelf: async () => await toShelf(dropped()),
+        shot: now.shot,
+      };
+    },
 
     /** The card is done with its screenshot (copied, saved elsewhere, dismissed): it goes. */
     done: (shot: S): void => {
