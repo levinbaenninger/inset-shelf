@@ -2,7 +2,7 @@
   "name": "@inset/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "A side window for selections, screen areas, pins and prompts, for the Inset capture experiments.",
+  "description": "Save selected text, screenshots, and notes beside the window you work in.",
   "license": "MIT",
   "author": "Levin Bänninger",
   "type": "module",

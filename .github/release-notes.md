@@ -1,4 +1,4 @@
-Test build of Inset Shelf, without a developer certificate. See the README section "Install a test build" for the macOS Gatekeeper and Windows SmartScreen steps. Install once. After that the app updates itself from the newest release, except for the portable Windows zips.
+Download Inset Shelf for your platform below. The [installation guide](https://inset-shelf.levexis.workers.dev/docs/install) covers the first-launch warnings on macOS and Windows. The Mac app and Windows installer update automatically. To update a portable Windows copy, download the latest zip.
 
 | Platform | File |
 | --- | --- |

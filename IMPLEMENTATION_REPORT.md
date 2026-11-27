@@ -1,6 +1,6 @@
 # Implementation report
 
-## What the prototype does
+## Desktop features
 
 Inset Shelf is a regular app with a Dock icon, a menu bar and a status-bar icon. Its main window, the shelf, opens at launch beside the window in front and floats above other windows until it is hidden. The shelf is one list of items grouped by section: notes and prompts typed into it, text saved from a selection in another app, screenshots, pasted images, drawings and attached files. Each captured item keeps the app, window title and web page it came from, where the system lets the app read them.
 

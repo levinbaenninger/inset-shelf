@@ -1,7 +1,15 @@
-## What changed and why?
+## Summary
 
-<!-- Link the issue if there is one. For a UI change, a screenshot with sample data helps. -->
+<!-- Show what changes with a small diff, file tree, or diagram. Link the issue if there is one. -->
 
-## How did you verify it?
+## Evidence
 
-<!-- List checks you ran, the platforms you tried, and anything a reviewer should test. -->
+- **Before:** <!-- Screenshot, command output, or failing test that shows the original behavior. -->
+
+  **After:** <!-- Comparable evidence from this branch. Include the platform when relevant. -->
+
+## Merge Danger
+
+**Door:** <!-- One-way or two-way. What would it take to undo this? -->
+
+**Blast Radius:** <!-- Name the affected area in one word. Add detail if others could be affected. -->
