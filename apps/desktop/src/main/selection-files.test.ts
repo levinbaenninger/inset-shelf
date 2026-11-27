@@ -21,6 +21,14 @@ const A = "file:///Users/me/a.pdf";
 const B = "file:///Users/me/b.pdf";
 const list = (url: string) => ({ "text/uri-list": url });
 
+/** How Windows notes a copy or a cut of files beside their list: a 32-bit flag set, 1 to copy and 2 to move. */
+const DROP_EFFECT = 'electron application/osclipboard;format="Preferred DropEffect"';
+const copyOf = (url: string) => ({
+  ...list(url),
+  [DROP_EFFECT]: "\u0001\0\0\0",
+});
+const cutOf = (url: string) => ({ ...list(url), [DROP_EFFECT]: "\u0002\0\0\0" });
+
 const toSnapshot = (items: readonly Item[]): Snapshot =>
   items.map((item) =>
     Object.fromEntries(
@@ -44,8 +52,11 @@ const toItems = async (snapshot: Snapshot): Promise<Item[]> =>
 /**
  * A clipboard with Explorer's and Finder's formats, read as the app reads it:
  * `held` lists the numbers of the snapshot reads that run into another app's
- * hold, `before` what the user does just before a numbered read, and `swallow`
- * how many writes back a hold swallows without an error.
+ * hold, `before` what the user does just before a numbered read, `swallow`
+ * how many writes back a hold swallows without an error, `rejected` the
+ * snapshot reads that fail, `filesHeld` the file-list reads that come back
+ * empty (as Chromium does when it can't open the clipboard), and `halfRead`
+ * the snapshot reads a hold cuts short: the files' list comes back empty.
  */
 const clipboard = (options: {
   readonly initial: readonly Item[];
@@ -53,9 +64,13 @@ const clipboard = (options: {
   readonly held?: readonly number[];
   readonly before?: Readonly<Record<number, readonly Item[]>>;
   readonly swallow?: number;
+  readonly rejected?: readonly number[];
+  readonly filesHeld?: readonly number[];
+  readonly halfRead?: readonly number[];
 }) => {
   let items = options.initial;
   let reads = 0;
+  let fileReads = 0;
   let time = 0;
   let swallow = options.swallow ?? 0;
   const restored: Snapshot[] = [];
@@ -71,14 +86,21 @@ const clipboard = (options: {
     holds: holdsAgainIn,
     now: () => time,
     readable: readableClipboard,
-    readFiles: async () =>
-      await copiedFilePaths(
+    readFiles: async () => {
+      fileReads += 1;
+
+      if (options.filesHeld?.includes(fileReads) === true) {
+        return [];
+      }
+
+      return await copiedFilePaths(
         toSnapshot(items).map((item) => ({
           getType: async (type: string) =>
             await Promise.resolve(item[type] ?? new Blob([])),
           types: Object.keys(item),
         }))
-      ),
+      );
+    },
     readHtml: async () =>
       await Promise.resolve(
         items.find((item) => "text/html" in item)?.["text/html"] ?? ""
@@ -108,6 +130,19 @@ const clipboard = (options: {
       reads += 1;
       time += 5;
       items = options.before?.[reads] ?? items;
+
+      if (options.rejected?.includes(reads) === true) {
+        throw new Error("clipboard unavailable");
+      }
+
+      if (options.halfRead?.includes(reads) === true) {
+        return toSnapshot(
+          items.map((item) => ({
+            ...item,
+            "text/uri-list": "",
+          }))
+        );
+      }
 
       return await Promise.resolve(
         options.held?.includes(reads) === true ? HELD_READ : toSnapshot(items)
@@ -244,5 +279,38 @@ describe("restoring a clipboard that held files", () => {
     });
     expect(clip.restored).toHaveLength(2);
     expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
+
+describe("a hold that starts while the capture checks the files it copied", () => {
+  // A clipboard manager opens the clipboard after the capture's snapshot is read: Chromium then lists no files.
+  it("puts the clipboard back when the file-list read after the snapshot comes back empty", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      filesHeld: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      paths: ["/Users/me/a.pdf"],
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("puts the clipboard back when the hold came back for the file-list read that follows a held snapshot", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      filesHeld: [2],
+      held: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
   });
 });
