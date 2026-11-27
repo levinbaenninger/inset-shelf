@@ -740,3 +740,76 @@ describe("attachments in search and copies", () => {
     expect(hasDetails(note)).toBeFalsy();
   });
 });
+
+/** A shelf holding one thought captured from Code, at this place in the code. */
+const fromCode = (code: {
+  readonly file: string;
+  readonly line: number | null;
+  readonly root: string | null;
+}) => {
+  const { doc } = applyOp(
+    emptyShelf(INBOX),
+    {
+      context: {
+        app: "Code",
+        appLink: null,
+        code,
+        title: "recall.ts — inset-shelf",
+        url: null,
+      },
+      html: null,
+      text: "The pill counts done items",
+      type: "addText",
+      via: "selection",
+    },
+    env(),
+    []
+  );
+
+  const [item] = doc.items;
+
+  if (item === undefined) {
+    throw new Error("missing item");
+  }
+
+  return { doc, item };
+};
+
+describe("an item from a code editor", () => {
+  const file =
+    "/Users/anna/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
+
+  const root = "/Users/anna/Developer/inset-shelf";
+
+  it("copies with details where in the project it came from, and the line, never the whole path", () => {
+    const { item } = fromCode({ file, line: 147, root });
+    const details = itemDetailsText(item);
+
+    expect(details).toBe(
+      "The pill counts done items\n\nFrom: Code · apps/desktop/src/shared/recall.ts:147"
+    );
+    expect(details).not.toContain("/Users/anna");
+  });
+
+  it("copies the file's name alone without a project folder", () => {
+    const { item } = fromCode({ file, line: null, root: null });
+
+    expect(itemDetailsText(item)).toBe(
+      "The pill counts done items\n\nFrom: Code · recall.ts"
+    );
+  });
+
+  it("is found by the file's name and a folder inside the project, not by one above it", () => {
+    const { doc, item } = fromCode({ file, line: null, root });
+
+    const found = (query: string) =>
+      groupItems(doc, query, new Date(2026, 10, 20)).flatMap((group) =>
+        group.items.map((each) => each.id)
+      );
+
+    expect(found("recall.ts")).toStrictEqual([item.id]);
+    expect(found("src/shared")).toStrictEqual([item.id]);
+    expect(found("Developer")).toStrictEqual([]);
+    expect(found("anna")).toStrictEqual([]);
+  });
+});

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { CodePlaceSchema, PATH_MAX } from "./code-place";
+import { atLine, CodePlaceSchema, PATH_MAX, pathInProject } from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
 import {
   isAppLink,
@@ -1877,6 +1877,8 @@ const searchableText = (item: ShelfItem): string =>
     item.context?.app ?? "",
     item.context?.title ?? "",
     item.context?.url ?? "",
+    // The file's path inside its project, its name among it; never the whole path.
+    item.context?.code ? pathInProject(item.context.code) : "",
     ...item.attachments.flatMap((attachment) => [
       attachmentName(attachment),
       ...(attachment.kind === "image"
@@ -2008,7 +2010,13 @@ export const detailLines = (
     ]),
     ...(full && source !== null && (source.app ?? source.title) !== null
       ? [
-          `From: ${[source.app, source.title]
+          `From: ${[
+            source.app,
+            // Where in the project, never the whole path, which can name the user.
+            source.code === null
+              ? source.title
+              : atLine(pathInProject(source.code), source.code),
+          ]
             .filter((part) => part !== null && part !== "")
             .join(" · ")}`,
         ]
