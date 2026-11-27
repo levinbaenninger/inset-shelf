@@ -144,12 +144,6 @@ export interface DetailsProps {
   readonly attachments: AttachmentHandlers & AttachmentAdders;
 }
 
-const newStep = (): Step => ({
-  done: false,
-  id: crypto.randomUUID(),
-  text: "",
-});
-
 const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 const k = (accelerator: string): string => keyText(accelerator, isMac);
@@ -335,7 +329,9 @@ const AutoText = ({
  */
 const StepsEditor = ({
   focusSeq,
+  newStep,
   onChange,
+  onLeave,
   onRemoved,
   onUndo,
   steps,
@@ -343,7 +339,10 @@ const StepsEditor = ({
   readonly steps: readonly Step[];
   /** Changes when the last step should take focus. */
   readonly focusSeq: number;
+  readonly newStep: () => Step;
   readonly onChange: (steps: readonly Step[]) => void;
+  /** Focus has left the step's row, for good: not to its own checkbox or ×, nor only out of the window. */
+  readonly onLeave: (step: Step) => void;
   readonly onRemoved: (step: Step, index: number) => void;
   readonly onUndo: () => boolean;
 }) => {
@@ -462,7 +461,22 @@ const StepsEditor = ({
       ref={listRef}
     >
       {steps.map((step, index) => (
-        <li className="group/step flex items-start gap-2" key={step.id}>
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the row only hears focus leave it; its checkbox, words and × take the keys.
+        <li
+          className="group/step flex items-start gap-2"
+          key={step.id}
+          onBlur={(event) => {
+            if (
+              document.hasFocus() &&
+              !(
+                event.relatedTarget instanceof Node &&
+                event.currentTarget.contains(event.relatedTarget)
+              )
+            ) {
+              onLeave(step);
+            }
+          }}
+        >
           <span className="flex h-7 shrink-0 items-center">
             {/* Named by its words, as in the open row, and checked or not says the rest; a step not typed yet goes by its number. */}
             <Checkbox
@@ -488,12 +502,6 @@ const StepsEditor = ({
               step.done && "text-muted-foreground line-through"
             )}
             maxLength={STEP_TEXT_MAX}
-            // A step left untyped goes, so Add step stays the one way to add one; not when only the window lost focus.
-            onBlur={() => {
-              if (step.text.trim() === "" && document.hasFocus()) {
-                onChange(steps.filter((other) => other.id !== step.id));
-              }
-            }}
             onChange={(event) => {
               markRemoved(false);
               onChange(
@@ -1486,7 +1494,24 @@ export const DetailsView = (props: DetailsProps) => {
     steps: steps.length > 0 || added.has("steps"),
   };
 
+  // Steps added here and never typed in: only these go when left blank, so Add step stays the one way to add one. A step that held words stays once cleared, and ⌘Z in it brings them back.
+  const untyped = useRef(new Set<string>());
+
+  const newStep = (): Step => {
+    const step = { done: false, id: crypto.randomUUID(), text: "" };
+
+    untyped.current.add(step.id);
+
+    return step;
+  };
+
   const saveSteps = (next: readonly Step[]): void => {
+    for (const step of next) {
+      if (step.text.trim() !== "") {
+        untyped.current.delete(step.id);
+      }
+    }
+
     setSteps(next);
     props.onApply({ id: item.id, steps: [...next], type: "setSteps" });
   };
@@ -1621,7 +1646,13 @@ export const DetailsView = (props: DetailsProps) => {
           >
             <StepsEditor
               focusSeq={stepsFocus}
+              newStep={newStep}
               onChange={saveSteps}
+              onLeave={(step) => {
+                if (step.text.trim() === "" && untyped.current.has(step.id)) {
+                  saveSteps(steps.filter((other) => other.id !== step.id));
+                }
+              }}
               onRemoved={(step, index) => {
                 props.onUndoable({ index, kind: "step", step });
               }}

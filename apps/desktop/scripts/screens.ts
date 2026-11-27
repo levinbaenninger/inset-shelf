@@ -9305,14 +9305,15 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
-    // A step added and left untyped goes once the keyboard leaves it, so the list never shows a blank step beside Add step.
+    // A step added and left untyped goes once the keyboard leaves its row (Tab to its ×, then on), so the list never shows a blank step beside Add step.
     act: async (page) => {
       await details(page, 10);
       await page.getByRole("button", { name: "Add step" }).click();
       await page.waitForFunction(
         () => document.activeElement?.getAttribute("aria-label") === "Step 6"
       );
-      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
       await page.waitForTimeout(150);
     },
     check: async (page) => {
@@ -9370,6 +9371,7 @@ const SCENES: readonly Scene[] = [
       const steps = await page
         .getByRole("textbox", { name: /^Step \d/u })
         .count();
+
       const first = await page
         .getByRole("textbox", { name: "Step 1" })
         .inputValue();
@@ -9426,13 +9428,13 @@ const SCENES: readonly Scene[] = [
       await page.waitForTimeout(150);
     },
     check: async (page) => {
-      const focused = await page.evaluate(() =>
+      const landed = await page.evaluate(() =>
         document.activeElement?.getAttribute("aria-label")
       );
 
-      return focused === "Remove step 6"
+      return landed === "Remove step 6"
         ? null
-        : `Tab from a blank step lands on ${focused ?? "nothing"}, not its ×`;
+        : `Tab from a blank step lands on ${landed ?? "nothing"}, not its ×`;
     },
     data: { view: shelfView() },
     name: "shelf-details-step-blank-tab",
@@ -9450,14 +9452,14 @@ const SCENES: readonly Scene[] = [
       await page.waitForTimeout(150);
     },
     check: async (page) => {
-      const focused = await page.evaluate(() => ({
+      const landed = await page.evaluate(() => ({
         label: document.activeElement?.getAttribute("aria-label"),
         role: document.activeElement?.getAttribute("role"),
       }));
 
-      return focused.role === "checkbox" && focused.label === "Step 6"
+      return landed.role === "checkbox" && landed.label === "Step 6"
         ? null
-        : `Shift+Tab from a blank step lands on ${focused.label ?? "nothing"}, not its checkbox`;
+        : `Shift+Tab from a blank step lands on ${landed.label ?? "nothing"}, not its checkbox`;
     },
     data: { view: shelfView() },
     name: "shelf-details-step-blank-shift-tab",
