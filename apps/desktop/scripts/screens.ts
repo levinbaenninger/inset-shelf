@@ -8899,7 +8899,7 @@ const stepBox = (page: Page) =>
 const descriptionBox = (page: Page) =>
   page.getByRole("textbox", { exact: true, name: "Description" });
 
-/** A keyboard user never loses their place: a field left in details or in a row keeps the keyboard there. */
+/** A keyboard user never loses their place: a field left in details or in a row keeps the keyboard there, and ↓ goes from the search field to its results. */
 const KEEPS_PLACE_SCENES: readonly Scene[] = [
   {
     // Return in a picture's Title keeps the keyboard on the Title, which shows where it is.
@@ -9022,6 +9022,52 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     data: { view: shelfView() },
     name: "shelf-keeps-place-row-words",
     page: "shelf",
+  },
+  {
+    // ⌘F, a word, ↓ selects the first result and → opens it, as the list's own keys do.
+    act: async (page) => {
+      await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
+      await page.getByRole("textbox", { name: "Search the shelf" }).waitFor();
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Search the shelf'"
+      );
+      await page.keyboard.type("the");
+      await page.keyboard.press("ArrowDown");
+    },
+    check: async (page) => {
+      const first = await page
+        .locator("[data-item-id]")
+        .first()
+        .getAttribute("data-item-id");
+
+      const current = await page
+        .locator('[data-item-id][aria-current="true"]')
+        .getAttribute("data-item-id", { timeout: 1000 })
+        .catch(() => null);
+
+      if (first === null || current !== first) {
+        return `↓ from the search selected ${String(current)}, not the first result ${String(first)}`;
+      }
+
+      await page.keyboard.press("ArrowRight");
+
+      const opened = await page
+        .getByRole("button", { name: "Back to the list" })
+        .isVisible();
+
+      const shown = z
+        .array(z.string().nullable())
+        .parse(await page.evaluate("globalThis.__selection"))
+        .at(-1);
+
+      return opened && shown === first
+        ? null
+        : `→ after ↓ from the search opened ${opened ? String(shown) : "nothing"}, not ${first}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-to-results",
+    page: "shelf",
+    platforms: ["macos", "windows"],
   },
 ];
 
