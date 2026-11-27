@@ -152,12 +152,6 @@ const Privacy = () => (
         doesn’t check.
       </li>
       <li>
-        <strong>Spell checking on Windows.</strong> The note field uses the
-        spell checker built into Electron. On Windows it downloads a dictionary
-        for your language from a Google server; your words are not sent. On
-        macOS the system’s own spell checker is used.
-      </li>
-      <li>
         <strong>Links you open.</strong> Opening an item’s page or a link in a
         note hands it to your browser or to the app it belongs to.
       </li>

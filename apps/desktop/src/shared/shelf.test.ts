@@ -515,19 +515,17 @@ describe("selections with links", () => {
     expect(item?.context?.app).toBe("Zen");
   });
 
-  it("rejects stored file names that are not one plain name", () => {
+  it("turns stored file names into one plain name on load", () => {
     const stored = `${uuid(60)}.txt`;
 
-    for (const name of ["", ".", "..", "a/b", String.raw`a\b`, "a\0b"]) {
-      expect(
-        StoredFileSchema.safeParse({ bytes: 1, name, stored }).success
-      ).toBeFalsy();
-    }
+    const name = (raw: string): string | undefined =>
+      StoredFileSchema.safeParse({ bytes: 1, name: raw, stored }).data?.name;
 
+    expect(name("")).toBeUndefined();
     expect(
-      StoredFileSchema.safeParse({ bytes: 1, name: "Report.txt", stored })
-        .success
-    ).toBeTruthy();
+      [".", "..", "../../etc/passwd", String.raw`a\b`, "a\0b"].map(name)
+    ).toStrictEqual(["File", "File", ".._.._etc_passwd", "a_b", "a_b"]);
+    expect(name("Report.txt")).toBe("Report.txt");
   });
 
   it("drops the copied HTML once the text is edited", () => {

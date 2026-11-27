@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { isValidDay, matchesDue, parseSearch } from "./due";
-import { isSafeFileName } from "./local-path";
+import { safeFileName } from "./local-path";
 import {
   isAppLink,
   isPageAddress,
@@ -301,8 +301,11 @@ const ImageFields = {
 
 export const StoredFileSchema = z.object({
   bytes: z.number().int().min(0),
-  /** The name the file had, used again when it is dragged or copied out. */
-  name: z.string().min(1).max(255).refine(isSafeFileName),
+  /**
+   * The name the file had, used again when it is dragged or copied out. Separators, NUL and dot
+   * names are replaced on load, so a shelf saved before this check still opens.
+   */
+  name: z.string().min(1).max(255).transform(safeFileName),
   stored: AttachmentFileSchema,
 });
 
