@@ -15,6 +15,7 @@ import {
   ATTACHMENTS_MAX,
   AttachedImageSchema,
   AttachmentSchema,
+  CodePlaceSchema,
   ContextSchema,
   ItemIdSchema,
   parseComposer,
@@ -1561,8 +1562,8 @@ describe("where in the code an item came from", () => {
     ["the file itself", "/Users/anna/dev/proj/src/a.ts"],
   ])("refuses %s as the project", (_, root) => {
     expect(
-      ContextSchema.safeParse(
-        codeContext("/Users/anna/dev/proj/src/a.ts", root)
+      CodePlaceSchema.safeParse(
+        codeContext("/Users/anna/dev/proj/src/a.ts", root).code
       ).success
     ).toBeFalsy();
   });
@@ -1572,7 +1573,30 @@ describe("where in the code an item came from", () => {
 
     expect(file).toHaveLength(4097);
     expect(
-      ContextSchema.safeParse(codeContext(file, null)).success
+      CodePlaceSchema.safeParse(codeContext(file, null).code).success
     ).toBeFalsy();
+  });
+
+  it.each([
+    ["a file that is no whole path", "src/a.ts", null],
+    [
+      "a file that steps out of its project",
+      "/Users/anna/dev/proj/../other/a.ts",
+      "/Users/anna/dev/proj",
+    ],
+    ["a file with a dot step", "/Users/anna/dev/proj/./a.ts", null],
+  ])("refuses %s", (_, file, root) => {
+    expect(
+      CodePlaceSchema.safeParse(codeContext(file, root).code).success
+    ).toBeFalsy();
+  });
+
+  it("reads an item whose place in the code is odd without that place, never without the item", () => {
+    const context = codeContext("src/a.ts", "/Users/anna/dev/other");
+
+    expect(ContextSchema.parse(context)).toStrictEqual({
+      ...context,
+      code: null,
+    });
   });
 });

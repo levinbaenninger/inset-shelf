@@ -112,6 +112,32 @@ describe(codePlace, () => {
   });
 
   it.each([
+    [
+      "the file's name",
+      "/Users/anna/proj/src/report — draft.ts",
+      "report — draft.ts — proj",
+      "/Users/anna/proj",
+    ],
+    [
+      "the project folder's name",
+      "/Users/anna/my — proj/src/a.ts",
+      "a.ts — my — proj",
+      "/Users/anna/my — proj",
+    ],
+    [
+      "both, with a profile after them",
+      "/Users/anna/my — proj/src/report — draft.ts",
+      "report — draft.ts — my — proj — Work",
+      "/Users/anna/my — proj",
+    ],
+  ])(
+    "finds the project when the title's dash is in %s",
+    (_, file, title, root) => {
+      expect(codePlace(code, file, title, "Code")?.root).toBe(root);
+    }
+  );
+
+  it.each([
     ["a workspace", "a.ts — my (Workspace)"],
     ["a remote", "a.ts — app [SSH: box]"],
     ["no folder of the file", "a.ts — elsewhere"],
