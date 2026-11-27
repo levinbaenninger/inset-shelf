@@ -818,6 +818,19 @@ const checkSelection = async (): Promise<void> => {
  * (src/shared/code-editors.ts; the source app is an editor under the test).
  * The paths are compared here and never written to the results.
  */
+const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
+  for (let waited = 0; waited < ms; waited += 200) {
+    if (test()) {
+      return true;
+    }
+
+    // oxlint-disable-next-line no-await-in-loop -- polling the disk and the screen.
+    await delay(200);
+  }
+
+  return test();
+};
+
 const checkCodePlace = async (): Promise<void> => {
   const project = path.join(realpathSync(work), "code", "proj");
   const file = path.join(project, "src", "a.ts");
@@ -837,7 +850,13 @@ const checkCodePlace = async (): Promise<void> => {
       record("source app in front for the code place", false, frontmost());
     }
 
-    return items().find((item) => item.kind === "text" && item.text === text);
+    // The event comes with the item in memory; the shelf file is written after it.
+    const saved = () =>
+      items().find((item) => item.kind === "text" && item.text === text);
+
+    await waitUntil(() => saved() !== undefined, 4000);
+
+    return saved();
   };
 
   const inFile = await capture("Code place sentence in a file", file);
@@ -1370,19 +1389,6 @@ const shelfMtime = (): number => {
   const file = path.join(userData, "shelf.json");
 
   return existsSync(file) ? statSync(file).mtimeMs : 0;
-};
-
-const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
-  for (let waited = 0; waited < ms; waited += 200) {
-    if (test()) {
-      return true;
-    }
-
-    // oxlint-disable-next-line no-await-in-loop -- polling the disk and the screen.
-    await delay(200);
-  }
-
-  return test();
 };
 
 /** A picture as the shelf file holds it: an image item, or an attached image. */

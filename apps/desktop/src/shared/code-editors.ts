@@ -70,6 +70,16 @@ export const codeEditor = (
     ? undefined
     : editors.find((editor) => editor.apps.includes(app));
 
+/** The dashes a title of `app` may be split on: its platform's own first. */
+const dashesOf = (
+  editor: CodeEditor,
+  app: string | null
+): readonly TitleDash[] => {
+  const own = app === null ? undefined : editor.dash?.[app];
+
+  return own === undefined ? TITLE_DASHES : [own, ...TITLE_DASHES];
+};
+
 /**
  * The file's and the project's name in a window title, by the editor's row.
  * A title with fewer parts than the row names gives neither: an editor drops
@@ -81,9 +91,8 @@ export const titleParts = (
   app: string | null
 ): TitleParts => {
   const clean = cleanTitle(title, app);
-  const own = app === null ? undefined : editor.dash?.[app];
 
-  const dash = [...(own === undefined ? [] : [own]), ...TITLE_DASHES].find(
+  const dash = dashesOf(editor, app).find(
     (each) => clean?.includes(each) === true
   );
 
@@ -107,6 +116,41 @@ export const titleParts = (
 };
 
 /**
+ * Which of a file's folders the title names as the project: the deepest one
+ * of that name, or -1. The title is read after the file's own name, against
+ * whole folder names, so a dash inside a name splits nothing. A title that
+ * doesn't start with the file's name is read by the row's parts.
+ */
+const projectFolder = (
+  editor: CodeEditor,
+  file: { readonly folders: readonly string[]; readonly name: string },
+  title: string | null,
+  app: string | null
+): number => {
+  const clean = cleanTitle(title, app);
+  const dashes = dashesOf(editor, app);
+
+  const lead = dashes
+    .map((dash) => `${file.name}${dash}`)
+    .find((each) => clean?.startsWith(each) === true);
+
+  if (clean === null || lead === undefined) {
+    const { project } = titleParts(editor, title, app);
+
+    return project === null ? -1 : file.folders.lastIndexOf(project);
+  }
+
+  const rest = clean.slice(lead.length);
+
+  return file.folders.findLastIndex(
+    (folder) =>
+      folder !== "" &&
+      !EDITOR_NAMES.has(folder) &&
+      (rest === folder || dashes.some((dash) => rest.startsWith(folder + dash)))
+  );
+};
+
+/**
  * Where in the code a window is: the file its document names, and the
  * deepest folder above it that the title names as the project. Only for an
  * editor whose document is confirmed to be the file; reads no disk.
@@ -121,9 +165,9 @@ export const codePlace = (
     return null;
   }
 
-  const { project } = titleParts(editor, title, app);
   const folders = document.split("/").slice(0, -1);
-  const deepest = project === null ? -1 : folders.lastIndexOf(project);
+  const name = document.slice(document.lastIndexOf("/") + 1);
+  const deepest = projectFolder(editor, { folders, name }, title, app);
 
   const parsed = CodePlaceSchema.safeParse({
     file: document,
