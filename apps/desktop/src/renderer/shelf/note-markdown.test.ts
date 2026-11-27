@@ -74,13 +74,19 @@ describe(noteMarkdown, () => {
     expect(noteMarkdown(markdown, typed(text))).toBe(text);
   });
 
+  it("keeps the one escape a note needs to read as typed", () => {
+    expect(noteMarkdown(markdown, typed("*not bold*"))).toBe(
+      String.raw`*not bold\*`
+    );
+  });
+
   it.each([
     "email bob@example.com about ticket #42 | priority high",
     "see https://example.com/a_b?x=1 and www.example.com",
     "snake_case_name, Tom & Jerry",
     String.raw`C:\Users\bob`,
     "**bold** and [docs](https://example.com/docs)",
-    String.raw`\*not bold\*`,
+    String.raw`*not bold\*`,
     "one\ntwo",
   ])("leaves %s as it was when the note is edited and closed", (stored) => {
     expect(reopened(stored)).toBe(stored);
