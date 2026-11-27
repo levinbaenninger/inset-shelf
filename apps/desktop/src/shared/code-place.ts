@@ -4,7 +4,7 @@ import { z } from "zod";
 export const PATH_MAX = 4096;
 
 /** The folder `root` is, or holds, `file`: a whole path segment, never a name that only starts the same. */
-const isAncestor = (root: string, file: string): boolean =>
+export const isAncestor = (root: string, file: string): boolean =>
   file.startsWith(root.endsWith("/") ? root : `${root}/`);
 
 /** A whole path from the root, with no step back or in place: where it leads is what it says. */
@@ -21,7 +21,7 @@ export const CodePlaceSchema = z
     file: WholePathSchema,
     /** The project folder: the ancestor of `file` that the window's title names. Null when it names none. */
     root: WholePathSchema.nullable(),
-    /** The 1-based line the captured text began on. Not read yet: always null. */
+    /** The 1-based line the captured text began on in the saved file, when it was found there exactly once. */
     line: z.number().int().min(1).max(9_999_999).nullable(),
   })
   .refine(({ file, root }) => root === null || isAncestor(root, file), {

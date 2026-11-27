@@ -5,7 +5,9 @@ import {
   codeEditor,
   codeLabel,
   codePlace,
+  lineOfText,
   openAddress,
+  quietlyReadable,
   titleParts,
 } from "./code-editors";
 import type { CodeEditor } from "./code-editors";
@@ -318,5 +320,115 @@ describe(openAddress, () => {
         (editor) => editor.document === "file" && editor.open === null
       )
     ).toStrictEqual([]);
+  });
+});
+
+/** A source file of `count` lines, each naming its own number, with `lines` put in at their 1-based number. */
+const source = (count: number, lines: Readonly<Record<number, string>> = {}) =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      lines[index + 1] ?? `export const value${index + 1} = ${index + 1};`
+  ).join("\n");
+
+describe(lineOfText, () => {
+  it("finds the line the captured text begins on when it is in the file once", () => {
+    expect(lineOfText(source(40), "export const value12 = 12;")).toBe(12);
+  });
+
+  it("finds the first line of a capture over several lines, begun inside a line", () => {
+    expect(
+      lineOfText(source(40), "value12 = 12;\nexport const value13 = 13;")
+    ).toBe(12);
+  });
+
+  it("gives no line for text that is in the file twice", () => {
+    const twice = source(40, { 3: "retry();", 30: "retry();" });
+
+    expect(lineOfText(twice, "retry();")).toBeNull();
+  });
+
+  it("gives no line for text that is not in the file", () => {
+    expect(lineOfText(source(40), "a thought from no file")).toBeNull();
+  });
+
+  it.each([
+    ["a file saved with CRLF, captured with LF", "\r\n", "\n"],
+    ["a file saved with LF, captured with CRLF", "\n", "\r\n"],
+    ["a file saved with CR alone, captured with LF", "\r", "\n"],
+  ])("finds the line in %s", (_, saved, copied) => {
+    const text = source(40).replaceAll("\n", saved);
+
+    expect(
+      lineOfText(
+        text,
+        `export const value12 = 12;${copied}export const value13 = 13;`
+      )
+    ).toBe(12);
+  });
+
+  it("finds the line by an indented first line when the lines after it were copied with other indentation", () => {
+    const file = source(40, {
+      21: "    const total = items.length;",
+      22: "    return total;",
+    });
+
+    expect(
+      lineOfText(file, "  const total = items.length;\nreturn total;")
+    ).toBe(21);
+  });
+
+  it("gives no line by a first line shorter than 8 characters", () => {
+    const file = source(40, { 21: "  go();", 22: "  return 1;" });
+
+    expect(lineOfText(file, "go();\nreturn 2;")).toBeNull();
+  });
+
+  it("gives no line by a first line that is in the file twice", () => {
+    const file = source(40, { 5: "  if (ready) {", 25: "  if (ready) {" });
+
+    expect(lineOfText(file, "if (ready) {\n start(1);")).toBeNull();
+  });
+
+  it("starts at the first line that holds text, not a line break copied before it", () => {
+    expect(lineOfText(source(40), "\n  \nexport const value12 = 12;\n")).toBe(
+      12
+    );
+  });
+
+  it("gives no line for a capture of only blank space", () => {
+    expect(lineOfText(source(40), " \n\t\n")).toBeNull();
+  });
+});
+
+describe(quietlyReadable, () => {
+  const home = "/Users/anna";
+
+  it.each([
+    "/Users/anna/Developer/inset-shelf/src/a.ts",
+    "/private/var/folders/x1/T/inset-shelf-e2e-1/code/proj/src/a.ts",
+    "/Users/anna/DocumentsArchive/a.ts",
+    "/opt/src/proj/a.ts",
+  ])("reads %s on macOS", (file) => {
+    expect(quietlyReadable(file, home, "darwin")).toBeTruthy();
+  });
+
+  it.each([
+    "/Users/anna/Documents/proj/a.ts",
+    "/Users/anna/Desktop/a.ts",
+    "/Users/anna/Downloads/a.ts",
+    "/Users/anna/Library/Mobile Documents/com~apple~CloudDocs/a.ts",
+    "/Volumes/Backup/proj/a.ts",
+    "/Users/anna/documents/proj/a.ts",
+    "/volumes/Backup/a.ts",
+  ])("never reads %s on macOS, where a read can ask for access", (file) => {
+    expect(quietlyReadable(file, home, "darwin")).toBeFalsy();
+    expect(quietlyReadable(file, `${home}/`, "darwin")).toBeFalsy();
+  });
+
+  it("reads a Documents folder where the system asks nothing for it", () => {
+    expect(
+      quietlyReadable("/home/anna/Documents/a.ts", "/home/anna", "linux")
+    ).toBeTruthy();
   });
 });

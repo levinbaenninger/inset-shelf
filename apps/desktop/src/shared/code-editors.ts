@@ -3,6 +3,7 @@ import {
   CodePlaceSchema,
   fileName,
   fromHome,
+  isAncestor,
   pathInProject,
 } from "./code-place";
 import type { CodePlace } from "./code-place";
@@ -264,4 +265,79 @@ export const openAddress = (
   return template
     .replace("{path}", () => path)
     .replace("{line}", () => String(line));
+};
+
+/** Line breaks as Windows, old Macs and the rest write them, made one. */
+const oneLineBreak = (text: string): string => text.replaceAll(/\r\n?/gu, "\n");
+
+/** A first line shorter than this is too common to name one place in a file. */
+const FIRST_LINE_MIN = 8;
+
+/** Where `wanted` is in `text` when it is there exactly once, else -1. Stops at the second. */
+const onlyIndex = (text: string, wanted: string): number => {
+  const first = text.indexOf(wanted);
+
+  return first === -1 || text.includes(wanted, first + 1) ? -1 : first;
+};
+
+/**
+ * The 1-based line where `captured` begins in `text`, when it is there
+ * exactly once; else null. Line endings count as one. When the whole capture
+ * is not there, its first line is looked for alone, trimmed, if it holds 8
+ * characters or more: an editor can copy the lines after it with other
+ * indentation. More than one match is no match.
+ */
+export const lineOfText = (text: string, captured: string): number | null => {
+  const file = oneLineBreak(text);
+
+  // A drag begun at the end of the line above copies that line's break first.
+  const wanted = oneLineBreak(captured)
+    .replace(/^(?:[ \t]*\n)+/u, "")
+    .trimEnd();
+
+  const firstLine = wanted.split("\n", 1)[0]?.trim() ?? "";
+
+  if (firstLine === "") {
+    return null;
+  }
+
+  const lookedFor =
+    file.includes(wanted) || firstLine.length < FIRST_LINE_MIN
+      ? wanted
+      : firstLine;
+
+  const at = onlyIndex(file, lookedFor);
+
+  return at === -1 ? null : file.slice(0, at).split("\n").length;
+};
+
+/** Where macOS asks the user before an app reads a file (Files and Folders), by the home folder's own names. */
+const ASKED_IN_HOME = ["Desktop", "Documents", "Downloads", "Library"];
+
+/**
+ * Whether main may read `file` with no chance of a system prompt. On macOS
+ * a file under the Desktop, Documents, Downloads or Library folder, or on
+ * another disk, is never read: it keeps its path and gets no line.
+ */
+export const quietlyReadable = (
+  file: string,
+  home: string,
+  /** `process.platform` in main. */
+  platform: string
+): boolean => {
+  if (platform !== "darwin") {
+    return true;
+  }
+
+  const folder = home.replace(/\/$/u, "");
+
+  const asked = [
+    ...ASKED_IN_HOME.map((name) => `${folder}/${name}`),
+    "/Volumes",
+  ];
+
+  // The disk tells no capitals apart: ~/documents is ~/Documents.
+  return !asked.some((each) =>
+    isAncestor(each.toLowerCase(), file.toLowerCase())
+  );
 };
