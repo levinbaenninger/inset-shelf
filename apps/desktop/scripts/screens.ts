@@ -27,6 +27,7 @@ import { chromium } from "playwright";
 import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
 
+import { goneMessage } from "../src/shared/code-place.ts";
 import {
   SHELF_MAX_HEIGHT_DIP,
   SHELF_MIN_WIDTH_DIP,
@@ -7765,6 +7766,22 @@ const codeSource = async (page: Page, words: string) =>
       )
     );
 
+const CODE_PLACE = { file: CODE_FILE, line: 147, root: CODE_ROOT };
+
+/** The code item's source line, as a button. */
+const codeLink = (page: Page) =>
+  item(page, 760).getByRole("button", { name: /^recall\.ts:147/u });
+
+/** The page asked main to open the code item once, by its id alone: never an address. */
+const openedOnce = async (page: Page): Promise<string | null> => {
+  const all = await calls(page);
+  const sent = all.filter((call) => call.call === "openLink");
+
+  return isDeepStrictEqual(sent, [{ arg: { id: uuid(760) }, call: "openLink" }])
+    ? null
+    : `the page asked main to open ${JSON.stringify(sent)}`;
+};
+
 /**
  * The source line reads `words` with a code mark and `tooltip`, and no part
  * of the home folder shows. With a file (a tooltip), it is a button whose
@@ -7909,6 +7926,55 @@ const CODE_SCENES: readonly Scene[] = (
         ),
       },
       name: "details-code",
+    },
+    {
+      act: async (page) => {
+        await codeLink(page).click();
+      },
+      check: async (page) => await openedOnce(page),
+      data: {
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      keepPointer: true,
+      name: "item-code-open",
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 760);
+      },
+      check: async (page) => {
+        const entries = await menuEntries(page);
+        const open = entries.find((entry) => entry.startsWith("Open in Code"));
+
+        return open?.endsWith("⌘O") === true
+          ? null
+          : `the menu offers ${JSON.stringify(entries)}, with no "Open in Code ⌘O"`;
+      },
+      data: {
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "menu-code-open",
+    },
+    {
+      act: async (page) => {
+        await codeLink(page).click();
+        await page.locator("[data-sonner-toast]").first().waitFor();
+        await page.waitForTimeout(500);
+      },
+      check: async (page) => {
+        const toast =
+          (await page.locator("[data-sonner-toast]").first().textContent()) ??
+          "";
+
+        return toast.includes("recall.ts is no longer at this path")
+          ? await openedOnce(page)
+          : `the shelf says "${toast}", not that recall.ts is gone`;
+      },
+      data: {
+        openNotice: { message: goneMessage(CODE_PLACE), tone: "failed" },
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "item-code-gone",
     },
   ] satisfies readonly StressScene[]
 ).map(stress);
