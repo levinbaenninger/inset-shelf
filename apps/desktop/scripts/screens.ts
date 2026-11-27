@@ -8549,8 +8549,155 @@ const codeChecks = async (
     : null;
 };
 
+/** Lines selected in a code editor: indented two and four spaces, one far wider than the shelf at 300. */
+const CODE_SNIPPET = [
+  "export interface PlaceSource {",
+  "  readonly app: string | null;",
+  "    readonly title: string | null; // the window's title as the system reported it, before the shelf tidies it",
+  "}",
+].join("\n");
+
+/** The snippet captured on macOS, with the file Code showed. */
+const snippetMac = {
+  ...codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE),
+  text: CODE_SNIPPET,
+};
+
+/** The snippet captured on Windows, where Code's title is all the shelf reads. */
+const snippetWindows = {
+  ...codeItem(
+    "Visual Studio Code",
+    "recall.ts - inset-shelf - Visual Studio Code",
+    null
+  ),
+  text: CODE_SNIPPET,
+};
+
+/**
+ * The snippet in `where` reads as code: in a monospace face, every line's
+ * indentation kept. `open`, a line too long for it wraps and nothing
+ * scrolls sideways.
+ */
+const snippetChecks = async (
+  where: Locator,
+  open: boolean
+): Promise<string | null> => {
+  const shown = await where.evaluate((root) => {
+    const code = root.querySelector("code");
+    const block = code?.parentElement;
+
+    return code === null || block === null || block === undefined
+      ? null
+      : {
+          font: getComputedStyle(code).fontFamily,
+          height: Math.round(block.getBoundingClientRect().height),
+          inner: block.scrollWidth,
+          outer: block.clientWidth,
+          scrolls: getComputedStyle(block).overflowX !== "visible",
+          text: block.textContent,
+        };
+  });
+
+  if (shown === null) {
+    return "the code snippet shows in no code block";
+  }
+
+  if (!shown.font.includes("monospace")) {
+    return `the code snippet is set in ${shown.font}, not a monospace face`;
+  }
+
+  if (
+    !shown.text.includes("\n  readonly app") ||
+    !shown.text.includes("\n    readonly title")
+  ) {
+    return `the code snippet lost its indentation: ${JSON.stringify(shown.text)}`;
+  }
+
+  if (!open) {
+    return null;
+  }
+
+  if (shown.scrolls || shown.inner > shown.outer + 1) {
+    return `a long code line must wrap, not scroll sideways: ${JSON.stringify(shown)}`;
+  }
+
+  // Five lines of 16 px or more: the long one wraps.
+  return shown.height >= 80
+    ? null
+    : `the snippet's long line must wrap: ${JSON.stringify(shown)}`;
+};
+
+/** The edits sent for the code item: their words. */
+const editedTexts = async (page: Page): Promise<readonly string[]> => {
+  const ops = await applied(page);
+
+  return ops.filter((op) => op.type === "editText").map((op) => op.text ?? "");
+};
+
 const CODE_SCENES: readonly Scene[] = (
   [
+    {
+      check: async (page) => await snippetChecks(item(page, 760), false),
+      data: { view: codeView(snippetMac) },
+      name: "item-code-snippet",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 760);
+      },
+      // Code's title alone, as on Windows: the editor's name says it is code.
+      check: async (page) => await snippetChecks(item(page, 760), true),
+      data: { view: codeView(snippetWindows) },
+      height: 620,
+      name: "item-code-snippet-open",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 760);
+      },
+      check: async (page) =>
+        await snippetChecks(page.locator("[data-details-view]"), true),
+      data: { view: codeView(snippetMac) },
+      name: "details-code-snippet",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 760);
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(
+          "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+        );
+        await page.keyboard.type("x");
+      },
+      // Edited in place, the snippet still reads as code, and saving keeps every line's indentation: the typed letter changes only the end.
+      check: async (page) => {
+        const field = await snippetChecks(
+          item(page, 760).getByRole("textbox", { name: "Edit item" }),
+          true
+        );
+
+        if (field !== null) {
+          return `while it is edited: ${field}`;
+        }
+
+        await page.keyboard.press("ControlOrMeta+Enter");
+
+        const sent = await editedTexts(page);
+
+        return sent.at(-1) === `${CODE_SNIPPET}x`
+          ? null
+          : `editing the code snippet sent ${JSON.stringify(sent)}, not its lines with an x at the end`;
+      },
+      data: { view: codeView(snippetMac) },
+      name: "item-code-snippet-edit",
+      width: NARROWEST,
+    },
     {
       check: async (page) =>
         await codeChecks(page, "recall.ts:147 · inset-shelf", CODE_TOOLTIP),
