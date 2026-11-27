@@ -1,4 +1,4 @@
-import { AppWindowMacIcon } from "@hugeicons/core-free-icons";
+import { AppWindowMacIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
 import type { ShelfHere } from "@shared/contracts";
@@ -8,7 +8,7 @@ import type { ItemGroup, ItemId } from "@shared/shelf";
 import { useMemo, useState } from "react";
 
 import { InputGroupButton } from "@/components/ui/input-group";
-import { tooltipText } from "@/shared/clamp";
+import { tooltipText, Truncated } from "@/shared/clamp";
 
 /** The search with `from:here` added, once. */
 export const withFromHere = (query: string): string => {
@@ -123,3 +123,52 @@ export const FromHereChip = ({
     </InputGroupButton>
   );
 };
+
+/**
+ * The opening a note typed now goes with: the window from here, while the
+ * list shows its items and × hasn't taken the chip off for this opening
+ * (`dismissed` is the seq it was taken off in). Null makes a plain note.
+ */
+export const noteHere = (
+  here: ShelfHere | null | undefined,
+  filtering: boolean,
+  dismissed: number | null
+): ShelfHere | null =>
+  filtering &&
+  here !== null &&
+  here !== undefined &&
+  here.ids.length > 0 &&
+  here.seq !== dismissed
+    ? here
+    : null;
+
+/**
+ * In the composer while the list shows the items from here: the window a
+ * note typed now goes with, so it stays in the list and the shelf finds it
+ * beside that window again. × takes it off for this opening of the shelf.
+ */
+export const HereNoteChip = ({
+  here,
+  onRemove,
+}: {
+  readonly here: ShelfHere;
+  readonly onRemove: () => void;
+}) => (
+  <span className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-foreground inline-flex h-5 max-w-full min-w-0 items-center gap-1 rounded-md pl-1.5 text-xs font-medium">
+    <HugeiconsIcon className="size-3 shrink-0" icon={AppWindowMacIcon} />
+    <span className="sr-only">Notes typed now go with </span>
+    <Truncated
+      text={here.label}
+      tooltip={`Notes typed now go with ${here.label}`}
+    />
+    <InputGroupButton
+      aria-label={`Type notes without ${here.label}`}
+      className="size-5 shrink-0"
+      onClick={onRemove}
+      size="icon-xs"
+      title={tooltipText(`Type notes without ${here.label}`)}
+    >
+      <HugeiconsIcon className="size-3" icon={Cancel01Icon} />
+    </InputGroupButton>
+  </span>
+);

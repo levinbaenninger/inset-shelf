@@ -1,6 +1,7 @@
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
+import type { ShelfHere } from "@shared/contracts";
 import { parseComposer, TEXT_MAX } from "@shared/shelf";
 import { useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
@@ -13,6 +14,7 @@ import {
 import { Truncated } from "@/shared/clamp";
 import { coach } from "@/tutorial/anchors";
 
+import { HereNoteChip, noteHere } from "./from-here";
 import { MarkdownField } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
 import { AddMenu } from "./menus";
@@ -20,7 +22,8 @@ import type { AddActions } from "./menus";
 
 export interface ComposerProps {
   readonly sectionName: string;
-  readonly onSubmit: (text: string) => void;
+  /** `here`: the opening the from-here chip showed for, so the note goes with that window. */
+  readonly onSubmit: (text: string, here: number | undefined) => void;
   /** ↑ in an empty composer moves into the list. */
   readonly onLeaveUp: () => void;
   /** Escape in an empty composer hides the shelf. */
@@ -32,6 +35,9 @@ export interface ComposerProps {
   readonly hidden?: boolean;
   /** The sections there are, so "# Name" says whether it makes one or goes to one. */
   readonly sectionNames: readonly string[];
+  /** The window the shelf opened beside; its chip shows while the list is `filtering` to its items. */
+  readonly here: ShelfHere | null | undefined;
+  readonly filtering: boolean;
 }
 
 /**
@@ -42,6 +48,8 @@ export interface ComposerProps {
  */
 export const Composer = ({
   addActions,
+  filtering,
+  here,
   hidden = false,
   onEscape,
   onLeaveUp,
@@ -53,6 +61,14 @@ export const Composer = ({
   const field = useRef<MarkdownFieldHandle>(null);
   // Markdown, so the field can be cleared once a note is added.
   const [text, setText] = useState("");
+  // The opening whose chip × took off; the list showing everything again brings it back.
+  const [dismissed, setDismissed] = useState<number | null>(null);
+
+  if (!filtering && dismissed !== null) {
+    setDismissed(null);
+  }
+
+  const from = noteHere(here, filtering, dismissed);
 
   useImperativeHandle<MarkdownFieldHandle | null, MarkdownFieldHandle | null>(
     ref,
@@ -107,7 +123,7 @@ export const Composer = ({
             onLeaveUp,
             onSubmit: (markdown) => {
               if (markdown.trim() !== "") {
-                onSubmit(markdown.slice(0, TEXT_MAX));
+                onSubmit(markdown.slice(0, TEXT_MAX), from?.seq);
                 setText("");
               }
             },
@@ -121,8 +137,17 @@ export const Composer = ({
         <InputGroupAddon
           align="inline-end"
           aria-live="polite"
-          className="ml-2 max-w-[calc(100%-0.5rem)] min-w-0"
+          className="ml-2 max-w-[calc(100%-0.5rem)] min-w-0 flex-wrap justify-end gap-1"
         >
+          {from === null ? null : (
+            <HereNoteChip
+              here={from}
+              onRemove={() => {
+                setDismissed(from.seq);
+                field.current?.focus();
+              }}
+            />
+          )}
           {entry.kind === "section" ? (
             <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
               <span className="shrink-0">↩</span>
