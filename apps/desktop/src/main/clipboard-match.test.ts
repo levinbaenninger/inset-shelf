@@ -275,6 +275,12 @@ describe("holdsAgainIn with a cut and a copy of files", () => {
   });
 });
 
+const cutIn = async (read: Parameters<typeof clipboardContent>[0]) => {
+  const { cut } = await clipboardContent(read);
+
+  return cut;
+};
+
 describe(clipboardContent, () => {
   it("lists the files of the read itself, as the live clipboard would", async () => {
     await expect(
@@ -285,10 +291,21 @@ describe(clipboardContent, () => {
         },
       ])
     ).resolves.toStrictEqual({
+      cut: false,
       files: ["/Users/me/a.pdf"],
       html: "",
       text: "a.pdf",
     });
+  });
+
+  it("tells files cut from files copied by the drop effect beside their list", async () => {
+    expect({
+      copied: await cutIn(withEffect("file:///a.pdf", 1)),
+      cut: await cutIn(withEffect("file:///a.pdf", 2)),
+      none: await cutIn([{ "text/uri-list": new Blob(["file:///a.pdf"]) }]),
+      // Explorer notes a plain copy as copy and link together.
+      noted: await cutIn(withEffect("file:///a.pdf", 5)),
+    }).toStrictEqual({ copied: false, cut: true, none: false, noted: false });
   });
 
   it("reads the plain text and HTML of one read, empty for what it hasn't", async () => {
@@ -298,8 +315,8 @@ describe(clipboardContent, () => {
       ]),
       none: await clipboardContent([]),
     }).toStrictEqual({
-      both: { files: [], html: "<b>x</b>", text: "x" },
-      none: { files: [], html: "", text: "" },
+      both: { cut: false, files: [], html: "<b>x</b>", text: "x" },
+      none: { cut: false, files: [], html: "", text: "" },
     });
   });
 });

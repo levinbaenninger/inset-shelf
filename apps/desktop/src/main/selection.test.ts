@@ -73,6 +73,7 @@ const fakeClipboard = (
       }
     },
     content: async (read) => ({
+      cut: false,
       files: [],
       html: (await read[0]?.["text/html"]?.text()) ?? "",
       text: (await read[0]?.["text/plain"]?.text()) ?? "",

@@ -17,8 +17,9 @@ export interface SelectionDeps<S> {
    * empty one. It judges that read and makes none of its own, which a hold starting meanwhile would spoil.
    */
   readonly holds: (saved: S, current: S) => Promise<boolean>;
-  /** The plain text and HTML in a snapshot, "" for either it hasn't, and the files it lists. */
+  /** The plain text and HTML in a snapshot, "" for either it hasn't, the files it lists, and whether they were cut. */
   readonly content: (snapshot: S) => Promise<{
+    readonly cut: boolean;
     readonly files: readonly string[];
     readonly html: string;
     readonly text: string;
@@ -206,7 +207,7 @@ const words = (text: string): string => text.replaceAll("\r\n", "\n").trim();
  * empty or half-read without an error, so a read shows a newer copy only by
  * showing something else, never by lacking something the capture had. After a
  * hold the text and HTML are exactly what was copied, or it is a newer copy.
- * Files carry no text or HTML to tell a newer copy by, so the read's own list
+ * Files cut are one too: the capture copies. Files carry no text or HTML to tell a newer copy by, so the read's own list
  * of files is compared: another list, or text where the capture had none,
  * is a newer copy; no list at all, with nothing else shown, is unsure.
  */
@@ -220,9 +221,10 @@ const verdictOn = async <S>(
   },
   afterHold: boolean
 ): Promise<Verdict> => {
-  const { files, html, text } = await deps.content(snapshot);
+  const { cut, files, html, text } = await deps.content(snapshot);
 
-  if (afterHold && (text !== copied.text || html !== copied.html)) {
+  // The capture only copies: files cut since were cut by the user.
+  if (cut || (afterHold && (text !== copied.text || html !== copied.html))) {
     return "newer";
   }
 

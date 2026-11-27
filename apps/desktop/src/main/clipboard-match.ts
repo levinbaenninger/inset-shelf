@@ -139,6 +139,28 @@ const textIn = async (
   return value instanceof Blob ? await value.text() : "";
 };
 
+/** Where Windows notes a copy or a cut of files, beside their list: a 32-bit set of flags, with 2 to move. */
+const DROP_EFFECT =
+  'electron application/osclipboard;format="Preferred DropEffect"';
+
+/** The move flag is the second bit of the lowest byte: set when that byte, read as a number, is 2, 3, 6, 7 and so on. */
+const isMove = (low: number): boolean => Math.floor(low / 2) % 2 === 1;
+
+/** Whether the files in a read were cut, not copied; a read that notes no effect, as a copy from macOS, is a copy. */
+const filesCut = async (
+  read: readonly ClipboardContents[]
+): Promise<boolean> => {
+  const effect = read.find((item) => DROP_EFFECT in item)?.[DROP_EFFECT];
+
+  if (!(effect instanceof Blob)) {
+    return false;
+  }
+
+  const [low = 0] = new Uint8Array(await effect.arrayBuffer());
+
+  return isMove(low);
+};
+
 /** The paths of the copied files in one read of the clipboard, as the live clipboard lists them. */
 const filesIn = async (
   read: readonly ClipboardContents[]
@@ -156,16 +178,19 @@ const filesIn = async (
 
 /**
  * What one read of the clipboard holds: its plain text and HTML ("" for either
- * it hasn't) and the files it lists. Judging a read by itself matters: a read
- * made again could fall under another app's hold, and come back empty.
+ * it hasn't), the files it lists, and whether they were cut. Judging a read by
+ * itself matters: a read made again could fall under another app's hold, and
+ * come back empty.
  */
 export const clipboardContent = async (
   read: readonly ClipboardContents[]
 ): Promise<{
+  readonly cut: boolean;
   readonly files: readonly string[];
   readonly html: string;
   readonly text: string;
 }> => ({
+  cut: await filesCut(read),
   files: await filesIn(read),
   html: await textIn(read, "text/html"),
   text: await textIn(read, "text/plain"),
@@ -186,16 +211,19 @@ const fileListsIn = async (
 
 /**
  * holdsAgain, judged from one read of the clipboard rather than reading it
- * again. Copied files are what a clipboard of files holds, so they must be the
- * same files: another list of files isn't the clipboard put back.
+ * again. Files are part of what a clipboard holds, so they must be the same
+ * files, cut or copied alike, and none beside text that had none: another
+ * list of files isn't the clipboard put back.
  */
 export const holdsAgainIn = async (
   saved: readonly ClipboardContents[],
   current: readonly ClipboardContents[]
 ): Promise<boolean> => {
-  const files = await fileListsIn(saved);
+  if ((await fileListsIn(saved)) !== (await fileListsIn(current))) {
+    return false;
+  }
 
-  if (files !== "" && files !== (await fileListsIn(current))) {
+  if ((await filesCut(saved)) !== (await filesCut(current))) {
     return false;
   }
 
