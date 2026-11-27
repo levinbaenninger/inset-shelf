@@ -3162,6 +3162,21 @@ const checkRecall = async (app: ChildProcess): Promise<ChildProcess> => {
       shelf !== undefined && searchValue() === "from:here",
       searchValue()
     );
+
+    // Under the composer's from-here chip, a typed note goes with the window the pill was for.
+    await clickElement("AXTextArea", "New note in Inbox");
+    typeIntoShelf("Typed beside Recall A");
+    await delay(800);
+
+    const typed = items().find(
+      (item) => item.kind === "text" && item.text === "Typed beside Recall A"
+    );
+
+    record(
+      "recall: a note typed under the from-here chip carries the window's source",
+      typed?.context?.title === "Recall A",
+      JSON.stringify(typed?.context ?? null)
+    );
     await hideShelf();
   }
 
