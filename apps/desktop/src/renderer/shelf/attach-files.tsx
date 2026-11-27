@@ -1,3 +1,4 @@
+import { DROPPED_PATHS_MAX } from "@shared/contracts";
 import type { AttachResult } from "@shared/contracts";
 import { ATTACHMENTS_MAX } from "@shared/shelf";
 import type { AttachmentId, ItemId, ShelfItem } from "@shared/shelf";
@@ -15,13 +16,26 @@ import type { AttachTarget, RowDropLook } from "./use-attach-drop";
 
 const api = shelfBridge();
 
-/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). Main's notice says how it went once they are on disk. */
-const addDataFiles = async (files: readonly File[]): Promise<void> => {
-  const paths = files.flatMap((file) => {
+const TOO_MANY = `Drop or paste up to ${DROPPED_PATHS_MAX} files at a time.`;
+
+/** The paths of files dropped or pasted in; none for files without one, such as an image copied from a page. */
+const pathsOf = (files: readonly File[]): string[] =>
+  files.flatMap((file) => {
     const found = filePath(file);
 
     return found === "" ? [] : [found];
   });
+
+/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). Main's notice says how it went once they are on disk. */
+const addDataFiles = async (files: readonly File[]): Promise<void> => {
+  const paths = pathsOf(files);
+
+  // Main takes no more than this at once.
+  if (paths.length > DROPPED_PATHS_MAX) {
+    toast.error(`Nothing was added. ${TOO_MANY}`, { duration: NOTICE_MS });
+
+    return;
+  }
 
   if (paths.length > 0) {
     api.addFiles(paths);
@@ -43,11 +57,12 @@ const attachDataFiles = async (
   id: ItemId,
   files: readonly File[]
 ): Promise<AttachResult | null> => {
-  const paths = files.flatMap((file) => {
-    const found = filePath(file);
+  const paths = pathsOf(files);
 
-    return found === "" ? [] : [found];
-  });
+  // Main takes no more than this at once.
+  if (paths.length > DROPPED_PATHS_MAX) {
+    return { attached: [], message: `Nothing was attached. ${TOO_MANY}` };
+  }
 
   if (paths.length > 0) {
     return await api.addFilesTo({ id, paths });
