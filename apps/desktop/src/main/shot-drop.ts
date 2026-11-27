@@ -35,7 +35,7 @@ export interface ShotDropDeps<S extends NamedShot> {
   readonly dropFailed: (why: string) => void;
   /** Writes the card's picture, a PNG, as `name` into `folder`, the drag's own folder in staging, and returns the file; never a file of the user's. */
   readonly stage: (shot: S, folder: string, name: string) => string;
-  /** Removes a drag's file from staging, still as it was written: its screenshot has a place on the shelf, or the app quits. Never throws. */
+  /** Removes a drag's file from staging, still as it was written, once the disk holds its screenshot in a place on the shelf. Never throws. */
   readonly unstage: (file: string) => void;
 }
 
@@ -94,10 +94,10 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
   };
 
   /**
-   * A drag's file goes once its screenshot has a place on the shelf, unless
-   * an app the drag went to saved the user's edit into it. Until then file
-   * and record stay: another drop of the file still gives the screenshot its
-   * place.
+   * A drag's file goes once the disk holds its screenshot in a place on the
+   * shelf, unless an app the drag went to saved the user's edit into it.
+   * Until then file and record stay: another drop of the file still gives
+   * the screenshot its place.
    */
   const retire = ({ copy, file }: Claimed): void => {
     if (copy.drop.placed() && asStaged(file, copy) !== null) {
@@ -230,10 +230,16 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
       }
     },
 
-    /** At quit: each drag's file still as it was written goes; one the user edited in another app stays theirs. */
+    /**
+     * At quit: each drag's file still as it was written goes once the disk
+     * holds its screenshot in a place on the shelf. One the user edited in
+     * another app stays theirs, and one whose screenshot the disk doesn't
+     * hold stays in staging, its only copy: the next launch leaves it there,
+     * and a drop of it brings it in as a new picture.
+     */
     sweep: (): void => {
       for (const [file, copy] of drags) {
-        if (asStaged(file, copy) !== null) {
+        if (copy.drop.placed() && asStaged(file, copy) !== null) {
           deps.unstage(file);
         }
       }
