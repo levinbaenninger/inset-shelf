@@ -370,6 +370,14 @@ const trayItem = (item: string): boolean => {
     // A menu bar hider or a full menu bar leaves the tray out of reach: the global shortcut shows and hides the shelf too.
     console.log(`  tray out of reach: "${item}" with the shortcut`);
 
+    // The key guard refuses the shortcut while another app is in front (the shelf hands focus back when it hides): bring the app under test forward first, as a Dock click would.
+    if (!["source", processName].includes(frontmost())) {
+      osa(
+        `tell application "System Events" to set frontmost of process "${processName}" to true`
+      );
+      execFileSync("sleep", ["0.5"]);
+    }
+
     if (
       shelfOnScreen() !== visible &&
       !guardedKeys(toggleKeys, ["source", processName])
