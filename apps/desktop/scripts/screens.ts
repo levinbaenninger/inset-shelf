@@ -6526,6 +6526,9 @@ const ELSEWHERE = {
   shelf: "Delete it on the shelf to add it elsewhere.",
 } as const;
 
+/** What the dimmed Annotate says on hover while Retry is the only add. */
+const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
+
 /** How many lines the failure message takes as it shows now, and how many its words run to. */
 const failureLines = async (
   page: Page
@@ -6546,6 +6549,45 @@ const failureLines = async (
       };
     })
   );
+
+/**
+ * What the card whose only add is Retry adding to “…” tells the user: the
+ * reason, then where the screenshot is and what to do there. Its hover on the
+ * dimmed Annotate says when it works again; the keyboard never reaches a button
+ * that is off, so the message says it too, and the keyboard reads it to its end.
+ */
+const retryOnlySays = async (
+  page: Page,
+  message: string
+): Promise<string | null> => {
+  const said = (await page.getByRole("alert").textContent()) ?? "";
+
+  if (!said.startsWith(message) || !said.endsWith(ELSEWHERE.item)) {
+    return `the failure message must start with the reason and end with “${ELSEWHERE.item}”: “${said}”`;
+  }
+
+  await page.getByRole("button", { name: "Annotate" }).hover({ force: true });
+
+  const tip = await page
+    .getByRole("tooltip")
+    .first()
+    .textContent({ timeout: 2000 })
+    .catch(() => null);
+
+  if (tip !== ANNOTATE_OFF) {
+    return `the dimmed Annotate must say “${ANNOTATE_OFF}” on hover: ${String(tip)}`;
+  }
+
+  // In steps: the tip closes on the moves after the pointer left the button.
+  await page.mouse.move(0, 0, { steps: 4 });
+  await page.getByRole("tooltip").first().waitFor({ state: "hidden" });
+
+  if (!(await tabToFailure(page))) {
+    return "Tab never reached the failure message";
+  }
+
+  return await failureEndReached(page);
+};
 
 /** The failed card once Retry adding to “…” is the only add left (`placed`, src/shared/contracts.ts): one pill, in Add to Shelf's place, and the item named under it. */
 const retryOnly = (
@@ -6594,21 +6636,10 @@ const retryOnly = (
     // Annotate would add it to the shelf: it stays in its corner, off.
     const annotate = page.getByRole("button", { name: "Annotate" });
 
-    // Its hover says when it works again. The keyboard never reaches a button that is off, so the failure message says it too, after the reason.
-    const said = (await page.getByRole("alert").textContent()) ?? "";
+    const unsaid = await retryOnlySays(page, message);
 
-    if (!said.startsWith(message) || !said.endsWith(ELSEWHERE.item)) {
-      return `the failure message must start with the reason and end with “${ELSEWHERE.item}”: “${said}”`;
-    }
-
-    if (!(await tabToFailure(page))) {
-      return "Tab never reached the failure message";
-    }
-
-    const unread = await failureEndReached(page);
-
-    if (unread !== null) {
-      return unread;
+    if (unsaid !== null) {
+      return unsaid;
     }
 
     const before = await callCount(page);
