@@ -37,7 +37,7 @@ const doc: ShelfDoc = {
       context: null,
       createdAt: "2026-10-22T10:00:00.000Z",
       done: true,
-      edited: false,
+      captured: null,
       id: ItemIdSchema.parse(uuid(10)),
       html: null,
       kind: "text",

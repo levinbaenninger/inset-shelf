@@ -248,13 +248,10 @@ export const LinkSchema = z.object({
 
 const TextFields = {
   /**
-   * The selection as the app copied it, put back next to the text when the
-   * item is copied so links and formatting paste too. Never shown; dropped
-   * once the text is edited.
+   * The HTML the app copied beside a selection's words, put back next to
+   * them on Copy while the text is still those words. Never shown.
    */
   html: z.string().max(HTML_MAX).nullable().default(null),
-  /** Whether the text was changed in the shelf. A selection copies as the app copied it until it is. */
-  edited: z.boolean().default(false),
   kind: z.literal("text"),
   /** The web links in a copied selection, which the item lists when it is open. */
   links: z.array(LinkSchema).max(LINKS_MAX).default([]),
@@ -384,11 +381,28 @@ const FileFieldsV2 = {
   note: z.string().max(TEXT_MAX),
 };
 
-export const TextItemSchema = z.object({
-  ...ItemBase,
-  ...MetaFields,
-  ...TextFields,
-});
+/** The words a selection was captured with; a typed note has none. */
+const capturedOf = (item: {
+  readonly text: string;
+  readonly via: "typed" | "selection";
+}): string | null => (item.via === "selection" ? item.text : null);
+
+export const TextItemSchema = z
+  .object({
+    ...ItemBase,
+    ...MetaFields,
+    ...TextFields,
+    /**
+     * A selection's words as they were captured, never changed after. It
+     * copies as it was copied while its text is these words. A shelf saved
+     * before this field reads a selection as captured as it stands.
+     */
+    captured: z.string().max(TEXT_MAX).nullable().optional(),
+  })
+  .transform((item) => ({
+    ...item,
+    captured: item.captured === undefined ? capturedOf(item) : item.captured,
+  }));
 
 export const ImageItemSchema = z.object({
   ...ItemBase,
@@ -557,10 +571,14 @@ const upgradeV2 = (doc: z.output<typeof ShelfDocV2Schema>): ShelfDocV3 => ({
   schemaVersion: 3,
 });
 
-/** Every version 3 item as it was, with no attachments. */
+/** Every version 3 item as it was, with no attachments; a selection as captured as it stands. */
 const upgradeV3 = (doc: ShelfDocV3): ShelfDoc => ({
   ...doc,
-  items: doc.items.map((item) => ({ ...item, attachments: [] })),
+  items: doc.items.map((item) =>
+    item.kind === "text"
+      ? { ...item, attachments: [], captured: capturedOf(item) }
+      : { ...item, attachments: [] }
+  ),
   schemaVersion: 4,
 });
 
@@ -999,9 +1017,9 @@ const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
       ...NO_META,
       color: null,
       context: null,
+      captured: null,
       createdAt: env.now().toISOString(),
       done: false,
-      edited: false,
       html: null,
       id: env.newItemId(),
       kind: "text",
@@ -1125,11 +1143,11 @@ const addText = (
 
   return addItem(doc, {
     ...NO_META,
+    captured: capturedOf({ text, via: op.via }),
     color: null,
     context: withTextMark(op.context, text, op.text.length > TEXT_MAX),
     createdAt: env.now().toISOString(),
     done: false,
-    edited: false,
     html: op.html !== null && op.html.length <= HTML_MAX ? op.html : null,
     id: env.newItemId(),
     kind: "text",
@@ -1713,9 +1731,7 @@ export const applyOp = (
     case "editText": {
       return changed(
         mapItem(doc, op.id, (item) =>
-          item.kind === "text"
-            ? { ...item, edited: true, html: null, text: op.text }
-            : null
+          item.kind === "text" ? { ...item, text: op.text } : null
         )
       );
     }
@@ -1867,12 +1883,13 @@ export const PICTURE_KIND: Readonly<Record<ImageItem["via"], string>> = {
 
 /**
  * The shelf's rendering of a note typed or edited in it, which Copy gives as
- * the shelf shows it. Null for a selection the app copied, which Copy gives
- * back unread, and for a note the shelf shows as nothing. What the shelf
- * shows as one code block is a tree of one `code` node, which copies as code.
+ * the shelf shows it. Null for a selection still holding the words it was
+ * captured with, which Copy gives back unread, and for a note the shelf
+ * shows as nothing. What the shelf shows as one code block is a tree of one
+ * `code` node, which copies as code.
  */
 const shownNote = (item: ShelfItem): Copied | null => {
-  if (item.kind !== "text" || (item.via === "selection" && !item.edited)) {
+  if (item.kind !== "text" || item.text === item.captured) {
     return null;
   }
 
@@ -1887,13 +1904,21 @@ export const copiesAsShown = (item: ShelfItem): boolean =>
 
 /**
  * A text item's words as Copy and drag-out give them: a note as the shelf
- * shows it, else the text as it was given, with the HTML the app copied
- * beside it when it had some.
+ * shows it, else the text as it stands, with the HTML the app copied beside
+ * it while the text is still the captured words and that HTML holds any.
  */
 export const copiedNote = (
   item: TextItem
 ): { readonly text: string; readonly html: string | null } =>
-  shownNote(item) ?? { html: item.html, text: item.text };
+  shownNote(item) ?? {
+    html:
+      item.text !== item.captured ||
+      item.html === null ||
+      item.html.trim() === ""
+        ? null
+        : item.html,
+    text: item.text,
+  };
 
 export const itemText = (item: ShelfItem): string => {
   if (item.kind === "text") {

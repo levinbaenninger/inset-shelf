@@ -5,6 +5,7 @@ import { CodePlaceSchema, isCapturedText } from "./code-place";
 import v3 from "./fixtures/shelf-v3.json";
 import {
   applyOp,
+  copiedNote,
   storedFilesOf,
   groupItems,
   itemsAsList,
@@ -558,7 +559,51 @@ describe("selections with links", () => {
     }
   );
 
-  it("drops the copied HTML once the text is edited", () => {
+  it("reads a selection a shelf kept before it knew the captured words as captured as it stands, and a typed note as typed", () => {
+    const stored = (id: number, via: string) => ({
+      attachments: [],
+      color: null,
+      context: null,
+      createdAt: "2026-11-20T09:00:00.000Z",
+      description: "",
+      done: false,
+      due: null,
+      html: null,
+      id: uuid(id),
+      kind: "text",
+      links: [],
+      sectionId: INBOX,
+      steps: [],
+      text: "__init__",
+      via,
+      windows: [],
+    });
+
+    const doc = parseShelfDocument(
+      JSON.stringify({
+        activeSectionId: INBOX,
+        items: [stored(20, "selection"), stored(21, "typed")],
+        schemaVersion: 4,
+        sections: [{ id: INBOX, name: "Inbox" }],
+      })
+    );
+
+    const [selection, typed] = doc?.items ?? [];
+
+    if (doc === null || selection === undefined || typed === undefined) {
+      throw new Error("not read");
+    }
+
+    const [edited] = apply(doc, [
+      { id: selection.id, text: "__init__ runs", type: "editText" },
+    ]).doc.items;
+
+    expect(
+      [selection, typed, edited ?? selection].map((item) => itemText(item))
+    ).toStrictEqual(["__init__", "init", "init runs"]);
+  });
+
+  it("copies an edited selection without the HTML it was copied with", () => {
     const added = apply(emptyShelf(INBOX), [
       {
         context: null,
@@ -579,7 +624,10 @@ describe("selections with links", () => {
       { id: item.id, text: "plain", type: "editText" },
     ]).doc.items;
 
-    expect(edited).toMatchObject({ html: null, text: "plain" });
+    expect(edited?.kind === "text" ? copiedNote(edited) : null).toStrictEqual({
+      html: "<p>plain</p>",
+      text: "plain",
+    });
   });
 });
 
@@ -1080,7 +1128,7 @@ const shelfWithAttachments = (attachments: readonly unknown[]) =>
         description: "",
         done: false,
         due: null,
-        edited: false,
+        captured: null,
         html: null,
         id: uuid(20),
         kind: "text",
@@ -1113,8 +1161,13 @@ describe("attachments on an item (format 4)", () => {
             item.context === null ? null : { ...item.context, code: null },
         };
 
-        // A text item a version 3 build kept reads as not edited in the shelf.
-        return item.kind === "text" ? { ...read, edited: false } : read;
+        // A selection a version 3 build kept reads as captured as it stands.
+        return item.kind === "text"
+          ? {
+              ...read,
+              captured: item.via === "selection" ? item.text : null,
+            }
+          : read;
       }),
       schemaVersion: 4,
     });

@@ -193,12 +193,6 @@ export const createShelfController = (
     { readonly item: ShelfItem; readonly version: number }
   > = new Map();
 
-  // A captured selection's formatting while its words are edited: it comes back with the captured words (Escape after typing).
-  let formatted: ReadonlyMap<
-    ItemId,
-    { readonly text: string; readonly html: string }
-  > = new Map();
-
   const listeners = new Set<() => void>();
 
   const emit = (): void => {
@@ -396,37 +390,6 @@ export const createShelfController = (
     return true;
   };
 
-  /** An edit of a captured selection's words clears its formatting; going back to the captured words brings it back. */
-  const keepFormatting = (
-    id: ItemId,
-    text: string,
-    before: ShelfDoc
-  ): ShelfDoc => {
-    const was = before.items.find((item) => item.id === id);
-
-    if (was?.kind === "text" && was.html !== null && !formatted.has(id)) {
-      formatted = new Map([
-        ...formatted,
-        [id, { html: was.html, text: was.text }],
-      ]);
-    }
-
-    const captured = formatted.get(id);
-
-    if (captured?.text !== text) {
-      return doc;
-    }
-
-    return {
-      ...doc,
-      items: doc.items.map((item) =>
-        item.id === id && item.kind === "text"
-          ? { ...item, html: captured.html }
-          : item
-      ),
-    };
-  };
-
   /** removeWindow remembers the window; restoreWindow puts it back where it was. */
   const windowOp = (op: ShelfOp | MainOp): ShelfOp | MainOp | null => {
     if (op.type === "removeWindow") {
@@ -583,7 +546,6 @@ export const createShelfController = (
         return null;
       }
 
-      const before = doc;
       const result = applyOp(doc, op, deps.env, pending);
 
       if (result.doc === doc) {
@@ -591,10 +553,6 @@ export const createShelfController = (
       }
 
       ({ doc } = result);
-
-      if (op.type === "editText") {
-        doc = keepFormatting(op.id, op.text, before);
-      }
 
       version += 1;
       toDelete = [...toDelete, ...result.discarded];

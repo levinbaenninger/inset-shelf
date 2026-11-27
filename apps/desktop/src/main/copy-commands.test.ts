@@ -6,6 +6,7 @@ import {
   AttachmentIdSchema,
   emptyShelf,
   ItemIdSchema,
+  itemText,
   SectionIdSchema,
 } from "@shared/shelf";
 import type {
@@ -1305,6 +1306,137 @@ describe(createCopyCommands, () => {
       );
     }
   );
+
+  /** Words the open editor sends, one live update each, that end on the captured words again. */
+  const BACK_TO_CAPTURED: readonly {
+    readonly way: string;
+    readonly sent: (captured: string) => readonly string[];
+  }[] = [
+    { sent: (captured) => [`${captured} it`, captured], way: "Escape" },
+    {
+      sent: (captured) => [`${captured} it`, `${captured} its`, captured],
+      way: "Undo",
+    },
+  ];
+
+  it.each(
+    BACK_TO_CAPTURED.flatMap((back) =>
+      [
+        { html: null, text: "__init__" },
+        { html: "<b>__init__</b>", text: "__init__\n" },
+      ].map((capture) => ({ ...back, ...capture }))
+    )
+  )(
+    "copies and drags out a selection with HTML $html as it was copied after $way puts its words back",
+    async ({ html, sent, text }) => {
+      const { commands, controller, written } = await setup();
+
+      const id = added(
+        controller.apply({
+          context: null,
+          html,
+          text,
+          type: "addText",
+          via: "selection",
+        })
+      );
+
+      for (const words of sent(text)) {
+        controller.apply({ id, text: words, type: "editText" });
+      }
+
+      await commands.copy(id);
+      const item = controller.item(id);
+
+      expect({
+        copied: await formats(written[0]?.[0]),
+        dragged: item === undefined ? undefined : itemText(item),
+      }).toStrictEqual({
+        copied:
+          html === null
+            ? { "text/plain": text }
+            : { "text/html": html, "text/plain": text },
+        dragged: text,
+      });
+    }
+  );
+
+  it("copies a selection as it was copied once its edit that failed to save is discarded", async () => {
+    const { commands, controller, disk, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: null,
+        html: null,
+        text: "__init__",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await controller.flush();
+    disk.full = true;
+    controller.apply({ id, text: "__init__ it", type: "editText" });
+    await controller.flush();
+    controller.discard(id);
+    disk.full = false;
+
+    await commands.copy(id);
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "__init__",
+    });
+  });
+
+  it("copies and drags out a selection as the shelf shows it once its words are changed", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: null,
+        html: "<b>__init__</b>",
+        text: "__init__",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    controller.apply({ id, text: "__init__ it", type: "editText" });
+
+    await commands.copy(id);
+    const item = controller.item(id);
+
+    expect({
+      copied: await formats(written[0]?.[0]),
+      dragged: item === undefined ? undefined : itemText(item),
+    }).toStrictEqual({
+      copied: {
+        "text/html": "<p><strong>init</strong> it</p>",
+        "text/plain": "init it",
+      },
+      dragged: "init it",
+    });
+  });
+
+  it("copies a selection with empty HTML as plain text alone", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: null,
+        html: "",
+        text: "__init__",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await commands.copy(id);
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/plain": "__init__",
+    });
+  });
 
   it("copies a selection's words unread with its details, as a list and with its link", async () => {
     const { commands, controller, written } = await setup();
