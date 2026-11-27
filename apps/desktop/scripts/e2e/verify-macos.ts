@@ -3283,8 +3283,8 @@ const dropCardOnShelf = async (): Promise<void> => {
 
 /**
  * Step 5: a screenshot saved as a file, dragged into a Finder window. Finder
- * gets a file, the card stays, the shelf is unchanged; and whether the
- * original is still in the screenshot folder says whether Finder moved it.
+ * gets a file, the card stays, the shelf is unchanged, and the original is
+ * still in the screenshot folder: the drag hands out a copy of its own.
  */
 const dropCardInFinder = async (): Promise<void> => {
   // A test writes nothing in a folder the user keeps, and macOS saves screenshots to the Desktop unless told otherwise.
@@ -3372,7 +3372,7 @@ const dropCardInFinder = async (): Promise<void> => {
     items().length === shelfBefore,
     `${items().length - shelfBefore} new items`
   );
-  // A same-volume Finder drop may move the original instead of copying it; a later drag would then hand out a missing file.
+  // The card's drag hands out a staged copy, so even a Finder drop that moves its file leaves the original where macOS saved it.
   record(
     "card-drop: the screenshot's original stays in its folder after the Finder drop",
     existsSync(original),
