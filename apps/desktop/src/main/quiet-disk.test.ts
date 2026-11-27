@@ -212,6 +212,7 @@ describe(quietDisk, () => {
     ["nothing is", path.join(dev, "proj", "b.ts")],
     ["a file is on the way", path.join(source, "c.ts")],
     ["a file is named as a folder", `${source}/`],
+    ["the name is longer than a disk keeps", path.join(dev, "a".repeat(300))],
   ])("says a file is gone where %s", async (_, gone) => {
     await expect(disk.find(gone)).resolves.toStrictEqual({ kind: "gone" });
   });
