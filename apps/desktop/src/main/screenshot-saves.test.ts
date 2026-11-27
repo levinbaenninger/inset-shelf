@@ -199,7 +199,7 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
       notices.push(message);
     },
     now: () => clock,
-    onItsWay: (id) => controller.onItsWay(id),
+    comesBack: (id) => controller.comesBack(id),
     onWrite: (listener) => controller.onWrite(listener),
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
@@ -2023,6 +2023,47 @@ const tileOffWhileItsWriteIsHeld = async () => {
   return { card, end };
 };
 
+/**
+ * Add to Shelf still writes its picture file, and the shelf shows the
+ * screenshot nowhere. The disk holds no note, no write is on its way, and
+ * the disk refuses the next: only Discard changes still holds the tile on
+ * the note, which offers it.
+ */
+const tileOnlyDiscardHolds = async () => {
+  const card = await refused("item");
+  const tile = { attachmentId: tileOf(card), id: card.note };
+
+  card.controller.apply({ ...tile, type: "removeAttachment" });
+  card.failWrites({ ok: true });
+  await settled(card);
+
+  const writePicture = card.holdPicture();
+  const adding = card.saves.addToShelf(1);
+
+  // The user's Undo, saved, while the picture file is written; then the tile is off again, and the disk refuses that.
+  card.controller.apply({ ...tile, type: "restoreAttachment" });
+  await settled(card);
+  card.failWrites(DISK_REFUSES);
+  card.controller.apply({ ...tile, type: "removeAttachment" });
+  await settled(card);
+
+  // The note's deletion is on the disk's way when Undo brings the note back and Discard changes its tile, which is then removed once more.
+  const endDeletion = card.holdWrite();
+
+  card.controller.apply({ id: card.note, type: "remove" });
+  await turn();
+  card.controller.apply({ id: card.note, type: "undoRemove" });
+
+  const offeredDiscard = card.controller.view().notSaved;
+
+  card.controller.discard(card.note);
+  card.controller.apply({ ...tile, type: "removeAttachment" });
+  endDeletion({ ok: true });
+  await settled(card);
+
+  return { adding, card, offeredDiscard, writePicture };
+};
+
 describe("a screenshot taken off the shelf whose removal the disk doesn't hold yet", () => {
   it("adds nothing anew while a write on its way still holds the screenshot on the note, so Discard changes brings back the only copy", async () => {
     const { card, end } = await tileOffWhileItsWriteIsHeld();
@@ -2113,38 +2154,9 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
   });
 
   it("adds nothing anew while Discard changes can still bring the screenshot back to its note, though neither the disk nor a write on its way holds it there", async () => {
-    const card = await refused("item");
-    const tile = { attachmentId: tileOf(card), id: card.note };
+    const { adding, card, offeredDiscard, writePicture } =
+      await tileOnlyDiscardHolds();
 
-    card.controller.apply({ ...tile, type: "removeAttachment" });
-    card.failWrites({ ok: true });
-    await settled(card);
-
-    const writePicture = card.holdPicture();
-    const adding = card.saves.addToShelf(1);
-
-    // The user's Undo, saved, while the picture file is written; then the tile is off again, and the disk refuses that.
-    card.controller.apply({ ...tile, type: "restoreAttachment" });
-    await settled(card);
-    card.failWrites(DISK_REFUSES);
-    card.controller.apply({ ...tile, type: "removeAttachment" });
-    await settled(card);
-
-    // The note's deletion is on the disk's way when Undo brings the note back and Discard changes its tile, which is then removed once more.
-    const endDeletion = card.holdWrite();
-
-    card.controller.apply({ id: card.note, type: "remove" });
-    await turn();
-    card.controller.apply({ id: card.note, type: "undoRemove" });
-
-    const offeredDiscard = card.controller.view().notSaved;
-
-    card.controller.discard(card.note);
-    card.controller.apply({ ...tile, type: "removeAttachment" });
-    endDeletion({ ok: true });
-    await settled(card);
-
-    // The disk holds no note now, and no write is on its way: only Discard changes still holds the tile.
     const before = {
       notSaved: card.controller.view().notSaved,
       shown: card.shown(),
@@ -2177,6 +2189,27 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
       offeredDiscard: [{ id: card.note, undo: "discard" }],
       shown: { attached: 1, items: 0 },
       written: { doubled: [], last: { attached: 1, items: 0 } },
+    });
+  });
+
+  it("adds it to the shelf, once, when the note Discard changes could bring it back to is deleted: only the user's Undo brings that back", async () => {
+    const { adding, card, writePicture } = await tileOnlyDiscardHolds();
+
+    card.failWrites({ ok: true });
+    card.controller.apply({ id: card.note, type: "remove" });
+    await settled(card);
+    writePicture();
+
+    const row = await adding;
+
+    expect({
+      disk: card.disk().at(-1),
+      notices: card.notices,
+      row: row !== null,
+    }).toStrictEqual({
+      disk: { attached: 0, items: 1 },
+      notices: [],
+      row: true,
     });
   });
 

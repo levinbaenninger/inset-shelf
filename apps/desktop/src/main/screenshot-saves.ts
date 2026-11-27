@@ -50,7 +50,7 @@ const missedNotice = (named: ItemId | null, exists: boolean): string => {
 export const SHOT_STAYS =
   "The screenshot stays where it was added. Retry saves it there.";
 
-/** A press of an add while the shelf shows the screenshot nowhere, but the disk, or a write on its way, still holds it where the user took it off: a new place now could end beside the old one, which Discard changes brings back. */
+/** A press of an add while the shelf shows the screenshot nowhere, but it can still come back where the user took it off without their Undo: a new place now could end beside the old one, which Discard changes brings back. */
 export const SHOT_REMOVAL_UNSAVED =
   "The shelf hasn’t saved the screenshot’s removal yet. Add it again once it has.";
 
@@ -102,8 +102,8 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly setTimer: (run: () => void, ms: number) => () => void;
   /** The item as the disk holds it; undefined while no write of it has landed. */
   readonly stored: (id: ItemId) => ShelfItem | undefined;
-  /** The item as the write now on the disk's way holds it; undefined while none holds it. */
-  readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
+  /** Every version of the item that can be on the disk, or back on the shelf, without the user's Undo. */
+  readonly comesBack: (id: ItemId) => readonly ShelfItem[];
   /** Tells the card each time a write starts and each time one ends, whoever started it: `stored` can read differently once one ends. */
   readonly onWrite: (listener: () => void) => () => void;
   /** Why the shelf's last write of this item was refused; null when none was, or one has landed since. */
@@ -165,7 +165,7 @@ interface Unplaced {
 
 type Placed =
   | { readonly ok: true }
-  /** Nothing was placed: by the time the picture file was written, the user's Undo had the screenshot back on the shelf, or in a write on its way. */
+  /** Nothing was placed: by the time the picture file was written, the user's Undo had the screenshot back on the shelf, or it could come back without one. */
   | Unplaced
   | {
       readonly ok: false;
@@ -273,18 +273,18 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     within(deps.stored(at.item), at) !== undefined;
 
   /**
-   * The disk, or a write on its way, holds the screenshot in a place an add
-   * made. Asked while the shelf shows it nowhere: the user took it off, and
-   * the disk doesn't hold that yet.
+   * A place an add made can still hold the screenshot without the user's
+   * Undo. Asked while the shelf shows it nowhere: the user took it off, and
+   * the shelf doesn't hold that for good yet.
    */
   const kept = (now: Held<S>): boolean =>
-    now.places.some(
-      (at) => landed(at) || within(deps.onItsWay(at.item), at) !== undefined
+    now.places.some((at) =>
+      deps.comesBack(at.item).some((item) => within(item, at) !== undefined)
     );
 
   /**
    * Why no new place may be made for the screenshot now: the shelf shows it,
-   * or the disk doesn't hold yet that the user took it off. Null when one may.
+   * or it can still come back where the user took it off. Null when one may.
    */
   const elsewhere = (now: Held<S>): string | null => {
     if (shown(now) !== null) {
@@ -464,7 +464,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * on the shelf if it has one: it is still the newest, no save of it runs (a
    * second click waits for the first), and the shelf shows it nowhere else.
    * Where it is, it stays, and the user hears why. Off the shelf, it is added
-   * anew only once the disk holds that it is off.
+   * anew only once nothing but the user's Undo brings it back.
    */
   const ready = (
     seq: number,

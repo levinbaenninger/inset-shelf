@@ -937,7 +937,7 @@ const start = async (): Promise<void> => {
       notify(message, tone);
     },
     now: () => Date.now(),
-    onItsWay: controller.onItsWay,
+    comesBack: controller.comesBack,
     onWrite: controller.onWrite,
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
