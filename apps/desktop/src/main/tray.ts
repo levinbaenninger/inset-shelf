@@ -87,11 +87,15 @@ export const createTray = (options: TrayOptions): ShelfTray => {
     });
 
     // Windows shows the icon's tooltip again while the pointer rests on it, over the menu
-    // that opened beside it ("About Inset Shelf" hidden): the menu opens without one.
+    // that opened beside it ("About Inset Shelf" hidden): the menu opens without one. It is
+    // cleared as the menu shows, since Electron pops nothing up, and closes nothing, when
+    // Windows denies it the foreground.
     tray.on("right-click", () => {
       const menu = buildMenu();
 
-      tray.setToolTip("");
+      menu.once("menu-will-show", () => {
+        tray.setToolTip("");
+      });
       menu.once("menu-will-close", () => {
         tray.setToolTip(tooltip);
       });
