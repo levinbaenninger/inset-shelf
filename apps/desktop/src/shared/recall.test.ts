@@ -518,9 +518,10 @@ describe(hereWith, () => {
 
     expect(first).toBeDefined();
 
-    const checked = first === undefined
-      ? doc
-      : applyOp(doc, { id: first, type: "toggleDone" }, env(), []).doc;
+    const checked =
+      first === undefined
+        ? doc
+        : applyOp(doc, { id: first, type: "toggleDone" }, env(), []).doc;
 
     const after = typed(
       checked,

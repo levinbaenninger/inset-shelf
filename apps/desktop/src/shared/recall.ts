@@ -1,6 +1,16 @@
 import { z } from "zod";
 
-import type { ItemGroup, ItemId, ShelfDoc, ShelfItem } from "./shelf";
+import type { ShelfHere } from "./contracts";
+import { parseComposer } from "./shelf";
+import type {
+  ItemContext,
+  ItemGroup,
+  ItemId,
+  MainOp,
+  ShelfDoc,
+  ShelfItem,
+  ShelfOp,
+} from "./shelf";
 import { serviceOfHost, sourceLabel } from "./web-source";
 import { withoutAppName } from "./window-title";
 
@@ -258,6 +268,47 @@ export const hereOf = (
   return front === null || ids.length === 0
     ? null
     : { ids, label: sourceLabel(front).label };
+};
+
+/** One opening of the shelf beside a window open items came from: what the shelf is told, and the window's source, which stays in main. */
+export interface Opening {
+  readonly here: ShelfHere;
+  readonly context: ItemContext;
+}
+
+/**
+ * A composer request as main carries it out: a note typed under this
+ * opening's from-here chip gets the window's source, as a Double Shift
+ * capture from it would. A request from an earlier opening, or with the chip
+ * taken off, is a plain note; "# Name" still makes a section.
+ */
+export const typedNote = (
+  op: Extract<ShelfOp, { readonly type: "compose" }>,
+  opening: Opening | null
+): ShelfOp | MainOp => {
+  const entry = parseComposer(op.text);
+
+  return opening !== null &&
+    op.here === opening.here.seq &&
+    entry.kind === "note"
+    ? {
+        context: opening.context,
+        html: null,
+        text: entry.text,
+        type: "addText",
+        via: "typed",
+      }
+    : op;
+};
+
+/** The shelf's here for this opening: its items, checked ones too, and each open item from the window since, such as a note typed under the chip. */
+export const hereWith = (opening: Opening, doc: ShelfDoc): ShelfHere => {
+  const kept = new Set(opening.here.ids);
+  const since = itemsFrom(doc, opening.context).filter((id) => !kept.has(id));
+
+  return since.length === 0
+    ? opening.here
+    : { ...opening.here, ids: [...opening.here.ids, ...since] };
 };
 
 /** Some open item has a source to match, so the front window is worth reading at all. An empty shelf costs nothing. */
