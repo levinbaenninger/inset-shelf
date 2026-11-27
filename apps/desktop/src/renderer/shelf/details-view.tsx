@@ -54,7 +54,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Textarea } from "@/components/ui/textarea";
+import { IN_PLACE, Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -164,6 +164,11 @@ const isUndoKey = (event: KeyboardEvent): boolean =>
 /** The card surface the list's items sit on, so details read as the same material. */
 const SURFACE = "border-foreground/10 bg-background/60 rounded-lg border";
 
+/** One typed-in field on its card, its words in line with the item's own at the top of details. */
+const FieldBox = ({ children }: { readonly children: ReactNode }) => (
+  <div className={cn(SURFACE, "p-1.5")}>{children}</div>
+);
+
 /** A labelled part of details; the label is small and quiet, like a section name in the list. */
 const Field = ({
   action,
@@ -244,7 +249,6 @@ const AutoText = ({
   onEdited,
   onSave,
   placeholder,
-  rows = 2,
   value,
 }: {
   readonly value: string;
@@ -256,7 +260,6 @@ const AutoText = ({
   /** Focus left after the text changed: what it held when focus came in. */
   readonly onEdited?: (before: string) => void;
   readonly autoFocus?: boolean;
-  readonly rows?: number;
 }) => {
   const [text, setText] = useState(value);
   const [saved, setSaved] = useState(value);
@@ -321,13 +324,8 @@ const AutoText = ({
     value: text,
   };
 
-  // Read as text until typed in: no border, a quiet tint on hover and focus. A
-  // one-line text wraps as it grows, an input's height while it fits, so a long title shows whole.
-  return multiline ? (
-    <Textarea {...props} rows={rows} variant="quiet" />
-  ) : (
-    <Textarea {...props} rows={1} variant="quietLine" />
-  );
+  // Read as text until typed in. A one-line text wraps as it grows, so a long title shows whole.
+  return <Textarea {...props} variant="inPlace" />;
 };
 
 /**
@@ -483,10 +481,10 @@ const StepsEditor = ({
               }}
             />
           </span>
-          <textarea
+          <Textarea
             aria-label={`Step ${index + 1}`}
             className={cn(
-              "placeholder:text-muted-foreground focus-visible:ring-ring/50 focus-visible:bg-foreground/[0.04] field-sizing-content min-h-7 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1.5 py-1 text-sm leading-5 outline-none focus-visible:ring-3",
+              "min-w-0 flex-1",
               step.done && "text-muted-foreground line-through"
             )}
             maxLength={STEP_TEXT_MAX}
@@ -518,6 +516,7 @@ const StepsEditor = ({
               }
             }}
             value={step.text}
+            variant="inPlace"
           />
           <span className="flex h-7 shrink-0 items-center opacity-0 transition-opacity group-focus-within/step:opacity-100 group-hover/step:opacity-100">
             <Button
@@ -581,7 +580,7 @@ const WindowDescription = ({
   // Return and Esc hand focus back to the words; a click elsewhere keeps it where it went.
   const refocus = useRef(false);
   const shown = useRef<HTMLButtonElement>(null);
-  const field = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (editing) {
@@ -592,23 +591,24 @@ const WindowDescription = ({
     }
   }, [editing]);
 
-  const line = "-mx-1.5 min-h-6 rounded-md px-1.5 text-sm";
-
   if (editing) {
     return (
-      <input
+      <Textarea
         aria-label={`Description of ${name}`}
-        className={cn(
-          line,
-          "placeholder:text-muted-foreground focus-visible:ring-ring/50 bg-foreground/[0.04] h-6 min-w-0 outline-none focus-visible:ring-3"
-        )}
         defaultValue={value}
         maxLength={DESCRIPTION_MAX}
         onBlur={() => {
           setEditing(false);
         }}
         onChange={(event) => {
-          onSave(event.target.value);
+          // One line, as it reads: a pasted text's breaks become spaces.
+          const typed = event.target.value.replaceAll(/\s*\n\s*/gu, " ");
+
+          if (typed !== event.target.value) {
+            event.target.value = typed;
+          }
+
+          onSave(typed);
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) {
@@ -632,6 +632,7 @@ const WindowDescription = ({
         }}
         placeholder="What this window shows"
         ref={field}
+        variant="inPlace"
       />
     );
   }
@@ -644,7 +645,7 @@ const WindowDescription = ({
   return value === "" ? (
     <Button
       aria-label={`Add a description of ${name}`}
-      className="-ml-1.5 self-start"
+      className="self-start"
       onClick={edit}
       ref={shown}
       size="xs"
@@ -656,11 +657,8 @@ const WindowDescription = ({
   ) : (
     <button
       aria-label={`${value}. Edit the description of ${name}`}
-      className={cn(
-        line,
-        // Focus tints the words as hover does; a ring would read as the field again.
-        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 max-w-full self-start text-left break-words outline-none"
-      )}
+      // The field's own look, so a click turns the words into it without a move.
+      className={cn(IN_PLACE, "text-left break-words outline-none")}
       onClick={edit}
       ref={shown}
       type="button"
@@ -780,7 +778,8 @@ const WindowRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex min-w-0 flex-col">
+      {/* Out past the row's inset by the field's own, so the words line up with the picture. */}
+      <div className="-mx-1.5 flex min-w-0 flex-col">
         <WindowDescription
           name={name}
           onSave={(description) => {
@@ -827,12 +826,12 @@ const PinLabels = ({
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
       {pins.map((pin, index) => (
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
-        // The pin sits beside a label's first line (h-8, a one-line field's height), however many lines it wraps to.
+        // The pin sits beside a label's first line (h-7, a one-line field's height), however many lines it wraps to.
         <li
           className="flex items-start gap-2"
           key={`${index}:${pin.x}:${pin.y}`}
         >
-          <span className="flex h-8 shrink-0 items-center">
+          <span className="flex h-7 shrink-0 items-center">
             <PinGlyph height={18} number={index + 1} />
           </span>
           <AutoText
@@ -1039,16 +1038,18 @@ const Content = (props: ContentProps) => {
         <FileLine item={item} />
       )}
       <Field icon={TextIcon} label="Title">
-        <AutoText
-          label="Title"
-          max={TITLE_MAX}
-          multiline={false}
-          onSave={(title) => {
-            onApply({ id: item.id, title, type: "setTitle" });
-          }}
-          placeholder="Shown as the main line"
-          value={item.title ?? ""}
-        />
+        <FieldBox>
+          <AutoText
+            label="Title"
+            max={TITLE_MAX}
+            multiline={false}
+            onSave={(title) => {
+              onApply({ id: item.id, title, type: "setTitle" });
+            }}
+            placeholder="Shown as the main line"
+            value={item.title ?? ""}
+          />
+        </FieldBox>
       </Field>
       <Field
         action={
@@ -1061,23 +1062,24 @@ const Content = (props: ContentProps) => {
         icon={StickyNote01Icon}
         label="Caption"
       >
-        <AutoText
-          autoFocus={editing}
-          key={editing ? "editing" : "note"}
-          label={
-            item.kind === "image"
-              ? "Caption, copied with the image"
-              : "Caption, copied with the file"
-          }
-          max={TEXT_MAX}
-          multiline
-          onSave={(note) => {
-            onApply({ id: item.id, note, type: "editNote" });
-          }}
-          placeholder="A line to paste along with it"
-          rows={1}
-          value={item.note}
-        />
+        <FieldBox>
+          <AutoText
+            autoFocus={editing}
+            key={editing ? "editing" : "note"}
+            label={
+              item.kind === "image"
+                ? "Caption, copied with the image"
+                : "Caption, copied with the file"
+            }
+            max={TEXT_MAX}
+            multiline
+            onSave={(note) => {
+              onApply({ id: item.id, note, type: "editNote" });
+            }}
+            placeholder="A line to paste along with it"
+            value={item.note}
+          />
+        </FieldBox>
       </Field>
       {item.kind === "image" && item.pins.length > 0 ? (
         <PinLabels
@@ -1587,22 +1589,24 @@ export const DetailsView = (props: DetailsProps) => {
         />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
-            <AutoText
-              autoFocus={descriptionFocus > 0}
-              key={descriptionFocus}
-              label="Description"
-              max={DESCRIPTION_MAX}
-              multiline
-              onSave={(description) => {
-                props.onApply({
-                  description,
-                  id: item.id,
-                  type: "setDescription",
-                });
-              }}
-              placeholder="Add a description"
-              value={item.description}
-            />
+            <FieldBox>
+              <AutoText
+                autoFocus={descriptionFocus > 0}
+                key={descriptionFocus}
+                label="Description"
+                max={DESCRIPTION_MAX}
+                multiline
+                onSave={(description) => {
+                  props.onApply({
+                    description,
+                    id: item.id,
+                    type: "setDescription",
+                  });
+                }}
+                placeholder="Add a description"
+                value={item.description}
+              />
+            </FieldBox>
           </Field>
         ) : null}
         {shown.steps ? (
