@@ -1,4 +1,22 @@
-# PULLFROG ACTION — DO NOT EDIT EXCEPT WHERE INDICATED
+# PULLFROG ACTION. Edited from the template to pin the action to a commit SHA.
+#
+# Security notes
+# - This runs a third-party agent with `id-token: write` (it can mint OIDC tokens
+#   for this repository) and receives every provider API key set below. Anyone who
+#   can run it, or any prompt injected into the agent, can spend those keys or
+#   exfiltrate them. It only runs by manual dispatch (`workflow_dispatch`), so only
+#   people with write access can start it.
+# - Secrets passed to the action, and why each is a risk:
+#     ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY,
+#     GOOGLE_GENERATIVE_AI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, DEEPSEEK_API_KEY,
+#     MOONSHOT_API_KEY, KIMI_API_KEY, META_MODEL_API_KEY, OPENROUTER_API_KEY,
+#     AI_GATEWAY_API_KEY, OPENCODE_API_KEY
+#   Each is a billable credential handed to code that reads untrusted prompts.
+#   Unset secrets are passed as empty strings, so only the ones that exist in the
+#   repository settings are exposed, but delete every provider key you do not use
+#   and remove its line below. Keep one at most.
+# - The job has no access to the release signing key (it lives only in the release
+#   workflow). Do not add contents/pull-requests write unless the agent needs it.
 name: Pullfrog
 run-name: ${{ inputs.name || github.workflow }}
 on:
@@ -22,12 +40,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 1
           persist-credentials: false
       - name: Run agent
-        uses: pullfrog/pullfrog@v0
+        uses: pullfrog/pullfrog@6c7f71f5f3883690dbf2d5a88663da12f4cc4712 # v0.1.149
         with:
           prompt: ${{ inputs.prompt }}
         env:

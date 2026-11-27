@@ -6,6 +6,8 @@ It is the third Inset prototype. [Inset Context Pin](https://github.com/levinbae
 
 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) lists what was tested, on which system, and what is still open.
 
+See [SECURITY.md](SECURITY.md) for what the app can access, how to verify a download and how to report a vulnerability.
+
 ## Install a test build
 
 Install once, then the app updates itself. Download a build from the [latest release](https://github.com/levinbaenninger/inset-shelf/releases/latest). Every push to `main` publishes a new release, so the latest one holds the latest commit on `main`. Each pull request also uploads builds as workflow artifacts on its CI run.

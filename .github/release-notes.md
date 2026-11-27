@@ -1,4 +1,4 @@
-Test build of Inset Shelf, without a developer certificate. See the README section "Install a test build" for the macOS Gatekeeper and Windows SmartScreen steps. Install once. After that the app updates itself from the newest release, except for the portable Windows zips.
+Test build of Inset Shelf, without a developer certificate. See the README section "Install a test build" for the macOS Gatekeeper and Windows SmartScreen steps. Install once. After that, choose "Check for updates" in the app to update, except for the portable Windows zips. Verify a download against `SHA256SUMS.txt` (attached to this release) with `shasum -a 256 -c --ignore-missing SHA256SUMS.txt`. See SECURITY.md.
 
 | Platform | File |
 | --- | --- |
