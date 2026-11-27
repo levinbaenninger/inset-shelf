@@ -5,29 +5,45 @@ description: Group items, add a checklist, and give them a day.
 
 ## Sections
 
-The list shows every section as a group. Click a section's name to fold it away.
+With no search active, the list shows all sections, including empty ones. Click a section's name to fold or reopen it.
 
-- The filled dot at the right of a section's name shows where new items go. Click another section's dot to send new items there, or press `⌘1` to `⌘9`.
-- Type `# Name` in the note field and press `Return` to make a section, or use **New Section** in the **⋯** at the top.
-- A section's **⋯**, or a right-click on its name, renames it, clears its checked items or deletes it.
+- When you have more than one section, a filled dot marks where new items go. Point at another section's name and click the ring that appears, or use `⌘1` to `⌘9` to pick a section.
+- Type `# Name` in the note field and press `Return` to make a section or go to one with that name. You can also choose **New Section** from the **⋯** at the top.
+- Use a section's **⋯**, or right-click its name, to rename it, clear its checked items, or delete it. The app asks before removing any items.
 - Drag an item onto another section to move it there, or press `⌥⌘↑` and `⌥⌘↓`.
+
+## Open and edit an item
+
+Click an item's text to open its row. Click the text again to edit it where you clicked. A click on a link in the open row opens the link. Click the note under an open image or file to edit it, or click **Add a note…** to start one.
+
+Press `Return` or click elsewhere to finish the edit. `Esc` restores the original text on a text item. In an image or file caption, `Esc` keeps the change and hides the shelf.
+
+An open row gives each part its own space.
+
+- Pictures are up to 192 pixels tall. Titles start at three lines, and the item's text, caption, and description start at ten lines each. **Show more** appears when at least two lines would be hidden. Click it to read the full text in the row.
+- The row shows up to three pin labels and five steps, with unchecked steps first when the row opens. Click the count of remaining pins or steps to see them in Details.
+- Linked windows fit on one row of thumbnails. Click a thumbnail to reopen that window, or **+N** to see the rest in Details. The row also shows up to three [attachments](/docs/attachments).
 
 ## Details
 
-Every item can also hold a **Description**, **Next steps**, a **Due** date and [linked windows](/docs/linked-windows). Selecting an item shows them; `→`, or **Details**, opens the details view with everything about the item and an **Add** menu for the fields it doesn't have yet. Edits save as you type.
+Press `→` or click **Details** at the bottom of the open row to see the whole item. Use **Add** for a **Description**, **Next steps**, a **Due** date, [linked windows](/docs/linked-windows), or [attachments](/docs/attachments). Images and files can also have a **Title** and a separate caption. Click a field's text to edit it. Edits save as you type. Press `←` or `Esc` from Details to return to the list.
 
-Up to three small badges on the item's source line show the Due chip, step progress, linked windows and pins.
+A closed row shows up to three badges for the due date, step progress, linked windows, and pins. On a file without a source, the badges sit with the file name.
 
 ## Next steps
 
-`⇧⌘S` adds a checklist under the item. In a step, `Return` adds the next one and `⌫` in an empty one removes it. Its progress shows on the source line, such as **1/3**.
+`⇧⌘S` opens **Next steps** in Details. In a step, `Return` adds the next one and `⌫` in an empty one removes it. `⌘Z` brings back a removed step in Details. A closed row can show progress such as **1/3**.
 
 ## Due dates
 
-`⇧⌘D` opens the Due picker: **Today**, **Tomorrow**, **This weekend**, **Next week**, **Pick a date…** and **Clear**.
+`⇧⌘D` opens the Due picker with **Today**, **Tomorrow**, **This weekend**, **Next week**, and **Pick a date…**. Use **Clear** or the **×** on the chip to remove a due date.
 
 - This weekend is the coming Saturday, or today on a Saturday or Sunday. Next week is the coming Monday.
-- The chip says Today, Tomorrow, a weekday within the week, or the date. It is blue when the item is due today and says **Overdue** in red after that.
+- On the row, the chip is blue on the due date and says **Overdue** in red after that. Point at the chip to see the full date.
 - In the calendar, the arrow keys move the day, `Return` picks it and `Esc` closes it.
 
-Search filters by due date: `due:today`, `due:overdue`, `due:week`, `due:any` and `due:none`. The filter button at the end of the search field picks them for you.
+## Search
+
+Press `⌘F` to search items by their text, titles, captions, descriptions, steps, pin labels, file or attachment names, and source or linked window details.
+
+Use `due:today`, `due:overdue`, `due:week`, `due:any`, or `due:none` to filter by due date. `due:week` includes overdue items, today, and the next six days. Choose a filter from the button at the end of the search field, or type `due:` to see suggestions. Use [`from:here`](/docs/sources#recall) to find items from the window beside the shelf.

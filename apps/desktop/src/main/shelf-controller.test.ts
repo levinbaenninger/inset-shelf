@@ -384,7 +384,7 @@ describe(createShelfController, () => {
 
     const { controller } = setup([], written);
     let repaints = 0;
-    const heard: { onItsWay: boolean; stored: boolean }[] = [];
+    const heard: boolean[] = [];
 
     const id = ItemIdSchema.parse(
       controller.apply({ text: "Call the movers", type: "compose" })
@@ -394,47 +394,35 @@ describe(createShelfController, () => {
       repaints += 1;
     });
     controller.onWrite(() => {
-      heard.push({
-        onItsWay: controller.onItsWay(id) !== undefined,
-        stored: controller.stored(id) !== undefined,
-      });
+      heard.push(controller.stored(id) !== undefined);
     });
 
     const flushed = controller.flush();
 
     await Promise.resolve();
-    expect(heard).toStrictEqual([{ onItsWay: true, stored: false }]);
+    expect(heard).toStrictEqual([false]);
 
     disk.dispatchEvent(new Event("written"));
     await flushed;
 
-    expect(heard).toStrictEqual([
-      { onItsWay: true, stored: false },
-      { onItsWay: false, stored: true },
-    ]);
+    expect(heard).toStrictEqual([false, true]);
     expect(repaints).toBe(0);
   });
 
   it("tells who watches writes that a refused one ended, with the disk as it was", async () => {
     const { controller } = setup([{ message: "The disk is full.", ok: false }]);
-    const heard: { onItsWay: boolean; stored: boolean }[] = [];
+    const heard: boolean[] = [];
 
     const id = ItemIdSchema.parse(
       controller.apply({ text: "Call the movers", type: "compose" })
     );
 
     controller.onWrite(() => {
-      heard.push({
-        onItsWay: controller.onItsWay(id) !== undefined,
-        stored: controller.stored(id) !== undefined,
-      });
+      heard.push(controller.stored(id) !== undefined);
     });
     await controller.flush();
 
-    expect(heard).toStrictEqual([
-      { onItsWay: true, stored: false },
-      { onItsWay: false, stored: false },
-    ]);
+    expect(heard).toStrictEqual([false, false]);
   });
 
   it("counts the items the disk doesn't hold yet", async () => {

@@ -21,6 +21,8 @@ export interface ScreenshotWindow {
   readonly hover: (on: boolean) => void;
   /** Keeps the card until it is used or dismissed. */
   readonly hold: () => void;
+  /** Keeps the card while it shows a save (`on`), and gives it its time again after. */
+  readonly holdForSave: (on: boolean) => void;
   readonly view: () => ScreenshotView | null;
   /** The card names another item for Add to “…”, or shows how its save stands, where it is and for as long as it had. */
   readonly update: (
@@ -145,6 +147,7 @@ export const createScreenshotWindow = (options: {
     hide,
     hover: clock.hover,
     hold: clock.hold,
+    holdForSave: clock.holdForSave,
     // Asked by the tutorial while the app quits, too: a destroyed window throws.
     isVisible: () => !window.isDestroyed() && window.isVisible(),
     load: async () => {

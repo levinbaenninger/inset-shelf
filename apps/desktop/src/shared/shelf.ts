@@ -662,7 +662,12 @@ export const parseComposer = (raw: string): ComposerEntry => {
 
 /** Operations the shelf window may request. Images are only added by the main process. */
 export const ShelfOpSchema = z.discriminatedUnion("type", [
-  z.object({ text: z.string().max(TEXT_MAX), type: z.literal("compose") }),
+  z.object({
+    /** Typed under the from-here chip: the opening it showed for (ShelfHere.seq). Main gives the note that window's source. */
+    here: z.number().int().optional(),
+    text: z.string().max(TEXT_MAX),
+    type: z.literal("compose"),
+  }),
   z.object({
     id: ItemIdSchema,
     text: z.string().min(1).max(TEXT_MAX),
@@ -844,27 +849,6 @@ export type MainOp =
       readonly attachmentId: AttachmentId;
       readonly image: ShelfImage;
       readonly scene?: DrawingScene;
-    }
-  /**
-   * A picture that is an item of its own becomes an attachment of another
-   * item, with its pins, its marks and the same files. One step, so no shelf
-   * holds it twice or not at all, and Undo has nothing to bring back. Its
-   * words don't go along: the screenshot card moves only a row nobody wrote
-   * on. All or nothing: the other item must have room.
-   */
-  | {
-      readonly type: "itemToAttachment";
-      readonly from: ItemId;
-      readonly id: ItemId;
-      readonly attachmentId: AttachmentId;
-      readonly name: string;
-    }
-  /** An attached picture becomes an item of its own in the section new items go to, the same way. */
-  | {
-      readonly type: "attachmentToItem";
-      readonly id: ItemId;
-      readonly attachmentId: AttachmentId;
-      readonly via: ImageItem["via"];
     };
 
 export interface OpEnv {
@@ -1095,28 +1079,6 @@ const replaceImage = (
     discarded: [{ ...item, windows: [] }],
   };
 };
-
-/** A picture's image, pins and marks alone, out of whatever holds them. An image with no marks kept has no scene at all, as on shelves from before them. */
-const pictureOf = ({ image, pins, scene }: Picture): Picture =>
-  scene === undefined ? { image, pins } : { image, pins, scene };
-
-/** A picture as a new item in the section new items go to. */
-const imageItem = (
-  doc: ShelfDoc,
-  env: OpEnv,
-  made: Picture & Pick<ImageItem, "context" | "source" | "via">
-): ImageItem => ({
-  ...NO_META,
-  color: null,
-  createdAt: env.now().toISOString(),
-  done: false,
-  id: env.newItemId(),
-  kind: "image",
-  note: "",
-  sectionId: doc.activeSectionId,
-  title: null,
-  ...made,
-});
 
 /** A selection or other text from main; blank text adds nothing. */
 const addText = (
@@ -1635,91 +1597,6 @@ const applyAttachmentOp = (doc: ShelfDoc, op: AttachmentOp): OpResult => {
   }
 };
 
-type HolderOp = Extract<
-  MainOp,
-  { readonly type: "itemToAttachment" | "attachmentToItem" }
->;
-
-const HOLDER_OPS: ReadonlySet<string> = new Set([
-  "itemToAttachment",
-  "attachmentToItem",
-]);
-
-const isHolderOp = (op: ShelfOp | MainOp): op is HolderOp =>
-  HOLDER_OPS.has(op.type);
-
-/** The item becomes the last attachment of another; nothing changes unless it is a picture with nothing attached or linked and the other has room. */
-const itemToAttachment = (
-  doc: ShelfDoc,
-  op: Extract<MainOp, { readonly type: "itemToAttachment" }>,
-  env: OpEnv
-): OpResult => {
-  const from = doc.items.find((item) => item.id === op.from);
-  const to = doc.items.find((item) => item.id === op.id);
-
-  if (
-    from?.kind !== "image" ||
-    to === undefined ||
-    to === from ||
-    // Its picture's files go along; any others would be left with no item.
-    from.attachments.length > 0 ||
-    from.windows.length > 0 ||
-    to.attachments.length >= ATTACHMENTS_MAX ||
-    to.attachments.some((attachment) => attachment.id === op.attachmentId)
-  ) {
-    return unchanged(doc);
-  }
-
-  const attachment: Attachment = {
-    ...pictureOf(from),
-    addedAt: env.now().toISOString(),
-    id: op.attachmentId,
-    kind: "image",
-    name: op.name,
-  };
-
-  return changed({
-    ...doc,
-    items: doc.items
-      .filter((item) => item !== from)
-      .map((item) =>
-        item === to
-          ? { ...to, attachments: [...to.attachments, attachment] }
-          : item
-      ),
-  });
-};
-
-/** A picture changes what holds it: every file it has goes along, so nothing is discarded. */
-const applyHolderOp = (doc: ShelfDoc, op: HolderOp, env: OpEnv): OpResult => {
-  if (op.type === "itemToAttachment") {
-    return itemToAttachment(doc, op, env);
-  }
-
-  const holder = doc.items.find((item) => item.id === op.id);
-
-  const attachment = holder?.attachments.find(
-    (each) => each.id === op.attachmentId
-  );
-
-  if (holder === undefined || attachment?.kind !== "image") {
-    return unchanged(doc);
-  }
-
-  return addItem(
-    mapItem(doc, op.id, () => ({
-      ...holder,
-      attachments: holder.attachments.filter((each) => each !== attachment),
-    })),
-    imageItem(doc, env, {
-      ...pictureOf(attachment),
-      context: null,
-      source: null,
-      via: op.via,
-    })
-  );
-};
-
 /**
  * Applies one operation. `pending` holds the deleted items that can still be
  * put back, oldest first; a delete past UNDO_MAX discards the oldest for good.
@@ -1746,10 +1623,6 @@ export const applyOp = (
     return applyRemovalOp(doc, op, pending);
   }
 
-  if (isHolderOp(op)) {
-    return applyHolderOp(doc, op, env);
-  }
-
   switch (op.type) {
     case "compose": {
       return compose(doc, op.text, env);
@@ -1760,14 +1633,27 @@ export const applyOp = (
     }
 
     case "addImage": {
+      const item: ImageItem = {
+        ...NO_META,
+        color: null,
+        context: op.context,
+        createdAt: env.now().toISOString(),
+        done: false,
+        id: env.newItemId(),
+        image: op.image,
+        kind: "image",
+        note: "",
+        pins: clampPins(op.pins, op.image),
+        sectionId: doc.activeSectionId,
+        source: op.source,
+        title: null,
+        via: op.via,
+      };
+
+      // An image with no marks kept has no scene at all, as on shelves from before them.
       return addItem(
         doc,
-        imageItem(doc, env, {
-          ...pictureOf({ ...op, pins: clampPins(op.pins, op.image) }),
-          context: op.context,
-          source: op.source,
-          via: op.via,
-        })
+        op.scene === undefined ? item : { ...item, scene: op.scene }
       );
     }
 
