@@ -14,7 +14,6 @@ import {
   FolderExportIcon,
   HelpCircleIcon,
   InboxDownloadIcon,
-  KeyboardIcon,
   SidebarRightIcon,
   Link01Icon,
   PaintBrush01Icon,
@@ -77,14 +76,12 @@ const ICONS: Record<MenuIcon, typeof Copy01Icon> = {
   edit: PencilEdit02Icon,
   float: PinIcon,
   help: HelpCircleIcon,
-  keyboard: KeyboardIcon,
   link: Link01Icon,
   move: FolderExportIcon,
   newSection: FolderAddIcon,
   open: ArrowUpRight01Icon,
   settings: Settings02Icon,
   tour: Route01Icon,
-  windowLink: AppWindowIcon,
 };
 
 const EntryIcon = ({ icon }: { readonly icon?: MenuIcon }) =>

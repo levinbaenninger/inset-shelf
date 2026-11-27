@@ -26,8 +26,6 @@ export type MenuChoice =
   | { readonly kind: "renameSection"; readonly id: SectionId }
   | { readonly kind: "removeSection"; readonly id: SectionId }
   | { readonly kind: "newSection" }
-  | { readonly kind: "newWindowLink" }
-  | { readonly kind: "shortcuts" }
   | { readonly kind: "openSettings" }
   | { readonly kind: "setFloatOnTop"; readonly on: boolean }
   | { readonly kind: "openHelp" }
@@ -66,8 +64,6 @@ export type MenuIcon =
   | "addHere"
   | "clear"
   | "newSection"
-  | "windowLink"
-  | "keyboard"
   | "details"
   | "settings"
   | "float"
@@ -117,8 +113,10 @@ const SEPARATOR: MenuEntry = { kind: "separator" };
 
 /**
  * The ⋯ at the top of the shelf, and a right-click on empty space: start a
- * section, open Settings. Without a menu bar (`windowMenu`, on Windows) it
- * also holds what the Window and Help menus would: Float on Top and Help.
+ * section, open Settings, open the docs. Without a menu bar (`windowMenu`, on
+ * Windows) it also holds what the Window and Help menus would: Float on Top
+ * and the tutorial. A window link (+, ⇧⌘L) and Keyboard Shortcuts (⌘/, the
+ * Help menu, the tray) have their own ways in.
  */
 export const shelfMenu = (
   windowMenu: { readonly floatOnTop: boolean } | null = null
@@ -130,14 +128,6 @@ export const shelfMenu = (
     icon: "newSection",
     kind: "choice",
     label: "New Section",
-  },
-  {
-    accelerator: "Shift+CommandOrControl+L",
-    choice: { kind: "newWindowLink" },
-    enabled: true,
-    icon: "windowLink",
-    kind: "choice",
-    label: "New Window Link…",
   },
   SEPARATOR,
   ...(windowMenu === null
@@ -161,14 +151,6 @@ export const shelfMenu = (
     kind: "choice",
     label: "Settings",
   },
-  {
-    accelerator: "CommandOrControl+/",
-    choice: { kind: "shortcuts" },
-    enabled: true,
-    icon: "keyboard",
-    kind: "choice",
-    label: "Keyboard Shortcuts",
-  },
   ...(windowMenu === null
     ? []
     : [
@@ -186,14 +168,14 @@ export const shelfMenu = (
           kind: "choice",
           label: "Show Me Around",
         } as const,
-        {
-          choice: { kind: "openHelp" },
-          enabled: true,
-          icon: "help",
-          kind: "choice",
-          label: "Inset Shelf Help",
-        } as const,
       ]),
+  {
+    choice: { kind: "openHelp" },
+    enabled: true,
+    icon: "help",
+    kind: "choice",
+    label: "Help",
+  },
 ];
 
 /** A section's ⋯ and right-click: new items here, rename, clear checked items, delete. */
