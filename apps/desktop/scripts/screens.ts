@@ -9243,7 +9243,77 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-search-down-focuses-result",
     page: "shelf",
   },
+  {
+    // An edit in the row that takes away the search's match: the row leaves the results, and the keyboard goes back to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+    },
+    check: async (page) => {
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after an edit that left the search's results put focus on ${placeText(left)}, not on the search`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row",
+    page: "shelf",
+  },
+  {
+    // The same edit in details: Return edits the words again, and Esc back to the list gives the keyboard to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowRight");
+      await page.getByRole("button", { name: "Back to the list" }).waitFor();
+      await unmatchWords(page);
+    },
+    check: async (page) => {
+      await page.waitForTimeout(100);
+      await page.keyboard.press("Enter");
+
+      const again = await keyboardPlace(page);
+
+      if (again.label !== "Edit item") {
+        return `Return on the words in details after an edit that left the search's results went to ${placeText(again)}, not into the words`;
+      }
+
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(100);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(100);
+
+      const back = await keyboardPlace(page);
+
+      return back.label === "Search the shelf"
+        ? null
+        : `Esc from details on an item that left the search's results put focus on ${placeText(back)}, not on the search`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-unmatched-details",
+    page: "shelf",
+  },
 ];
+
+/** Return on the selected words edits them, “Monday” becomes “Tuesday”, and Return ends the edit. */
+const unmatchWords = async (page: Page): Promise<void> => {
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+  await page.keyboard.press("End");
+
+  for (const _ of "Monday") {
+    await page.keyboard.press("Backspace");
+  }
+
+  await page.keyboard.type("Tuesday");
+  await page.keyboard.press("Enter");
+};
 
 /** ⌘F and words typed in the search field. */
 const searchFor = async (page: Page, words: string): Promise<void> => {
