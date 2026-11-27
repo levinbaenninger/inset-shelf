@@ -273,6 +273,32 @@ describe(samePlace, () => {
       source({ app: "Notepad", title: "*explore-notes.txt" }),
       "title",
     ],
+    [
+      // Edge's title counts the other tabs once there are two (finding 2).
+      "an Edge page saved from one tab against its window with two",
+      source({
+        app: "Microsoft Edge",
+        title: "Example Domain",
+        url: "https://example.com/",
+      }),
+      source({
+        app: "Microsoft Edge",
+        title:
+          "Example Domain and 1 more page - Profile 1 - Microsoft\u200B Edge",
+      }),
+      "title",
+    ],
+    [
+      // Without an address only the title tells pages apart: another tab with the same title is the same place.
+      "an Edge page against another tab with the same title, no address read",
+      source({
+        app: "Microsoft Edge",
+        title: "Example Domain",
+        url: "https://example.com/",
+      }),
+      source({ app: "Microsoft Edge", title: "Example Domain" }),
+      "title",
+    ],
   ] as const)("%s → %s", (_, item, front, rule) => {
     expect(samePlace(item, front)).toBe(rule);
   });

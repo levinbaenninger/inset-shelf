@@ -33,12 +33,52 @@ describe(withoutAppName, () => {
     );
   });
 
+  // Edge ends every window's title with its profile, and counts the other tabs after the page's title.
+  it.each([
+    [
+      "one tab",
+      "Example Domain - Profile 1 - Microsoft\u200B Edge",
+      "Example Domain",
+    ],
+    [
+      "two tabs",
+      "Example Domain and 1 more page - Profile 1 - Microsoft\u200B Edge",
+      "Example Domain",
+    ],
+    [
+      "three tabs, and a page title holding a dash",
+      "Budget - Q4 and 2 more pages - Work - Microsoft\u200B Edge",
+      "Budget - Q4",
+    ],
+  ])(
+    "takes Edge's profile and other tabs off with %s",
+    (_, title, expected) => {
+      expect(withoutAppName(title, "Microsoft Edge")).toBe(expected);
+    }
+  );
+
+  // Chrome 158 titles a window of two tabs "Example Domain - Google Chrome", as one: only Edge counts them.
+  it("keeps the words of a Chrome page that read like Edge's count of tabs", () => {
+    expect(
+      withoutAppName(
+        "Release notes and 2 more pages - Google Chrome",
+        "Google Chrome"
+      )
+    ).toBe("Release notes and 2 more pages");
+  });
+
   it("keeps a title that is only the app's name or doesn't end in it", () => {
     expect(withoutAppName("T3 Code (Nightly)", "T3 Code (Nightly)")).toBe(
       "T3 Code (Nightly)"
     );
     expect(withoutAppName("Budget - Q4", "Excel")).toBe("Budget - Q4");
     expect(withoutAppName("Budget - Q4", null)).toBe("Budget - Q4");
+  });
+
+  it("leaves an Edge window that isn't a browser tab, an installed app, as it is", () => {
+    expect(withoutAppName("Outlook - Mail", "Microsoft Edge")).toBe(
+      "Outlook - Mail"
+    );
   });
 });
 
@@ -62,6 +102,15 @@ describe(cleanTitle, () => {
     ["no mark", "explore-notes.txt - Notepad", "Notepad.exe"],
   ])("names a Notepad file the same with %s", (_, title, app) => {
     expect(cleanTitle(title, app)).toBe("explore-notes.txt");
+  });
+
+  it("names an Edge tab the same with one tab or two", () => {
+    expect(
+      cleanTitle(
+        "Example Domain and 1 more page - Profile 1 - Microsoft\u200B Edge",
+        "Microsoft Edge"
+      )
+    ).toBe(cleanTitle("Example Domain", "Microsoft Edge"));
   });
 
   it("is nothing for a title too short to name a place", () => {

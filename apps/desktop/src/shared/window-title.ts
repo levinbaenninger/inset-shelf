@@ -25,10 +25,35 @@ const hasTitleName = (app: string): app is keyof typeof TITLE_NAMES =>
 const DASHES = [" - ", " — ", " – "] as const;
 
 /**
- * A window's title without the app's name at its end. Windows titles read
+ * Edge writes its profile, and a count of the window's other tabs, between
+ * the page's title and its own name: "Example Domain and 1 more page -
+ * Profile 1 - Microsoft Edge" (Edge 158 on Windows 11). Chrome 158 writes
+ * neither: two tabs read "Example Domain - Google Chrome".
+ */
+const EDGE = "Microsoft Edge";
+
+/** Edge's count of the other tabs, after the page's title. Its English wording only. */
+const MORE_PAGES = /\s+and \d+ more pages?$/u;
+
+/** The page's own title, from a window's title without the app's name: for Edge, without its profile and its count of other tabs. */
+const pageTitle = (rest: string, app: string): string => {
+  if (app !== EDGE) {
+    return rest;
+  }
+
+  const profileAt = rest.lastIndexOf(" - ");
+  const page = profileAt > 0 ? rest.slice(0, profileAt) : rest;
+
+  return page.replace(MORE_PAGES, "").trim();
+};
+
+/**
+ * A window's title without what the app adds at its end. Windows titles read
  * "Page - Google Chrome", "Notes.txt - Notepad" or "Page — Mozilla Firefox",
- * where macOS titles only name the page or document. Any other title stays
- * as it is.
+ * where macOS titles only name the page or document; Edge also names its
+ * profile and counts its other tabs there, which go too. Only a title that
+ * ends in the app's name is changed: that is what tells a browser's window
+ * from an installed web app's.
  */
 export const withoutAppName = (title: string, app: string | null): string => {
   if (app === null) {
@@ -52,7 +77,7 @@ export const withoutAppName = (title: string, app: string | null): string => {
       const suffix = `${dash}${name}`;
 
       if (visible.endsWith(suffix) && visible.length > suffix.length) {
-        return visible.slice(0, -suffix.length).trim();
+        return pageTitle(visible.slice(0, -suffix.length).trim(), shown);
       }
     }
   }
