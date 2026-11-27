@@ -28,7 +28,12 @@ export interface LiveEdits {
   readonly drop: (owner: string) => void;
 }
 
-const clean = (markdown: string): string => markdown.trim().slice(0, TEXT_MAX);
+/** The words without blank lines around them: the first line keeps its indentation, which code needs. */
+const clean = (markdown: string): string =>
+  markdown
+    .replace(/^\s*\n/u, "")
+    .trimEnd()
+    .slice(0, TEXT_MAX);
 
 /**
  * The page's only drafts: words typed into a text item's field that have

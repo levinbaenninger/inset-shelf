@@ -88,6 +88,14 @@ describe(createLiveEdits, () => {
     expect(sent).toStrictEqual(["Book the", "Book the movers"]);
   });
 
+  it("keeps the first line's indentation, as code needs, and drops only blank lines and trailing spaces around the words", () => {
+    const { edit, sent } = setup();
+
+    edit.finish("\n  \n    return total;\n  }\n\n");
+
+    expect(sent).toStrictEqual(["    return total;\n  }"]);
+  });
+
   it("keeps the item's words when the field is left empty", () => {
     const { edit, pause, sent } = setup();
 
