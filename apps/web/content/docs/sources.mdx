@@ -1,24 +1,36 @@
 ---
 title: Sources and reopening
-description: The line under each item says where it came from, and opens it again.
+description: Open an item's source and find items from the window you're using.
 ---
 
-The line under an item names the app, window and page it came from. Click it, or press `⌘O`, to open the page or the app again.
+The line under an item shows its source when the shelf could read it. Click the line to open the page or app again when there's a destination. On a text item, you can also press `⌘O`. On an image, `⌘O` opens the drawing tools.
 
 ## How items are named
 
 - A GitHub pull request or issue, a ChatGPT or Claude chat, a post on X or a YouTube video is named on the line.
 - Other pages show their site and title.
-- The page address comes from your browser: Safari, Chrome, Edge, Brave, Arc, Firefox, Zen and other Chromium browsers.
+- On macOS, the shelf can read a page address from Safari, Chrome, Edge, Brave, Arc, Firefox, Zen, and other Chromium browsers.
 
 ## What opens
 
-- A ChatGPT thread, a Claude chat or project and a Notion page open right where they were, in their desktop app.
-- Figma, Slack and Linear come to the front.
-- Other items open the page they came from.
+- A saved app link can reopen a ChatGPT or T3 Code thread, a Claude chat or project, or a Notion page in its desktop app.
+- On macOS, supported desktop apps come to the front if the shelf has no app link. This includes Figma, Slack, and Linear.
+- If the shelf has a page address for another source, it opens that page.
 
-On Windows, the page of a selection copied from Chrome, Edge, Firefox or an app built on Chromium is the one the browser noted with the copy. A desktop app opens only at a chat or page it has a link for, such as a Claude chat or a Notion page; other items open their page.
+On Windows, a selection can get its page address from the copy made by Chrome, Edge, Firefox, or an app built on Chromium. A desktop app needs a link to the chat, thread, or page to reopen it.
 
 ## When the line is missing parts
 
-An item records the app, window title and page address only when the matching permission is granted. Without Screen Recording there is no title, and without Accessibility and Automation there is no address. See [Install](/docs/install#permissions).
+On macOS, Screen Recording lets the shelf read window titles. Accessibility lets it read page addresses. Safari and Chromium browsers can also ask for Automation access. Firefox and Zen use Accessibility to supply the address. See [Install](/docs/install#permissions).
+
+## Recall
+
+When you return to a window, page, or repository with open items, a small **3 items from here** pill can appear in the window's bottom-right corner. It counts unchecked items captured there or linked to that window. Click it to open the shelf filtered to those items. The pill leaves the keyboard with your app and goes away when you type or after a few seconds.
+
+Recall can match a browser page by its address, a desktop thread by its link, or files in the same VS Code or Cursor project. It can also match the app and window title. On Windows, browser windows match by title when an address isn't available.
+
+When you open the shelf beside a matching window, click the **from here** chip in Search. You can also choose **From this window** from the filter menu or type `from:here`. Click the pressed chip again or remove `from:here` to clear the filter.
+
+The pill shows at most once per visit. After the first visit, it waits until you've been away for at least ten minutes. The wait gets longer when you leave a pill alone. Click its **×** to quiet that place until its matching items change.
+
+The pill is on by default. To turn it off, open **Settings > Recall** and switch off **Show items from the window in front**. The search filter stays available. On macOS, Recall uses the [permissions you grant for capture](/docs/install#permissions).

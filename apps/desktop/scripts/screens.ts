@@ -4005,6 +4005,27 @@ const ONE_OVER_DOC = {
   ],
 };
 
+/** A note with a code line far wider than the shelf at 300. */
+const CODE_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(727, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: [
+        "Vor dem Umzug sichern:",
+        "",
+        "```",
+        "rsync --archive --delete --exclude node_modules /Volumes/Archiv/Projekte/ sicherung@nas.rieder-moebel.ch:/backup/projekte/",
+        "```",
+      ].join("\n"),
+      via: "typed",
+    },
+  ],
+};
+
 /** An item linked to 25 windows: its open row shows three and “+22”. */
 const MANY_WINDOWS_DOC = {
   ...NINE_DOC,
@@ -4447,6 +4468,43 @@ const STRESS_SCENES: readonly Scene[] = (
       data: { view: shelfView(ONE_OVER_DOC) },
       height: 720,
       name: "stress-open-one-line-over",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 727);
+      },
+      // A code line wider than the note wraps: reading it must not take a sideways scroll.
+      check: async (page) => {
+        const code = await item(page, 727).evaluate((row) => {
+          const block = row.querySelector("code")?.parentElement;
+
+          return block === null || block === undefined
+            ? null
+            : {
+                height: Math.round(block.getBoundingClientRect().height),
+                inner: block.scrollWidth,
+                outer: block.clientWidth,
+                scrolls: getComputedStyle(block).overflowX !== "visible",
+              };
+        });
+
+        if (code === null) {
+          return "the scene must show a code block";
+        }
+
+        if (code.scrolls || code.inner > code.outer + 1) {
+          return `a long code line must wrap, not scroll sideways: ${JSON.stringify(code)}`;
+        }
+
+        // Three lines of 16 px or more.
+        return code.height >= 48
+          ? null
+          : `the scene's code line must be longer than the note is wide: ${JSON.stringify(code)}`;
+      },
+      data: { view: shelfView(CODE_DOC) },
+      height: 620,
+      name: "stress-open-code",
       width: NARROWEST,
     },
     {
