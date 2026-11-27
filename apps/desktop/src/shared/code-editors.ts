@@ -1,4 +1,10 @@
-import { CodePlaceSchema } from "./code-place";
+import {
+  atLine,
+  CodePlaceSchema,
+  fileName,
+  fromHome,
+  pathInProject,
+} from "./code-place";
 import type { CodePlace } from "./code-place";
 import { cleanTitle } from "./window-title";
 
@@ -176,4 +182,31 @@ export const codePlace = (
   });
 
   return parsed.success ? parsed.data : null;
+};
+
+/** How a code place reads on an item. */
+export interface CodeLabel {
+  /** The file's name, with ":line" when a line is stored. */
+  readonly file: string;
+  /** The project folder's name, or null without one. */
+  readonly project: string | null;
+  /**
+   * Where the file is, for a tooltip: from the home folder as "~/…". Without
+   * a known home, only the part inside the project, so no user name shows.
+   */
+  readonly path: string;
+}
+
+/** The words an item from code shows: "recall.ts:147", "inset-shelf", and the path from home. */
+export const codeLabel = (place: CodePlace, home: string | null): CodeLabel => {
+  const root = place.root?.replace(/\/$/u, "") ?? "";
+
+  return {
+    file: atLine(fileName(place), place),
+    path:
+      home === null
+        ? pathInProject(place)
+        : (fromHome(place.file, home) ?? place.file),
+    project: root === "" ? null : root.slice(root.lastIndexOf("/") + 1),
+  };
 };

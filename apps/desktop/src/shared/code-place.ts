@@ -30,3 +30,26 @@ export const CodePlaceSchema = z
   });
 
 export type CodePlace = z.output<typeof CodePlaceSchema>;
+
+/** The file's name, the last part of its path. */
+export const fileName = (place: CodePlace): string =>
+  place.file.slice(place.file.lastIndexOf("/") + 1);
+
+/** The file's path inside its project, or its name without one: never the whole path, which can name the user. */
+export const pathInProject = (place: CodePlace): string =>
+  place.root === null
+    ? fileName(place)
+    : place.file.slice(place.root.replace(/\/$/u, "").length + 1);
+
+/** `text` with the place's line after a colon, when one is stored. */
+export const atLine = (text: string, place: CodePlace): string =>
+  place.line === null ? text : `${text}:${place.line}`;
+
+/** `path` from the home folder as "~/…" when home holds it; null when it does not. */
+export const fromHome = (path: string, home: string): string | null => {
+  const folder = home.replace(/\/$/u, "");
+
+  return folder !== "" && isAncestor(folder, path)
+    ? `~${path.slice(folder.length)}`
+    : null;
+};
