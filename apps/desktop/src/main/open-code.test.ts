@@ -10,9 +10,9 @@ import { fileIsThere, openCode } from "./open-code";
 import type { CodeSystem } from "./open-code";
 import { quietDisk } from "./quiet-disk";
 
-/** What the shelf says when the editor was to open the file and its folder shows it instead. */
+/** What the shelf says when the editor was to open the file: what it tries next, since a reveal can't report that it failed. */
 const FELL_BACK =
-  "say Couldn’t open a.ts in Code, so it is shown in its folder";
+  "say Couldn’t open a.ts in Code, so Inset tries to show it in its folder";
 
 const PLACE: CodePlace = {
   file: "/Users/anna/My Code/proj/a.ts",
@@ -50,7 +50,7 @@ const system = (
 };
 
 describe(openCode, () => {
-  it("shows the file in its folder, and says so, when its editor refuses to open it", async () => {
+  it("tries to show the file in its folder, and says so, when its editor refuses to open it", async () => {
     const mac = system(true, ["vscode"]);
 
     await openCode("Code", PLACE, CODE_EDITORS, {
@@ -99,7 +99,7 @@ describe(openCode, () => {
     ]);
   });
 
-  it("shows the file in its folder, and says so, when no app on this computer takes the editor's address", async () => {
+  it("tries to show the file in its folder, and says so, when no app on this computer takes the editor's address", async () => {
     const mac = system(true, []);
 
     await openCode("Code", PLACE, CODE_EDITORS, mac);
