@@ -130,6 +130,13 @@ describe(codePlace, () => {
       "report — draft.ts — my — proj — Work",
       "/Users/anna/my — proj",
     ],
+    [
+      // The title's own dash is known from the file's name: a shorter one in the folder's name is part of the name.
+      "neither, with another dash in the project's name and a folder named like its start inside",
+      "/Users/anna/my - proj/my/a.ts",
+      "a.ts — my - proj",
+      "/Users/anna/my - proj",
+    ],
   ])(
     "finds the project when the title's dash is in %s",
     (_, file, title, root) => {
