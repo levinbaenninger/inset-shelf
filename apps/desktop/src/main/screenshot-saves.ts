@@ -465,9 +465,11 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     now.saving = to;
     now.failed = null;
     now.write = null;
-    retarget();
 
+    // A throw on the way, showing Saving… included, ends this save as failed, so the next press isn't taken for a second click.
     const written = await reportSaveError(async () => {
+      retarget();
+
       const result = await place();
 
       if (!result.ok) {

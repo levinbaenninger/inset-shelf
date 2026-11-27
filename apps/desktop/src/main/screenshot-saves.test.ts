@@ -112,6 +112,8 @@ const setup = () => {
   // The picture files the card wrote for a place it then didn't make, and took away again.
   const dropped: string[] = [];
   let view: ScreenshotView | null = null;
+  // Filled by breakCardOnce(): the next change to the card's view throws it, as a window gone at quit does.
+  let cardBreaks: Error | null = null;
   // The card's 12 seconds while they run: the test lets them pass by hand.
   let time: (() => void) | null = null;
 
@@ -216,6 +218,14 @@ const setup = () => {
         cardClock.shown();
       },
       update: (change) => {
+        const broken = cardBreaks;
+
+        cardBreaks = null;
+
+        if (broken !== null) {
+          throw broken;
+        }
+
         if (view !== null) {
           view = { ...view, ...change };
         }
@@ -294,6 +304,10 @@ const setup = () => {
         id,
         type: "attach",
       });
+    },
+    /** The next change to the card's view throws `error`. */
+    breakCardOnce: (error: Error) => {
+      cardBreaks = error;
     },
     failAttachments: (error: Error | null) => {
       attachmentWrites = error;
@@ -497,6 +511,22 @@ describe("the screenshot card's save path", () => {
     await older;
 
     expect(card.view()?.seq).toBe(2);
+  });
+
+  it("offers its add again, not Saving… for good, when the card can't show that the save started", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+    card.breakCardOnce(new Error("Object has been destroyed"));
+
+    const first = await card.saves.addToShelf(1).catch(() => "threw");
+
+    const second = await card.saves.addToShelf(1);
+
+    expect({
+      first,
+      rows: card.images().map((each) => each.id),
+    }).toStrictEqual({ first: null, rows: [second] });
   });
 
   it("ignores a second click while the save runs", async () => {
