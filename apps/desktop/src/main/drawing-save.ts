@@ -44,8 +44,8 @@ export interface DrawingSaveInput {
 export type DrawingTarget =
   /** New Drawing: a new item. */
   | { readonly kind: "new" }
-  /** Annotate on an image item. */
-  | { readonly kind: "item"; readonly id: ItemId }
+  /** Annotate on an image item; `screenshot`: the screenshot card's, made as its Annotate opened. */
+  | { readonly kind: "item"; readonly id: ItemId; readonly screenshot?: true }
   /** New Drawing in an item's details: a new attachment of that item. */
   | { readonly kind: "newAttachment"; readonly id: ItemId }
   /** Annotate on a picture attached to an item. */
@@ -101,6 +101,8 @@ export interface DrawingSaveDeps {
   readonly added: (id: ItemId, via: "annotation" | "drawing") => void;
   /** The shelf selects an item and brings it into view, as after a capture, which also leaves details. */
   readonly focus: (id: ItemId) => void;
+  /** Marks on the screenshot card's item: the shelf says where the screenshot went, and open details stay. */
+  readonly shotSaved: (id: ItemId) => void;
   /** After the user's own Save: the shelf shows the item, and says so when a copy failed or a copied drawing never reached the disk. */
   readonly show: (
     copied: ActionResult | null,
@@ -559,13 +561,20 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
 
   /**
    * Marks that went to an item of their own, new or annotated, bring it into
-   * view. Marks on an attachment leave the shelf where the user was: in the
-   * details the picture was opened from, or on the list.
+   * view, except on the screenshot card's item, which main announces. Marks
+   * on an attachment leave the shelf where the user was: in the details the
+   * picture was opened from, or on the list.
    */
   const landed = (put: Put): void => {
     deps.added(put.placed.id, put.via);
 
-    if (put.placed.kind === "item") {
+    if (put.placed.kind !== "item") {
+      return;
+    }
+
+    if (opened.kind === "item" && opened.screenshot === true) {
+      deps.shotSaved(put.placed.id);
+    } else {
       deps.focus(put.placed.id);
     }
   };

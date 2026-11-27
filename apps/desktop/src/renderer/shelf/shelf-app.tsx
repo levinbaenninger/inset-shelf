@@ -597,11 +597,11 @@ const DetailsNotSaved = ({
     />
   );
 
+/** An item main brings into view, and how. */
+type Shown = Omit<NonNullable<ShelfView["focus"]>, "seq">;
+
 /** A capture's focus closes details, unless it asks for them at a field: the why field's way in when the pill couldn't get the keyboard. */
-const showFocusDetails = (
-  details: Details,
-  focus: NonNullable<ShelfView["focus"]>
-): void => {
+const showFocusDetails = (details: Details, focus: Shown): void => {
   if (focus.field === undefined) {
     details.close();
   } else {
@@ -805,26 +805,35 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     });
   };
 
-  // A capture asks main to show its item: open its section, select it, and open an image's note for typing.
-  if (focus !== null && focus.seq !== handledFocus) {
-    const shown = doc.items.find((item) => item.id === focus.id);
-    const kind = shown?.kind;
+  /** Shows an item main named: opens its section, selects it, and opens an image's note for typing. */
+  const showItem = (shown: Shown): void => {
+    const item = doc.items.find(({ id }) => id === shown.id);
 
-    if (shown !== undefined) {
-      setOpen(shown.sectionId, true);
+    if (item !== undefined) {
+      setOpen(item.sectionId, true);
     }
 
     // A search left on from before would hide it.
     if (
-      !groups.some((group) => group.items.some(({ id }) => id === focus.id))
+      !groups.some((group) => group.items.some(({ id }) => id === shown.id))
     ) {
       setQuery("");
     }
 
+    setSelectedId(shown.id);
+    setEditingId(
+      item?.kind === "image" || shown.edit === true ? shown.id : null
+    );
+    showFocusDetails(details, shown);
+  };
+
+  // A capture asks main to show its item. A screenshot's leaves open details as they are: its notice offers Show.
+  if (focus !== null && focus.seq !== handledFocus) {
     setHandledFocus(focus.seq);
-    setSelectedId(focus.id);
-    setEditingId(kind === "image" || focus.edit === true ? focus.id : null);
-    showFocusDetails(details, focus);
+
+    if (focus.keepDetails !== true || !inDetails) {
+      showItem(focus);
+    }
   }
 
   useEffect(() => {
@@ -1581,18 +1590,37 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   useEffect(() => api.on("command", onCommand), []);
 
+  const onNotice = useEffectEvent(
+    (message: string, tone: NoticeTone, show: ItemId | undefined) => {
+      const row = nextNoticeRow();
+
+      if (tone === "failed") {
+        toast.error(message, { className: row, duration: NOTICE_MS });
+      } else if (show !== undefined && inDetails) {
+        // Details stayed open: the notice brings the item it names into view.
+        toast.success(message, {
+          action: {
+            label: "Show",
+            onClick: () => {
+              showItem({ id: show });
+              reveal(show);
+            },
+          },
+          className: row,
+          duration: UNDO_VISIBLE_MS,
+        });
+      } else {
+        toast.success(message, { className: row, duration: NOTICE_MS });
+      }
+
+      reportNoticeShown({ message, tone }, row);
+    }
+  );
+
   useEffect(
     () =>
-      api.on("notice", ({ message, tone }) => {
-        const row = nextNoticeRow();
-
-        if (tone === "failed") {
-          toast.error(message, { className: row, duration: NOTICE_MS });
-        } else {
-          toast.success(message, { className: row, duration: NOTICE_MS });
-        }
-
-        reportNoticeShown({ message, tone }, row);
+      api.on("notice", ({ message, show, tone }) => {
+        onNotice(message, tone, show);
       }),
     []
   );

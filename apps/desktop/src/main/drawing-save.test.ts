@@ -23,6 +23,7 @@ import {
 } from "vite-plus/test";
 
 import { createDrawingSaves } from "./drawing-save";
+import type { DrawingSaveDeps } from "./drawing-save";
 import { createQuitHold, drawingMarks } from "./quit-hold";
 import { createShelfController } from "./shelf-controller";
 import { nodeStoreFs, openShelfStore } from "./shelf-store";
@@ -134,6 +135,7 @@ const setup = async (dir: string, blocked = false) => {
   const saves = createDrawingSaves({
     added: () => {},
     focus: () => {},
+    shotSaved: () => {},
     clearStaging: () => {},
     close: () => {
       window.visible = false;
@@ -250,10 +252,14 @@ const setup = async (dir: string, blocked = false) => {
 };
 
 /** Saves that read the pictures and marks from the disk, as main's do. */
-const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
+const savesReading = (
+  app: Awaited<ReturnType<typeof setup>>,
+  shelf: Partial<Pick<DrawingSaveDeps, "focus" | "shotSaved">> = {}
+) =>
   createDrawingSaves({
     added: () => {},
     focus: () => {},
+    shotSaved: () => {},
     clearStaging: () => {},
     close: () => {},
     controller: app.controller,
@@ -275,6 +281,7 @@ const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
     },
     show: () => {},
     store: app.store,
+    ...shelf,
   });
 
 const HELLO: readonly StrokeMark[] = [
@@ -721,6 +728,7 @@ describe(createDrawingSaves, () => {
     const saves = createDrawingSaves({
       added: () => {},
       focus: () => {},
+      shotSaved: () => {},
       clearStaging: () => {},
       close: () => {},
       controller: app.controller,
@@ -766,6 +774,61 @@ describe(createDrawingSaves, () => {
     await setImmediate();
 
     expect({ image, reads }).toStrictEqual({ image: original, reads: [file] });
+  });
+
+  it("leaves the shelf to main's notice after Save on the screenshot card's Annotate, and brings any other annotated image into view", async () => {
+    const app = await setup(dir);
+    const file = await app.store.writeAttachment(new Uint8Array([1, 2, 3]));
+
+    const id = app.controller.apply({
+      context: null,
+      image: { file, heightPx: 3, pixelsPerDip: 1, widthPx: 4 },
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "screenshot",
+    });
+
+    if (id === null) {
+      throw new Error("not added");
+    }
+
+    const shown: string[] = [];
+
+    const saves = savesReading(app, {
+      focus: () => {
+        shown.push("brought into view");
+      },
+      shotSaved: () => {
+        shown.push("announced");
+      },
+    });
+
+    /** Annotate opens the image, from the card or not, and Save puts the marks on it. */
+    const annotateAndSave = async (screenshot: boolean) => {
+      const item = app.controller.item(id);
+
+      if (item?.kind !== "image") {
+        throw new Error("no image");
+      }
+
+      saves.open(
+        screenshot ? { id, kind: "item", screenshot } : { id, kind: "item" },
+        await saves.opening(item)
+      );
+      await saves.save({
+        copy: false,
+        forQuit: false,
+        marks: HELLO,
+        pins: [],
+        png: PNG,
+      });
+    };
+
+    await annotateAndSave(true);
+    await annotateAndSave(false);
+
+    expect(shown).toStrictEqual(["announced", "brought into view"]);
   });
 
   describe("the marks kept beside the picture (feedback round 13)", () => {
@@ -1026,6 +1089,7 @@ const noteWith = async (app: Awaited<ReturnType<typeof setup>>, held = 1) => {
     focus: (shown) => {
       focused.push(shown);
     },
+    shotSaved: () => {},
     controller: app.controller,
     copies: {
       copy: async () => await Promise.resolve({ ok: true }),

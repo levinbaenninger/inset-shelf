@@ -781,7 +781,7 @@ const start = async (): Promise<void> => {
         await showShelf();
 
         if (item !== null) {
-          controller.focus(item, false, field ?? undefined);
+          controller.focus(item, field === null ? {} : { field });
         }
       })();
     },
@@ -836,8 +836,8 @@ const start = async (): Promise<void> => {
     url: pageUrl("screenshot"),
   });
 
-  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
-  let notify: (message: string, tone?: NoticeTone) => void = (
+  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden. `show`: the item the shelf's toast offers to show from open details.
+  let notify: (message: string, tone?: NoticeTone, show?: ItemId) => void = (
     message,
     tone = "done"
   ) => {
@@ -989,13 +989,13 @@ const start = async (): Promise<void> => {
 
   /**
    * The card's screenshot is saved to `to`: a notice says where it is, by
-   * the section's name or the item's words. A drop on an item also ends the
-   * tutorial's screenshot step here; Add to Shelf ended it when its row was
-   * made.
+   * the section's name or the item's words, and offers to show a new item
+   * from open details. A drop on an item also ends the tutorial's
+   * screenshot step here; Add to Shelf ended it when its row was made.
    */
   const shotAdded = (to: ShotSaveTo, id: ItemId): void => {
     if (to === "shelf") {
-      notify(`Added to ${sectionName(id)}`);
+      notify(`Added to ${sectionName(id)}`, "done", id);
 
       return;
     }
@@ -1008,6 +1008,15 @@ const start = async (): Promise<void> => {
         ? "Added to the item"
         : `Added to “${excerpt(itemText(item))}”`
     );
+  };
+
+  /** The card's own add saved its screenshot: the visible shelf shows a new row, or keeps open details, and a notice says where it is. */
+  const shotLanded = (to: ShotSaveTo, id: ItemId): void => {
+    if (to === "shelf" && shelf.isVisible()) {
+      controller.focus(id, { keepDetails: true });
+    }
+
+    shotAdded(to, id);
   };
 
   const shotSaves = createShotSaves<CardShot>({
@@ -1643,7 +1652,7 @@ const start = async (): Promise<void> => {
 
         if (id !== null) {
           e2eLog("itemAdded", { itemId: id, kind: "text", via: "windowLink" });
-          controller.focus(id, true);
+          controller.focus(id, { edit: true });
         }
       } else {
         controller.apply({
@@ -1765,6 +1774,14 @@ const start = async (): Promise<void> => {
     },
     focus: (id) => {
       controller.focus(id);
+    },
+    // The shelf hidden, Save shows it at the item as after any Annotate.
+    shotSaved: (id) => {
+      if (shelf.isVisible()) {
+        shotLanded("shelf", id);
+      } else {
+        controller.focus(id);
+      }
     },
     readFile: async (file) => {
       try {
@@ -2243,15 +2260,6 @@ const start = async (): Promise<void> => {
     }
   };
 
-  /** The card's own add saved its screenshot: a new row is shown on the visible shelf, and a notice says where it is. */
-  const shotLanded = (to: ShotSaveTo, id: ItemId): void => {
-    if (to === "shelf" && shelf.isVisible()) {
-      controller.focus(id);
-    }
-
-    shotAdded(to, id);
-  };
-
   // The card's own file dropped back on the shelf goes through the card's add, so a screenshot keeps one place.
   const shotDrop = createShotDrop({
     // The router needs no count; Double Shift's capture is what reads it.
@@ -2520,8 +2528,8 @@ const start = async (): Promise<void> => {
             return;
           }
 
-          controller.focus(id);
-          await openImage(id);
+          controller.focus(id, { keepDetails: true });
+          await openPicture({ id, kind: "item", screenshot: true });
         })();
       },
       copy: (seq) => {
@@ -2733,13 +2741,17 @@ const start = async (): Promise<void> => {
     shelfServer.emit("view", pageView());
   };
 
-  notify = (message, tone = "done") => {
+  notify = (message, given, show) => {
+    const tone = given ?? "done";
     const via = shelf.isVisible() ? "shelf" : "toast";
 
     e2eLog("noticeSent", { text: message, tone, via });
 
     if (via === "shelf") {
-      shelfServer.emit("notice", { message, tone });
+      shelfServer.emit(
+        "notice",
+        show === undefined ? { message, tone } : { message, show, tone }
+      );
     } else {
       toast.send({ title: message, tone, type: "notified" });
     }
