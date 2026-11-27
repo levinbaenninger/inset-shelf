@@ -2448,6 +2448,44 @@ describe("a drag's copy of the card's screenshot on disk", () => {
     });
   });
 
+  it.each(["item", "shelf"] as const)(
+    "keeps a replaced screenshot's copy when the shelf shows its drop on the %s and the disk refuses to save it",
+    async (to) => {
+      const card = setup();
+
+      await card.controller.flush();
+      card.saves.show(shot(1));
+
+      const { drop } = dropping(card);
+      const file = drop.drag(1)?.file ?? "";
+
+      // Clipboard screenshot B replaces A on the card before main handles A's drop; A's picture file is written, and the shelf's write is refused.
+      card.saves.show(shot(2));
+      card.failWrites(DISK_REFUSES);
+
+      if (to === "item") {
+        await drop.onItem(card.note, [file]);
+      } else {
+        drop.onShelf([file]);
+      }
+
+      await vi.waitFor(() => {
+        expect(card.notices).toStrictEqual([DISK_REFUSES.message]);
+      });
+      await settled(card);
+      expect({
+        copy: onDisk(file),
+        shown: card.shown(),
+        written: card.disk().at(-1),
+      }).toStrictEqual({
+        copy: shot(1).png,
+        shown:
+          to === "item" ? { attached: 1, items: 0 } : { attached: 0, items: 1 },
+        written: { attached: 0, items: 0 },
+      });
+    }
+  );
+
   it("gives the card's copy its own add when it comes in a drop of several files, and attaches the rest as files", async () => {
     const card = setup();
 
