@@ -2,10 +2,13 @@ import { lstat, readlink, realpath } from "node:fs/promises";
 
 import { FsErrorSchema } from "./save-error";
 
-/** The folders Inset may look in for a code file: the user's own, which it lives in already. */
+/**
+ * The folder Inset may look in for a code file: the user's home, which it
+ * lives in already. Only the home folder: another, the temp folder say, can
+ * be set to a place macOS asks about, and finding where it is would touch it.
+ */
 export interface QuietRoots {
   readonly home: string;
-  readonly temp: string;
 }
 
 /** What is at a path, as `lstat` says it: a link is not followed. */
@@ -134,7 +137,7 @@ const NODE_FS: QuietFs = { lstat, readlink, realpath };
  * volume, and ends the walk there.
  */
 export const quietDisk = (
-  { home, temp }: QuietRoots,
+  { home }: QuietRoots,
   fs: QuietFs = NODE_FS
 ): QuietDisk => {
   /** The root as the disk spells it; none when it is not there. */
@@ -150,10 +153,10 @@ export const quietDisk = (
   };
 
   const policyNow = async (): Promise<Policy> => {
-    const [homes, temps] = await Promise.all([rootAt(home), rootAt(temp)]);
+    const homes = await rootAt(home);
 
     return {
-      roots: [...homes, ...temps],
+      roots: homes,
       shut: [
         VOLUMES,
         ...homes.flatMap((root) =>

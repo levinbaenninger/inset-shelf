@@ -828,7 +828,7 @@ const start = async (): Promise<void> => {
   };
 
   /** Where main may look for a code item's file with no chance of a system prompt (src/main/quiet-disk.ts). */
-  const codeDisk = quietDisk({ home, temp: app.getPath("temp") });
+  const codeDisk = quietDisk({ home });
 
   /** Opens a code item's file in the editor it came from (src/main/open-code.ts). */
   const openCodeItem = async (

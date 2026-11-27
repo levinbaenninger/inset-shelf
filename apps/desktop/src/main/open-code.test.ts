@@ -175,7 +175,7 @@ describe(fileIsThere, () => {
   writeFileSync(file, "export {};\n");
   writeFileSync(kept, "export {};\n");
 
-  const disk = quietDisk({ home, temp: path.join(folder, "temp") });
+  const disk = quietDisk({ home });
 
   it("finds a file at its path", async () => {
     await expect(fileIsThere(file, disk)).resolves.toBeTruthy();

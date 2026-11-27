@@ -961,10 +961,16 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
 };
 
 const checkCodePlace = async (): Promise<void> => {
-  const project = path.join(realpathSync(work), "code", "proj");
+  // Under the run's own folder in the repo, in the home folder: the only place
+  // the shelf looks for a code file (src/main/quiet-disk.ts). The repo must not
+  // be in a folder macOS asks about, Documents say.
+  const code = path.join(sourceHome, "code");
+
+  mkdirSync(path.join(code, "proj", "src"), { recursive: true });
+
+  const project = path.join(realpathSync(code), "proj");
   const file = path.join(project, "src", "a.ts");
 
-  mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, "export const answer = 42;\n");
 
   const capture = async (text: string, document?: string) => {
