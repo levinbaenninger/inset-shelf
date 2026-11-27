@@ -1730,14 +1730,20 @@ const CARD_FILE = "/var/folders/7x/T/Inset Shelf/screenshot-1/Screenshot.png";
 
 const OTHER_FILE = "/Users/anna/Desktop/offer.pdf";
 
+/** Where macOS saved the card's screenshot: the user's own file, which they can edit and drag in from Finder. */
+const USER_FILE = "/Users/anna/Desktop/Screenshot 2026-11-25 at 10.00.00.png";
+
 /** What the shelf's plain attach answered for a file from outside. */
 const PLAIN: AttachResult = {
   attached: [AttachmentIdSchema.parse(uuid(90))],
   message: null,
 };
 
-/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, and what the card said it added. */
-const dropping = (card: ReturnType<typeof setup>) => {
+/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, and what the card said it added. The card's drag hands out what `stage` writes. */
+const dropping = (
+  card: ReturnType<typeof setup>,
+  stage: (shot: Shot) => string = () => CARD_FILE
+) => {
   const plain: unknown[] = [];
   const added: (readonly [ShotSaveTo, ItemId])[] = [];
   const dropped: ShotSaveTo[] = [];
@@ -1759,6 +1765,7 @@ const dropping = (card: ReturnType<typeof setup>) => {
       dropped.push(to);
     },
     saves: card.saves,
+    stage,
   });
 
   return { added, drop, dropped, plain };
@@ -1772,7 +1779,7 @@ describe("the card's file dropped on the shelf", () => {
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    drop.dragged(1, CARD_FILE);
+    expect(drop.drag(1)?.file).toBe(CARD_FILE);
 
     // The shelf's drop says nothing: the card says how it went.
     await expect(drop.onItem(card.note, [CARD_FILE])).resolves.toStrictEqual({
@@ -1806,7 +1813,7 @@ describe("the card's file dropped on the shelf", () => {
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    drop.dragged(1, CARD_FILE);
+    drop.drag(1);
 
     await expect(drop.onItem(card.note, [OTHER_FILE])).resolves.toBe(PLAIN);
     await expect(drop.onItem(card.note, [CARD_FILE, OTHER_FILE])).resolves.toBe(
@@ -1832,25 +1839,135 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 
-  it("takes the plain route for an older card's file once a newer screenshot shows", async () => {
+  it("imports nothing for an older card's file once a newer screenshot shows", async () => {
     const card = setup();
 
     card.saves.show(shot(1));
 
     const { drop, dropped, plain } = dropping(card);
+    const file = drop.drag(1)?.file;
 
-    drop.dragged(1, CARD_FILE);
     card.saves.show(shot(2));
 
-    await expect(drop.onItem(card.note, [CARD_FILE])).resolves.toBe(PLAIN);
+    await expect(drop.onItem(card.note, [file ?? ""])).resolves.toStrictEqual({
+      attached: [],
+      message: null,
+    });
+    drop.onShelf([file ?? ""]);
     expect({
       dropped,
-      plain: plain.length,
+      plain,
+      save: card.view()?.save,
       shown: card.shown(),
     }).toStrictEqual({
       dropped: [],
-      plain: 1,
+      plain: [],
+      save: { state: "idle" },
       shown: { attached: 0, items: 0 },
+    });
+  });
+
+  it("imports no second copy when the card's file is dropped on an item after its Add to Shelf saved it", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, dropped, plain } = dropping(card);
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+    // The pill reads Saving…, and the picture can still be dragged.
+    const file = drop.drag(1)?.file;
+
+    end({ ok: true });
+
+    const row = await adding;
+
+    expect({ row, view: card.view() }).toStrictEqual({
+      row: rowOf(card),
+      view: null,
+    });
+
+    // The note's drop reaches main only now.
+    await expect(drop.onItem(card.note, [file ?? ""])).resolves.toStrictEqual({
+      attached: [],
+      message: null,
+    });
+    await settled(card);
+    expect({
+      added,
+      dropped,
+      plain,
+      shown: card.shown(),
+      written: written(card),
+    }).toStrictEqual({
+      added: [],
+      dropped: [],
+      plain: [],
+      shown: { attached: 0, items: 1 },
+      written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("imports no second copy when an older card's second drop on the item reaches main after a newer screenshot shows", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, plain } = dropping(card);
+    const file = drop.drag(1)?.file ?? "";
+    const end = card.holdWrite();
+
+    // The first drop attaches the tile; a second one, made while the pill read Saving…, is still on its way.
+    await drop.onItem(card.note, [file]);
+    await vi.waitFor(() => {
+      expect(card.attachmentsOn(card.note)).toBe(1);
+    });
+    card.saves.show(shot(2));
+    await expect(drop.onItem(card.note, [file])).resolves.toStrictEqual({
+      attached: [],
+      message: null,
+    });
+    end({ ok: true });
+    await settled(card);
+    expect({
+      added,
+      attached: card.attachmentsOn(card.note),
+      plain,
+      written: written(card),
+    }).toStrictEqual({
+      // The first drop's own add, once its write landed.
+      added: [["item", card.note]],
+      attached: 1,
+      plain: [],
+      written: { doubled: [], last: { attached: 1, items: 0 } },
+    });
+  });
+
+  it("attaches a file from Finder at the screenshot's own path as a plain file, with the shelf's Undo, after a canceled drag of the card", async () => {
+    const card = setup();
+
+    // macOS saved this screenshot as USER_FILE.
+    card.saves.show(shot(1));
+
+    const { added, drop, dropped, plain } = dropping(card);
+    const file = drop.drag(1)?.file;
+
+    // The drag was canceled. The user edits the screenshot in Preview, saves it in place, and drags it in from Finder.
+    await expect(drop.onItem(card.note, [USER_FILE])).resolves.toBe(PLAIN);
+    expect({
+      added,
+      dropped,
+      file,
+      plain,
+      save: card.view()?.save,
+    }).toStrictEqual({
+      added: [],
+      dropped: [],
+      file: CARD_FILE,
+      plain: [{ call: "attachFiles", id: card.note, paths: [USER_FILE] }],
+      save: { state: "idle" },
     });
   });
 
@@ -1861,7 +1978,7 @@ describe("the card's file dropped on the shelf", () => {
 
     const { added, drop, dropped, plain } = dropping(card);
 
-    drop.dragged(1, CARD_FILE);
+    drop.drag(1);
     drop.onShelf([CARD_FILE]);
     await vi.waitFor(() => {
       expect(added).toHaveLength(1);
@@ -1889,10 +2006,10 @@ describe("the card's file dropped on the shelf", () => {
     writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
     card.saves.show(shot(1));
 
-    const { added, drop } = dropping(card);
+    const { added, drop } = dropping(card, () => file);
 
     // macOS keeps temporary files under /var, a link to /private/var: the drop can name either.
-    drop.dragged(1, file);
+    drop.drag(1);
     await drop.onItem(card.note, [realpathSync.native(file)]);
     await vi.waitFor(() => {
       expect(added).toStrictEqual([["item", card.note]]);
