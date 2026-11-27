@@ -192,7 +192,8 @@ const leaveField = (field: HTMLElement): void => {
   field
     .closest("[data-field-place]")
     ?.querySelector<HTMLElement>("[data-place-stop]")
-    ?.focus();
+    // The field was just on screen; its stop at the place's end mustn't scroll a long one away.
+    ?.focus({ preventScroll: true });
 };
 
 /** One typed-in field on its card, its words in line with the item's own at the top of details. */
