@@ -23,7 +23,10 @@ export type E2eEvent =
   | "whyNotSaved"
   | "whyFallback"
   // Recall: the pill showed, with `count` open items from the window in front.
-  | "recallShown";
+  | "recallShown"
+  // A notice: main sent it (`text`, `tone`, and `via` the shelf page or the toast window), then the shelf page put it on screen. The toast window reports nothing, so a notice sent its way is never logged as shown.
+  | "noticeSent"
+  | "noticeShown";
 
 export interface E2eDetails {
   readonly bounds?: Rectangle;
@@ -39,6 +42,7 @@ export interface E2eDetails {
   readonly count?: number;
   /** Why something couldn't be saved. */
   readonly reason?: string;
+  readonly tone?: string;
 }
 
 const logFile = process.env.INSET_E2E_LOG;

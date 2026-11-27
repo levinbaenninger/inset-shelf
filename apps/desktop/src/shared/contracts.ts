@@ -236,6 +236,13 @@ export const shelfContract = defineContract({
      * the menu takes every key, so main holds back the menu bar's keys.
      */
     menuOpen: send(z.boolean()),
+    /** A notice main sent is on the page, for the trial log; the page says nothing of one that never rendered. */
+    noticeShown: send(
+      z.object({
+        message: z.string().max(2000),
+        tone: z.enum(["done", "failed"]),
+      })
+    ),
     /** Files dropped or pasted into the shelf, by path; main reads them, and its notice says how it went once they are on disk. */
     addFiles: send(z.array(z.string().min(1).max(4096)).min(1).max(50)),
     apply: send(ShelfOpSchema),

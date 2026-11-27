@@ -839,6 +839,7 @@ const start = async (): Promise<void> => {
     message,
     tone = "done"
   ) => {
+    e2eLog("noticeSent", { text: message, tone, via: "toast" });
     toast.send({ title: message, tone, type: "notified" });
   };
 
@@ -2323,6 +2324,9 @@ const start = async (): Promise<void> => {
       menuOpen: (open) => {
         menus.set(shelf.webContents, open);
       },
+      noticeShown: ({ message, tone }) => {
+        e2eLog("noticeShown", { text: message, tone, via: "shelf" });
+      },
       nativeEdit: (action) => {
         if (action === "copy") {
           gate.copySelection(shelf.webContents);
@@ -2665,7 +2669,11 @@ const start = async (): Promise<void> => {
   };
 
   notify = (message, tone = "done") => {
-    if (shelf.isVisible()) {
+    const via = shelf.isVisible() ? "shelf" : "toast";
+
+    e2eLog("noticeSent", { text: message, tone, via });
+
+    if (via === "shelf") {
       shelfServer.emit("notice", { message, tone });
     } else {
       toast.send({ title: message, tone, type: "notified" });
