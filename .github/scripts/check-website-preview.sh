@@ -22,21 +22,26 @@ check_preview() {
 
 # Cloudflare can skip a desktop-only push after publishing a preview for the same website.
 commits=$(git rev-list --first-parent "$base..$head")
-preview_commit=$head
-result=missing
+eligible=()
 for commit in $commits; do
   git diff --quiet "$commit" "$head" -- "${inputs[@]}" || break
-  result=$(check_preview "$commit")
-  if [[ $result != missing ]]; then
-    preview_commit=$commit
-    break
-  fi
+  eligible+=("$commit")
 done
 
-echo "Checking Cloudflare website preview for $preview_commit"
-while [[ $result == pending || $result == missing ]]; do
+echo "Waiting for Cloudflare to preview the website at $head"
+while true; do
+  for commit in "${eligible[@]}"; do
+    result=$(check_preview "$commit")
+    case "$result" in
+      missing) continue ;;
+      pending) break ;;
+      'Preview URL: https://'*)
+        echo "$commit $result"
+        exit 0 ;;
+      *)
+        echo "Cloudflare preview for $commit: $result" >&2
+        exit 1 ;;
+    esac
+  done
   sleep 15
-  result=$(check_preview "$preview_commit")
 done
-echo "$result"
-[[ $result == 'Preview URL: https://'* ]]
