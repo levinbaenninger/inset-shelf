@@ -48,6 +48,13 @@ describe(titleParts, () => {
       "Design - notes.md",
       "inset-shelf",
     ],
+    // On Windows the title's dash is the short one, whatever a file's name holds.
+    [
+      "Visual Studio Code",
+      "Design — notes.md - alpha",
+      "Design — notes.md",
+      "alpha",
+    ],
     ["Cursor", "index.ts — inset-shelf", "index.ts", "inset-shelf"],
   ] as const)("reads %s's %j", (app, title, file, project) => {
     expect(titleParts(rowOf(app), title, app)).toStrictEqual({

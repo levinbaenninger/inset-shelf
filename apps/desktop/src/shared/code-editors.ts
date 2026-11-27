@@ -2,6 +2,14 @@ import { CodePlaceSchema } from "./shelf";
 import type { CodePlace } from "./shelf";
 import { cleanTitle } from "./window-title";
 
+/**
+ * The dashes an editor's title is split on, longest first: Code writes " — "
+ * on macOS and " - " on Windows. A file's name may hold a dash too.
+ */
+const TITLE_DASHES = [" — ", " – ", " - "] as const;
+
+export type TitleDash = (typeof TITLE_DASHES)[number];
+
 /** What one part of an editor's window title names. */
 export type TitlePart = "file" | "project";
 
@@ -12,6 +20,12 @@ export interface CodeEditor {
   readonly title: readonly TitlePart[];
   /** What the window's document attribute (AXDocument) names on macOS: the open file, or null when that is not confirmed. */
   readonly document: "file" | null;
+  /**
+   * The dash an app name's titles are split on, where the name tells the
+   * platform. A name it leaves out, or a title without that dash (the user
+   * can set another), is split on the longest dash the title holds.
+   */
+  readonly dash?: Readonly<Record<string, TitleDash>>;
 }
 
 /** What a window title names, by an editor's row. */
@@ -29,6 +43,7 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
     // "Code" on macOS, "Visual Studio Code" on Windows. Its title can go on
     // with a folder location and a profile after the project.
     apps: ["Code", "Visual Studio Code"],
+    dash: { Code: " — ", "Visual Studio Code": " - " },
     // From Code's bundle, which sets the window's document to the active
     // editor's local file; not read from a running window with a file open.
     document: "file",
@@ -45,13 +60,6 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
 const EDITOR_NAMES: ReadonlySet<string> = new Set(
   CODE_EDITORS.flatMap((editor) => editor.apps)
 );
-
-/**
- * The dashes an editor's title is split on, longest first. A title is split
- * on the longest one it holds: Code writes " — " on macOS and " - " on
- * Windows, and a file's name may hold a shorter dash than the title's own.
- */
-const TITLE_DASHES = [" — ", " – ", " - "] as const;
 
 /** The row for an app among `editors`, or undefined. */
 export const codeEditor = (
@@ -73,7 +81,11 @@ export const titleParts = (
   app: string | null
 ): TitleParts => {
   const clean = cleanTitle(title, app);
-  const dash = TITLE_DASHES.find((each) => clean?.includes(each) === true);
+  const own = app === null ? undefined : editor.dash?.[app];
+
+  const dash = [...(own === undefined ? [] : [own]), ...TITLE_DASHES].find(
+    (each) => clean?.includes(each) === true
+  );
 
   const parts =
     clean === null || dash === undefined
