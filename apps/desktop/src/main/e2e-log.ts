@@ -24,9 +24,7 @@ export type E2eEvent =
   | "whyNotSaved"
   | "whyFallback"
   // Recall: the pill showed, with `count` open items from the window in front.
-  | "recallShown"
-  /** A capture's place in the code, once its line was looked for: never its path or the file's words. */
-  | "codePlace";
+  | "recallShown";
 
 export interface E2eDetails {
   readonly bounds?: Rectangle;
@@ -42,10 +40,6 @@ export interface E2eDetails {
   readonly count?: number;
   /** Why something couldn't be saved. */
   readonly reason?: string;
-  /** The capture holds the file its editor's window named. */
-  readonly fileFound?: boolean;
-  /** The captured words were found once in that file, so the item has their line. */
-  readonly lineFound?: boolean;
 }
 
 const logFile = process.env.INSET_E2E_LOG;

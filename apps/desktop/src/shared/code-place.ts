@@ -30,7 +30,7 @@ export const CodePlaceSchema = z
     file: WholePathSchema,
     /** The project folder: the ancestor of `file` that the window's title names. Null when it names none. */
     root: WholePathSchema.nullable(),
-    /** The 1-based line the captured text began on in the saved file, when it was found there exactly once. */
+    /** The 1-based line the captured text began on. Never stored: always null. The line is looked for when the item is opened (src/main/code-line.ts). */
     line: z.number().int().min(1).max(9_999_999).nullable(),
   })
   .refine(({ file, root }) => root === null || isAncestor(root, file), {

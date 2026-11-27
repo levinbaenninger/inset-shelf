@@ -88,7 +88,7 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
-import { lineInFile, lineToOpen } from "./code-line";
+import { lineToOpen } from "./code-line";
 import type { SourceReader } from "./code-line";
 import { chatGptThreadLink } from "./codex-threads";
 import { contained } from "./contained";
@@ -837,29 +837,6 @@ const start = async (): Promise<void> => {
     stat,
   };
 
-  /**
-   * A capture's line in its code file, found once the item is added so the
-   * capture is no slower: a step of its own, which counts only while the item
-   * still names that file.
-   */
-  const findCodeLine = async (
-    id: ItemId,
-    place: CodePlace | null,
-    text: string
-  ): Promise<void> => {
-    const line =
-      place === null ? null : await lineInFile(place.file, text, sourceReader);
-
-    if (place !== null && line !== null) {
-      controller.apply({ file: place.file, id, line, type: "setCodeLine" });
-    }
-
-    e2eLog("codePlace", {
-      fileFound: place !== null,
-      lineFound: line !== null,
-    });
-  };
-
   /** Where main may look for a code item's file with no chance of a system prompt (src/main/quiet-disk.ts). */
   const codeDisk = quietDisk({ home, temp: app.getPath("temp") });
 
@@ -1277,7 +1254,6 @@ const start = async (): Promise<void> => {
       }
 
       e2eLog("itemAdded", { itemId: id, kind: "text", via: "selection" });
-      void findCodeLine(id, context?.code ?? null, result.text);
       tutorial.complete(SHELF_TASK_IDS.doubleShift);
 
       if (shelf.isVisible()) {

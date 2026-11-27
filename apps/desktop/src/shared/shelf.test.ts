@@ -21,7 +21,6 @@ import {
   parseComposer,
   SectionIdSchema,
   ShelfDocSchema,
-  ShelfOpSchema,
   UNDO_MAX,
   fitText,
   withPinLabel,
@@ -1599,82 +1598,5 @@ describe("where in the code an item came from", () => {
       ...context,
       code: null,
     });
-  });
-});
-
-/** The line stored on the shelf's first item. */
-const lineOf = (doc: ShelfDoc) => doc.items[0]?.context?.code?.line;
-
-describe("the line found after a capture", () => {
-  const file = "/Users/anna/dev/proj/src/a.ts";
-  const start = emptyShelf(INBOX);
-  // The first id env() gives.
-  const id = ItemIdSchema.parse(uuid(11));
-
-  const captured = (from: string | null = file): MainOp => ({
-    context: from === null ? null : codeContext(from, "/Users/anna/dev/proj"),
-    html: null,
-    text: "retry();",
-    type: "addText",
-    via: "selection",
-  });
-
-  const setLine: MainOp = { file, id, line: 12, type: "setCodeLine" };
-
-  it("sets the line on the item it was found for, and nothing else", () => {
-    const { doc: before } = apply(start, [captured()]);
-    const { doc } = apply(start, [captured(), setLine]);
-
-    expect(doc.items).toStrictEqual(
-      before.items.map((item) => ({
-        ...item,
-        context: {
-          ...codeContext(file, "/Users/anna/dev/proj"),
-          code: { file, line: 12, root: "/Users/anna/dev/proj" },
-        },
-      }))
-    );
-  });
-
-  it.each([
-    ["deleted", [captured(), { id, type: "remove" } as const]],
-    ["from no file", [captured(null)]],
-    ["from another file", [captured("/Users/anna/dev/proj/src/b.ts")]],
-    ["already at that line", [captured(), setLine]],
-  ])("changes nothing on an item %s", (_, ops) => {
-    const { doc, pending } = apply(start, ops);
-
-    expect(applyOp(doc, setLine, env(), pending).doc).toBe(doc);
-  });
-
-  it("adds nothing for Undo to take back", () => {
-    expect(apply(start, [captured(), setLine]).pending).toStrictEqual([]);
-  });
-
-  it("leaves a capture deleted before its line was found to come back with one Undo, as captured", () => {
-    const { doc } = apply(start, [
-      captured(),
-      { id, type: "remove" },
-      setLine,
-      { type: "undoRemove" },
-    ]);
-
-    expect(doc.items.map((item) => item.id)).toStrictEqual([id]);
-    expect(lineOf(doc)).toBeNull();
-  });
-
-  it("brings a capture deleted after its line was found back with one Undo, at its line", () => {
-    const { doc } = apply(start, [
-      captured(),
-      setLine,
-      { id, type: "remove" },
-      { type: "undoRemove" },
-    ]);
-
-    expect(lineOf(doc)).toBe(12);
-  });
-
-  it("can't be sent by a page", () => {
-    expect(ShelfOpSchema.safeParse(setLine).success).toBeFalsy();
   });
 });
