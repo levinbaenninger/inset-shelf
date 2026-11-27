@@ -882,6 +882,17 @@ describe(createDrawingSaves, () => {
     expect(shown).toStrictEqual(["announced as saved"]);
   });
 
+  it("announces the screenshot card's item when another drawing takes its clean window", async () => {
+    const { annotate, id, saves, shown } = await cardShot(await setup(dir));
+
+    await annotate(true);
+    // New Drawing in the item's details opens in the same window, which never hides.
+    saves.open({ id, kind: "newAttachment" });
+    saves.hidden();
+
+    expect(shown).toStrictEqual(["announced as closed"]);
+  });
+
   describe("the marks kept beside the picture (feedback round 13)", () => {
     it("opens an image saved before marks were kept as it shows, with nothing to edit", async () => {
       const app = await setup(dir);
