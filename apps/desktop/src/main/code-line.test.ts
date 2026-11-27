@@ -5,7 +5,7 @@ import path from "node:path";
 import { TEXT_MAX } from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
-import { lineInFile, SOURCE_READ_MAX } from "./code-line";
+import { lineInFile } from "./code-line";
 import { quietDisk } from "./quiet-disk";
 
 // A home folder of the test's own, in a temp folder: its Documents is a folder of the test's too.
@@ -36,6 +36,9 @@ const saved = (name: string, text: string): string => {
 
 const LINE_12 = "export const value12 = 12;";
 
+/** The largest file searched for a line: 512 KB. */
+const READ_MAX = 512 * 1024;
+
 describe(lineInFile, () => {
   it("finds the line the captured text begins on in the saved file", async () => {
     const file = saved("dev/proj/a.ts", source(40));
@@ -61,21 +64,24 @@ describe(lineInFile, () => {
     await expect(lineInFile(file, LINE_12, disk)).resolves.toBeNull();
   });
 
-  it("gives no line in a file larger than 2 MB, even one that holds the text", async () => {
-    const file = saved(
-      "dev/proj/large.ts",
-      `${LINE_12}\n${"x".repeat(SOURCE_READ_MAX)}`
-    );
+  it.each([
+    ["at its start", `${LINE_12}\n${"x".repeat(READ_MAX)}`],
+    ["at its end", `${"x".repeat(READ_MAX)}\n${LINE_12}\n`],
+  ])(
+    "gives no line in a file larger than 512 KB that holds the text %s",
+    async (_, text) => {
+      const file = saved("dev/proj/large.ts", text);
 
-    await expect(lineInFile(file, LINE_12, disk)).resolves.toBeNull();
-  });
+      await expect(lineInFile(file, LINE_12, disk)).resolves.toBeNull();
+    }
+  );
 
-  it("finds a line in a file of exactly 2 MB", async () => {
+  it("finds a line in a file of exactly 512 KB", async () => {
     const head = `${LINE_12}\n`;
 
     const file = saved(
       "dev/proj/full.ts",
-      `${head}${"x".repeat(SOURCE_READ_MAX - head.length)}`
+      `${head}${"x".repeat(READ_MAX - head.length)}`
     );
 
     await expect(lineInFile(file, LINE_12, disk)).resolves.toBe(1);
