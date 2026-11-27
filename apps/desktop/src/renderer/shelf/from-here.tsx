@@ -21,11 +21,11 @@ export const withFromHere = (query: string): string => {
   return words === "" ? FROM_HERE : `${words} ${FROM_HERE}`;
 };
 
-/** The search with `from:here` taken out. */
+/** The search with `from:here` taken out, however it was typed: the search reads it in any case. */
 export const withoutFromHere = (query: string): string =>
   query
     .split(/\s+/u)
-    .filter((word) => word !== "" && word !== FROM_HERE)
+    .filter((word) => word !== "" && word.toLocaleLowerCase() !== FROM_HERE)
     .join(" ");
 
 /** "2 open items from GitHub · inset/shelf #482", for the chip's and the menu's tooltip. */

@@ -37,6 +37,7 @@ describe(withoutStaleHere, () => {
   it("takes from:here out of the search when the shelf opens beside no window items came from, and keeps the other words", () => {
     expect(withoutStaleHere("from:here", null, true)).toBe("");
     expect(withoutStaleHere("build from:here", undefined, true)).toBe("build");
+    expect(withoutStaleHere("Build FROM:Here", null, true)).toBe("Build");
   });
 
   it("leaves the search alone while there is an opening, or there never was one", () => {
