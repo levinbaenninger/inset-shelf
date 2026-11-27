@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isCodeCapture } from "./code-editors";
 import {
   atLine,
   CodePlaceSchema,
@@ -8,7 +9,7 @@ import {
   textMark,
 } from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
-import { copiedWords, noteTree } from "./shown-note";
+import { codeTree, copiedWords, noteTree } from "./shown-note";
 import type { Copied } from "./shown-note";
 import {
   isAppLink,
@@ -1893,7 +1894,10 @@ const shownNote = (item: ShelfItem): Copied | null => {
     return null;
   }
 
-  const shown = copiedWords(noteTree(item.text));
+  // The shelf shows a code capture as one block of code, so it copies as code.
+  const shown = copiedWords(
+    isCodeCapture(item) ? codeTree(item.text) : noteTree(item.text)
+  );
 
   return shown.text.trim() === "" ? null : shown;
 };

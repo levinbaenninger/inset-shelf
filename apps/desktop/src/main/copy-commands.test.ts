@@ -1494,6 +1494,51 @@ describe(createCopyCommands, () => {
     });
   });
 
+  it("copies and drags out a code capture edited in the shelf as the code block it shows, as typed in plain text", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: {
+          app: "Code",
+          appLink: null,
+          code: {
+            file: "/Users/anna/p/recall.py",
+            line: null,
+            root: "/Users/anna/p",
+          },
+          title: "recall.py — p",
+          url: null,
+        },
+        html: "<span>def __init__</span>",
+        text: "def __init__(self):",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    controller.apply({
+      id,
+      text: "def __init__(self):\n    return *a*",
+      type: "editText",
+    });
+
+    await commands.copy(id);
+    const item = controller.item(id);
+
+    expect({
+      copied: await formats(written[0]?.[0]),
+      dragged: item === undefined ? undefined : itemText(item),
+    }).toStrictEqual({
+      copied: {
+        "text/html":
+          "<pre><code>def __init__(self):\n    return *a*\n</code></pre>",
+        "text/plain": "def __init__(self):\n    return *a*",
+      },
+      dragged: "def __init__(self):\n    return *a*",
+    });
+  });
+
   it("copies a note the shelf shows as nothing as it was typed, with no empty format", async () => {
     const { commands, controller, items, written } = await setup();
 

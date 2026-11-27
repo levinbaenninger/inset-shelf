@@ -27,6 +27,12 @@ export const noteTree = (markdown: string): Root => {
   return tree;
 };
 
+/** Words the shelf shows as one block of code, which is the words themselves: every space and line kept, nothing read as Markdown. */
+export const codeTree = (code: string): Root => ({
+  children: [{ type: "code", value: code }],
+  type: "root",
+});
+
 /** The words of inline content as they read. HTML, which the shelf hides, reads as nothing, as does a footnote's mark; a picture reads as its words. */
 const inlineText = (node: Nodes): string => {
   if (node.type === "text" || node.type === "inlineCode") {
