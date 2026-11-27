@@ -291,6 +291,10 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     /** The card shows, and its time is stopped. */
     held: () => view !== null && time === null,
+    /** The card's 12 seconds end now, if they are running. */
+    runOut: () => {
+      time?.();
+    },
     /** The card's 12 seconds pass, unless its time is stopped. */
     elapse: () => {
       const run = time;
@@ -580,6 +584,20 @@ describe("Add to “…” on the screenshot card", () => {
       id: other,
       label: "Book the lift",
     });
+  });
+
+  it("still attaches when the card's time ran out between the click and its arrival", async () => {
+    const card = setup();
+
+    card.select(card.note, true);
+    card.saves.show(shot(1));
+    // The click left the card while it named the note; its 12 seconds ended before it reached main.
+    card.runOut();
+
+    expect(card.view()).toBeNull();
+    await expect(card.saves.addToItem(1, card.note)).resolves.toBe(card.note);
+    expect(card.attached).toStrictEqual([card.note]);
+    expect(card.notices).toStrictEqual([]);
   });
 
   it("says so in one notice when the item the card showed was deleted before the click arrived", async () => {
