@@ -15,6 +15,7 @@ import {
   ATTACHMENTS_MAX,
   AttachedImageSchema,
   AttachmentSchema,
+  ContextSchema,
   ItemIdSchema,
   parseComposer,
   SectionIdSchema,
@@ -1070,7 +1071,11 @@ describe("attachments on an item (format 4)", () => {
 
     expect(doc).toStrictEqual({
       ...v3,
-      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      items: v3.items.map((item) => ({
+        ...item,
+        attachments: [],
+        context: item.context === null ? null : { ...item.context, code: null },
+      })),
       schemaVersion: 4,
     });
     expect(doc === null ? [] : doc.items.map(storedFilesOf)).toStrictEqual([
@@ -1506,5 +1511,61 @@ describe("a picture changes what holds it", () => {
 
     expect(toItem(file.id).doc).toBe(doc);
     expect(toItem(imageAt(60).id).doc).toBe(doc);
+  });
+});
+
+/** A context from Code holding this file and project folder, as the system would report it. */
+const codeContext = (file: string, root: string | null) => ({
+  app: "Code",
+  appLink: null,
+  code: { file, line: null, root },
+  title: "a.ts — proj",
+  url: null,
+});
+
+describe("where in the code an item came from", () => {
+  it("reads a version 4 shelf saved before it with no place in the code", () => {
+    const savedBefore = {
+      ...v3,
+      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      schemaVersion: 4,
+    };
+
+    const doc = parseShelfDocument(JSON.stringify(savedBefore));
+
+    expect(doc?.schemaVersion).toBe(4);
+    expect(doc?.items.map((item) => item.context?.code)).toStrictEqual(
+      v3.items.map((item) => (item.context === null ? undefined : null))
+    );
+  });
+
+  it("keeps a file and the project folder it sits in", () => {
+    const context = codeContext(
+      "/Users/anna/dev/proj/src/a.ts",
+      "/Users/anna/dev/proj"
+    );
+
+    expect(ContextSchema.parse(context).code).toStrictEqual(context.code);
+  });
+
+  it.each([
+    ["a folder elsewhere", "/Users/anna/dev/other"],
+    ["a folder whose name only starts the same", "/Users/anna/dev/pro"],
+    ["the file itself", "/Users/anna/dev/proj/src/a.ts"],
+  ])("refuses %s as the project", (_, root) => {
+    expect(
+      ContextSchema.safeParse(
+        codeContext("/Users/anna/dev/proj/src/a.ts", root)
+      ).success
+    ).toBeFalsy();
+  });
+
+  it("refuses a path longer than the shelf keeps", () => {
+    const file = `/${"a".repeat(4096)}`;
+
+    expect(file).toHaveLength(4097);
+    expect(
+      ContextSchema.safeParse(codeContext(file, null)).success
+    ).toBeFalsy();
   });
 });

@@ -840,7 +840,12 @@ describe("attachments on an item (format 4)", () => {
     }).toStrictEqual({
       initial: {
         ...v3,
-        items: v3.items.map((item) => ({ ...item, attachments: [] })),
+        items: v3.items.map((item) => ({
+          ...item,
+          attachments: [],
+          context:
+            item.context === null ? null : { ...item.context, code: null },
+        })),
         schemaVersion: 4,
       },
       kept: [...new Set(named)].toSorted(),
