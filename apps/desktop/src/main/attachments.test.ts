@@ -348,32 +348,35 @@ describe(createAttachments, () => {
     expect(deleted).toStrictEqual(stored);
   });
 
-  it("keeps a dropped or picked picture's own name, spaces and all, on the shelf and when it is dragged back out", async () => {
-    const { attachments, controller, id } = setup(0);
-    const file = "/Users/someone/Desktop/chart  sample.png";
-    const op = await attachments.prepareItem(file);
+  it.each(["chart  sample", "chart ", "v1."])(
+    "keeps a dropped or picked picture's own name %j, spaces and dots and all, on the shelf and when it is dragged back out",
+    async (name) => {
+      const { attachments, controller, id } = setup(0);
+      const file = `/Users/someone/Desktop/${name}.png`;
+      const op = await attachments.prepareItem(file);
 
-    if ("problem" in op) {
-      throw new Error(op.problem);
+      if ("problem" in op) {
+        throw new Error(op.problem);
+      }
+
+      const added = controller.item(controller.apply(op) ?? id);
+
+      await attachments.attachFilesTo(id, [file]);
+
+      const [attached] = controller.item(id)?.attachments ?? [];
+
+      expect({
+        attachedDragsOutAs:
+          attached?.kind === "image" ? ownFileName(attached.name) : null,
+        itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
+        itemReads: added?.kind === "image" ? added.title : null,
+      }).toStrictEqual({
+        attachedDragsOutAs: `${name}.png`,
+        itemDragsOutAs: `${name}.png`,
+        itemReads: name,
+      });
     }
-
-    const added = controller.item(controller.apply(op) ?? id);
-
-    await attachments.attachFilesTo(id, [file]);
-
-    const [attached] = controller.item(id)?.attachments ?? [];
-
-    expect({
-      attachedDragsOutAs:
-        attached?.kind === "image" ? ownFileName(attached.name) : null,
-      itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
-      itemReads: added?.kind === "image" ? added.title : null,
-    }).toStrictEqual({
-      attachedDragsOutAs: "chart  sample.png",
-      itemDragsOutAs: "chart  sample.png",
-      itemReads: "chart  sample",
-    });
-  });
+  );
 
   it("drags a screenshot out under its note, as before, whatever it is titled", async () => {
     const { attachments, controller } = setup(0);
