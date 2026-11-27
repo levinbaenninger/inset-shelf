@@ -3271,6 +3271,19 @@ const dropCardOnShelf = async (): Promise<void> => {
  * original is still in the screenshot folder says whether Finder moved it.
  */
 const dropCardInFinder = async (): Promise<void> => {
+  // A test writes nothing in a folder the user keeps, and macOS saves screenshots to the Desktop unless told otherwise.
+  const shut = shutFolder(screenshotFolder());
+
+  if (shut !== undefined) {
+    record(
+      "card-drop: the Finder step is left to a person",
+      true,
+      `screenshots save to ${shut}`
+    );
+
+    return;
+  }
+
   const folder = finderFolder("Card dropped");
 
   const original = path.join(
