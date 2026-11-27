@@ -115,21 +115,23 @@ describe("Inset Shelf's tutorial", () => {
 
     const named = (mac: boolean) => {
       const stop = shelfSpotlight(mac).find((step) => step.id === "menu");
+
       const labels = new Set(
         shelfMenu(mac ? null : { floatOnTop: false }).flatMap((entry) =>
           entry.kind === "choice" ? [entry.label.replace("…", "")] : []
         )
       );
-      const said = words.filter((word) => stop?.text.includes(word));
 
-      return { missing: said.filter((word) => !labels.has(word)), said };
+      const said = words.filter((word) => stop?.text.includes(word) === true);
+
+      return {
+        missing: said.filter((word) => !labels.has(word)),
+        namesHelp: said.includes("Help"),
+      };
     };
 
     for (const mac of [true, false]) {
-      expect(named(mac)).toMatchObject({
-        missing: [],
-        said: expect.arrayContaining(["Help"]),
-      });
+      expect(named(mac)).toStrictEqual({ missing: [], namesHelp: true });
     }
   });
 

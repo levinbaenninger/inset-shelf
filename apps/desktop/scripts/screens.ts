@@ -9908,11 +9908,15 @@ const SCENES: readonly Scene[] = [
   {
     // The ⋯ at the top: New Section, Settings and Help, which opens the docs; a window link and Keyboard Shortcuts have their own ways in.
     act: async (page) => {
-      await page.locator("header").getByRole("button", { name: "More" }).click();
+      await page
+        .locator("header")
+        .getByRole("button", { name: "More" })
+        .click();
       await page.getByRole("menu").waitFor();
     },
     check: async (page) => {
       const entries = await page.getByRole("menuitem").allTextContents();
+
       const gone = entries.filter((entry) =>
         /^(?:New Window Link|Keyboard Shortcuts)/u.test(entry)
       );
