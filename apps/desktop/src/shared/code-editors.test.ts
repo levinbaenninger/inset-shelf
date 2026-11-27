@@ -441,6 +441,29 @@ describe(lineOfText, () => {
   );
 
   it.each([
+    // A drag begun at the end of the line above copies its break: the capture began a line.
+    [
+      "the same words now end another line",
+      "if (ready) run();\na();\nrun(); // ready is checked above\n",
+      "\nrun();\n",
+    ],
+    [
+      "the same words now end another line, its break copied twice",
+      "if (ready) run();\n",
+      "\n\nrun();  \n",
+    ],
+  ])(
+    "gives no line for a capture that began its line when %s",
+    (_, file, captured) => {
+      expect(lineOfText(file, captured)).toBeNull();
+    }
+  );
+
+  it("finds a capture that began its line where it still begins one", () => {
+    expect(lineOfText("if (ready) go();\nrun();  \n", "\nrun();\n")).toBe(2);
+  });
+
+  it.each([
     ["blanks now end its line", "a();\nrun();  \nb();\n", 2],
     ["its line is now the file's last", "a();\nrun();", 2],
     ["the same words begin another line first", "run(); // x\nrun();\t\n", 2],

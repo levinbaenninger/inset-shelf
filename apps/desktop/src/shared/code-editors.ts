@@ -317,14 +317,36 @@ const endsLine = (text: string, at: number): boolean => {
   return index === text.length || text[index] === "\n";
 };
 
+/** Which ends of a match must be ends of a line: the start, after a break or at the file's start; the end, as `endsLine` says. */
+interface LineEdges {
+  readonly start: boolean;
+  readonly end: boolean;
+}
+
+const NO_EDGES: LineEdges = { end: false, start: false };
+
+/** Whether the match of `text` from `start` to `end` has the line ends `edges` asks for. */
+const onEdges = (
+  text: string,
+  start: number,
+  end: number,
+  edges: LineEdges
+): boolean =>
+  (!edges.start || start === 0 || text[start - 1] === "\n") &&
+  (!edges.end || endsLine(text, end));
+
 /**
  * Where `wanted` is in `text`: at one place, at more than one, or nowhere,
- * counting only places that end their line when `toLineEnd`. Stops at the
- * second. One pass over `text`, never back (Knuth, Morris and Pratt): no
+ * counting only places whose ends are line ends where `edges` asks. Stops at
+ * the second. One pass over `text`, never back (Knuth, Morris and Pratt): no
  * file and no capture make it slower than their two lengths, where a
  * built-in search can compare most of a long capture at each place.
  */
-const placeOf = (text: string, wanted: string, toLineEnd = false): Found => {
+const placeOf = (
+  text: string,
+  wanted: string,
+  edges: LineEdges = NO_EDGES
+): Found => {
   if (wanted === "") {
     return { at: -1, times: 0 };
   }
@@ -360,12 +382,14 @@ const placeOf = (text: string, wanted: string, toLineEnd = false): Found => {
     }
 
     if (matched === wanted.length) {
-      if (!toLineEnd || endsLine(text, index + 1)) {
+      const start = index + 1 - wanted.length;
+
+      if (onEdges(text, start, index + 1, edges)) {
         if (at !== -1) {
           return { at, times: 2 };
         }
 
-        at = index + 1 - wanted.length;
+        at = start;
       }
 
       matched = border[matched - 1] ?? 0;
@@ -397,7 +421,8 @@ const lineAt = (text: string, index: number): number => {
  * Only when it is nowhere is it looked for without the blank lines before
  * it and the blanks after it, which leaves every line that was selected in
  * the match. A capture whose blanks after it held a line break ended its
- * line, so its match must too. No part of a capture stands in for the
+ * line, so its match must too; one that began with a line break began its
+ * line, so its match must start one. No part of a capture stands in for the
  * whole, and a capture that is there twice, in either form, has no line.
  *
  * The file on disk is not the editor's buffer: a selection from unsaved
@@ -422,13 +447,13 @@ export const lineOfText = (text: string, captured: string): number | null => {
     return lineAt(file, exact.at + blankStart);
   }
 
+  // The blanks trimmed away still say where the selection's lines began and ended.
   const loose =
     exact.times === 0 && trimmed !== whole
-      ? placeOf(
-          file,
-          trimmed,
-          whole.slice(blankStart + trimmed.length).includes("\n")
-        )
+      ? placeOf(file, trimmed, {
+          end: whole.slice(blankStart + trimmed.length).includes("\n"),
+          start: blankStart > 0,
+        })
       : exact;
 
   return loose.times === 1 ? lineAt(file, loose.at) : null;
