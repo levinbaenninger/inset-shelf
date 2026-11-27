@@ -125,8 +125,8 @@ const Steady = ({
 
 const PILL_LABELS = Object.values(PILL_LABEL);
 
-/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. The dimmed button says it on hover; the failure message says it for the keyboard (ELSEWHERE). */
-const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
+/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. Its tile there opens to annotate, saved or not. The dimmed button says where on hover; the failure message says it for the keyboard (ON_SHELF). */
+const ANNOTATE_OFF = "Annotate it in its item’s details";
 
 /**
  * “Name”, cut inside the quotes so the closing one always shows, right after
@@ -244,15 +244,15 @@ const FOOT_CAPTION =
 /** Shown after the reason a save failed: what it means for the screenshot. */
 const NOT_KEPT = "The screenshot isn’t saved yet.";
 
-/** While the shelf holds the screenshot, Retry is the only add: what the user does on the shelf to get the other add back. For an attachment it names the tile's own removal in details, not Discard changes, which would put back the item's other changes too; and it says when Annotate works again, since the keyboard never reaches a button that is off. */
-const ELSEWHERE = {
-  item: "To add it elsewhere, remove it in its item’s details. Annotate it there once Retry has saved it.",
-  shelf: "Delete it on the shelf to add it elsewhere.",
+/** While the shelf holds the screenshot, Retry is the only add: that it isn't saved, and what the user does on the shelf to get the other add back. For an attachment the place to act comes first, so the card's two lines hold it. There the tile opens to annotate, which the keyboard can't learn from a button that is off, and the tile's own removal brings the other add back (not Discard changes, which would put back the item's other changes too). */
+const ON_SHELF = {
+  item: "The screenshot is in its item’s details, not saved yet. Annotate it there, or remove it to add it elsewhere.",
+  shelf: `${NOT_KEPT} Delete it on the shelf to add it elsewhere.`,
 } as const;
 
-/** What follows the reason a save failed: the screenshot isn't saved, and where the shelf holds it, how to add it elsewhere. */
+/** What follows the reason a save failed: the screenshot isn't saved, and where the shelf holds it, what to do there. */
 const afterFailure = (placed: ShotPlaced | null): string =>
-  placed === null ? NOT_KEPT : `${NOT_KEPT} ${ELSEWHERE[placed.to]}`;
+  placed === null ? NOT_KEPT : ON_SHELF[placed.to];
 
 /** Why the save failed, reason first, then what `after` says it means for the screenshot, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
 const FailureBar = ({

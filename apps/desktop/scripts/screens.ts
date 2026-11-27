@@ -6546,18 +6546,21 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
 /** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
 const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
 
-/** What the failure message says while the shelf holds the screenshot: the shelf action that brings the other add back and, on an item, when Annotate works again (the keyboard never reaches the dimmed button's hover). */
+/** What the failure message ends with while the shelf holds the screenshot: the shelf action that brings the other add back and, on an item, where to annotate it (the keyboard never reaches the dimmed button's hover). */
 const ELSEWHERE = {
-  item: "To add it elsewhere, remove it in its item’s details. Annotate it there once Retry has saved it.",
+  item: "The screenshot is in its item’s details, not saved yet. Annotate it there, or remove it to add it elsewhere.",
   shelf: "Delete it on the shelf to add it elsewhere.",
 } as const;
+
+/** Where the screenshot on its item is acted on: the card's two lines must hold it after any of main's ordinary reasons. */
+const CARD_PLACE = "details";
 
 /** A sentence's last three words: what the keyboard must reach under the longest reason. */
 const lastWords = (sentence: string): string =>
   sentence.split(" ").slice(-3).join(" ");
 
 /** What the dimmed Annotate says on hover while Retry is the only add. */
-const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
+const ANNOTATE_OFF = "Annotate it in its item’s details";
 
 /** How many lines the failure message takes as it shows now, and how many its words run to. */
 const failureLines = async (
@@ -6583,7 +6586,7 @@ const failureLines = async (
 /**
  * What the card whose only add is Retry adding to “…” tells the user: the
  * reason, then where the screenshot is and what to do there. Its hover on the
- * dimmed Annotate says when it works again; the keyboard never reaches a button
+ * dimmed Annotate says where to annotate; the keyboard never reaches a button
  * that is off, so the message says it too, and the keyboard reads it to its end.
  */
 const retryOnlySays = async (
@@ -6594,6 +6597,16 @@ const retryOnlySays = async (
 
   if (!said.startsWith(message) || !said.endsWith(ELSEWHERE.item)) {
     return `the failure message must start with the reason and end with “${ELSEWHERE.item}”: “${said}”`;
+  }
+
+  // After one of main's ordinary reasons the two lines name the place to act. The longest reason fills them by itself: the keyboard reads on, below.
+  const placeCut =
+    message === CARD_FAILURE
+      ? await reasonInView(page)
+      : await restingLinesShow(page, CARD_PLACE);
+
+  if (placeCut !== null) {
+    return placeCut;
   }
 
   await page.getByRole("button", { name: "Annotate" }).hover({ force: true });
@@ -7667,13 +7680,19 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       "Saving didn’t finish in time.",
       CARD_LABEL
     ),
+    // Main's longest ordinary reason: the two lines still name the place to act.
+    retryOnly(
+      "screenshot-card-retry-only-no-access",
+      "Inset can’t write to its data folder.",
+      CARD_LABEL
+    ),
     // One unbroken word for the item, and the longest reason.
     retryOnly(
       "stress-screenshot-retry-only",
       CARD_FAILURE,
       `${LONG_WORD.slice(0, 39)}…`
     ),
-    // The keyboard on that card's message, with main's longest ordinary reason: how to add it elsewhere and why Annotate is off, in the four lines it has.
+    // The keyboard on that card's message, with main's longest ordinary reason: where the screenshot is, and what to do with it there, in the four lines it has.
     retryRead(
       "screenshot-card-retry-only-read",
       placedCard(
