@@ -12,14 +12,7 @@ let focusedEditor: Editor | null = null;
 
 export const editorWithFocus = (): Editor | null => focusedEditor;
 
-const toMarkdown = (editor: Editor): string => {
-  // NOTE_EXTENSIONS holds Markdown, which gives every field's editor this.
-  if (editor.markdown === undefined) {
-    throw new Error("A note field reads and writes Markdown.");
-  }
-
-  return noteMarkdown(editor.markdown, editor.getJSON());
-};
+const toMarkdown = (editor: Editor): string => noteMarkdown(editor.getJSON());
 
 /** What a note field does with the keys a plain field would not. */
 export interface MarkdownFieldKeys {

@@ -2,6 +2,7 @@ import { Strike } from "@tiptap/extension-strike";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 import type { JSONContent } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
+import { z } from "zod";
 
 /**
  * ~~text~~ still strikes through, but ⇧⌘S is Next steps in every Inset app,
@@ -44,121 +45,437 @@ export const noteMarkdownManager = (): MarkdownManager =>
     markedOptions: MARKED_OPTIONS,
   });
 
-/** A backslash escape or an HTML entity, as TipTap writes them around plain characters. */
-const ESCAPE = /\\[\\`*_[\]~]|&(?:amp|lt|gt);/gu;
+/** Characters that pair up into formatting: emphasis, strikethrough and code spans. */
+const PAIRING = new Set(["*", "_", "~", "`"]);
 
-const ENTITY = new Map([
-  ["&amp;", "&"],
-  ["&gt;", ">"],
-  ["&lt;", "<"],
+/** The paired characters each kind of formatting is written with. */
+const WRITTEN_WITH = new Map([
+  ["bold", ["*", "_"]],
+  ["code", ["`"]],
+  ["italic", ["*", "_"]],
+  ["strike", ["~"]],
 ]);
 
-/** A link written out, which reads the same bare when its words are its own address. */
-const LINK = /\[(?<words>[^\]\n]*)\]\([^)\s]*\)/gu;
+const WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
+const PUNCTUATION = /^[\p{P}\p{S}]$/u;
+const ASCII_PUNCTUATION = /^[!-/:-@[-`{-~]$/u;
+const OPENS_HTML = /^[!/?A-Za-z]$/u;
+
+const CHARACTER_REFERENCE =
+  /^&(?:#\d{1,7}|#[Xx][\dA-Fa-f]{1,6}|[A-Za-z][\dA-Za-z]{0,31});/u;
+
+const TASK_BOX = /^\[[ Xx]\](?:\s|$)/u;
+
+/** Formatting TipTap writes beside a text node; "" is the edge of its block and "\n" a line break. */
+const MARKUP = "markup";
+
+const isSpace = (char: string): boolean => char === "" || WHITESPACE.test(char);
+
+const isPunctuation = (char: string): boolean => PUNCTUATION.test(char);
 
 /**
- * `text` with as many of `pattern`'s matches written bare as `same` allows,
- * found by halving the matches that can't all go at once.
+ * Whether a run of `char` between `before` and `after` could open or close
+ * formatting (CommonMark's flanking rules), with markup beside it read as
+ * anything at all.
  */
-const withoutNeedless = (
-  text: string,
-  pattern: RegExp,
-  bare: (match: RegExpExecArray) => string,
-  same: (candidate: string) => boolean
+const canPair = (char: string, before: string, after: string): boolean => {
+  if (char === "`" || before === MARKUP || after === MARKUP) {
+    return true;
+  }
+
+  const left =
+    !isSpace(after) &&
+    (!isPunctuation(after) || isSpace(before) || isPunctuation(before));
+
+  const right =
+    !isSpace(before) &&
+    (!isPunctuation(before) || isSpace(after) || isPunctuation(after));
+
+  return char === "_"
+    ? (left && (!right || isPunctuation(before))) ||
+        (right && (!left || isPunctuation(after)))
+    : left || right;
+};
+
+/** A run of one paired character in a text node. */
+interface Run {
+  readonly char: string;
+  readonly start: number;
+  readonly end: number;
+  readonly canPair: boolean;
+  /** First on its line, where `* ` starts a list, `***` a rule and ``` a code block. */
+  readonly startsBlock: boolean;
+}
+
+/** One text node's characters, what the written note holds after them, and its runs. */
+interface Piece {
+  readonly chars: readonly string[];
+  readonly after: string;
+  readonly runs: readonly Run[];
+}
+
+/** Whether a line has held only indentation once it holds `char` too. */
+const stillLineStart = (lineStart: boolean, char: string): boolean =>
+  char === "\n" || (lineStart && (char === " " || char === "\t"));
+
+const piece = (text: string, before: string, after: string): Piece => {
+  // Code points, as CommonMark reads them.
+  const chars = Array.from(text, (char) => char);
+  const runs: Run[] = [];
+  // Whatever is before a text node can end a line: a block's edge, a line break, or markup TipTap drops around a formatted space.
+  let lineStart = true;
+
+  for (let start = 0; start < chars.length;) {
+    const char = chars[start] ?? "";
+
+    if (!PAIRING.has(char)) {
+      lineStart = stillLineStart(lineStart, char);
+      start += 1;
+
+      continue;
+    }
+
+    let end = start + 1;
+
+    while (chars[end] === char) {
+      end += 1;
+    }
+
+    const next = chars[end] ?? after;
+
+    runs.push({
+      canPair: canPair(char, chars[start - 1] ?? before, next),
+      char,
+      end,
+      start,
+      startsBlock:
+        lineStart &&
+        (char === "*" || char === "_"
+          ? isSpace(next) || next === MARKUP
+          : end - start >= 3),
+    });
+    lineStart = false;
+    start = end;
+  }
+
+  return { after, chars, runs };
+};
+
+/** Where a character stands in a text node as it is written. */
+interface Spot {
+  readonly next: string;
+  /** The characters from this one on, as far as any rule below reads. */
+  readonly ahead: string;
+  readonly lineStart: boolean;
+  readonly startsListItem: boolean;
+}
+
+const AHEAD = 34;
+
+/** Each character besides the paired ones that a reader can take for syntax, in TipTap's escaped form, and where it needs escaping. */
+const SYNTAX = new Map<
+  string,
+  { readonly escaped: string; readonly needed: (spot: Spot) => boolean }
+>([
+  // Before punctuation it escapes that; before a line break it is one.
+  [
+    "\\",
+    {
+      escaped: "\\\\",
+      needed: ({ next }) =>
+        ASCII_PUNCTUATION.test(next) || next === "\n" || next === MARKUP,
+    },
+  ],
+  // HTML, which the shelf hides and the field reads as formatting.
+  ["<", { escaped: "&lt;", needed: ({ next }) => OPENS_HTML.test(next) }],
+  // A character reference such as &copy;, which the shelf shows as ©.
+  [
+    "&",
+    {
+      escaped: "&amp;",
+      needed: ({ ahead }) => CHARACTER_REFERENCE.test(ahead),
+    },
+  ],
+  [">", { escaped: "&gt;", needed: ({ lineStart }) => lineStart }],
+  // The end of a link's words, or of a link definition's name.
+  [
+    "]",
+    {
+      escaped: "\\]",
+      needed: ({ next }) =>
+        next === "(" || next === "[" || next === ":" || next === MARKUP,
+    },
+  ],
+  [
+    "[",
+    {
+      escaped: "\\[",
+      needed: ({ ahead, startsListItem, lineStart }) =>
+        startsListItem && lineStart && TASK_BOX.test(ahead),
+    },
+  ],
+]);
+
+/**
+ * One text node written as Markdown: a character is escaped only where a
+ * reader of the note would take it for syntax, in TipTap's own forms.
+ */
+const written = (
+  { after, chars, runs }: Piece,
+  paired: (char: string) => boolean,
+  startsListItem: boolean
 ): string => {
-  const matches = [...text.matchAll(pattern)];
-  const dropped = new Set<RegExpExecArray>();
+  let out = "";
+  let lineStart = true;
+  let run = 0;
 
-  const write = (drop: ReadonlySet<RegExpExecArray>): string => {
-    let out = "";
-    let from = 0;
+  for (let at = 0; at < chars.length; at += 1) {
+    const char = chars[at] ?? "";
+    const current = runs[run];
 
-    for (const match of matches) {
-      if (drop.has(match)) {
-        out += text.slice(from, match.index) + bare(match);
-        from = match.index + match[0].length;
-      }
+    if (current?.start === at) {
+      const text = chars.slice(at, current.end).join("");
+
+      out +=
+        current.startsBlock || (current.canPair && paired(char))
+          ? text.replaceAll(char, `\\${char}`)
+          : text;
+      at = current.end - 1;
+      run += 1;
+      lineStart = false;
+
+      continue;
     }
 
-    return out + text.slice(from);
-  };
+    const syntax = SYNTAX.get(char);
 
-  const settle = (group: readonly RegExpExecArray[]): void => {
-    if (group.length === 0) {
-      return;
-    }
+    out +=
+      syntax?.needed({
+        ahead: chars.slice(at, at + AHEAD).join(""),
+        startsListItem,
+        lineStart,
+        next: chars[at + 1] ?? after,
+      }) === true
+        ? syntax.escaped
+        : char;
+    lineStart = stillLineStart(lineStart, char);
+  }
 
-    if (same(write(new Set([...dropped, ...group])))) {
-      for (const match of group) {
-        dropped.add(match);
-      }
-
-      return;
-    }
-
-    if (group.length > 1) {
-      const half = Math.ceil(group.length / 2);
-
-      settle(group.slice(0, half));
-      settle(group.slice(half));
-    }
-  };
-
-  settle(matches);
-
-  return write(dropped);
+  return out;
 };
 
-/** TipTap's Markdown for `doc`, with plain newlines for hard breaks. */
-const written = (markdown: MarkdownManager, doc: JSONContent): string =>
-  markdown.serialize(doc).replaceAll("  \n", "\n");
+/** A web address the shelf links bare: a dotted host with no underscore, ending where GFM ends a link. */
+const WEB_LINK =
+  /^(?:https?:\/\/|www\.)(?:[\dA-Za-z-]+\.)+[\dA-Za-z-]+(?:[#/:?]\S*)?(?<=[\dA-Za-z/])$/u;
 
-/** One block's Markdown with every escape, entity and link syntax it reads the same without left out. */
-const simplest = (markdown: MarkdownManager, block: string): string => {
-  const meaning = JSON.stringify(markdown.parse(block));
+const EMAIL_LINK = /^[\w.+-]+@(?:[\dA-Za-z-]+\.)+[\dA-Za-z]+$/u;
+const OPENS_ADDRESS = /[\s(]$/u;
+const CLOSES_ADDRESS = /^[!),.:?]*\s/u;
+const ENDS_ADDRESS = /^[!),.:?]*$/u;
 
-  const same = (candidate: string): boolean =>
-    JSON.stringify(markdown.parse(candidate)) === meaning;
+const LinkMarkSchema = z.object({
+  attrs: z.object({ href: z.string() }),
+  type: z.literal("link"),
+});
 
-  const unescaped = withoutNeedless(
-    block,
-    ESCAPE,
-    ([match]) => ENTITY.get(match) ?? match.slice(1),
-    same
-  );
+const marksOf = (node: JSONContent | undefined): readonly JSONContent[] =>
+  node?.marks ?? [];
 
-  return withoutNeedless(
-    unescaped,
-    LINK,
-    (match) => match.groups?.words ?? "",
-    same
+const isPlainText = (node: JSONContent | undefined): boolean =>
+  node?.type === "text" && marksOf(node).length === 0;
+
+/** Whether the line can end right after `node`: at the block's edge or a line break. */
+const endsLine = (node: JSONContent | undefined): boolean =>
+  node === undefined || node.type === "hardBreak";
+
+/** Whether a link to `href` is the address it reads, written as GFM links it bare. */
+const linksItself = (text: string, href: string): boolean => {
+  if (href === `mailto:${text}`) {
+    return EMAIL_LINK.test(text);
+  }
+
+  return (
+    href === (text.startsWith("www.") ? `http://${text}` : text) &&
+    WEB_LINK.test(text)
   );
 };
+
+/** Whether a bare address can start right after `node`: GFM links one only after a space or "(". */
+const opensAddress = (node: JSONContent | undefined): boolean =>
+  endsLine(node) || (isPlainText(node) && OPENS_ADDRESS.test(node?.text ?? ""));
+
+/** Whether a bare address ends before `node`, followed by `next`: at a space, or at the end of the line after closing punctuation. */
+const closesAddress = (
+  node: JSONContent | undefined,
+  next: JSONContent | undefined
+): boolean => {
+  const text = node?.text ?? "";
+
+  return (
+    endsLine(node) ||
+    (isPlainText(node) &&
+      (CLOSES_ADDRESS.test(text) ||
+        (ENDS_ADDRESS.test(text) && endsLine(next))))
+  );
+};
+
+/**
+ * Whether the link at `index` is an address linked to itself that the shelf
+ * links again when it shows the note bare: no formatting inside it, nothing
+ * beside it that would join it, and nothing in it that needs escaping.
+ */
+const isOwnAddress = (
+  content: readonly JSONContent[],
+  index: number
+): boolean => {
+  const node = content[index];
+  const [only, ...others] = marksOf(node);
+  const link = LinkMarkSchema.safeParse(only);
+  const text = node?.text ?? "";
+
+  return (
+    link.success &&
+    others.length === 0 &&
+    linksItself(text, link.data.attrs.href) &&
+    opensAddress(content[index - 1]) &&
+    closesAddress(content[index + 1], content[index + 2]) &&
+    written(piece(text, "", ""), () => true, false) === text
+  );
+};
+
+const sameMarks = (a: JSONContent, b: JSONContent): boolean =>
+  JSON.stringify(marksOf(a)) === JSON.stringify(marksOf(b));
+
+/** Neighbouring text nodes with the same formatting as one, as the note reads. */
+const joined = (content: readonly JSONContent[]): JSONContent[] => {
+  const out: JSONContent[] = [];
+
+  for (const node of content) {
+    const last = out.at(-1);
+
+    if (
+      last?.type === "text" &&
+      node.type === "text" &&
+      sameMarks(last, node)
+    ) {
+      out[out.length - 1] = {
+        ...last,
+        text: `${last.text ?? ""}${node.text ?? ""}`,
+      };
+    } else {
+      out.push(node);
+    }
+  }
+
+  return out;
+};
+
+const isCode = (node: JSONContent): boolean =>
+  marksOf(node).some((mark) => mark.type === "code");
+
+/** What a block's text node has beside it in the written note. */
+const beside = (node: JSONContent | undefined): string => {
+  if (node === undefined) {
+    return "";
+  }
+
+  return node.type === "hardBreak" ? "\n" : MARKUP;
+};
+
+/**
+ * A block's words written as Markdown. A paired character is escaped where it
+ * could pair with another in the block, or with formatting written in it.
+ */
+const writtenInline = (
+  content: readonly JSONContent[],
+  startsListItem: boolean
+): JSONContent[] => {
+  const inline = joined(
+    content.map((node, index) =>
+      isOwnAddress(content, index) ? { text: node.text, type: "text" } : node
+    )
+  );
+
+  const pieces = inline.map((node, index) =>
+    node.type === "text" && !isCode(node)
+      ? piece(
+          node.text ?? "",
+          beside(inline[index - 1]),
+          beside(inline[index + 1])
+        )
+      : null
+  );
+
+  const pairing = new Map<string, number>();
+
+  for (const run of pieces.flatMap((each) => each?.runs ?? [])) {
+    if (run.canPair) {
+      pairing.set(run.char, (pairing.get(run.char) ?? 0) + 1);
+    }
+  }
+
+  for (const mark of inline.flatMap(marksOf)) {
+    for (const char of WRITTEN_WITH.get(mark.type ?? "") ?? []) {
+      pairing.set(char, Infinity);
+    }
+  }
+
+  const paired = (char: string): boolean => (pairing.get(char) ?? 0) > 1;
+
+  return inline.map((node, index) => {
+    const each = pieces[index];
+
+    return each === null || each === undefined
+      ? node
+      : { ...node, text: written(each, paired, startsListItem) };
+  });
+};
+
+/** `node` with every block's words written as Markdown; code blocks keep theirs. */
+const withWrittenText = (
+  node: JSONContent,
+  startsListItem = false
+): JSONContent => {
+  if (node.type === "codeBlock" || node.content === undefined) {
+    return node;
+  }
+
+  if (node.type === "paragraph" || node.type === "heading") {
+    return { ...node, content: writtenInline(node.content, startsListItem) };
+  }
+
+  return {
+    ...node,
+    content: node.content.map((child, index) =>
+      withWrittenText(child, node.type === "listItem" && index === 0)
+    ),
+  };
+};
+
+/**
+ * Writes notes. TipTap escapes every *, _, `, [, ], ~ and \ in a text node
+ * and writes every &, < and > as an entity, in one method it has no option
+ * for. A note's words reach it already written, so they pass through as they are.
+ */
+const writer = noteMarkdownManager();
+
+if (!("encodeTextForMarkdown" in writer)) {
+  throw new Error(
+    "TipTap no longer writes text through encodeTextForMarkdown."
+  );
+}
+
+Object.assign(writer, {
+  encodeTextForMarkdown: (text: string): string => text,
+});
 
 /**
  * The note a field holds, as the Markdown stored for it: what was typed, with
- * only the syntax its formatting needs. TipTap escapes every *, _, [, \ and &
- * and writes a linked address as [address](address); each of those that the
- * note reads the same without is left out, so Copy gives the note as typed.
+ * a character escaped only where the shelf, or the field when the note is
+ * opened again, would read it as syntax, and an address linked to itself
+ * written bare, as the shelf links it again. One pass over the note.
  * A hard break is written as two spaces and a newline; the shelf shows a plain
  * newline as a break anyway (remark-breaks), so notes keep plain newlines.
- * Block by block, so a long note costs little more per keystroke than a short
- * one; if the blocks read differently together, the note is simplified whole.
  */
-export const noteMarkdown = (
-  markdown: MarkdownManager,
-  doc: JSONContent
-): string => {
-  const whole = written(markdown, doc);
-
-  const joined = (doc.content ?? [])
-    .map((block) =>
-      simplest(markdown, written(markdown, { content: [block], type: "doc" }))
-    )
-    .join("\n\n");
-
-  return JSON.stringify(markdown.parse(joined)) ===
-    JSON.stringify(markdown.parse(whole))
-    ? joined
-    : simplest(markdown, whole);
-};
+export const noteMarkdown = (doc: JSONContent): string =>
+  writer.serialize(withWrittenText(doc)).replaceAll("  \n", "\n");
