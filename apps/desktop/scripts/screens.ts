@@ -8681,6 +8681,81 @@ const sendsNothing = async (page: Page): Promise<string | null> => {
     : `code left as it opened was saved as ${JSON.stringify(sent)}`;
 };
 
+/** `count` short lines of code, indented zero to four spaces, none wide enough to wrap. */
+const codeLines = (count: number): string =>
+  Array.from(
+    { length: count },
+    (_, at) => `${"  ".repeat(at % 3)}step(${at + 1});`
+  ).join("\n");
+
+/**
+ * The open code item shows `count` lines under the row's cap of ten: ten or
+ * fewer whole, with no Show more; more cut after the tenth, the edge where
+ * its words stop showing between the tenth line and the eleventh.
+ */
+const codeCap = async (page: Page, count: number): Promise<string | null> => {
+  const shown = await item(page, 760).evaluate((row) => {
+    const words = row.querySelector<HTMLElement>("[style*='--lines']");
+    const text = words?.querySelector("code")?.firstChild;
+
+    if (words === null || words === undefined || !(text instanceof Text)) {
+      return null;
+    }
+
+    // Where each line's first character shows.
+    const lines = text.data.split("\n");
+    let at = 0;
+
+    const tops = lines.map((line) => {
+      const range = document.createRange();
+
+      range.setStart(text, at);
+      range.setEnd(text, at + 1);
+      at += line.length + 1;
+
+      return range.getBoundingClientRect();
+    });
+
+    const style = getComputedStyle(words);
+
+    const edge =
+      words.getBoundingClientRect().bottom -
+      Number.parseFloat(style.borderBottomWidth) -
+      (style.overflowClipMargin.includes("content-box")
+        ? Number.parseFloat(style.paddingBottom)
+        : 0);
+
+    return {
+      edge,
+      eleventh: tops[10]?.top ?? null,
+      more:
+        row.querySelector("button[aria-label='Show more of the text']") !==
+        null,
+      tenth: tops[Math.min(9, tops.length - 1)]?.bottom ?? 0,
+    };
+  });
+
+  if (shown === null) {
+    return "the code item shows in no capped code block";
+  }
+
+  if (count <= 10) {
+    return !shown.more && shown.tenth <= shown.edge + 0.5
+      ? null
+      : `${count} lines of code must show whole, without Show more: ${JSON.stringify(shown)}`;
+  }
+
+  if (!shown.more) {
+    return `${count} lines of code must be cut after ten, with Show more`;
+  }
+
+  return shown.tenth <= shown.edge + 0.5 &&
+    shown.eleventh !== null &&
+    shown.eleventh >= shown.edge - 0.5
+    ? null
+    : `the cut must fall between the tenth line and the eleventh, not through one: ${JSON.stringify(shown)}`;
+};
+
 const CODE_SCENES: readonly Scene[] = (
   [
     {
@@ -8790,6 +8865,15 @@ const CODE_SCENES: readonly Scene[] = (
       platforms: ["macos", "windows"],
       width: NARROWEST,
     },
+    ...[10, 11, 13].map((count) => ({
+      act: async (page: Page) => {
+        await select(page, 760);
+      },
+      check: async (page: Page) => await codeCap(page, count),
+      data: { view: codeView({ ...snippetWindows, text: codeLines(count) }) },
+      name: `item-code-lines-${count}-open`,
+      width: NARROWEST,
+    })),
     {
       // ↑ at the very start stays in the code: the letter typed next goes before its first line.
       act: async (page) => {
