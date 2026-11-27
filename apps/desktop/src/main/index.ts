@@ -27,7 +27,7 @@ import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
 import { secondTap } from "@shared/pill";
-import { hereOf, hereWith, typedNote } from "@shared/recall";
+import { hereOf, hereWith, openingOf, typedNote } from "@shared/recall";
 import type { Opening } from "@shared/recall";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import {
@@ -698,7 +698,11 @@ const start = async (): Promise<void> => {
     hereOpening =
       found === null || context === null
         ? null
-        : { context, here: { ...found, filter: false, seq: hereSeq } };
+        : openingOf(controller.view().doc, context, {
+            ...found,
+            filter: false,
+            seq: hereSeq,
+          });
     emitShelfView();
   };
 
@@ -712,6 +716,10 @@ const start = async (): Promise<void> => {
   ): Promise<void> => {
     // From the notification area, the window in front is a part of the taskbar.
     if (options.dock === false) {
+      // No window to be from: the last opening's window must not name a note typed now.
+      hereSeq += 1;
+      hereOpening = null;
+      emitShelfView();
       shelf.show(null);
 
       return;
@@ -780,10 +788,12 @@ const start = async (): Promise<void> => {
       hereOpening =
         recalledFrom === null
           ? null
-          : {
-              context: recalledFrom,
-              here: { filter: true, ids, label, seq: hereSeq },
-            };
+          : openingOf(controller.view().doc, recalledFrom, {
+              filter: true,
+              ids,
+              label,
+              seq: hereSeq,
+            });
       emitShelfView();
 
       if (window !== null) {

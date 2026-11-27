@@ -274,7 +274,20 @@ export const hereOf = (
 export interface Opening {
   readonly here: ShelfHere;
   readonly context: ItemContext;
+  /** The items the shelf held when it opened, so a note typed since is told from an older item with the same source. */
+  readonly before: ReadonlySet<ItemId>;
 }
+
+/** The shelf opening beside `context`, where `here` names the open items from it. */
+export const openingOf = (
+  doc: ShelfDoc,
+  context: ItemContext,
+  here: ShelfHere
+): Opening => ({
+  before: new Set(doc.items.map((item) => item.id)),
+  context,
+  here,
+});
 
 /**
  * A composer request as main carries it out: a note typed under this
@@ -301,10 +314,26 @@ export const typedNote = (
     : op;
 };
 
-/** The shelf's here for this opening: its items, checked ones too, and each open item from the window since, such as a note typed under the chip. */
+/** Made under this opening with its window's source: a note typed under the chip. No rule has to match it again, so a site's home page keeps it too. */
+const madeHere = (item: ShelfItem, opening: Opening): boolean =>
+  !opening.before.has(item.id) &&
+  item.context !== null &&
+  item.context.app === opening.context.app &&
+  item.context.appLink === opening.context.appLink &&
+  item.context.title === opening.context.title &&
+  item.context.url === opening.context.url;
+
+/** The shelf's here for this opening: its items, and each note typed under the chip since, checked ones too, and each open item from the window since. */
 export const hereWith = (opening: Opening, doc: ShelfDoc): ShelfHere => {
   const kept = new Set(opening.here.ids);
-  const since = itemsFrom(doc, opening.context).filter((id) => !kept.has(id));
+  const typed = doc.items.filter((item) => madeHere(item, opening));
+
+  const since = [
+    ...new Set([
+      ...itemsFrom(doc, opening.context),
+      ...typed.map((item) => item.id),
+    ]),
+  ].filter((id) => !kept.has(id));
 
   return since.length === 0
     ? opening.here

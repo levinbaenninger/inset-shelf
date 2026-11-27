@@ -6,6 +6,7 @@ import {
   hasPlaces,
   hereOf,
   hereWith,
+  openingOf,
   holdsPagesFrom,
   INITIAL_RECALL,
   itemsFrom,
@@ -436,15 +437,13 @@ describe(hereOf, () => {
 });
 
 /** The shelf opened beside the pull request: the open items from it, and its source for a note typed under the chip. */
-const opening = (doc: ShelfDoc, seq = 4): Opening => ({
-  context: PR,
-  here: {
+const opening = (doc: ShelfDoc, seq = 4): Opening =>
+  openingOf(doc, PR, {
     filter: true,
     ids: itemsFrom(doc, PR),
     label: "GitHub · acme/app #12",
     seq,
-  },
-});
+  });
 
 /** The shelf after a composer request, mapped as main maps it for this opening, and the item it made. */
 const typed = (
