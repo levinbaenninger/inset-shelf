@@ -3012,6 +3012,7 @@ const start = async (): Promise<void> => {
       tray = createTray({
         iconPath: trayIconPath,
         model: () => ({
+          mac: isMac,
           setUpPermissions: isMac,
           shelfVisible: shelf.isVisible(),
           shortcutsRegistered,

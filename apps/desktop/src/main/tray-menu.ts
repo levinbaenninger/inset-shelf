@@ -1,4 +1,4 @@
-import { shortcutLabels, TOGGLE_ACCELERATOR } from "@shared/shortcut";
+import { keyText, shortcutLabels, TOGGLE_ACCELERATOR } from "@shared/shortcut";
 
 import { updateMenuItem } from "./update-state";
 import type { UpdateAction, UpdateState } from "./update-state";
@@ -20,11 +20,12 @@ export type TrayItem =
       readonly kind: "item";
       readonly label: string;
       readonly action: TrayAction;
-      /** Shown next to the label; the global shortcut is registered elsewhere. */
+      /** macOS: shown next to the label; the global shortcut is registered elsewhere. */
       readonly accelerator?: string;
     };
 
 export interface TrayModel {
+  readonly mac: boolean;
   readonly shelfVisible: boolean;
   /** macOS: Set Up Permissions… opens the onboarding at Allow access. */
   readonly setUpPermissions: boolean;
@@ -45,22 +46,39 @@ const updateItem = (update: UpdateState): TrayItem => {
 
 /** A plain macOS menu-bar menu: the app's actions, the version and its update, then About and Quit. */
 export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
-  const accelerator = (value: string): { accelerator?: string } =>
-    model.shortcutsRegistered ? { accelerator: value } : {};
+  /**
+   * Windows draws an accelerator from the key's place on a US keyboard
+   * (Ctrl+§ for Ctrl+/ on a Swiss one) and in its own words (Ctrl+Comma,
+   * Alt+Ctrl+S), and its menus can't set that text. There the keys go after
+   * the label, written as the shelf's menu and shortcut sheet write them.
+   */
+  const withKeys = (
+    label: string,
+    accelerator: string
+  ): { readonly label: string; readonly accelerator?: string } => {
+    if (!model.shortcutsRegistered) {
+      return { label };
+    }
+
+    return model.mac
+      ? { accelerator, label }
+      : { label: `${label} (${keyText(accelerator, false)})` };
+  };
 
   return [
     {
       action: "toggleShelf",
       kind: "item",
-      label: model.shelfVisible ? "Hide Inset Shelf" : "Show Inset Shelf",
-      ...accelerator(TOGGLE_ACCELERATOR),
+      ...withKeys(
+        model.shelfVisible ? "Hide Inset Shelf" : "Show Inset Shelf",
+        TOGGLE_ACCELERATOR
+      ),
     },
     SEPARATOR,
     {
       action: "openSettings",
       kind: "item",
-      label: "Settings…",
-      ...accelerator("CommandOrControl+,"),
+      ...withKeys("Settings…", "CommandOrControl+,"),
     },
     ...(model.setUpPermissions
       ? [
@@ -74,8 +92,7 @@ export const trayMenu = (model: TrayModel): readonly TrayItem[] => {
     {
       action: "showShortcuts",
       kind: "item",
-      label: "Keyboard Shortcuts",
-      ...accelerator("CommandOrControl+/"),
+      ...withKeys("Keyboard Shortcuts", "CommandOrControl+/"),
     },
     // The tutorial, also here: without a Dock icon the app has no Help menu.
     { action: "gettingStarted", kind: "item", label: "Getting Started" },

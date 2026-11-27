@@ -4,6 +4,7 @@ import { trayMenu, trayTooltip } from "./tray-menu";
 import type { TrayItem, TrayModel } from "./tray-menu";
 
 const base: TrayModel = {
+  mac: true,
   setUpPermissions: false,
   shelfVisible: false,
   shortcutsRegistered: true,
@@ -83,6 +84,39 @@ describe(trayMenu, () => {
     expect(
       trayMenu({ ...base, shortcutsRegistered: false })[0]
     ).not.toHaveProperty("accelerator");
+  });
+});
+
+describe("trayMenu on Windows", () => {
+  const windows: TrayModel = { ...base, mac: false };
+
+  it("names each item's keys as the shelf's own menu and shortcut sheet do", () => {
+    expect(names(trayMenu(windows)).slice(0, 4)).toStrictEqual([
+      "Show Inset Shelf (Ctrl+Alt+S)",
+      "---",
+      "Settings… (Ctrl+,)",
+      "Keyboard Shortcuts (Ctrl+/)",
+    ]);
+  });
+
+  // Windows draws an accelerator from the key's place on a US keyboard: Ctrl+§ for Ctrl+/ on a Swiss one.
+  it("leaves Windows no accelerator to draw", () => {
+    expect(
+      trayMenu(windows).filter(
+        (item) => item.kind === "item" && item.accelerator !== undefined
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("names no keys when they weren't registered", () => {
+    expect(
+      names(trayMenu({ ...windows, shortcutsRegistered: false })).slice(0, 4)
+    ).toStrictEqual([
+      "Show Inset Shelf",
+      "---",
+      "Settings…",
+      "Keyboard Shortcuts",
+    ]);
   });
 });
 
