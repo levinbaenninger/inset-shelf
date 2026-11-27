@@ -459,16 +459,27 @@ describe(lineOfText, () => {
     }
   );
 
-  it("finds a capture that began its line where it still begins one", () => {
-    expect(lineOfText("if (ready) go();\nrun();  \n", "\nrun();\n")).toBe(2);
+  it("gives no line when the captured spot changed and other spots hold the same words loosely", () => {
+    // Line 5 was captured; a comment was added to it since. Lines 2 and 3 hold run(); too.
+    const file =
+      "setup();\nrun();  \nif (ready) run();\nprepare();\nrun(); // original call\n";
+
+    expect(lineOfText(file, "\nrun();\n")).toBeNull();
+    expect(
+      lineOfText(file.replaceAll("\n", "\r\n"), "\r\nrun();\r\n")
+    ).toBeNull();
+  });
+
+  it("gives no line for a capture whose blanks are no longer around its words", () => {
+    expect(lineOfText("if (ready) go();\nrun();  \n", "\nrun();\n")).toBeNull();
   });
 
   it.each([
-    ["blanks now end its line", "a();\nrun();  \nb();\n", 2],
-    ["its line is now the file's last", "a();\nrun();", 2],
-    ["the same words begin another line first", "run(); // x\nrun();\t\n", 2],
-  ])("finds a capture that ended its line where %s", (_, file, line) => {
-    expect(lineOfText(file, "run();\n")).toBe(line);
+    ["blanks now end its line", "a();\nrun();  \nb();\n"],
+    ["its line is now the file's last", "a();\nrun();"],
+    ["the same words begin another line first", "run(); // x\nrun();\t\n"],
+  ])("gives no line for a capture that ended its line where %s", (_, file) => {
+    expect(lineOfText(file, "run();\n")).toBeNull();
   });
 
   it("gives no line when the whole capture is in the file twice, however its trimmed form reads", () => {
@@ -477,15 +488,15 @@ describe(lineOfText, () => {
     expect(lineOfText(file, "  retry();")).toBeNull();
   });
 
-  it("finds a capture whose blank end is not in the file, by all the lines it selected", () => {
+  it("gives no line for a capture whose blank end is not in the file, though all its lines are", () => {
     const file = source(40, {
       21: "  const total = 1;",
       22: "  return total;",
     });
 
-    expect(lineOfText(file, "  const total = 1;\n  return total;   \n\n")).toBe(
-      21
-    );
+    expect(
+      lineOfText(file, "  const total = 1;\n  return total;   \n\n")
+    ).toBeNull();
   });
 
   it("gives no line when the capture without its blank ends is in the file twice", () => {
@@ -515,9 +526,9 @@ describe(lineOfText, () => {
   });
 
   it("starts at the first line that holds text, not a line break copied before it", () => {
-    expect(lineOfText(source(40), "\n  \nexport const value12 = 12;\n")).toBe(
-      12
-    );
+    expect(
+      lineOfText(source(40, { 11: "  " }), "\n  \nexport const value12 = 12;\n")
+    ).toBe(12);
   });
 
   it("gives no line for a capture of only blank space", () => {

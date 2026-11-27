@@ -306,47 +306,13 @@ interface Found {
 // oxlint-disable-next-line unicorn/prefer-code-point -- a unit, as above.
 const unitAt = (text: string, at: number): number => text.charCodeAt(at);
 
-/** Whether only spaces or tabs stand between `at` and the end of its line in `text`. */
-const endsLine = (text: string, at: number): boolean => {
-  let index = at;
-
-  while (text[index] === " " || text[index] === "\t") {
-    index += 1;
-  }
-
-  return index === text.length || text[index] === "\n";
-};
-
-/** Which ends of a match must be ends of a line: the start, after a break or at the file's start; the end, as `endsLine` says. */
-interface LineEdges {
-  readonly start: boolean;
-  readonly end: boolean;
-}
-
-const NO_EDGES: LineEdges = { end: false, start: false };
-
-/** Whether the match of `text` from `start` to `end` has the line ends `edges` asks for. */
-const onEdges = (
-  text: string,
-  start: number,
-  end: number,
-  edges: LineEdges
-): boolean =>
-  (!edges.start || start === 0 || text[start - 1] === "\n") &&
-  (!edges.end || endsLine(text, end));
-
 /**
- * Where `wanted` is in `text`: at one place, at more than one, or nowhere,
- * counting only places whose ends are line ends where `edges` asks. Stops at
- * the second. One pass over `text`, never back (Knuth, Morris and Pratt): no
+ * Where `wanted` is in `text`: at one place, at more than one, or nowhere.
+ * Stops at the second. One pass over `text`, never back (Knuth, Morris and Pratt): no
  * file and no capture make it slower than their two lengths, where a
  * built-in search can compare most of a long capture at each place.
  */
-const placeOf = (
-  text: string,
-  wanted: string,
-  edges: LineEdges = NO_EDGES
-): Found => {
+const placeOf = (text: string, wanted: string): Found => {
   if (wanted === "") {
     return { at: -1, times: 0 };
   }
@@ -382,15 +348,11 @@ const placeOf = (
     }
 
     if (matched === wanted.length) {
-      const start = index + 1 - wanted.length;
-
-      if (onEdges(text, start, index + 1, edges)) {
-        if (at !== -1) {
-          return { at, times: 2 };
-        }
-
-        at = start;
+      if (at !== -1) {
+        return { at, times: 2 };
       }
+
+      at = index + 1 - wanted.length;
 
       matched = border[matched - 1] ?? 0;
     }
@@ -416,47 +378,30 @@ const lineAt = (text: string, index: number): number => {
 
 /**
  * The 1-based line where `captured` begins in `text`, when it is there
- * exactly once; else null. Line endings count as one. The whole capture is
- * looked for first, blanks and all, since they can tell two places apart.
- * Only when it is nowhere is it looked for without the blank lines before
- * it and the blanks after it, which leaves every line that was selected in
- * the match. A capture whose blanks after it held a line break ended its
- * line, so its match must too; one that began with a line break began its
- * line, so its match must start one. No part of a capture stands in for the
- * whole, and a capture that is there twice, in either form, has no line.
+ * exactly once; else null. Line endings count as one. Only the whole
+ * capture counts, blanks and all: a part of it, or the capture without its
+ * blanks, can be the end of another line or the other of two places, and a
+ * click would then land on code that was never selected. No line is better
+ * than a wrong one, since the file still opens.
  *
  * The file on disk is not the editor's buffer: a selection from unsaved
- * edits may be nowhere in it, or only where an older copy of the same lines
- * stands. Without the editor's own cursor this can't be told apart, which
- * is why only a single match of everything selected counts.
+ * edits may be nowhere in it. And a capture whose own place has changed
+ * since may now be found once elsewhere, where the same words stand: without
+ * the editor's own cursor this can't be told apart.
  */
 export const lineOfText = (text: string, captured: string): number | null => {
-  const file = oneLineBreak(text);
   const whole = oneLineBreak(captured);
   const blankStart = BLANK_START.exec(whole)?.[0].length ?? 0;
-  const trimmed = whole.slice(blankStart).trimEnd();
 
-  if (trimmed === "") {
+  if (whole.slice(blankStart).trim() === "") {
     return null;
   }
 
-  const exact = placeOf(file, whole);
+  const file = oneLineBreak(text);
+  const found = placeOf(file, whole);
 
-  if (exact.times === 1) {
-    // The line that holds the capture's first text, not a break copied before it.
-    return lineAt(file, exact.at + blankStart);
-  }
-
-  // The blanks trimmed away still say where the selection's lines began and ended.
-  const loose =
-    exact.times === 0 && trimmed !== whole
-      ? placeOf(file, trimmed, {
-          end: whole.slice(blankStart + trimmed.length).includes("\n"),
-          start: blankStart > 0,
-        })
-      : exact;
-
-  return loose.times === 1 ? lineAt(file, loose.at) : null;
+  // The line that holds the capture's first text, not a break copied before it.
+  return found.times === 1 ? lineAt(file, found.at + blankStart) : null;
 };
 
 /** How a click on a code item reaches its file: opened in its editor, or shown in its folder. */
