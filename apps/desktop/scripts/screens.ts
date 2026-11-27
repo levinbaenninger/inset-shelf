@@ -8583,6 +8583,18 @@ const snippetChecks = async (
   open: boolean
 ): Promise<string | null> => {
   const shown = await where.evaluate((root) => {
+    // A field for code is the block itself; read text is code inside one.
+    if (root instanceof HTMLTextAreaElement) {
+      return {
+        font: getComputedStyle(root).fontFamily,
+        height: Math.round(root.getBoundingClientRect().height),
+        inner: root.scrollWidth,
+        outer: root.clientWidth,
+        scrolls: false,
+        text: root.value,
+      };
+    }
+
     const code = root.querySelector("code");
     const block = code?.parentElement;
 
@@ -8632,6 +8644,41 @@ const editedTexts = async (page: Page): Promise<readonly string[]> => {
   const ops = await applied(page);
 
   return ops.filter((op) => op.type === "editText").map((op) => op.text ?? "");
+};
+
+/** The code item open in its field, the caret at the end of its words. */
+const editSnippet = async (page: Page): Promise<void> => {
+  await select(page, 760);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+};
+
+/** The code item's field saved with ⌘↩ (Ctrl+↩): null when it sent `expected` last. */
+const savesAs = async (
+  page: Page,
+  expected: string
+): Promise<string | null> => {
+  await page.keyboard.press("ControlOrMeta+Enter");
+
+  const sent = await editedTexts(page);
+
+  return sent.at(-1) === expected
+    ? null
+    : `saving sent ${JSON.stringify(sent)}, not ${JSON.stringify(expected)}`;
+};
+
+/** Code as a selection brings it: a blank line first, a tab, spaces at a line's end, a last line break. */
+const LOOSE_CODE = "\n\tcall()  \n";
+
+/** Saving code left as it opened sends nothing: an edit would drop its HTML and change what Copy gives. */
+const sendsNothing = async (page: Page): Promise<string | null> => {
+  const sent = await editedTexts(page);
+
+  return sent.length === 0
+    ? null
+    : `code left as it opened was saved as ${JSON.stringify(sent)}`;
 };
 
 const CODE_SCENES: readonly Scene[] = (
@@ -8696,6 +8743,80 @@ const CODE_SCENES: readonly Scene[] = (
       },
       data: { view: codeView(snippetMac) },
       name: "item-code-snippet-edit",
+      width: NARROWEST,
+    },
+    {
+      act: editSnippet,
+      check: async (page) => {
+        await page.keyboard.press("ControlOrMeta+Enter");
+
+        return await sendsNothing(page);
+      },
+      data: { view: codeView({ ...snippetMac, text: LOOSE_CODE }) },
+      name: "item-code-snippet-keep-submit",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: editSnippet,
+      check: async (page) => {
+        await page.evaluate(() => {
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+        });
+
+        return await sendsNothing(page);
+      },
+      data: { view: codeView({ ...snippetMac, text: LOOSE_CODE }) },
+      name: "item-code-snippet-keep-blur",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      // Select All, then a paste of plain text with a blank line: the field holds exactly what was pasted. The host's ⌘A stands in for Windows' Ctrl+A: both select the whole field.
+      act: async (page) => {
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.evaluate(
+          async () => await navigator.clipboard.writeText("a\n\n  b")
+        );
+        await editSnippet(page);
+        await page.keyboard.press("ControlOrMeta+A");
+        await page.keyboard.press("ControlOrMeta+V");
+      },
+      check: async (page) => await savesAs(page, "a\n\n  b"),
+      data: { view: codeView(snippetWindows) },
+      name: "item-code-snippet-paste",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      // ↑ at the very start stays in the code: the letter typed next goes before its first line.
+      act: async (page) => {
+        await editSnippet(page);
+        await page.keyboard.press("ControlOrMeta+ArrowUp");
+        await page.keyboard.press("ArrowUp");
+        await page.keyboard.type("y");
+      },
+      check: async (page) => await savesAs(page, `y${CODE_SNIPPET}`),
+      data: { view: codeView(snippetWindows) },
+      name: "item-code-snippet-start-up",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      // ⌫ at the very start changes nothing, and Return after it adds a line instead of saving.
+      act: async (page) => {
+        await editSnippet(page);
+        await page.keyboard.press("ControlOrMeta+ArrowUp");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.press("Enter");
+        await page.keyboard.type("z");
+      },
+      check: async (page) => await savesAs(page, `\nz${CODE_SNIPPET}`),
+      data: { view: codeView(snippetWindows) },
+      name: "item-code-snippet-start-backspace",
+      platforms: ["macos", "windows"],
       width: NARROWEST,
     },
     {

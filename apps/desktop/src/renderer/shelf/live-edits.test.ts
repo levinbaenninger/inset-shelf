@@ -40,7 +40,17 @@ const setup = () => {
     }
   };
 
-  return { counts, edit, edits, pause, sent, timers };
+  /** A field on code, whose words are sent exactly as typed. */
+  const codeEdit = (original: string, into: string[]) =>
+    edits.open({
+      code: true,
+      original,
+      send: (text) => {
+        into.push(text);
+      },
+    });
+
+  return { codeEdit, counts, edit, edits, pause, sent, timers };
 };
 
 describe(createLiveEdits, () => {
@@ -88,12 +98,48 @@ describe(createLiveEdits, () => {
     expect(sent).toStrictEqual(["Book the", "Book the movers"]);
   });
 
-  it("keeps the first line's indentation, as code needs, and drops only blank lines and trailing spaces around the words", () => {
+  it("drops the spaces around a note's words, so four typed before them never make it code", () => {
     const { edit, sent } = setup();
 
-    edit.finish("\n  \n    return total;\n  }\n\n");
+    edit.finish("\n    Book the movers today  \n");
 
-    expect(sent).toStrictEqual(["    return total;\n  }"]);
+    expect(sent).toStrictEqual(["Book the movers today"]);
+  });
+
+  it("sends code exactly as typed, every blank line and space kept", () => {
+    const { codeEdit, pause, sent, timers } = setup();
+    const original = "\n\tcall()  \n";
+    const edit = codeEdit(original, sent);
+
+    edit.change("\n\tcall()  \n\n\tnext()  \n");
+    pause();
+    edit.finish("\n\tcall()  \n\n\tnext()  \n\n");
+
+    expect([sent, timers]).toStrictEqual([
+      ["\n\tcall()  \n\n\tnext()  \n", "\n\tcall()  \n\n\tnext()  \n\n"],
+      [],
+    ]);
+  });
+
+  it("sends nothing for code left as it opened, or typed back to it, whatever its spaces", () => {
+    const { codeEdit, pause, sent } = setup();
+    const original = "\n\tcall()  \n";
+    const edit = codeEdit(original, sent);
+
+    edit.change(`${original}x`);
+    edit.change(original);
+    pause();
+    edit.finish(original);
+
+    expect(sent).toStrictEqual([]);
+  });
+
+  it("keeps the item's code when its field is left blank", () => {
+    const { codeEdit, sent } = setup();
+
+    codeEdit("\tcall()", sent).finish("  \n\t");
+
+    expect(sent).toStrictEqual([]);
   });
 
   it("keeps the item's words when the field is left empty", () => {
