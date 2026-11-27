@@ -436,16 +436,42 @@ export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
   return mac ? "Show in Finder" : "Show in Folder";
 };
 
+/** Files whose words are prose, which read as Markdown even from a code editor. */
+const PROSE_FILES = new Set([".md", ".mdx", ".markdown", ".txt"]);
+
+/** A file name's extension, lower case, or "" for none (a dot file such as .env has none). */
+const extensionOf = (name: string): string => {
+  const dot = name.lastIndexOf(".");
+
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+};
+
 /**
- * Whether a text item is code: a selection from a code editor among
- * `editors`, or from a file one showed. It reads and edits as code, every
- * line's whitespace kept. The editor's name counts alone, since Windows
- * reads no file.
+ * Whether a text item is code: a selection from a file a code editor
+ * showed, that is not Markdown or plain text. The file is the code place's
+ * (macOS), else the one the title names by the editor's row among `editors`
+ * (Windows), where a name without an extension (Welcome, Untitled-1) is not
+ * taken for a file. A selection from an editor with no file named, such as
+ * a panel, is prose. Code reads and edits with every line's whitespace kept.
  */
 export const isCodeCapture = (
   { context, via }: Pick<TextItem, "context" | "via">,
   editors: readonly CodeEditor[] = CODE_EDITORS
-): boolean =>
-  via === "selection" &&
-  context !== null &&
-  (context.code !== null || codeEditor(context.app, editors) !== undefined);
+): boolean => {
+  if (via !== "selection" || context === null) {
+    return false;
+  }
+
+  if (context.code !== null) {
+    return !PROSE_FILES.has(extensionOf(fileName(context.code)));
+  }
+
+  const editor = codeEditor(context.app, editors);
+  const file =
+    editor === undefined
+      ? null
+      : titleParts(editor, context.title, context.app).file;
+  const extension = file === null ? "" : extensionOf(file);
+
+  return extension !== "" && !PROSE_FILES.has(extension);
+};
