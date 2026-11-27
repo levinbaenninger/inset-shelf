@@ -359,6 +359,35 @@ describe("labels for code editors", () => {
     }
   );
 
+  it.each([
+    // A dash with spaces is legal in a file's name, and Windows splits on the same dash.
+    [
+      "Visual Studio Code",
+      "Design - notes.md - inset-shelf - Visual Studio Code",
+      "Visual Studio Code · Design - notes.md - inset-shelf",
+    ],
+    // A profile after the project: three parts, and the title alone can't say which two count.
+    ["Cursor", "a.ts — proj — Work", "Cursor · a.ts — proj — Work"],
+  ])(
+    "keeps the whole title of %s when it holds more parts than a file and a project",
+    (app, raw, label) => {
+      expect(
+        sourceLabel({ app, code: null, title: raw, url: null })
+      ).toStrictEqual({ label, service: null });
+    }
+  );
+
+  it("takes no project from a title with more parts, for a file whose folder the title doesn't name", () => {
+    expect(
+      sourceLabel({
+        app: "Code",
+        code: { file: "/work/x/Design - notes.md", line: null, root: null },
+        title: "Design - notes.md — a — b",
+        url: null,
+      }).label
+    ).toBe("Design - notes.md");
+  });
+
   it("keeps the app and the title when the title names no file and project", () => {
     expect(
       sourceLabel({ app: "Code", title: "Welcome", url: null })

@@ -1,4 +1,4 @@
-import { codeEditor, codeLabel, titleParts } from "./code-editors";
+import { codeEditor, codeLabel, shownTitleParts } from "./code-editors";
 import type { CodePlace } from "./code-place";
 import { withoutAppName } from "./window-title";
 
@@ -464,7 +464,7 @@ const fromCode = (
   const named =
     editor === undefined
       ? { file: null, project: null }
-      : titleParts(editor, source.title, source.app);
+      : shownTitleParts(editor, source.title, source.app);
 
   const place = source.code ?? null;
 

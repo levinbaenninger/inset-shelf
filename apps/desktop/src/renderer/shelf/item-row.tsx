@@ -52,7 +52,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
+import {
+  Clamp,
+  TOOLTIP_MAX,
+  tooltipText,
+  Truncated,
+  useCut,
+} from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
@@ -142,6 +148,35 @@ const sourceTitle = (
   return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
 };
 
+/** The least of a file's path a tooltip keeps, however long the line beside it. */
+const PATH_TOOLTIP_MIN = 60;
+
+/** `text` in `room` characters, losing its start: a path's end names the file. */
+const endOf = (text: string, room: number): string =>
+  text.length > room ? `…${text.slice(1 - room)}` : text;
+
+/** `text` in `room` characters, losing its end. */
+const startOf = (text: string, room: number): string =>
+  text.length > room ? `${text.slice(0, room - 1).trimEnd()}…` : text;
+
+/**
+ * A code item's tooltip: the whole line when it shows cut, then where the
+ * file is, in a tooltip's characters in all. The path keeps room of its own,
+ * so a long line never pushes it out.
+ */
+const codeTitle = (shown: string, path: string, cut: boolean): string => {
+  if (!cut || shown === path) {
+    return endOf(path, TOOLTIP_MAX);
+  }
+
+  const where = endOf(
+    path,
+    Math.max(PATH_TOOLTIP_MIN, TOOLTIP_MAX - 1 - shown.length)
+  );
+
+  return `${startOf(shown, TOOLTIP_MAX - 1 - where.length)}\n${where}`;
+};
+
 /** The user's home folder, from the shelf's view: a code item's path shows from "~". */
 export const HomeFolder = createContext<string | null>(null);
 
@@ -173,7 +208,11 @@ export const SourceLine = ({
       <p
         className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
         ref={plain}
-        title={sourceTitle(label, code?.path ?? null, plainCut)}
+        title={
+          code?.path === null || code?.path === undefined
+            ? sourceTitle(label, null, plainCut)
+            : codeTitle(label, code.path, plainCut)
+        }
       >
         {service === null && code === undefined ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
