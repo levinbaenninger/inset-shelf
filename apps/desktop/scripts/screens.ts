@@ -9436,14 +9436,18 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
 
       await page.keyboard.press("ArrowRight");
 
-      const opened = await page
-        .getByRole("button", { name: "Back to the list" })
-        .isVisible();
+      const back = page.getByRole("button", { name: "Back to the list" });
+      const opened = await back.isVisible();
 
-      const shown = z
-        .array(z.string().nullable())
-        .parse(await page.evaluate("globalThis.__selection"))
-        .at(-1);
+      // The shelf no longer reports its selection to main, so the item the details opened on is the one the list selects once they close.
+      if (opened) {
+        await back.click();
+      }
+
+      const shown = await page
+        .locator('[data-item-id][aria-current="true"]')
+        .getAttribute("data-item-id", { timeout: 1000 })
+        .catch(() => null);
 
       return opened && shown === first
         ? null
