@@ -82,7 +82,7 @@ const watched = (other: Partial<QuietFs> = {}): Watched => {
       realpath: async (at) => {
         touched.push(at);
 
-        return await realpath(at);
+        return await (other.realpath ?? realpath)(at);
       },
     },
     touched,
@@ -245,6 +245,40 @@ describe(quietDisk, () => {
       kind: "unsure",
     });
   });
+
+  it("does not look in a folder spelled like the home folder with other capitals", async () => {
+    // On a disk that tells capitals apart, it is another folder.
+    const sibling = path.join(base, "HOME");
+    const { fs, touched } = watched();
+
+    await expect(
+      quietDisk({ home }, fs).find(path.join(sibling, "dev", "proj", "a.ts"))
+    ).resolves.toStrictEqual({ kind: "unsure" });
+    expect(touched.filter((at) => at.startsWith(sibling))).toStrictEqual([]);
+  });
+
+  it.each(["/Volumes/Disk/home", "/volumes/Disk/home"])(
+    "touches nothing, not even to find it, for a home folder at %s",
+    async (mounted) => {
+      const touched: string[] = [];
+
+      const refuse = async (at: string): Promise<never> => {
+        touched.push(at);
+
+        return await Promise.reject(
+          Object.assign(new Error("not here"), { code: "ENOENT" })
+        );
+      };
+
+      await expect(
+        quietDisk(
+          { home: mounted },
+          { lstat: refuse, readlink: refuse, realpath: refuse }
+        ).find(path.join(mounted, "dev", "a.ts"))
+      ).resolves.toStrictEqual({ kind: "unsure" });
+      expect(touched).toStrictEqual([]);
+    }
+  );
 
   it("is sure of nothing without a home folder it can find", async () => {
     await expect(

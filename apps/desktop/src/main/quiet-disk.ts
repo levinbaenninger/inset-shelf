@@ -49,7 +49,7 @@ const GONE: Looked = { kind: "gone" };
 const ASKED_IN_HOME = ["Desktop", "Documents", "Downloads", "Library"];
 
 /** Where disks other than the Mac's own are mounted. */
-const VOLUMES = "/volumes";
+const VOLUMES = "/Volumes";
 
 /** More links than any real path holds: a path that leads to itself ends here. */
 const LINKS_MAX = 32;
@@ -60,9 +60,17 @@ const NOTHING_THERE = new Set(["ENOENT", "ENOTDIR", "ENAMETOOLONG"]);
 /** A path as a Mac's disk compares names: composed, and with no capitals told apart. */
 const fold = (at: string): string => at.normalize("NFC").toLowerCase();
 
-/** Whether `folder` is `at` or holds it, by whole names. */
+/** Whether `folder` is `at` or holds it, by whole names spelled the same. */
 const holds = (folder: string, at: string): boolean =>
   at === folder || at.startsWith(`${folder}/`);
+
+/**
+ * Whether the shut `folder` holds `at` however either is spelled: a disk
+ * that tells no capitals apart reaches it by any of them. Only a denial
+ * folds: a place is let in only by its own spelling.
+ */
+const shuts = (folder: string, at: string): boolean =>
+  holds(fold(folder), fold(at));
 
 /** A folder Inset may look in, as the disk spells it, and the disk it is on. */
 interface Root {
@@ -78,7 +86,7 @@ interface Policy {
 
 /** The root that holds `at`, when no shut place does. */
 const rootOf = (at: string, { roots, shut }: Policy): Root | undefined =>
-  shut.some((each) => holds(each, at))
+  shut.some((each) => shuts(each, at))
     ? undefined
     : roots.find((root) => holds(root.path, at));
 
@@ -89,20 +97,10 @@ const rootOf = (at: string, { roots, shut }: Policy): Root | undefined =>
  * system keeps links of its own (/var, /tmp). Nothing shut may, and nothing
  * else: a place not known to be safe is not touched.
  */
-const mayTouch = (at: string, policy: Policy): boolean => {
-  const place = fold(at);
-
-  if (policy.shut.some((each) => holds(each, place))) {
-    return false;
-  }
-
-  return (
-    place.lastIndexOf("/") === 0 ||
-    policy.roots.some(
-      (root) => holds(place, root.path) || holds(root.path, place)
-    )
-  );
-};
+const mayTouch = (at: string, policy: Policy): boolean =>
+  !policy.shut.some((each) => shuts(each, at)) &&
+  (at.lastIndexOf("/") === 0 ||
+    policy.roots.some((root) => holds(at, root.path) || holds(root.path, at)));
 
 type Touched<T> =
   | { readonly ok: true; readonly value: T }
@@ -140,13 +138,22 @@ export const quietDisk = (
   { home }: QuietRoots,
   fs: QuietFs = NODE_FS
 ): QuietDisk => {
-  /** The root as the disk spells it; none when it is not there. */
+  /** The root as the disk spells it; none when it is not there, or on a mounted volume, which is not touched even to find it. */
   const rootAt = async (folder: string): Promise<readonly Root[]> => {
+    if (shuts(VOLUMES, folder)) {
+      return [];
+    }
+
     try {
       const real = await fs.realpath(folder);
+
+      if (shuts(VOLUMES, real)) {
+        return [];
+      }
+
       const entry = await fs.lstat(real);
 
-      return [{ dev: entry.dev, path: fold(real) }];
+      return [{ dev: entry.dev, path: real }];
     } catch {
       return [];
     }
@@ -160,7 +167,7 @@ export const quietDisk = (
       shut: [
         VOLUMES,
         ...homes.flatMap((root) =>
-          ASKED_IN_HOME.map((name) => `${root.path}/${fold(name)}`)
+          ASKED_IN_HOME.map((name) => `${root.path}/${name}`)
         ),
       ],
     };
@@ -179,7 +186,7 @@ export const quietDisk = (
     if (step === undefined) {
       const path = `/${above.join("/")}`;
 
-      return last === null || rootOf(fold(path), policy) === undefined
+      return last === null || rootOf(path, policy) === undefined
         ? UNSURE
         : { entry: last, kind: "there", path };
     }
@@ -193,6 +200,10 @@ export const quietDisk = (
     }
 
     const at = `/${[...above, step].join("/")}`;
+    // Left open: the folders above `at` were each looked at before, and one
+    // can be swapped for a link between that look and this call, or the
+    // file's opening after the walk. Holding them needs openat, which Node
+    // does not have.
     const found = await touch(at, policy, fs.lstat);
 
     if (!found.ok) {
@@ -200,8 +211,11 @@ export const quietDisk = (
     }
 
     const entry = found.value;
-    const root = rootOf(fold(at), policy);
+    const root = rootOf(at, policy);
 
+    // Left open: a volume mounted in the home folder is known only by this
+    // lstat of the folder it is mounted on, which already asks its disk.
+    // Nothing tells a folder's disk without a call on that folder.
     if (root !== undefined && entry.dev !== root.dev) {
       return UNSURE;
     }
