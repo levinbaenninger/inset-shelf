@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -868,6 +868,26 @@ const fileOfAddress = (address: string): string | null => {
   }
 };
 
+/** A path as an address spells it: each part encoded, as src/shared/code-editors.ts builds one. */
+const addressPath = (at: string): string =>
+  at.split("/").map(encodeURIComponent).join("/");
+
+/**
+ * What the stand-in editor received, for a result's detail: every address,
+ * with the run's folder as "<run>" and the home folder as "~", so no user
+ * name is written to the results; "none" when it received nothing.
+ */
+const received = (asked: readonly string[]): string =>
+  asked.length === 0
+    ? "received none"
+    : `received ${asked
+        .map((address) =>
+          address
+            .replaceAll(addressPath(realpathSync(sourceHome)), "<run>")
+            .replaceAll(addressPath(homedir()), "~")
+        )
+        .join(", ")}`;
+
 /** Clicks the code item's source line, "a.ts · proj", in the shelf: the only button that names the file. */
 const clickCodeLine = async (attempts = 10): Promise<boolean> => {
   const found = jxa(`const hit = ${processElements}.findLast((e) => {
@@ -928,7 +948,7 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   record(
     "a click on it opens its file in the editor it came from, by the editor's address",
     asked.length === 1 && asked.map(fileOfAddress).every((at) => at === file),
-    `${asked.length} address(es)`
+    received(asked)
   );
 
   // Gone, and with the editor quit: only the bring-forward can start it again.
@@ -945,7 +965,8 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   await delay(1000);
   record(
     "a file that is gone opens nothing",
-    clickedGone && openedInSource().length === 0
+    clickedGone && openedInSource().length === 0,
+    received(openedInSource())
   );
   record(
     "and brings its editor forward",
