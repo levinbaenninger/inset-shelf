@@ -34,6 +34,7 @@ import type { Shot } from "./screenshot-saves";
 import { createShelfController } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
 import { createShotDrop } from "./shot-drop";
+import type { ShotDropDeps } from "./shot-drop";
 
 const SAVE_TOO_SLOW = "Saving didn’t finish in time.";
 
@@ -1739,17 +1740,19 @@ const PLAIN: AttachResult = {
   message: null,
 };
 
-/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, and what the card said it added. The card's drag hands out what `stage` writes. */
+/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, what the card said it added, and what failed on the way. The card's drag hands out CARD_FILE, unless `deps` says otherwise. */
 const dropping = (
   card: ReturnType<typeof setup>,
-  stage: (shot: Shot) => string = () => CARD_FILE
+  deps: Partial<ShotDropDeps<Shot>> = {}
 ) => {
   const plain: unknown[] = [];
   const added: (readonly [ShotSaveTo, ItemId])[] = [];
   const dropped: ShotSaveTo[] = [];
+  const failed: (readonly ["drag" | "drop", string])[] = [];
 
   const drop = createShotDrop({
-    addFiles: (paths) => {
+    addFiles: async (paths) => {
+      await turn();
       plain.push({ call: "addFiles", paths });
     },
     added: (to, id) => {
@@ -1761,14 +1764,21 @@ const dropping = (
 
       return PLAIN;
     },
+    dragFailed: (why) => {
+      failed.push(["drag", why]);
+    },
+    dropFailed: (why) => {
+      failed.push(["drop", why]);
+    },
     dropped: (to) => {
       dropped.push(to);
     },
     saves: card.saves,
-    stage,
+    stage: () => CARD_FILE,
+    ...deps,
   });
 
-  return { added, drop, dropped, plain };
+  return { added, drop, dropped, failed, plain };
 };
 
 describe("the card's file dropped on the shelf", () => {
@@ -1820,6 +1830,9 @@ describe("the card's file dropped on the shelf", () => {
       PLAIN
     );
     drop.onShelf([OTHER_FILE]);
+    await vi.waitFor(() => {
+      expect(plain).toHaveLength(3);
+    });
     expect({
       added,
       attached: card.attachmentsOn(card.note),
@@ -1998,6 +2011,83 @@ describe("the card's file dropped on the shelf", () => {
     });
   });
 
+  it("resolves the shelf's drop with nothing, and says once what went wrong, when a step after the card's add throws", async () => {
+    const card = setup();
+    const noticeFailed = new Error("The toast window is gone.");
+
+    card.saves.show(shot(1));
+
+    const { drop, failed } = dropping(card, {
+      added: () => {
+        throw noticeFailed;
+      },
+    });
+
+    const file = drop.drag(1)?.file ?? "";
+
+    await expect(drop.onItem(card.note, [file])).resolves.toStrictEqual({
+      attached: [],
+      message: null,
+    });
+    await vi.waitFor(() => {
+      expect(failed).toHaveLength(1);
+    });
+    await settled(card);
+    expect({
+      attached: card.attachmentsOn(card.note),
+      failed,
+      written: written(card),
+    }).toStrictEqual({
+      attached: 1,
+      failed: [["drop", noticeFailed.message]],
+      written: { doubled: [], last: { attached: 1, items: 0 } },
+    });
+  });
+
+  it("says once what went wrong, and throws nothing into main's handler, when files dropped off any item can't be added", async () => {
+    const card = setup();
+    const unreadable = new Error("The folder can’t be read.");
+
+    card.saves.show(shot(1));
+
+    const { drop, failed } = dropping(card, {
+      addFiles: async () => {
+        await turn();
+
+        throw unreadable;
+      },
+    });
+
+    expect(() => {
+      drop.onShelf([OTHER_FILE]);
+    }).not.toThrow();
+    await vi.waitFor(() => {
+      expect(failed).toStrictEqual([["drop", unreadable.message]]);
+    });
+  });
+
+  it("starts no drag, and says why once, when the card's picture can't be staged for it", () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { drop, failed } = dropping(card, {
+      stage: () => {
+        throw DISK_FULL;
+      },
+    });
+
+    expect({
+      drag: drop.drag(1),
+      failed,
+      save: card.view()?.save,
+    }).toStrictEqual({
+      drag: null,
+      failed: [["drag", "The disk is full."]],
+      save: { state: "idle" },
+    });
+  });
+
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {
     const card = setup();
     const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
@@ -2006,7 +2096,7 @@ describe("the card's file dropped on the shelf", () => {
     writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
     card.saves.show(shot(1));
 
-    const { added, drop } = dropping(card, () => file);
+    const { added, drop } = dropping(card, { stage: () => file });
 
     // macOS keeps temporary files under /var, a link to /private/var: the drop can name either.
     drop.drag(1);

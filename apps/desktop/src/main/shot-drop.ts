@@ -4,6 +4,8 @@ import path from "node:path";
 import type { AttachResult, ShotSaveTo } from "@shared/contracts";
 import type { ItemId } from "@shared/shelf";
 
+import { errorMessage } from "./save-error";
+
 export interface ShotDropDeps<S> {
   /** The card's save path (screenshot-saves.ts). */
   readonly saves: {
@@ -20,9 +22,13 @@ export interface ShotDropDeps<S> {
     paths: readonly string[]
   ) => Promise<AttachResult>;
   /** Files from outside dropped on the shelf, as new items. */
-  readonly addFiles: (paths: readonly string[]) => void;
+  readonly addFiles: (paths: readonly string[]) => Promise<void>;
   /** The card's own file came back: it went the card's way. */
   readonly dropped: (to: ShotSaveTo) => void;
+  /** The card's picture couldn't be staged, so no drag starts: the user hears why. */
+  readonly dragFailed: (why: string) => void;
+  /** A drop threw after the shelf had its reply: the user hears why, once. */
+  readonly dropFailed: (why: string) => void;
   /** Writes the card's picture to a file of the drag's own, named as the screenshot is, and returns it; never a file of the user's. */
   readonly stage: (shot: S) => string;
 }
@@ -80,19 +86,42 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
       : { kind: "card", seq: drag.seq };
   };
 
-  const land = (to: ShotSaveTo, adding: Promise<ItemId | null>): void => {
-    deps.dropped(to);
+  /** Runs what a drop does after the shelf has its reply: whatever throws on the way is said once, and never escapes main's handler. */
+  const settle = (run: () => Promise<void>): void => {
     void (async () => {
-      const id = await adding;
-
-      if (id !== null) {
-        deps.added(to, id);
+      try {
+        await run();
+      } catch (error) {
+        deps.dropFailed(errorMessage(error));
       }
     })();
   };
 
+  /** The card's add for its file: the card says how it went, and the user hears where it is. */
+  const land = (to: ShotSaveTo, add: () => Promise<ItemId | null>): void => {
+    settle(async () => {
+      deps.dropped(to);
+
+      const id = await add();
+
+      if (id !== null) {
+        deps.added(to, id);
+      }
+    });
+  };
+
+  const staged = (shot: S): string | null => {
+    try {
+      return deps.stage(shot);
+    } catch (error) {
+      deps.dragFailed(errorMessage(error));
+
+      return null;
+    }
+  };
+
   return {
-    /** The card's drag for screenshot `seq`: the file it hands out, and the screenshot; null once it is not the newest. */
+    /** The card's drag for screenshot `seq`: the file it hands out, and the screenshot; null once it is not the newest, or when its file can't be written. */
     drag: (seq: number): { readonly file: string; readonly shot: S } | null => {
       const shot = deps.saves.current(seq);
 
@@ -100,7 +129,11 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
         return null;
       }
 
-      const file = deps.stage(shot);
+      const file = staged(shot);
+
+      if (file === null) {
+        return null;
+      }
 
       drag = { file, seq };
 
@@ -119,7 +152,7 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
       }
 
       if (drop.kind === "card") {
-        land("item", deps.saves.dropOnItem(drop.seq, id));
+        land("item", async () => await deps.saves.dropOnItem(drop.seq, id));
       }
 
       return NOTHING;
@@ -130,9 +163,11 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
       const drop = classify(paths);
 
       if (drop.kind === "files") {
-        deps.addFiles(paths);
+        settle(async () => {
+          await deps.addFiles(paths);
+        });
       } else if (drop.kind === "card") {
-        land("shelf", deps.saves.addToShelf(drop.seq));
+        land("shelf", async () => await deps.saves.addToShelf(drop.seq));
       }
     },
   };
