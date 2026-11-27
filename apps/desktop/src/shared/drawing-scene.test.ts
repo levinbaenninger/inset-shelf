@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { openedMarks, parseSceneFile, sceneFileText } from "./drawing-scene";
+import {
+  drawingTitle,
+  openedMarks,
+  parseSceneFile,
+  sceneFileText,
+} from "./drawing-scene";
 import type { StrokeMark } from "./drawing-scene";
 
 const MARKS: readonly StrokeMark[] = [
@@ -76,5 +81,18 @@ describe(openedMarks, () => {
       { at: { x: 100, y: 25 }, kind: "pin", label: "Too close" },
       { at: { x: 3.5, y: 4.5 }, kind: "pin" },
     ]);
+  });
+});
+
+describe(drawingTitle, () => {
+  const image = { heightPx: 10, pixelsPerDip: 1, url: "inset://x", widthPx: 10 };
+
+  it("names an image being marked up Annotate, as the page's header does", () => {
+    expect(drawingTitle({ image, marks: [] })).toBe("Annotate");
+  });
+
+  it("names a blank page New Drawing, and one with marks Drawing", () => {
+    expect(drawingTitle({ image: null, marks: [] })).toBe("New Drawing");
+    expect(drawingTitle({ image: null, marks: MARKS })).toBe("Drawing");
   });
 });

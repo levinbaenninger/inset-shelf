@@ -1,6 +1,7 @@
 import { once } from "node:events";
 
 import type { DrawingOpened, DrawingView } from "@shared/contracts";
+import { drawingTitle } from "@shared/drawing-scene";
 import { rect, size, VIEWER_MIN, viewerWindowSize } from "@shared/geometry";
 import { app, BrowserWindow, nativeTheme, screen } from "electron";
 import type { WebContents } from "electron";
@@ -47,15 +48,6 @@ export interface DrawingWindow {
 }
 
 const ignore = (): void => undefined;
-
-/** A blank page with marks on it opens a drawing saved before. */
-const windowTitle = (opened: DrawingOpened): string => {
-  if (opened.image !== null) {
-    return "Image";
-  }
-
-  return opened.marks.length === 0 ? "New Drawing" : "Drawing";
-};
 
 /** A regular window for one drawing or image; closing it throws the marks away. */
 export const createDrawingWindow = (options: {
@@ -206,7 +198,7 @@ export const createDrawingWindow = (options: {
       markClean();
       current = { ...current, ...opened, seq: current.seq + 1 };
       onView(current);
-      window.setTitle(windowTitle(opened));
+      window.setTitle(drawingTitle(opened));
       window.setContentBounds({
         height: content.height,
         width: content.width,

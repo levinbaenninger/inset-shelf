@@ -4,6 +4,7 @@ import type {
   DrawingOpened,
   DrawingView,
 } from "@shared/contracts";
+import { drawingTitle } from "@shared/drawing-scene";
 import type { Pin } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
@@ -246,15 +247,6 @@ const firstTool = (opened: DrawingOpened): Tool => {
   }
 
   return opened.marks.some(isDrawn) ? "select" : "pen";
-};
-
-/** What the header calls the page: a new drawing, one saved before, or an image. */
-const pageTitle = (opened: DrawingOpened): string => {
-  if (opened.image !== null) {
-    return "Annotate";
-  }
-
-  return opened.marks.length === 0 ? "New Drawing" : "Drawing";
 };
 
 /** How long the page says why New Drawing or Annotate brought it forward instead. */
@@ -760,7 +752,7 @@ const Editor = ({
   return (
     <main className="bg-background flex h-svh flex-col overflow-hidden select-none">
       <WindowHeader>
-        <WindowTitle>{pageTitle(opened)}</WindowTitle>
+        <WindowTitle>{drawingTitle(opened)}</WindowTitle>
       </WindowHeader>
       {/* A problem saving, under the header, across the whole window; saving itself is in the toolbar. */}
       {problem === null ? null : (
