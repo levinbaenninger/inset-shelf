@@ -86,7 +86,7 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly writePicture: (shot: S) => Promise<string>;
   /** A picture file written for a place that was then not made: it goes. */
   readonly dropPicture: (file: string) => void;
-  /** The scale of the display the pointer is on now. */
+  /** The scale of the display the pointer is on now. A picture keeps the one read when its add was pressed, before its file is written. */
   readonly scale: () => number;
   /** Makes the screenshot, with its picture file written, an item in the section new items go to; null when the shelf refuses it. Awaits nothing, so what the card read of the shelf just before still holds. */
   readonly addItem: (image: ShelfImage) => ItemId | null;
@@ -266,13 +266,15 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
    * between this and placing.
    */
   const pictureFor = async (now: Held<S>): Promise<ShelfImage | null> => {
+    // Read at the press: the pointer can be on a display with another scale by the time the file is written.
+    const pixelsPerDip = deps.scale();
     const file = await deps.writePicture(now.shot);
 
     if (shown(now) === null) {
       return {
         file,
         heightPx: now.shot.heightPx,
-        pixelsPerDip: deps.scale(),
+        pixelsPerDip,
         widthPx: now.shot.widthPx,
       };
     }
