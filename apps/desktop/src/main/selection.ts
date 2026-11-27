@@ -202,11 +202,20 @@ const sameFiles = (a: readonly string[], b: readonly string[]): boolean =>
 /** Line breaks and edges as an app may hand text back, to compare it with the text read. */
 const words = (text: string): string => text.replaceAll("\r\n", "\n").trim();
 
+/** After a hold, a field holds what the capture copied, or another copy; one that came back empty may be a read cut short. */
+const against = (seen: string, had: string): Verdict => {
+  if (seen === had) {
+    return "ours";
+  }
+
+  return seen === "" ? "unsure" : "newer";
+};
+
 /**
  * What one read of the clipboard says, judged by itself: a hold turns a read
  * empty or half-read without an error, so a read shows a newer copy only by
  * showing something else, never by lacking something the capture had. After a
- * hold the text and HTML are exactly what was copied, or it is a newer copy.
+ * hold the text and HTML are what was copied, or another one is a newer copy.
  * Files cut are one too: the capture copies. Files carry no text or HTML to tell a newer copy by, so the read's own list
  * of files is compared: another list, or text where the capture had none,
  * is a newer copy; no list at all, with nothing else shown, is unsure.
@@ -224,8 +233,23 @@ const verdictOn = async <S>(
   const { cut, files, html, text } = await deps.content(snapshot);
 
   // The capture only copies: files cut since were cut by the user.
-  if (cut || (afterHold && (text !== copied.text || html !== copied.html))) {
+  if (cut) {
     return "newer";
+  }
+
+  if (afterHold) {
+    const fields = new Set([
+      against(text, copied.text),
+      against(html, copied.html),
+    ]);
+
+    if (fields.has("newer")) {
+      return "newer";
+    }
+
+    if (fields.has("unsure")) {
+      return "unsure";
+    }
   }
 
   if (copied.files.length === 0) {
