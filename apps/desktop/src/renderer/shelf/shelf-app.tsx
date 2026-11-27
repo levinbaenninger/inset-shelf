@@ -1122,7 +1122,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     composerRef.current?.focus();
   };
 
-  // The keys' way into the list and through it: one item selected and no picks, so plain keys act on it alone.
+  // The keys' way into the list and through it: one item selected and no picks, so plain keys act on it alone, and its row has the keyboard, so Tab goes on from it.
   const selectItem = (id: ItemId): void => {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
@@ -1131,6 +1131,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     unpick();
     setSelectedId(id);
     reveal(id);
+    // The open row draws its own keyboard target, so it is there a frame on.
+    requestAnimationFrame(() => {
+      focusRow(document.querySelector(`[data-item-id="${id}"]`));
+    });
   };
 
   const onSelected = (run: (id: ItemId) => void): (() => void) | null =>
