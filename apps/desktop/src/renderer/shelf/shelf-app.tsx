@@ -736,6 +736,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
   const [namingSection, setNamingSection] = useState(false);
   const composerRef = useRef<MarkdownFieldHandle>(null);
+  /** The frame that gives the selected row the keyboard, after a key selects it. */
+  const rowHandoff = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   // Level 2: the item whose details are pushed over the list.
   const details = useDetails({ apply, doc, listRef });
@@ -1131,9 +1133,14 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     unpick();
     setSelectedId(id);
     reveal(id);
-    // The open row draws its own keyboard target, so it is there a frame on.
-    requestAnimationFrame(() => {
-      focusRow(document.querySelector(`[data-item-id="${id}"]`));
+    // The open row draws its own keyboard target, so it is there a frame on; a Tab or click before then keeps the keyboard where it went, and only the last key's row takes it.
+    const from = document.activeElement;
+
+    cancelAnimationFrame(rowHandoff.current);
+    rowHandoff.current = requestAnimationFrame(() => {
+      if (document.activeElement === from) {
+        focusRow(document.querySelector(`[data-item-id="${id}"]`));
+      }
     });
   };
 
