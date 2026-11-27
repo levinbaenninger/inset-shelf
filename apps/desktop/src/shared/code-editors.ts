@@ -467,10 +467,12 @@ export const isCodeCapture = (
   }
 
   const editor = codeEditor(context.app, editors);
+
   const file =
     editor === undefined
       ? null
       : titleParts(editor, context.title, context.app).file;
+
   const extension = file === null ? "" : extensionOf(file);
 
   return extension !== "" && !PROSE_FILES.has(extension);

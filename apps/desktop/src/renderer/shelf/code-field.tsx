@@ -72,7 +72,7 @@ export const CodeField = ({
         aria-label={ariaLabel}
         className={cn(
           CODE_BLOCK,
-          "block w-full resize-none py-1.5 outline-none field-sizing-content"
+          "block field-sizing-content w-full resize-none py-1.5 outline-none"
         )}
         defaultValue={value}
         onBlur={(event) => {

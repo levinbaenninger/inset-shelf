@@ -160,7 +160,8 @@ export const hideCutControls = (
 
 /** How tall a box's words are whole, under any padding above them, whether or not they are cut now. */
 const wordsHeight = (element: HTMLElement): number =>
-  element.scrollHeight - Number.parseFloat(getComputedStyle(element).paddingTop);
+  element.scrollHeight -
+  Number(getComputedStyle(element).paddingTop.replace("px", ""));
 
 /**
  * Words cut to `--lines` lines, the last one fading: only the lines below

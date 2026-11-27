@@ -8720,9 +8720,9 @@ const codeCap = async (page: Page, count: number): Promise<string | null> => {
 
     const edge =
       words.getBoundingClientRect().bottom -
-      Number.parseFloat(style.borderBottomWidth) -
+      Number(style.borderBottomWidth.replace("px", "")) -
       (style.overflowClipMargin.includes("content-box")
-        ? Number.parseFloat(style.paddingBottom)
+        ? Number(style.paddingBottom.replace("px", ""))
         : 0);
 
     return {
@@ -8851,10 +8851,12 @@ const CODE_SCENES: readonly Scene[] = (
     {
       // Select All, then a paste of plain text with a blank line: the field holds exactly what was pasted. The host's ⌘A stands in for Windows' Ctrl+A: both select the whole field.
       act: async (page) => {
-        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-        await page.evaluate(
-          async () => await navigator.clipboard.writeText("a\n\n  b")
-        );
+        await page
+          .context()
+          .grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.evaluate(async () => {
+          await navigator.clipboard.writeText("a\n\n  b");
+        });
         await editSnippet(page);
         await page.keyboard.press("ControlOrMeta+A");
         await page.keyboard.press("ControlOrMeta+V");
@@ -13360,8 +13362,8 @@ const capProblems = async (page: Page): Promise<readonly string[]> =>
           // The cap counts lines of the box's content: code keeps its padding.
           const shown = Math.round(
             (words.getBoundingClientRect().height -
-              Number.parseFloat(style.paddingTop) -
-              Number.parseFloat(style.paddingBottom)) /
+              Number(style.paddingTop.replace("px", "")) -
+              Number(style.paddingBottom.replace("px", ""))) /
               line
           );
 
