@@ -183,9 +183,25 @@ const place = {
   },
 } as const;
 
-/** The place's last stop, after its field and buttons, so Tab goes on past them; the place draws its ring. */
-const PlaceStop = () => (
-  <span className="sr-only" data-place-stop tabIndex={-1} />
+/**
+ * The place's last stop, after its field and buttons, so Tab goes on past
+ * them; the place draws its ring. A screen reader names it for its field, and
+ * pressing it types in the field again.
+ */
+const PlaceStop = ({ field }: { readonly field: string }) => (
+  <button
+    aria-label={`Edit ${field}`}
+    className="sr-only"
+    data-place-stop
+    onClick={(event) => {
+      event.currentTarget
+        .closest("[data-field-place]")
+        ?.querySelector("textarea")
+        ?.focus();
+    }}
+    tabIndex={-1}
+    type="button"
+  />
 );
 
 const leaveField = (field: HTMLElement): void => {
@@ -197,10 +213,16 @@ const leaveField = (field: HTMLElement): void => {
 };
 
 /** One typed-in field on its card, its words in line with the item's own at the top of details. */
-const FieldBox = ({ children }: { readonly children: ReactNode }) => (
+const FieldBox = ({
+  children,
+  field,
+}: {
+  readonly children: ReactNode;
+  readonly field: string;
+}) => (
   <div {...place} className={cn(SURFACE, place.className, "p-1.5")}>
     {children}
-    <PlaceStop />
+    <PlaceStop field={field} />
   </div>
 );
 
@@ -590,7 +612,7 @@ const StepsEditor = ({
               <HugeiconsIcon icon={Cancel01Icon} />
             </Button>
           </span>
-          <PlaceStop />
+          <PlaceStop field={`Step ${index + 1}`} />
         </li>
       ))}
     </ul>
@@ -909,7 +931,7 @@ const PinLabels = ({
             placeholder={`What pin ${index + 1} marks`}
             value={pin.label ?? ""}
           />
-          <PlaceStop />
+          <PlaceStop field={`label for pin ${index + 1}`} />
         </li>
       ))}
     </ol>
@@ -1103,7 +1125,7 @@ const Content = (props: ContentProps) => {
         <FileLine item={item} />
       )}
       <Field icon={TextIcon} label="Title">
-        <FieldBox>
+        <FieldBox field="Title">
           <AutoText
             label="Title"
             max={TITLE_MAX}
@@ -1127,7 +1149,7 @@ const Content = (props: ContentProps) => {
         icon={StickyNote01Icon}
         label="Caption"
       >
-        <FieldBox>
+        <FieldBox field="Caption">
           <AutoText
             autoFocus={editing}
             key={editing ? "editing" : "note"}
@@ -1671,7 +1693,7 @@ export const DetailsView = (props: DetailsProps) => {
         />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
-            <FieldBox>
+            <FieldBox field="Description">
               <AutoText
                 autoFocus={descriptionFocus > 0}
                 key={descriptionFocus}
