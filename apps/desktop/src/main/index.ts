@@ -436,8 +436,8 @@ const pad = (value: number): string => String(value).padStart(2, "0");
 /** Named like the system names its own: "Screenshot 2026-10-23 at 21.03.46.png" on macOS, "Screenshot 2026-10-23 210346.png" on Windows. */
 /** The newest screenshot on its card, with what dragging it out needs. */
 interface CardShot extends Shot {
-  /** The file macOS saved it to, if any. */
-  readonly file: string | null;
+  /** What the card's drag calls its file: the name macOS saved it under, else Screenshot.png. */
+  readonly name: string;
   readonly image: NativeImage;
   /** Names its picture for the card's page, and for no other. */
   readonly token: string;
@@ -1066,9 +1066,9 @@ const start = async (): Promise<void> => {
     const { height, width } = image.getSize();
 
     shotSaves.show({
-      file,
       heightPx: height,
       image,
+      name: file === null ? "Screenshot.png" : path.basename(file),
       png: image.toPNG(),
       seq: shotSeq,
       token: randomUUID().replaceAll("-", ""),
@@ -2268,6 +2268,8 @@ const start = async (): Promise<void> => {
       e2eLog("shotDropped", { to });
     },
     saves: shotSaves,
+    stage: (shot) =>
+      staging.write(`screenshot-${shot.seq}`, shot.name, shot.png),
   });
 
   const attachmentHandlers = {
@@ -2574,21 +2576,16 @@ const start = async (): Promise<void> => {
         })();
       },
       startDrag: (seq) => {
-        const current = shotSaves.current(seq);
+        // A copy of the drag's own: dropped back on the shelf, it goes the card's way.
+        const drag = shotDrop.drag(seq);
 
-        if (current === null) {
+        if (drag === null) {
           return;
         }
 
-        const file =
-          current.file ??
-          staging.write(`screenshot-${seq}`, "Screenshot.png", current.png);
-
-        // Dropped back on the shelf, this file goes the card's way.
-        shotDrop.dragged(seq, file);
         screenshotCard.webContents.startDrag({
-          file,
-          icon: current.image.resize({ width: 128 }),
+          file: drag.file,
+          icon: drag.shot.image.resize({ width: 128 }),
         });
       },
     },
