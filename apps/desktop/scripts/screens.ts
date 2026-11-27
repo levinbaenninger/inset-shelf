@@ -9354,6 +9354,116 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A step that held words and was cleared stays once the keyboard leaves it, and ⌘Z in it brings its words back.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { name: "Step 1" }).focus();
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.press("Backspace");
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+      await page.getByRole("textbox", { name: "Step 1" }).focus();
+      await page.keyboard.press("ControlOrMeta+Z");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+      const first = await page
+        .getByRole("textbox", { name: "Step 1" })
+        .inputValue();
+
+      return steps === 5 && first !== ""
+        ? null
+        : `a cleared step left and undone shows ${steps} steps, the first reading "${first}"`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-cleared-kept",
+    page: "shelf",
+  },
+  {
+    // A new step typed in and undone to blank has held words, so it stays once the keyboard leaves it.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      // One insertion, so one ⌘Z takes all of it back.
+      await page.keyboard.insertText("Book the room");
+      await page.keyboard.press("ControlOrMeta+Z");
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      const last = await page
+        .getByRole("textbox", { name: "Step 6" })
+        .inputValue()
+        .catch(() => null);
+
+      return steps === 6 && last === ""
+        ? null
+        : `a new step typed in and undone to blank shows ${steps} steps, the sixth reading ${last === null ? "nothing" : `"${last}"`}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-undone-kept",
+    page: "shelf",
+  },
+  {
+    // Tab from a blank new step reaches its ×, so the keyboard can remove it.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const focused = await page.evaluate(() =>
+        document.activeElement?.getAttribute("aria-label")
+      );
+
+      return focused === "Remove step 6"
+        ? null
+        : `Tab from a blank step lands on ${focused ?? "nothing"}, not its ×`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-blank-tab",
+    page: "shelf",
+  },
+  {
+    // Shift+Tab from a blank new step reaches its checkbox.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Shift+Tab");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const focused = await page.evaluate(() => ({
+        label: document.activeElement?.getAttribute("aria-label"),
+        role: document.activeElement?.getAttribute("role"),
+      }));
+
+      return focused.role === "checkbox" && focused.label === "Step 6"
+        ? null
+        : `Shift+Tab from a blank step lands on ${focused.label ?? "nothing"}, not its checkbox`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-blank-shift-tab",
+    page: "shelf",
+  },
+  {
     act: async (page) => {
       await details(page, 12);
     },
