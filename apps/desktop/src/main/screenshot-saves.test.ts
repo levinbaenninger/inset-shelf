@@ -1,7 +1,14 @@
 import { once } from "node:events";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { setImmediate } from "node:timers/promises";
 
-import type { ScreenshotView } from "@shared/contracts";
+import type {
+  AttachResult,
+  ScreenshotView,
+  ShotSaveTo,
+} from "@shared/contracts";
 import {
   AttachmentIdSchema,
   ATTACHMENTS_MAX,
@@ -10,7 +17,7 @@ import {
   SectionIdSchema,
 } from "@shared/shelf";
 import type { AttachmentId, ItemId, ShelfDoc } from "@shared/shelf";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { cardAdds } from "../renderer/screenshot/card-adds";
 import { createCardClock } from "./card-clock";
@@ -25,6 +32,7 @@ import {
 import type { Shot } from "./screenshot-saves";
 import { createShelfController } from "./shelf-controller";
 import type { WriteResult } from "./shelf-store";
+import { createShotDrop } from "./shot-drop";
 
 const SAVE_TOO_SLOW = "Saving didn’t finish in time.";
 
@@ -1684,6 +1692,181 @@ describe("a screenshot dropped on an item", () => {
       attached: card.attachmentsOn(card.note),
       notices: card.notices,
     }).toStrictEqual({ attached: 0, notices: [CARD_CLEARED] });
+  });
+});
+
+/** The file the card's drag handed out, as main stages it. */
+const CARD_FILE = "/var/folders/7x/T/Inset Shelf/screenshot-1/Screenshot.png";
+
+const OTHER_FILE = "/Users/anna/Desktop/offer.pdf";
+
+/** What the shelf's plain attach answered for a file from outside. */
+const PLAIN: AttachResult = {
+  attached: [AttachmentIdSchema.parse(uuid(90))],
+  message: null,
+};
+
+/** The shelf's drop handlers in main over the card's real save path: what the plain routes were handed, and what the card said it added. */
+const dropping = (card: ReturnType<typeof setup>) => {
+  const plain: unknown[] = [];
+  const added: (readonly [ShotSaveTo, ItemId])[] = [];
+  const dropped: ShotSaveTo[] = [];
+
+  const drop = createShotDrop({
+    addFiles: (paths) => {
+      plain.push({ call: "addFiles", paths });
+    },
+    added: (to, id) => {
+      added.push([to, id]);
+    },
+    attachFiles: async (id, paths) => {
+      await turn();
+      plain.push({ call: "attachFiles", id, paths });
+
+      return PLAIN;
+    },
+    dropped: (to) => {
+      dropped.push(to);
+    },
+    saves: card.saves,
+  });
+
+  return { added, drop, dropped, plain };
+};
+
+describe("the card's file dropped on the shelf", () => {
+  it("adds exactly one tile through the card's own add, and the card goes saying Added, when it is dropped on an item", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { added, drop, dropped, plain } = dropping(card);
+
+    drop.dragged(1, CARD_FILE);
+
+    // The shelf's drop says nothing: the card says how it went.
+    await expect(drop.onItem(card.note, [CARD_FILE])).resolves.toStrictEqual({
+      attached: [],
+      message: null,
+    });
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
+    expect({
+      added,
+      attached: card.attachmentsOn(card.note),
+      dropped,
+      plain,
+      view: card.view(),
+      written: written(card),
+    }).toStrictEqual({
+      added: [["item", card.note]],
+      attached: 1,
+      dropped: ["item"],
+      plain: [],
+      view: null,
+      written: { doubled: [], last: { attached: 1, items: 0 } },
+    });
+  });
+
+  it("attaches any other file as before, and a drop of several files with the card's among them too", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { added, drop, dropped, plain } = dropping(card);
+
+    drop.dragged(1, CARD_FILE);
+
+    await expect(drop.onItem(card.note, [OTHER_FILE])).resolves.toBe(PLAIN);
+    await expect(drop.onItem(card.note, [CARD_FILE, OTHER_FILE])).resolves.toBe(
+      PLAIN
+    );
+    drop.onShelf([OTHER_FILE]);
+    expect({
+      added,
+      attached: card.attachmentsOn(card.note),
+      dropped,
+      plain,
+      save: card.view()?.save,
+    }).toStrictEqual({
+      added: [],
+      attached: 0,
+      dropped: [],
+      plain: [
+        { call: "attachFiles", id: card.note, paths: [OTHER_FILE] },
+        { call: "attachFiles", id: card.note, paths: [CARD_FILE, OTHER_FILE] },
+        { call: "addFiles", paths: [OTHER_FILE] },
+      ],
+      save: { state: "idle" },
+    });
+  });
+
+  it("takes the plain route for an older card's file once a newer screenshot shows", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { drop, dropped, plain } = dropping(card);
+
+    drop.dragged(1, CARD_FILE);
+    card.saves.show(shot(2));
+
+    await expect(drop.onItem(card.note, [CARD_FILE])).resolves.toBe(PLAIN);
+    expect({
+      dropped,
+      plain: plain.length,
+      shown: card.shown(),
+    }).toStrictEqual({
+      dropped: [],
+      plain: 1,
+      shown: { attached: 0, items: 0 },
+    });
+  });
+
+  it("adds the screenshot as an item of its own through the card's Add to Shelf when it is dropped on the shelf off any item", async () => {
+    const card = setup();
+
+    card.saves.show(shot(1));
+
+    const { added, drop, dropped, plain } = dropping(card);
+
+    drop.dragged(1, CARD_FILE);
+    drop.onShelf([CARD_FILE]);
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
+    expect({
+      added,
+      dropped,
+      plain,
+      view: card.view(),
+      written: written(card),
+    }).toStrictEqual({
+      added: [["shelf", rowOf(card)]],
+      dropped: ["shelf"],
+      plain: [],
+      view: null,
+      written: { doubled: [], last: { attached: 0, items: 1 } },
+    });
+  });
+
+  it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {
+    const card = setup();
+    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
+    const file = path.join(folder, "Screenshot.png");
+
+    writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
+    card.saves.show(shot(1));
+
+    const { added, drop } = dropping(card);
+
+    // macOS keeps temporary files under /var, a link to /private/var: the drop can name either.
+    drop.dragged(1, file);
+    await drop.onItem(card.note, [realpathSync.native(file)]);
+    await vi.waitFor(() => {
+      expect(added).toStrictEqual([["item", card.note]]);
+    });
   });
 });
 

@@ -160,6 +160,7 @@ import {
   shelfTasks,
 } from "./shelf-tutorial";
 import { createShelfWindow } from "./shelf-window";
+import { createShotDrop } from "./shot-drop";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
@@ -2261,6 +2262,29 @@ const start = async (): Promise<void> => {
     }
   };
 
+  /** The card's own add saved its screenshot: a new row is shown on the visible shelf, and a notice says where it is. */
+  const shotLanded = (to: ShotSaveTo, id: ItemId): void => {
+    if (to === "shelf" && shelf.isVisible()) {
+      controller.focus(id);
+    }
+
+    shotAdded(to, id);
+  };
+
+  // The card's own file dropped back on the shelf goes through the card's add, so a screenshot keeps one place.
+  const shotDrop = createShotDrop({
+    addFiles: (paths) => {
+      void addFiles(paths);
+    },
+    added: shotLanded,
+    attachFiles: async (id, paths) =>
+      await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
+    dropped: (to) => {
+      e2eLog("shotDropped", { to });
+    },
+    saves: shotSaves,
+  });
+
   const attachmentHandlers = {
     newDrawingFor: (id: ItemId): void => {
       if (drawing.isDirty()) {
@@ -2291,8 +2315,7 @@ const start = async (): Promise<void> => {
     }: {
       readonly id: ItemId;
       readonly paths: readonly string[];
-    }): Promise<AttachResult> =>
-      await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
+    }): Promise<AttachResult> => await shotDrop.onItem(id, paths),
     pasteImageTo: async ({
       bytes,
       id,
@@ -2331,9 +2354,7 @@ const start = async (): Promise<void> => {
     shelfContract,
     {
       ...attachmentHandlers,
-      addFiles: (paths) => {
-        void addFiles(paths);
-      },
+      addFiles: shotDrop.onShelf,
       apply: (op) => {
         controller.apply(
           op.type === "compose" ? typedNote(op, hereOpening) : op
@@ -2469,26 +2490,18 @@ const start = async (): Promise<void> => {
         void (async () => {
           const id = await shotSaves.addToItem(seq, named);
 
-          if (id === null) {
-            return;
+          if (id !== null) {
+            shotLanded("item", id);
           }
-
-          shotAdded("item", id);
         })();
       },
       addToShelf: (seq) => {
         void (async () => {
           const id = await shotSaves.addToShelf(seq);
 
-          if (id === null) {
-            return;
+          if (id !== null) {
+            shotLanded("shelf", id);
           }
-
-          if (shelf.isVisible()) {
-            controller.focus(id);
-          }
-
-          shotAdded("shelf", id);
         })();
       },
       annotate: (seq) => {
@@ -2586,6 +2599,8 @@ const start = async (): Promise<void> => {
           current.file ??
           staging.write(`screenshot-${seq}`, "Screenshot.png", current.png);
 
+        // Dropped back on the shelf, this file goes the card's way.
+        shotDrop.dragged(seq, file);
         screenshotCard.webContents.startDrag({
           file,
           icon: current.image.resize({ width: 128 }),
