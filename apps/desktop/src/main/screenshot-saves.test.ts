@@ -2067,12 +2067,14 @@ describe("a screenshot taken off the shelf whose removal the disk doesn't hold y
     const adding = card.saves.addToShelf(1);
 
     // The user's Undo starts a write that holds the tile; they remove it again before the picture file is written.
-    const started = new Promise<void>((resolve) => {
-      const off = card.controller.onWrite(() => {
-        off();
-        resolve();
-      });
+    const write = new EventTarget();
+
+    const off = card.controller.onWrite(() => {
+      off();
+      write.dispatchEvent(new Event("start"));
     });
+
+    const started = once(write, "start");
 
     card.controller.apply({ ...tile, type: "restoreAttachment" });
     await started;
