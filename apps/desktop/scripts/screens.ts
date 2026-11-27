@@ -9025,6 +9025,28 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A picture's note edited in its row and left with Return: the row keeps the keyboard.
+    act: async (page) => {
+      await select(page, 11);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Note for this image'"
+      );
+      await page.keyboard.type(" today");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      return left.row === uuid(11) && !left.field
+        ? null
+        : `Return in a row's note left focus on ${placeText(left)}, not on the row`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-row-note",
+    page: "shelf",
+  },
+  {
     // ⌘F, a word, ↓ selects the first result and → opens it, as the list's own keys do.
     act: async (page) => {
       await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
