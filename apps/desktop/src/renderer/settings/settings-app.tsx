@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { settingsBridge } from "@/shared/bridge";
+import { useLocalKeys } from "@/shared/keys";
 import { isMac, isWindows } from "@/shared/platform";
 import { usePushedView } from "@/shared/use-pushed-view";
 import { WindowHeader, WindowTitle } from "@/shared/window-header";
@@ -253,8 +254,15 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
   );
 };
 
+const close = (): void => {
+  api.close();
+};
+
 export const SettingsApp = () => {
   const view = usePushedView<SettingsView | null>(load, subscribe, null);
+
+  // Esc closes the window as its × does; an open menu in it closes first.
+  useLocalKeys({ onEscape: close });
 
   return view === null ? null : <SettingsForm view={view} />;
 };

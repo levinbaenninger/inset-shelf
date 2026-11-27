@@ -3067,6 +3067,7 @@ const start = async (): Promise<void> => {
   const settingsServer = serveContract(
     settingsContract,
     {
+      close: settingsWindow.close,
       fitHeight: settingsWindow.fitHeight,
       getView: settingsView,
       resetTutorial: () => {
