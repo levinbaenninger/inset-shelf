@@ -17,7 +17,7 @@ const window = (
   url: string | null = null
 ): FrontRead => ({
   bounds: null,
-  source: { app, appLink: null, title, url },
+  source: { app, appLink: null, code: null, title, url },
 });
 
 const PR_IN_CHROME = window(

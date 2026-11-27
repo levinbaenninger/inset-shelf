@@ -5,6 +5,8 @@ import {
   GAP_MS,
   hasPlaces,
   hereOf,
+  hereWith,
+  openingOf,
   holdsPagesFrom,
   INITIAL_RECALL,
   itemsFrom,
@@ -13,8 +15,15 @@ import {
   placeOf,
   samePlace,
   stepRecall,
+  typedNote,
 } from "./recall";
-import type { PlaceKey, PlaceSource, RecallEvent, RecallState } from "./recall";
+import type {
+  Opening,
+  PlaceKey,
+  PlaceSource,
+  RecallEvent,
+  RecallState,
+} from "./recall";
 import {
   applyOp,
   emptyShelf,
@@ -340,8 +349,8 @@ describe(placeOf, () => {
 const uuid = (n: number) =>
   `3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1b${String(n).padStart(2, "0")}`;
 
-const env = (): OpEnv => {
-  let next = 10;
+const env = (start = 10): OpEnv => {
+  let next = start;
 
   return {
     newItemId: () => ItemIdSchema.parse(uuid((next += 1))),
@@ -471,6 +480,167 @@ describe(hereOf, () => {
     });
     expect(hereOf(doc, source({ app: "Notes", title: "Standup" }))).toBeNull();
     expect(hereOf(doc, null)).toBeNull();
+  });
+});
+
+/** The shelf opened beside the pull request: the open items from it, and its source for a note typed under the chip. */
+const opening = (doc: ShelfDoc, seq = 4): Opening =>
+  openingOf(doc, PR, {
+    filter: true,
+    ids: itemsFrom(doc, PR),
+    label: "GitHub · acme/app #12",
+    seq,
+  });
+
+/** The shelf after a composer request, mapped as main maps it for this opening, and the item it made. */
+const typed = (
+  doc: ShelfDoc,
+  op: Extract<ShelfOp, { readonly type: "compose" }>,
+  open: Opening | null
+) => {
+  const result = applyOp(doc, typedNote(op, open), env(60), []);
+
+  return {
+    doc: result.doc,
+    item: result.doc.items.find((item) => item.id === result.addedId),
+  };
+};
+
+describe(typedNote, () => {
+  const doc = shelf();
+  const text = "Ask about the flaky test";
+  const plain = typed(doc, { text, type: "compose" }, opening(doc)).item;
+
+  it("gives a note typed under this opening's chip the window's source, and changes nothing else", () => {
+    expect(plain?.context).toBeNull();
+    expect(
+      typed(doc, { here: 4, text, type: "compose" }, opening(doc)).item
+    ).toStrictEqual({ ...plain, context: PR });
+  });
+
+  it("makes a plain note when the request names an earlier opening", () => {
+    expect(
+      typed(doc, { here: 3, text, type: "compose" }, opening(doc)).item
+    ).toStrictEqual(plain);
+    expect(
+      typed(doc, { here: 4, text, type: "compose" }, null).item
+    ).toStrictEqual(plain);
+  });
+
+  it("makes a plain note when the chip was taken off, so the request names no opening", () => {
+    expect(
+      typed(doc, { text, type: "compose" }, opening(doc)).item?.context
+    ).toBeNull();
+  });
+
+  it("still makes a section from “# Name” under the chip", () => {
+    const after = typed(
+      doc,
+      { here: 4, text: "# Review", type: "compose" },
+      opening(doc)
+    );
+
+    expect(after.item).toBeUndefined();
+    expect(after.doc.sections.map((section) => section.name)).toContain(
+      "Review"
+    );
+  });
+
+  it("is found from that window again, by recall and by the shelf's here", () => {
+    const after = typed(doc, { here: 4, text, type: "compose" }, opening(doc));
+    const id = after.item?.id;
+
+    expect(id).toBeDefined();
+    expect(itemsFrom(after.doc, PR)).toContain(id);
+    expect(hereOf(after.doc, PR)?.ids).toContain(id);
+  });
+});
+
+describe(hereWith, () => {
+  it("keeps the opening's items, checked ones too, and adds each open item from the window since", () => {
+    const doc = shelf();
+    const open = opening(doc);
+    const [first] = open.here.ids;
+
+    expect(first).toBeDefined();
+
+    const checked =
+      first === undefined
+        ? doc
+        : applyOp(doc, { id: first, type: "toggleDone" }, env(), []).doc;
+
+    const after = typed(
+      checked,
+      { here: 4, text: "Ask about the flaky test", type: "compose" },
+      open
+    );
+
+    expect(hereWith(open, after.doc)).toStrictEqual({
+      ...open.here,
+      ids: [...open.here.ids, after.item?.id],
+    });
+  });
+
+  it("is the opening as it was while nothing new came from the window", () => {
+    const doc = shelf();
+
+    expect(hereWith(opening(doc), doc)).toStrictEqual(opening(doc).here);
+  });
+
+  it("keeps a note typed under the chip once it is checked off, as it keeps the opening's own items", () => {
+    const doc = shelf();
+    const open = opening(doc);
+
+    const after = typed(
+      doc,
+      { here: 4, text: "Ask about the flaky test", type: "compose" },
+      open
+    );
+
+    const id = after.item?.id;
+
+    const checked =
+      id === undefined
+        ? after.doc
+        : applyOp(after.doc, { id, type: "toggleDone" }, env(70), []).doc;
+
+    expect(hereWith(open, checked).ids).toStrictEqual([...open.here.ids, id]);
+  });
+
+  it("keeps a note typed beside a site's home page, which no address rule matches again", () => {
+    const home = {
+      app: "Safari",
+      appLink: null,
+      code: null,
+      title: "Example Domain",
+      url: "https://example.com/",
+    };
+
+    const { doc } = applyOp(
+      shelf(),
+      addText("copied before the address was read", { ...home, url: null }),
+      env(50),
+      []
+    );
+
+    const open: Opening = {
+      ...opening(doc),
+      context: home,
+      here: { ...opening(doc).here, ids: itemsFrom(doc, home) },
+    };
+
+    expect(open.here.ids).toHaveLength(1);
+
+    const after = typed(
+      doc,
+      { here: 4, text: "Ask about the flaky test", type: "compose" },
+      open
+    );
+
+    expect(hereWith(open, after.doc).ids).toStrictEqual([
+      ...open.here.ids,
+      after.item?.id,
+    ]);
   });
 });
 
