@@ -339,19 +339,6 @@ const hideShelf = (): void => {
 
 const deletedToast = (id: ItemId): string => `deleted-${id}`;
 
-/** What a screenshot card's Add to “…” goes to: the item open in details, else the one selected, never one of several picked. */
-const selectionForMain = (
-  detailsId: ItemId | undefined,
-  picked: readonly ItemId[],
-  selectedId: ItemId | null
-): ItemId | null => {
-  if (detailsId !== undefined) {
-    return detailsId;
-  }
-
-  return picked.length > 1 ? null : selectedId;
-};
-
 /**
  * Ends a text edit still open in a row or in details, so a copy, export or
  * drag that follows takes the words the field shows: the editor saves on
@@ -762,12 +749,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       api.openAttachment({ attachmentId: attachment.id, id, pinMode: pins });
     },
   });
-
-  const selection = selectionForMain(detailsItem?.id, picked, selectedId);
-
-  useEffect(() => {
-    api.selection(selection);
-  }, [selection]);
 
   const [sheetOpen, setSheetOpen] = useState(false);
 
