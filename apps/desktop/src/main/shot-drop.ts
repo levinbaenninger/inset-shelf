@@ -30,6 +30,8 @@ export interface ShotDropDeps<S extends Shot> {
   readonly dropFailed: (why: string) => void;
   /** Writes the card's picture into `folder`, the drag's own folder in staging, named as the screenshot is, and returns the file; never a file of the user's. */
   readonly stage: (shot: S, folder: string) => string;
+  /** Removes a drag's folder from staging once its drop came back to the shelf: no other app got its file. Never throws. */
+  readonly unstage: (folder: string) => void;
 }
 
 /** Where a file is on disk: macOS can name a temporary file under /var or under /private/var. */
@@ -62,8 +64,12 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * the shelf's plain route.
  */
 export const createShotDrop = <S extends Shot>(deps: ShotDropDeps<S>) => {
-  // Each drag whose drop can still come, oldest first, by where its file is on disk.
-  const drags = new Map<string, ShotDrag<S>>();
+  // Each drag whose drop can still come, oldest first, by where its file is on disk, with the folder it staged its file in.
+  const drags = new Map<
+    string,
+    { readonly drag: ShotDrag<S>; readonly folder: string }
+  >();
+
   // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
   let made = 0;
 
@@ -71,15 +77,16 @@ export const createShotDrop = <S extends Shot>(deps: ShotDropDeps<S>) => {
   const claim = (paths: readonly string[]): ShotDrag<S> | null => {
     const [only] = paths;
     const file = only === undefined || paths.length !== 1 ? null : onDisk(only);
-    const drag = file === null ? undefined : drags.get(file);
+    const record = file === null ? undefined : drags.get(file);
 
-    if (file === null || drag === undefined) {
+    if (file === null || record === undefined) {
       return null;
     }
 
     drags.delete(file);
+    deps.unstage(record.folder);
 
-    return drag;
+    return record.drag;
   };
 
   /** Runs what a drop does after the shelf has its reply: whatever throws on the way is said once, and never escapes main's handler. */
@@ -106,11 +113,9 @@ export const createShotDrop = <S extends Shot>(deps: ShotDropDeps<S>) => {
     });
   };
 
-  const staged = (shot: S): string | null => {
-    made += 1;
-
+  const staged = (shot: S, folder: string): string | null => {
     try {
-      return deps.stage(shot, `screenshot-drag-${made}`);
+      return deps.stage(shot, folder);
     } catch (error) {
       deps.dragFailed(errorMessage(error));
 
@@ -128,13 +133,17 @@ export const createShotDrop = <S extends Shot>(deps: ShotDropDeps<S>) => {
       }
 
       const { shot } = drag;
-      const file = staged(shot);
+
+      made += 1;
+
+      const folder = `screenshot-drag-${made}`;
+      const file = staged(shot, folder);
 
       if (file === null) {
         return null;
       }
 
-      drags.set(onDisk(file), drag);
+      drags.set(onDisk(file), { drag, folder });
 
       for (const old of drags.keys()) {
         if (drags.size <= DRAGS_KEPT) {

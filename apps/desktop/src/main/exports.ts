@@ -1,4 +1,10 @@
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import type { Picture } from "@shared/shelf";
@@ -64,11 +70,16 @@ export const exportImage = (
 /** Dragged copies wait here for the drop, which can finish after startDrag returns. */
 export const createDragStaging = (tempDir: string) => {
   const root = path.join(tempDir, "Inset Shelf");
+  // The same folder as the disk names it: macOS hands the app /var, a link to /private/var, and a drop can name either.
+  const roots = [root, path.join(realpathSync.native(tempDir), "Inset Shelf")];
 
   return {
-    /** True for a file this staging wrote, so a drag back onto the shelf is not added twice. */
-    contains: (file: string): boolean =>
-      path.resolve(file).startsWith(`${root}${path.sep}`),
+    /** True for a file this staging wrote, however the drop spells its path, so a drag back onto the shelf is not added twice. */
+    contains: (file: string): boolean => {
+      const where = path.resolve(file);
+
+      return roots.some((each) => where.startsWith(`${each}${path.sep}`));
+    },
     clear: (id?: string): void => {
       rmSync(id === undefined ? root : path.join(root, id), {
         force: true,
