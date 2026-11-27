@@ -52,7 +52,7 @@ import { Truncated } from "@/shared/clamp";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 
-import { filledSteps, windowsThatFit } from "./row-parts";
+import { filledSteps, WINDOW_STRIP, windowsThatFit } from "./row-parts";
 import type { RowBadge } from "./row-parts";
 
 const BADGE_TONE: Readonly<Record<DueBucket | "plain", string>> = {
@@ -330,8 +330,15 @@ export const WindowStrip = ({
   return (
     <ul
       aria-label="Linked windows"
-      className="flex items-center gap-1.5"
+      className="flex items-center gap-(--gap)"
       ref={ref}
+      // The sizes windowsThatFit counted with, so what is drawn is what was counted.
+      style={{
+        "--gap": `${WINDOW_STRIP.gap}px`,
+        "--more": `${WINDOW_STRIP.more}px`,
+        "--thumb-height": `${WINDOW_STRIP.thumb.height}px`,
+        "--thumb-width": `${WINDOW_STRIP.thumb.width}px`,
+      }}
     >
       {windows.slice(0, shown).map((window) => (
         <li key={window.id}>
@@ -345,7 +352,10 @@ export const WindowStrip = ({
                 }}
                 type="button"
               >
-                <WindowThumb className="h-8 w-12" window={window} />
+                <WindowThumb
+                  className="h-(--thumb-height) w-(--thumb-width)"
+                  window={window}
+                />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -355,12 +365,14 @@ export const WindowStrip = ({
         </li>
       ))}
       {more === 0 ? null : (
-        <li>
+        // The room the count of windows that fit left for it.
+        <li className="w-(--more)">
           <Button
             aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
+            // Its words start one gap after the last thumbnail: the button's own inset lies in that gap.
+            className="-ml-1"
             onClick={onMore}
-            // As tall as the thumbnails, and as wide as "+25" needs.
-            size="sm"
+            size="count"
             variant="quiet"
           >
             +{more}

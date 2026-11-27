@@ -9,7 +9,7 @@ import { Clamp } from "@/shared/clamp";
 
 import { useCaretStart } from "./edit-start";
 import type { RowHandlers } from "./item-row";
-import { contextMenuAt, DONE } from "./row-look";
+import { contextMenuAt, DONE, EDITING } from "./row-look";
 import { ROW_CAPS } from "./row-parts";
 
 /** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
@@ -62,7 +62,7 @@ const NoteField = ({
 
   return (
     // The field takes its type from the note's own (a field's font is inherited), so nothing moves.
-    <div className={noteLook(item)}>
+    <div className={cn(noteLook(item), EDITING)}>
       <Textarea
         aria-label={
           item.kind === "image" ? "Note for this image" : "Note for this file"

@@ -3,6 +3,7 @@ import { z } from "zod";
 /** The system's code for a failed file operation, such as ENOENT. */
 export const FsErrorSchema = z.object({ code: z.string() });
 
+/** Each says what went wrong in its first words and names nothing of the user's, such as a volume: the screenshot card shows two lines, and a long name before the reason would push it out. */
 const SENTENCES = new Map([
   ["EACCES", "Inset can’t write to its data folder."],
   ["ENOSPC", "The disk is full."],

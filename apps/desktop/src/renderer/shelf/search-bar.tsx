@@ -18,7 +18,7 @@ import {
 } from "@shared/due";
 import type { DueFilter } from "@shared/due";
 import { keyText } from "@shared/shortcut";
-import { useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import {
@@ -168,19 +168,33 @@ const FilterMenu = ({
   );
 };
 
-/** Wide enough that the full placeholder fits beside the from-here chip. */
-const ROOMY = "(min-width: 420px)";
+/** The search field's own width, in px, from which the full placeholder fits beside the from-here chip. */
+const ROOMY_FIELD = 330;
 
-const roomy = (): boolean => window.matchMedia(ROOMY).matches;
+/** Whether the field is that wide, read from the field itself: what else shares its row doesn't matter. */
+const useRoomy = (field: RefObject<HTMLElement | null>): boolean => {
+  const [roomy, setRoomy] = useState(false);
 
-const onWidth = (changed: () => void): (() => void) => {
-  const query = window.matchMedia(ROOMY);
+  useLayoutEffect(() => {
+    const group = field.current;
 
-  query.addEventListener("change", changed);
+    const read = (): void => {
+      setRoomy((group?.clientWidth ?? 0) >= ROOMY_FIELD);
+    };
 
-  return () => {
-    query.removeEventListener("change", changed);
-  };
+    const observer = new ResizeObserver(read);
+
+    if (group !== null) {
+      observer.observe(group);
+      read();
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [field]);
+
+  return roomy;
 };
 
 /**
@@ -244,12 +258,14 @@ export const SearchBar = ({
   readonly here?: ShelfHere | null;
 }) => {
   const chip = here !== null && here !== undefined && here.ids.length > 0;
-  // Beside the from-here chip at the shelf's narrower widths, the placeholder is one word, never cut.
-  const wide = useSyncExternalStore(onWidth, roomy);
+  const field = useRef<HTMLDivElement>(null);
+  // Beside the from-here chip in a narrower field, the placeholder is one word, never cut.
+  const wide = useRoomy(field);
   const { due, here: fromHere } = parseSearch(query);
 
   return (
-    <InputGroup brand>
+    // A container, so the chip and Clear Search follow the field's width (from-here.tsx).
+    <InputGroup brand className="@container/search" ref={field}>
       <InputGroupAddon>
         <HugeiconsIcon icon={Search01Icon} />
       </InputGroupAddon>
@@ -292,11 +308,11 @@ export const SearchBar = ({
         {query === "" ? null : (
           <InputGroupButton
             aria-label="Clear Search"
-            // Searching only from:here in a shelf dragged narrower, the pressed chip clears it the same way and the field keeps the room to show it.
+            // Searching only from:here in a field under 240 px, the pressed chip clears it the same way and the field keeps the room to show it.
             className={cn(
               query === FROM_HERE &&
                 (here?.ids.length ?? 0) > 0 &&
-                "max-[330px]:hidden"
+                "@max-[240px]/search:hidden"
             )}
             onClick={() => {
               onChange("");

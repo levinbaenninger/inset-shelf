@@ -768,7 +768,12 @@ const Editor = ({
           className="bg-destructive/10 text-destructive flex shrink-0 flex-col gap-1 border-b px-4 py-2 text-xs select-text"
           role="alert"
         >
-          <Clamp className="break-words" lines={2} more="Show full message">
+          <Clamp
+            className="break-words"
+            lines={2}
+            more="Show full message"
+            spare
+          >
             {problem}
           </Clamp>
         </div>

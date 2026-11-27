@@ -239,21 +239,27 @@ export const createAttachments = (deps: AttachmentDeps) => {
   return { attachFilesTo, attachTo, pasteImageTo, prepare, storePicture };
 };
 
-/** How attaching ended, for the page: what landed, and why the rest didn't. */
+/**
+ * How attaching ended, for the page: what landed first, as a count of what
+ * was tried, then why the rest didn't. With nothing attached and no room
+ * asked for, the reasons say it all.
+ */
 export const attachResult = (outcome: AttachOutcome): AttachResult => {
   const { attached, problems, refused } = outcome;
   const added = attached.length;
+  const tried = added + refused + problems.length;
+  const room = `An item holds up to ${ATTACHMENTS_MAX}.`;
 
-  const full =
-    refused === 0
-      ? []
-      : [
-          added === 0
-            ? `Nothing was attached. An item holds up to ${ATTACHMENTS_MAX}.`
-            : `Attached ${added} of ${added + refused}. An item holds up to ${ATTACHMENTS_MAX}.`,
-        ];
+  const landed =
+    added === 0
+      ? ["Nothing was attached."]
+      : [`Attached ${added} of ${tried}.`];
 
-  const messages = [...full, ...problems];
+  const messages = [
+    ...(added === tried || (added === 0 && refused === 0) ? [] : landed),
+    ...(refused === 0 ? [] : [room]),
+    ...problems,
+  ];
 
   return {
     attached,

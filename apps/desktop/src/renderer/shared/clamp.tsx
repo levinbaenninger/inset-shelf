@@ -166,10 +166,12 @@ export const CUT_LINES =
 /**
  * Words cut to `lines` lines, the last one fading, with a quiet button
  * under them that shows the rest in place; no ellipsis, so a sentence's
- * own full stop never meets one. Words that fit show whole, with no button,
- * and so do words that would hide a single line: a button that costs a line
- * to save one is worse than none. `what` names the words for the button's
- * accessible name ("Show more of the description").
+ * own full stop never meets one. Words that fit in `lines` lines show whole,
+ * with no button; one line more and they are cut, so the cap is the number
+ * it says. A message passes `spare`: there a button that costs a line to
+ * save one is worse than none, so one line over still shows whole. `what`
+ * names the words for the button's accessible name ("Show more of the
+ * description").
  */
 export const Clamp = ({
   children,
@@ -178,10 +180,13 @@ export const Clamp = ({
   lines,
   more = "Show more",
   onLines,
+  spare = false,
   what,
 }: {
   readonly children: ReactNode;
   readonly lines: number;
+  /** One line over `lines` still shows whole: for a message, never for a part of a row with a stated cap. */
+  readonly spare?: boolean;
   /** Told how many lines the words take whole, whether or not they are cut, each time they are measured. */
   readonly onLines?: (lines: number) => void;
   /** Takes the line-height of the words, which `lines` counts in. */
@@ -191,15 +196,17 @@ export const Clamp = ({
   readonly what?: string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+  // The first control Show more brought into reach, until the keyboard has gone to it or left the button.
+  const revealed = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
-  // At least two lines would hide: the words are cut until Show more opens them.
+  // More lines would hide than are spared: the words are cut until Show more opens them.
   const [long, setLong] = useState(false);
   const cut = long && !open;
 
   useMeasure(ref, (element) => {
     // The words' whole height, whether or not they are cut now.
     const hidden = element.scrollHeight - lines * lineHeight(element);
-    const isLong = hidden >= 2 * lineHeight(element) - 1;
+    const isLong = hidden >= (spare ? 2 : 1) * lineHeight(element) - 1;
 
     setLong(isLong);
     hideCutControls(element, isLong && !open);
@@ -212,6 +219,7 @@ export const Clamp = ({
     <>
       <div
         className={cn(className, cut && CUT_LINES)}
+        data-spare={spare ? "" : undefined}
         ref={ref}
         style={{ "--lines": lines }}
       >
@@ -222,9 +230,28 @@ export const Clamp = ({
           aria-expanded={open}
           aria-label={what === undefined ? undefined : `${label} of ${what}`}
           className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 -mx-0.5 -mt-0.5 self-start rounded-sm px-0.5 text-xs font-medium outline-none focus-visible:ring-3"
+          onBlur={() => {
+            revealed.current = null;
+          }}
           onClick={(event) => {
             event.stopPropagation();
+            // What the cut kept the keyboard off comes before this button in the page: the next Tab goes there, not past it.
+            revealed.current = open
+              ? null
+              : (ref.current?.querySelector<HTMLElement>(
+                  `[${HIDDEN_BY_CLAMP}]`
+                ) ?? null);
             setOpen(!open);
+          }}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Tab" &&
+              !event.shiftKey &&
+              revealed.current?.isConnected === true
+            ) {
+              event.preventDefault();
+              revealed.current.focus();
+            }
           }}
           type="button"
         >

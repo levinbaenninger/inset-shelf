@@ -8,6 +8,7 @@ import {
   ROW_CAPS,
   rowParts,
   rowSteps,
+  WINDOW_STRIP,
   windowsThatFit,
 } from "./row-parts";
 
@@ -193,6 +194,20 @@ describe(rowParts, () => {
       ).badgesOn
     ).toBe("source");
   });
+
+  it("carries the badges of an open row without a source on its foot line, and on its source line otherwise", () => {
+    const sourced = text({
+      context: { app: "Safari", appLink: null, title: "plan", url: null },
+      due: "2026-11-01",
+    });
+
+    expect(rowParts(text({ due: "2026-11-01" }), true).badgesOn).toBe("foot");
+    expect(rowParts(text({ due: "2026-11-01" }), false).badgesOn).toBe(
+      "source"
+    );
+    expect(rowParts(sourced, true).badgesOn).toBe("source");
+    expect(rowParts(file({ due: "2026-11-01" }), true).badgesOn).toBe("file");
+  });
 });
 
 /** An image with this many labelled pins. */
@@ -272,6 +287,30 @@ describe("an open row's caps", () => {
     expect(windowsThatFit(210, 10)).toBe(3);
     expect(windowsThatFit(500, 10)).toBe(8);
     expect(windowsThatFit(560, 2)).toBe(2);
+  });
+
+  it("never counts more windows than the line holds at the sizes the strip draws them at, and never one fewer than fit", () => {
+    const { gap, more, thumb } = WINDOW_STRIP;
+
+    /** What the strip takes: the thumbnails with a gap between, then a gap and "+N" when some are left out. */
+    const taken = (shown: number, total: number): number =>
+      shown * thumb.width +
+      Math.max(0, shown - 1) * gap +
+      (shown < total ? (shown === 0 ? 0 : gap) + more : 0);
+
+    const wrong = Array.from({ length: 600 }, (_, width) => width).filter(
+      (width) => {
+        const shown = windowsThatFit(width, 25);
+
+        return (
+          // A line too narrow for even "+N" still shows it, alone.
+          (taken(shown, 25) > width && shown > 0) ||
+          (shown < 25 && taken(shown + 1, 25) <= width)
+        );
+      }
+    );
+
+    expect(wrong).toStrictEqual([]);
   });
 });
 

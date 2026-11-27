@@ -213,7 +213,7 @@ const LinkRow = ({
   onOpenLink,
   siteShown,
 }: {
-  /** On one line, its site cut short, where the row is long already. */
+  /** On one line where the row is long already: its site shows beside the words when it fits whole, and not at all when it doesn't. */
   readonly fold: boolean;
   readonly link: TextItem["links"][number];
   readonly onOpenLink: (url: string) => void;
@@ -238,16 +238,19 @@ const LinkRow = ({
         icon={Link01Icon}
         size={12}
       />
-      {/* The site goes under the words when both don't fit on one line, so it stays readable, unless the row folds it. */}
+      {/* The site goes under the words when both don't fit on one line, so it stays readable. A folded row shows only the first line: a site that would be cut to a few letters isn't shown, and its link's tooltip still names the address. */}
       <span
         className={cn(
-          "flex min-w-0 gap-x-1.5",
-          fold ? "flex-nowrap" : "flex-wrap"
+          "flex min-w-0 flex-wrap gap-x-1.5",
+          fold && "h-4 overflow-hidden"
         )}
       >
         <span className="max-w-full truncate">{link.text}</span>
         {link.text === link.url || siteShown ? null : (
-          <span className="text-muted-foreground max-w-full truncate">
+          <span
+            className="text-muted-foreground max-w-full truncate"
+            data-link-site
+          >
             {hostOf(link.url)}
           </span>
         )}
@@ -492,20 +495,52 @@ const percent = (value: number, total: number): string =>
 const imageCaption = (item: ImageItem): string =>
   item.title ?? (item.note === "" ? PICTURE_KIND[item.via] : item.note);
 
-const metaText = (item: ShelfItem): string => {
-  const when = whenText(item.createdAt);
-
+/** What the foot says after the time: how the item was captured, a file's size, a picture's source. Empty for a typed note. */
+const metaRest = (item: ShelfItem): string => {
   if (item.kind === "text") {
-    return item.via === "selection" ? `${when} · from a selection` : when;
+    return item.via === "selection" ? "from a selection" : "";
   }
 
   if (item.kind === "file") {
-    return `${when} · ${fileSizeText(item.file.bytes)}`;
+    return fileSizeText(item.file.bytes);
   }
 
   const where = item.source === null ? "" : ` · ${item.source}`;
 
-  return `${when} · ${PICTURE_KIND[item.via]}${where}`;
+  return `${PICTURE_KIND[item.via]}${where}`;
+};
+
+const metaText = (item: ShelfItem): string => {
+  const when = whenText(item.createdAt);
+  const rest = metaRest(item);
+
+  return rest === "" ? when : `${when} · ${rest}`;
+};
+
+/**
+ * The foot's words beside badges, where room is short: the time always
+ * shows, and what follows it shows when it has room for a word or two and
+ * not at all when it would be cut to a letter. The whole line is the time's
+ * tooltip then.
+ */
+const FootWords = ({ item }: { readonly item: ShelfItem }) => {
+  const rest = metaRest(item);
+
+  return (
+    <span
+      className="text-muted-foreground flex h-4 min-w-0 flex-1 flex-wrap gap-x-1 overflow-hidden text-xs"
+      data-foot-words
+    >
+      <Truncated
+        className="min-w-0"
+        text={whenText(item.createdAt)}
+        tooltip={metaText(item)}
+      />
+      {rest === "" ? null : (
+        <Truncated className="min-w-16 flex-1" text={`· ${rest}`} />
+      )}
+    </span>
+  );
 };
 
 /**
@@ -1134,20 +1169,34 @@ const MoreButton = ({
   </span>
 );
 
-/** The open row's foot: when and how it was captured, and Details (→). */
+/**
+ * The open row's foot: when and how it was captured, and Details (→). A row
+ * without a source has its badges here too, before Details, under the rules
+ * of every badge line: the words give way, and the Due chip always shows.
+ */
 const OpenFooter = ({
+  badges,
   item,
   onShowDetails,
 }: {
+  readonly badges: readonly ReactNode[];
   readonly item: ShelfItem;
   readonly onShowDetails: () => void;
 }) => (
   // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
   <div className="-mr-9 flex min-h-6 items-center gap-2">
-    <Truncated
-      className="text-muted-foreground min-w-0 flex-1 text-xs"
-      text={metaText(item)}
-    />
+    <div className="min-w-0 flex-1">
+      <BadgeLine badges={badges} reach={false}>
+        {badges.length === 0 ? (
+          <Truncated
+            className="text-muted-foreground min-w-0 flex-1 text-xs"
+            text={metaText(item)}
+          />
+        ) : (
+          <FootWords item={item} />
+        )}
+      </BadgeLine>
+    </div>
     <Button
       aria-label="Show details"
       className="-mr-2.75 shrink-0"
@@ -1360,7 +1409,11 @@ const RowView = (props: RowViewProps) => {
           />
         )}
         {selected ? (
-          <OpenFooter item={item} onShowDetails={props.onShowDetails} />
+          <OpenFooter
+            badges={parts.badgesOn === "foot" ? badges : []}
+            item={item}
+            onShowDetails={props.onShowDetails}
+          />
         ) : null}
       </div>
       <MoreButton

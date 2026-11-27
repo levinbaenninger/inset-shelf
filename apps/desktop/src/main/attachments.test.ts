@@ -252,9 +252,47 @@ describe(createAttachments, () => {
       result: {
         attached: controller.item(id)?.attachments.map((each) => each.id),
         message:
-          "Folder is a folder, not a file. huge.mov is larger than 200 MB.",
+          "Attached 1 of 3. Folder is a folder, not a file. huge.mov is larger than 200 MB.",
       },
       stored: [`${uuid(12)}.txt`],
+    });
+  });
+
+  it("says what landed first when a drop of a file and a folder attaches only the file", async () => {
+    const { attachments, controller, id } = setup(0);
+
+    const outcome = await attachments.attachFilesTo(id, [
+      "/a/Drop offer.pdf",
+      "/a/Quotes/",
+    ]);
+
+    expect(attachResult(outcome)).toStrictEqual({
+      attached: controller.item(id)?.attachments.map((each) => each.id),
+      message: "Attached 1 of 2. Quotes is a folder, not a file.",
+    });
+  });
+
+  it("counts what couldn't be read among what was tried when the item also ran out of room", async () => {
+    const { attachments, id } = setup(ATTACHMENTS_MAX - 1);
+
+    const outcome = await attachments.attachFilesTo(id, [
+      "/a/A.pdf",
+      "/a/Folder/",
+      "/a/B.pdf",
+    ]);
+
+    expect(attachResult(outcome).message).toBe(
+      `Attached 1 of 3. An item holds up to ${ATTACHMENTS_MAX}. Folder is a folder, not a file.`
+    );
+  });
+
+  it("says only why when nothing of a drop could be read", async () => {
+    const { attachments, id } = setup(0);
+    const outcome = await attachments.attachFilesTo(id, ["/a/Folder/"]);
+
+    expect(attachResult(outcome)).toStrictEqual({
+      attached: [],
+      message: "Folder is a folder, not a file.",
     });
   });
 

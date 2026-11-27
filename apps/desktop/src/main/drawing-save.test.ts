@@ -133,6 +133,7 @@ const setup = async (dir: string, blocked = false) => {
 
   const saves = createDrawingSaves({
     added: () => {},
+    focus: () => {},
     clearStaging: () => {},
     close: () => {
       window.visible = false;
@@ -252,6 +253,7 @@ const setup = async (dir: string, blocked = false) => {
 const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
   createDrawingSaves({
     added: () => {},
+    focus: () => {},
     clearStaging: () => {},
     close: () => {},
     controller: app.controller,
@@ -718,6 +720,7 @@ describe(createDrawingSaves, () => {
 
     const saves = createDrawingSaves({
       added: () => {},
+      focus: () => {},
       clearStaging: () => {},
       close: () => {},
       controller: app.controller,
@@ -1014,10 +1017,15 @@ const noteWith = async (app: Awaited<ReturnType<typeof setup>>, held = 1) => {
   app.controller.apply({ attachments: pictures, id, type: "attach" });
   await app.controller.flush();
 
+  const focused: string[] = [];
+
   const saves = createDrawingSaves({
     added: () => {},
     clearStaging: () => {},
     close: () => {},
+    focus: (shown) => {
+      focused.push(shown);
+    },
     controller: app.controller,
     copies: {
       copy: async () => await Promise.resolve({ ok: true }),
@@ -1039,7 +1047,7 @@ const noteWith = async (app: Awaited<ReturnType<typeof setup>>, held = 1) => {
     ...attaching(notices),
   });
 
-  return { id, notices, original, pictures, saves };
+  return { focused, id, notices, original, pictures, saves };
 };
 
 describe("drawing on an item's attachments", () => {
@@ -1122,6 +1130,43 @@ describe("drawing on an item's attachments", () => {
 
     expect(again.files).toStrictEqual([
       last?.kind === "image" ? last.image.file : "",
+    ]);
+  });
+
+  it("leaves the shelf where the user was after a save on an attached picture or a new drawing attached to the item", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app);
+    const [picture] = note.pictures;
+
+    if (picture === undefined) {
+      throw new Error("no picture");
+    }
+
+    note.saves.open(
+      { attachmentId: picture.id, id: note.id, kind: "attachment" },
+      await note.saves.opening(picture)
+    );
+    await note.saves.save(marked);
+    note.saves.open({ id: note.id, kind: "newAttachment" });
+    await note.saves.save(marked);
+    await app.controller.flush();
+
+    expect({
+      attachments: app.controller.item(note.id)?.attachments.length,
+      focused: note.focused,
+    }).toStrictEqual({ attachments: 2, focused: [] });
+  });
+
+  it("shows the item a new drawing became when its item was full", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app, ATTACHMENTS_MAX);
+
+    note.saves.open({ id: note.id, kind: "newAttachment" });
+    await note.saves.save(marked);
+    await app.controller.flush();
+
+    expect(note.focused).toStrictEqual([
+      app.controller.view().doc.items.at(-1)?.id,
     ]);
   });
 

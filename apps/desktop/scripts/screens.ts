@@ -3714,17 +3714,21 @@ const SCREENSHOT_VIEW = {
   widthPx: LOGIN.widthPx,
 };
 
-/** Main's reason a card's save failed: a sentence of its own, here a long one. */
-const CARD_FAILURE = `Der Datenträger „${LONG_WORD}“ ist voll.`;
+/** What the card must keep in view of a long reason: the words that say what went wrong. */
+const CARD_REASON = "Datenträger voll";
+
+/** Main's reason a card's save failed: a sentence of its own, here a long one. It says what went wrong first, as main's own sentences do (save-error.ts), so a long name after it can't push that out of the card's two lines. */
+const CARD_FAILURE = `${CARD_REASON}: „${LONG_WORD}“.`;
 
 /** The card as main shows it once a save failed. */
 const failedCard = (
   to: "shelf" | "item" | null,
   message = CARD_FAILURE,
-  target: { readonly id: string; readonly label: string } | null = null
+  target: { readonly id: string; readonly label: string } | null = null,
+  only = false
 ) => ({
   ...SCREENSHOT_VIEW,
-  save: { message, only: false, state: "failed", to },
+  save: { message, only, state: "failed", to },
   target,
 });
 
@@ -3858,6 +3862,27 @@ const tabToFailure = async (page: Page): Promise<boolean> => {
   return false;
 };
 
+/** With the keyboard on the failure message, it reads it all: whole in view, or in a box it scrolls. */
+const failureEndReached = async (page: Page): Promise<string | null> => {
+  const shown = z
+    .object({ client: z.number(), scroll: z.number(), style: z.string() })
+    .parse(
+      await page.evaluate(() => {
+        const alert = document.querySelector("[role=alert]");
+
+        return {
+          client: alert?.clientHeight ?? 0,
+          scroll: alert?.scrollHeight ?? 0,
+          style: alert === null ? "" : getComputedStyle(alert).overflowY,
+        };
+      })
+    );
+
+  return shown.scroll <= shown.client + 1 || shown.style === "auto"
+    ? null
+    : "the keyboard on the failure message can't reach its end";
+};
+
 /** A plain note that runs to about nine lines at 300 wide, between short ones. */
 const NINE_LINES = `${LONG_DESCRIPTION} Danach die Ergebnisse an das gesamte Projektteam schicken und die Zwischenablage wiederherstellen.`;
 
@@ -3894,6 +3919,49 @@ const NINE_DOC = {
       kind: "text",
       links: [],
       text: "Order boxes for the archive",
+      via: "typed",
+    },
+  ],
+};
+
+/** An image whose title takes one line more than its cap at 300 wide (four, not three), and whose description takes one more than its own (eleven, not ten). */
+const ONE_OVER_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(726, 30, STRESS_A),
+      description: Array.from(
+        { length: 11 },
+        (_, line) => `Zeile ${line + 1} der Beschreibung`
+      ).join("\n"),
+      image: LOGIN,
+      kind: "image",
+      note: "",
+      pins: [],
+      source: null,
+      title:
+        "Bildschirmaufnahme und Systemaudio für die Quartalsübersicht aufnehmen, die",
+      via: "screenshot",
+    },
+  ],
+};
+
+/** A note with a code line far wider than the shelf at 300. */
+const CODE_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(727, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: [
+        "Vor dem Umzug sichern:",
+        "",
+        "```",
+        "rsync --archive --delete --exclude node_modules /Volumes/Archiv/Projekte/ sicherung@nas.rieder-moebel.ch:/backup/projekte/",
+        "```",
+      ].join("\n"),
       via: "typed",
     },
   ],
@@ -4062,6 +4130,116 @@ const openCrowdedCheck = async (page: Page): Promise<string | null> => {
   return await reachedDetails(711)(page);
 };
 
+/** In a strip of tiles that ends in “+N”: the words of “+N” start as far after the last tile as the tiles are apart, and the strip stays inside its row. */
+const moreGapProblem = async (strip: Locator): Promise<string | null> => {
+  const gaps = z
+    .object({ between: z.number(), inside: z.boolean(), toMore: z.number() })
+    .parse(
+      await strip.evaluate((list) => {
+        const entries = [...list.children];
+        const words = entries.at(-1)?.querySelector("button");
+        const tiles = entries.slice(0, -1);
+        const range = document.createRange();
+
+        // The words themselves, not the button around them.
+        if (words !== null && words !== undefined) {
+          range.selectNodeContents(words);
+        }
+
+        const last = tiles.at(-1)?.getBoundingClientRect();
+        const first = tiles[0]?.getBoundingClientRect();
+        const second = tiles[1]?.getBoundingClientRect();
+
+        return {
+          between:
+            first === undefined || second === undefined
+              ? -1
+              : second.left - first.right,
+          inside:
+            range.getBoundingClientRect().right <=
+            (list.parentElement?.getBoundingClientRect().right ?? 0),
+          toMore:
+            last === undefined
+              ? -1
+              : range.getBoundingClientRect().left - last.right,
+        };
+      })
+    );
+
+  if (!gaps.inside) {
+    return "“+N” runs out of its row";
+  }
+
+  return Math.abs(gaps.toMore - gaps.between) <= 1
+    ? null
+    : `“+N” starts ${gaps.toMore} px after the last tile, and the tiles are ${gaps.between} px apart`;
+};
+
+/** An open row without a source: its badges sit on its foot line, after the words and before Details, and take no line of their own. */
+const badgesOnFoot = (n: number) =>
+  async function check(page: Page): Promise<string | null> {
+    const row = item(page, n);
+    const lines = row.locator("[data-badges]");
+    const count = await lines.count();
+
+    if (count !== 1) {
+      return `the open row has ${count} badge lines, not the one on its foot`;
+    }
+
+    const badge = await boxOf(lines.locator("> *").first());
+    const more = await boxOf(row.locator("[data-details-button]"));
+
+    // The time shows whole; what follows it shows with room for a word, or not at all.
+    const words = z
+      .array(
+        z.object({ cut: z.boolean(), shown: z.boolean(), width: z.number() })
+      )
+      .parse(
+        await row.locator("[data-foot-words]").evaluate((foot) => {
+          const { bottom } = foot.getBoundingClientRect();
+
+          return [...foot.children].map((each) => ({
+            cut: each.scrollWidth > each.clientWidth,
+            shown: each.getBoundingClientRect().top < bottom,
+            width: each.clientWidth,
+          }));
+        })
+      );
+
+    const [time, ...rest] = words;
+
+    if (time === undefined || time.cut) {
+      return `the foot's time is cut: ${JSON.stringify(words)}`;
+    }
+
+    if (rest.some((each) => each.shown && each.width < 60)) {
+      return `the foot's words after the time are cut to a letter or two: ${JSON.stringify(words)}`;
+    }
+
+    return badge.right <= more.left &&
+      middle(badge) < more.bottom &&
+      middle(badge) > more.top
+      ? null
+      : `the badge isn't on the foot line before Details: ${JSON.stringify({ badge, more })}`;
+  };
+
+/** The site beside each link of an open row that names one: whether it is in view, and whether it is cut short there. */
+const linkSites = async (page: Page, n: number) =>
+  z.array(z.object({ cut: z.boolean(), shown: z.boolean() })).parse(
+    await item(page, n).evaluate((row) =>
+      [...row.querySelectorAll("[data-link-site]")].map((site) => {
+        const line = site.parentElement;
+
+        const shown =
+          line !== null &&
+          site.getBoundingClientRect().top <
+            line.getBoundingClientRect().bottom - 1;
+
+        return { cut: shown && site.scrollWidth > site.clientWidth, shown };
+      })
+    )
+  );
+
 /** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
 type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
   readonly page?: PageName;
@@ -4116,17 +4294,28 @@ const STRESS_SCENES: readonly Scene[] = (
           return `the first Tab from the open row's words went to “${String(first)}”, not Show more`;
         }
 
+        // As a user meets it: Enter on Show more, then Tab, with the keyboard left where it is.
         await page.keyboard.press("Enter");
-        await words.focus();
         await page.keyboard.press("Tab");
 
         const next = await page.evaluate(
           "document.activeElement?.textContent ?? ''"
         );
 
-        return next === "das Protokoll"
+        if (next !== "das Protokoll") {
+          return `after Enter on Show more, Tab went to “${String(next)}”, not the link it revealed`;
+        }
+
+        // From the link the keyboard goes on: Show less is the next stop, so nothing is skipped and nothing traps it.
+        await page.keyboard.press("Tab");
+
+        const after = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-label') ?? ''"
+        );
+
+        return after === "Show less of the text"
           ? null
-          : `once open, Tab went to “${String(next)}”, not the link`;
+          : `from the revealed link, Tab went to “${String(after)}”, not Show less`;
       },
       data: { view: shelfView(LINK_BELOW_DOC) },
       keepPointer: true,
@@ -4152,12 +4341,111 @@ const STRESS_SCENES: readonly Scene[] = (
           })
           .textContent();
 
-        return shown > 0 && more === `+${25 - shown}`
-          ? null
-          : `the open row must show the windows that fit and “+N” for the other ${25 - shown}: ${String(more)}`;
+        if (!(shown > 0 && more === `+${25 - shown}`)) {
+          return `the open row must show the windows that fit and “+N” for the other ${25 - shown}: ${String(more)}`;
+        }
+
+        return await moreGapProblem(strip);
       },
       data: { view: shelfView(MANY_WINDOWS_DOC) },
       name: "stress-open-windows-many",
+      width: NARROWEST,
+    },
+    {
+      // One line over each cap: the title shows three lines and the description ten, each with its Show more.
+      act: async (page) => {
+        await select(page, 726);
+      },
+      check: async (page) => {
+        const caps = z
+          .array(
+            z.object({ cap: z.number(), shown: z.number(), whole: z.number() })
+          )
+          .parse(
+            await item(page, 726).evaluate((row) =>
+              [...row.querySelectorAll<HTMLElement>("[style*='--lines']")].map(
+                (words) => {
+                  const line =
+                    Number(
+                      getComputedStyle(words).lineHeight.replace("px", "")
+                    ) || 20;
+
+                  return {
+                    cap: Number(words.style.getPropertyValue("--lines")),
+                    shown: Math.round(
+                      words.getBoundingClientRect().height / line
+                    ),
+                    whole: Math.round(words.scrollHeight / line),
+                  };
+                }
+              )
+            )
+          );
+
+        if (
+          !isDeepStrictEqual(
+            caps.map((each) => [each.cap, each.whole]),
+            [
+              [3, 4],
+              [10, 11],
+            ]
+          )
+        ) {
+          return `the scene must hold a title one line over its cap of 3 and a description one over its cap of 10: ${JSON.stringify(caps)}`;
+        }
+
+        if (caps.some((each) => each.shown !== each.cap)) {
+          return `words one line over their cap must be cut to it: ${JSON.stringify(caps)}`;
+        }
+
+        const more = await item(page, 726)
+          .getByRole("button", { name: /^Show more of the/u })
+          .count();
+
+        return more === 2
+          ? null
+          : `the title and the description must each offer Show more: ${more}`;
+      },
+      data: { view: shelfView(ONE_OVER_DOC) },
+      height: 720,
+      name: "stress-open-one-line-over",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 727);
+      },
+      // A code line wider than the note wraps: reading it must not take a sideways scroll.
+      check: async (page) => {
+        const code = await item(page, 727).evaluate((row) => {
+          const block = row.querySelector("code")?.parentElement;
+
+          return block === null || block === undefined
+            ? null
+            : {
+                height: Math.round(block.getBoundingClientRect().height),
+                inner: block.scrollWidth,
+                outer: block.clientWidth,
+                scrolls: getComputedStyle(block).overflowX !== "visible",
+              };
+        });
+
+        if (code === null) {
+          return "the scene must show a code block";
+        }
+
+        if (code.scrolls || code.inner > code.outer + 1) {
+          return `a long code line must wrap, not scroll sideways: ${JSON.stringify(code)}`;
+        }
+
+        // Three lines of 16 px or more.
+        return code.height >= 48
+          ? null
+          : `the scene's code line must be longer than the note is wide: ${JSON.stringify(code)}`;
+      },
+      data: { view: shelfView(CODE_DOC) },
+      height: 620,
+      name: "stress-open-code",
       width: NARROWEST,
     },
     {
@@ -4183,8 +4471,19 @@ const STRESS_SCENES: readonly Scene[] = (
             .first()
         );
 
-        return link.bottom - link.top > 24
-          ? `the link must fold to one line beside a long description: ${link.bottom - link.top}px`
+        if (link.bottom - link.top > 24) {
+          return `the link must fold to one line beside a long description: ${link.bottom - link.top}px`;
+        }
+
+        // At this width the site can't show its domain beside the words: it isn't shown as a few letters.
+        const sites = await linkSites(page, 710);
+
+        if (sites.some((site) => site.cut)) {
+          return `a folded link shows its site cut short: ${JSON.stringify(sites)}`;
+        }
+
+        return sites.some((site) => site.shown)
+          ? `the site fits beside its link at 300 wide, so this scene no longer shows it left out: ${JSON.stringify(sites)}`
           : await reachedDetails(710)(page);
       },
       data: { view: stressView() },
@@ -4311,6 +4610,7 @@ const STRESS_SCENES: readonly Scene[] = (
           .getByRole("button", { name: "Show details" })
           .focus();
       },
+      check: badgesOnFoot(711),
       data: { view: stressView(CROWDED_DOC) },
       height: 620,
       name: "stress-open-crowded-end",
@@ -4328,7 +4628,30 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await select(page, 710);
       },
-      check: reachedDetails(710),
+      // The link's words fill this line too, so its site stays out. With shorter words the site shows beside them, whole.
+      check: async (page) => {
+        const long = await linkSites(page, 710);
+
+        await item(page, 710).evaluate((row) => {
+          for (const site of row.querySelectorAll("[data-link-site]")) {
+            const words = site.previousElementSibling;
+
+            if (words !== null) {
+              words.textContent = "Angebot";
+            }
+          }
+        });
+
+        const short = await linkSites(page, 710);
+
+        if (long.some((site) => site.cut) || short.some((site) => site.cut)) {
+          return `a folded link shows its site cut short: ${JSON.stringify({ long, short })}`;
+        }
+
+        return short.length > 0 && short.every((site) => site.shown)
+          ? await reachedDetails(710)(page)
+          : `a folded link with room beside its words must show its site: ${JSON.stringify(short)}`;
+      },
       data: { view: stressView() },
       name: "stress-open-text-wide",
     },
@@ -4820,7 +5143,23 @@ const STRESS_SCENES: readonly Scene[] = (
       act: async (page) => {
         await clickToEdit(page, 722, "button");
       },
-      check: async (page) => await editedInPlace(page, 722, "button"),
+      check: async (page) => {
+        // The field's tint is as wide as the text column: it ends where the picture over it does. Read first: finding the caret's word ends the edit.
+        const field = await boxOf(
+          item(page, 722).locator("div:has(> textarea)")
+        );
+
+        const picture = await boxOf(item(page, 722).locator("img").first());
+
+        if (
+          Math.abs(field.left - picture.left) > 0.5 ||
+          Math.abs(field.right - picture.right) > 0.5
+        ) {
+          return `the edit field runs from ${field.left} to ${field.right}, the picture over it from ${picture.left} to ${picture.right}`;
+        }
+
+        return await editedInPlace(page, 722, "button");
+      },
       data: { view: stressView(EDIT_DOC) },
       keepPointer: true,
       name: "stress-edit-in-place-note",
@@ -5146,6 +5485,31 @@ const STRESS_SCENES: readonly Scene[] = (
           return problem;
         }
 
+        // At rest the two lines say what went wrong, whatever name follows.
+        const reasonShows = await page
+          .getByRole("alert")
+          .evaluate((alert, reason) => {
+            const text = alert.querySelector("span")?.firstChild;
+            const range = document.createRange();
+
+            if (text === null || text === undefined) {
+              return false;
+            }
+
+            range.setStart(text, 0);
+            range.setEnd(text, reason.length);
+
+            return (
+              range.toString() === reason &&
+              range.getBoundingClientRect().bottom <=
+                alert.getBoundingClientRect().bottom
+            );
+          }, CARD_REASON);
+
+        if (!reasonShows) {
+          return `the failed card's two lines don't show “${CARD_REASON}”`;
+        }
+
         await page.getByRole("button", { name: "Retry" }).click();
 
         const sent = await calls(page);
@@ -5164,26 +5528,7 @@ const STRESS_SCENES: readonly Scene[] = (
           throw new Error("Tab never reached the failure message");
         }
       },
-      check: async (page) => {
-        const shown = z
-          .object({ client: z.number(), scroll: z.number(), style: z.string() })
-          .parse(
-            await page.evaluate(() => {
-              const alert = document.querySelector("[role=alert]");
-
-              return {
-                client: alert?.clientHeight ?? 0,
-                scroll: alert?.scrollHeight ?? 0,
-                style: alert === null ? "" : getComputedStyle(alert).overflowY,
-              };
-            })
-          );
-
-        // The keyboard reads it all: whole in view, or in a box it scrolls.
-        return shown.scroll <= shown.client + 1 || shown.style === "auto"
-          ? null
-          : "the keyboard on the failure message can't reach its end";
-      },
+      check: failureEndReached,
       data: { view: failedCard("shelf") },
       keepPointer: true,
       name: "stress-screenshot-add-failed-focus",
@@ -5380,6 +5725,66 @@ const listed = async (page: Page) => {
 
   return { ids, query };
 };
+
+/** The search field as it stands: the chip's words in view, the placeholder, and whether anything in it is cut (the chip, or what the field shows of its search or placeholder). */
+const fieldAtWidth = async (page: Page) =>
+  z
+    .object({ cut: z.string(), label: z.string(), placeholder: z.string() })
+    .parse(
+      await page.evaluate(() => {
+        const group = document.querySelector("[data-slot=input-group]");
+        const input = group?.querySelector("input");
+        const chip = group?.querySelector("button[aria-pressed]");
+
+        if (
+          !(group instanceof HTMLElement) ||
+          !(input instanceof HTMLInputElement) ||
+          !(chip instanceof HTMLElement)
+        ) {
+          return { cut: "no field", label: "", placeholder: "" };
+        }
+
+        const style = getComputedStyle(input);
+        const pen = document.createElement("canvas").getContext("2d");
+
+        if (pen !== null) {
+          pen.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        }
+
+        const words = input.value === "" ? input.placeholder : input.value;
+        const needs = pen?.measureText(words).width ?? Infinity;
+
+        const room =
+          input.clientWidth -
+          Number(style.paddingLeft.replace("px", "")) -
+          Number(style.paddingRight.replace("px", ""));
+
+        const cut = [
+          ...(needs > room + 0.5
+            ? [`“${words}” needs ${Math.round(needs)} of ${Math.round(room)}`]
+            : []),
+          ...(chip.scrollWidth > chip.clientWidth ? ["the chip"] : []),
+          ...([...group.querySelectorAll("button")].some(
+            (button) =>
+              button.getClientRects().length > 0 &&
+              button.getBoundingClientRect().right >
+                group.getBoundingClientRect().right + 0.5
+          )
+            ? ["a button runs out of the field"]
+            : []),
+        ];
+
+        return {
+          cut: cut.join(", "),
+          label: [...chip.querySelectorAll("span")]
+            .flatMap((part) =>
+              part.getClientRects().length > 0 ? [part.textContent ?? ""] : []
+            )
+            .join(""),
+          placeholder: input.placeholder,
+        };
+      })
+    );
 
 const whyView = (phase: "taking" | "typing" | "saved") => ({
   corner: "top-left",
@@ -5689,6 +6094,78 @@ const PILL_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // The chip's words, the placeholder and Clear Search follow the field's own width. Swept from the narrowest shelf to a wide one, with the filter off and on, nothing in the field is cut, and the decided looks hold at 300, 340 and 440.
+      check: async (page) => {
+        const sweep = async (on: boolean) => {
+          const seen: {
+            readonly cut: string;
+            readonly label: string;
+            readonly placeholder: string;
+            readonly width: number;
+          }[] = [];
+
+          for (let width = NARROWEST; width <= 440; width += 10) {
+            // oxlint-disable-next-line no-await-in-loop -- one width after another.
+            await page.setViewportSize({ height: 600, width });
+            // oxlint-disable-next-line no-await-in-loop -- the field is measured once it has settled at this width.
+            await page.waitForTimeout(60);
+
+            seen.push({
+              // oxlint-disable-next-line no-await-in-loop -- read at this width.
+              ...(await fieldAtWidth(page)),
+              width,
+            });
+          }
+
+          return seen.map((each) => ({ ...each, on }));
+        };
+
+        const off = await sweep(false);
+
+        await page
+          .getByRole("button", { name: "Show the 2 items from here" })
+          .click();
+
+        const on = await sweep(true);
+        const cut = [...off, ...on].filter((each) => each.cut !== "");
+
+        if (cut.length > 0) {
+          return `the search field cuts its words at ${JSON.stringify(cut)}`;
+        }
+
+        const at = (list: typeof off, width: number) => {
+          const found = list.find((each) => each.width === width);
+
+          return found === undefined
+            ? ""
+            : `${found.label} | ${found.placeholder}`;
+        };
+
+        const looks = {
+          off300: at(off, 300),
+          off340: at(off, 340),
+          off440: at(off, 440),
+          on300: at(on, 300),
+          on340: at(on, 340),
+          on440: at(on, 440),
+        };
+
+        return isDeepStrictEqual(looks, {
+          off300: "Here · 2 | Search",
+          off340: "2 from here | Search",
+          off440: "2 from here | Search or due:today",
+          on300: "Here | Search",
+          on340: "Here | Search",
+          on440: "2 from here | Search or due:today",
+        })
+          ? null
+          : `the field's words at 300, 340 and 440 changed: ${JSON.stringify(looks)}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-widths",
+      page: "shelf",
+    },
+    {
       // With the filter on the chip stays, pressed; Return on it takes the filter off again, which is what the picture shows.
       act: async (page) => {
         const chip = page.getByRole("button", {
@@ -5988,7 +6465,9 @@ const stripProblem = async (
     return "the row's tiles don't sit on one line inside the card";
   }
 
-  return null;
+  return more === null
+    ? null
+    : await moreGapProblem(item(page, n).locator("[data-attachment-strip]"));
 };
 
 /** The arguments of every call of one kind the page made, in order. */
@@ -6078,6 +6557,175 @@ const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
 
 /** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
 const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
+
+/** What the failure message says of Annotate while Retry is the only add: the words of the dimmed button's hover, as a sentence. */
+const ANNOTATE_NEXT = "Annotate it on its item, once Retry has saved it.";
+
+/** The failed card once Retry adding to “…” is the only add left (`only`, screenshot-saves.ts): one pill, in Add to Shelf's place, and the item named under it. */
+const retryOnly = (
+  name: string,
+  message: string,
+  label: string
+): StressScene => ({
+  check: async (page) => {
+    const retry = `Retry adding to “${label}”`;
+
+    const problem = await failedCardCheck([
+      retry,
+      "Copy",
+      "Save to Downloads",
+      "Dismiss",
+      "Keep on Screen",
+    ])(page);
+
+    if (problem !== null) {
+      return problem;
+    }
+
+    const pill = page.getByRole("button", { exact: true, name: retry });
+
+    // No empty slot above it: Retry is where Add to Shelf was, and no other add is on the card.
+    if (
+      (await page.getByRole("button", { name: /Add to/u }).count()) !== 0 ||
+      (await page.getByRole("button", { name: /Retry/u }).count()) !== 1
+    ) {
+      return "Retry adding to “…” must be the card's only add";
+    }
+
+    const off = cardMiddle(await boxOf(pill));
+
+    if (off !== null) {
+      return off;
+    }
+
+    // The name under it shows whole or cut, inside the card.
+    const closing = await boxOf(page.getByText("”", { exact: true }));
+
+    if (closing.right > 280 - 48 || closing.left < 48) {
+      return "the item's name under Retry reaches a corner button";
+    }
+
+    // Annotate would add it to the shelf: it stays in its corner, off.
+    const annotate = page.getByRole("button", { name: "Annotate" });
+
+    // Its hover says when it works again. The keyboard never reaches a button that is off, so the failure message says it too, after the reason.
+    const said = (await page.getByRole("alert").textContent()) ?? "";
+
+    if (!said.startsWith(message) || !said.endsWith(ANNOTATE_NEXT)) {
+      return `the failure message must start with the reason and end with “${ANNOTATE_NEXT}”: “${said}”`;
+    }
+
+    if (!(await tabToFailure(page))) {
+      return "Tab never reached the failure message";
+    }
+
+    const unread = await failureEndReached(page);
+
+    if (unread !== null) {
+      return unread;
+    }
+
+    const before = await callCount(page);
+
+    await annotate.click({ force: true });
+
+    if ((await annotate.isEnabled()) || (await callCount(page)) > before) {
+      return "Annotate can still be pressed while Retry is the only add";
+    }
+
+    const pillBox = await boxOf(pill);
+
+    await pill.click();
+
+    const sent = await calls(page, before);
+
+    if (
+      !sent.some(
+        (each) =>
+          each.call === "addToItem" &&
+          isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+      )
+    ) {
+      return `Retry sent ${JSON.stringify(sent)}`;
+    }
+
+    // While that Retry saves, the pill reads Saving… and Add to Shelf doesn't come back.
+    await page.evaluate(
+      `globalThis.__emit("view", ${JSON.stringify({
+        ...SCREENSHOT_VIEW,
+        save: { state: "saving", to: "item" },
+        target: { id: uuid(12), label },
+      })})`
+    );
+
+    const saving = page.getByRole("button", { name: "Saving…" });
+
+    await saving.waitFor();
+
+    if ((await page.getByRole("button", { name: /Add to/u }).count()) > 0) {
+      return "Add to Shelf came back while the only Retry saves";
+    }
+
+    // The reason under the picture went, so the pill is lower; it is no wider and no further left or right.
+    const savingBox = await boxOf(saving);
+
+    return savingBox.left === pillBox.left && savingBox.right === pillBox.right
+      ? null
+      : `the pill changed size when it read Saving…: ${JSON.stringify({ pillBox, savingBox })}`;
+  },
+  data: {
+    view: failedCard("item", message, { id: uuid(12), label }, true),
+  },
+  name,
+  page: "screenshot",
+});
+
+const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
+
+/** A failed Add to “…” whose Retry is the only add: the screenshot stays on its item. */
+const CARD_SOLE = failedCard("item", "The disk is full.", CARD_ITEM, true);
+
+/** The same card once the write that held the screenshot on its item failed too: both adds are back. */
+const CARD_BOTH = failedCard(
+  "item",
+  "Saving didn’t finish in time.",
+  CARD_ITEM
+);
+
+const CARD_RETRY = `Retry adding to “${CARD_LABEL}”`;
+
+/** What one press of Retry adding to “…” sends, as `cardAddsSent` reads it. */
+const CARD_TO_ITEM = JSON.stringify([
+  { arg: { id: CARD_ITEM.id, seq: 1 }, call: "addToItem" },
+]);
+
+/** Main pushes the card anew, as a write's end does (screenshot-saves.ts, retarget). */
+const pushCard = async (
+  page: Page,
+  view: ReturnType<typeof failedCard>
+): Promise<void> => {
+  await page.evaluate(`globalThis.__emit("view", ${JSON.stringify(view)})`);
+  await page.waitForTimeout(100);
+};
+
+/** The name of the control the keyboard is on; the tag of what holds it when that has no name. */
+const cardFocus = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(
+      "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? ''"
+    )
+  );
+
+/** The adds the card sent since `from`. */
+const cardAddsSent = async (page: Page, from: number): Promise<string> => {
+  const sent = await calls(page, from);
+
+  return JSON.stringify(
+    sent
+      .filter((each) => each.call === "addToItem" || each.call === "addToShelf")
+      .map((each) => ({ arg: each.arg, call: each.call }))
+  );
+};
 
 const ATTACHMENT_SCENES: readonly Scene[] = (
   [
@@ -6706,14 +7354,30 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
 
         const itemBox = await boxOf(add);
 
-        // Add to Shelf leads: Add to “…” is a quieter line under it, no taller and never wider.
-        if (
-          itemBox.top < shelfBox.bottom ||
-          itemBox.left < shelfBox.left - 0.5 ||
-          itemBox.right > shelfBox.right + 0.5 ||
-          tall(itemBox) >= tall(shelfBox)
-        ) {
+        // Add to Shelf leads: Add to “…” is a line of words under it, lower than the pill and with no fill of its own.
+        if (itemBox.top < shelfBox.bottom || tall(itemBox) >= tall(shelfBox)) {
           return `Add to “…” must sit under Add to Shelf, smaller: ${JSON.stringify({ itemBox, shelfBox })}`;
+        }
+
+        const fill = await add.evaluate(
+          (button) => getComputedStyle(button).backgroundColor
+        );
+
+        if (fill !== "rgba(0, 0, 0, 0)") {
+          return `Add to “…” is a second pill (${fill}), not a line of words`;
+        }
+
+        // The line names the item: about twenty characters of its name, not nine.
+        const named = await add.evaluate(
+          (button) =>
+            ([...button.querySelectorAll("span")]
+              .map((part) => part.firstChild?.nodeValue ?? "")
+              .find((text) => text.endsWith("…") && text.length > 1)?.length ??
+              1) - 1
+        );
+
+        if (named < 18) {
+          return `Add to “…” shows ${named} characters of the item's name, not about 20`;
         }
 
         // The name is cut inside the quotes: the closing one shows.
@@ -6857,6 +7521,20 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       name: "screenshot-card-attach-full",
       page: "screenshot",
     },
+    // The screenshot was changed on its item after a failed Add to “…”: it stays there, so Retry is the one add and the one pill.
+    retryOnly("screenshot-card-retry-only", "The disk is full.", CARD_LABEL),
+    // A write that holds it on its item is still on its way: the same card, for the other reason.
+    retryOnly(
+      "screenshot-card-retry-only-landing",
+      "Saving didn’t finish in time.",
+      CARD_LABEL
+    ),
+    // One unbroken word for the item, and the longest reason.
+    retryOnly(
+      "stress-screenshot-retry-only",
+      CARD_FAILURE,
+      `${LONG_WORD.slice(0, 39)}…`
+    ),
     {
       act: async (page) => {
         await page.keyboard.press("Tab");
@@ -6881,6 +7559,89 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       },
       keepPointer: true,
       name: "screenshot-card-attach-focus",
+      page: "screenshot",
+    },
+    {
+      // The keyboard is on the only Retry when a late failed write gives both adds back: the picture shows it on Retry adding to “…”, now the line.
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await pushCard(page, CARD_BOTH);
+      },
+      check: async (page) => {
+        const problems: string[] = [];
+        const start = await callCount(page);
+
+        // Retry was the pill and is the line now: the keyboard went with it, and Enter still retries on the item.
+        const afterBoth = await cardFocus(page);
+
+        await page.keyboard.press("Enter");
+
+        const retried = await cardAddsSent(page, start);
+
+        if (afterBoth !== CARD_RETRY || retried !== CARD_TO_ITEM) {
+          problems.push(
+            `both adds came back under a focused Retry pill: the keyboard is on “${afterBoth}” and Enter sent ${retried}`
+          );
+        }
+
+        // The other way: Retry was the line and is the pill now, and Tab goes on from the pill.
+        await page.getByRole("button", { name: CARD_RETRY }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const afterSole = await cardFocus(page);
+
+        await page.keyboard.press("Tab");
+
+        const next = await cardFocus(page);
+
+        if (afterSole !== CARD_RETRY || next !== "Copy") {
+          problems.push(
+            `Retry became the only add under a focused Retry adding to “…” line: the keyboard is on “${afterSole}” and Tab went to “${next}”, not Copy`
+          );
+        }
+
+        // Add to Shelf goes while the keyboard is on it: Enter adds nowhere, and Tab starts at the pill that took its place.
+        await pushCard(page, CARD_BOTH);
+        await page.getByRole("button", { name: "Add to Shelf" }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const mark = await callCount(page);
+
+        await page.keyboard.press("Enter");
+
+        const stray = await cardAddsSent(page, mark);
+
+        await page.keyboard.press("Tab");
+
+        const first = await cardFocus(page);
+
+        if (stray !== "[]" || first !== CARD_RETRY) {
+          problems.push(
+            `Add to Shelf went under the keyboard: Enter sent ${stray}, and Tab went to “${first}”`
+          );
+        }
+
+        // Any other control keeps the keyboard through both changes.
+        await pushCard(page, CARD_BOTH);
+        await page.getByRole("button", { name: "Copy" }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const kept = [await cardFocus(page)];
+
+        await pushCard(page, CARD_BOTH);
+        kept.push(await cardFocus(page));
+
+        if (kept.some((on) => on !== "Copy")) {
+          problems.push(
+            `the keyboard was on Copy and went to ${JSON.stringify(kept)}`
+          );
+        }
+
+        return problems.length === 0 ? null : problems.join(" || ");
+      },
+      data: { view: CARD_SOLE },
+      keepPointer: true,
+      name: "screenshot-card-retry-focus",
       page: "screenshot",
     },
     {
@@ -7145,6 +7906,7 @@ const SCENES: readonly Scene[] = [
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },
+    check: badgesOnFoot(11),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-image-pins",
@@ -7155,6 +7917,7 @@ const SCENES: readonly Scene[] = [
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },
+    check: badgesOnFoot(11),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-image-pins-narrow",
@@ -9984,6 +10747,34 @@ const ProblemsSchema = z.array(z.string());
 const strictProblems = async (page: Page): Promise<readonly string[]> =>
   ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));
 
+/** Words under a line cap (clamp.tsx Clamp) show no more lines than it says, until Show more opens them. A message may show one more (its `spare`). */
+const capProblems = async (page: Page): Promise<readonly string[]> =>
+  z.array(z.string()).parse(
+    await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("[style*='--lines']")].flatMap(
+        (words) => {
+          const cap =
+            Number(words.style.getPropertyValue("--lines")) +
+            (words.dataset.spare === undefined ? 0 : 1);
+
+          const line =
+            Number(getComputedStyle(words).lineHeight.replace("px", "")) || 20;
+
+          const shown = Math.round(words.getBoundingClientRect().height / line);
+
+          const opened =
+            words.nextElementSibling?.getAttribute("aria-expanded") === "true";
+
+          return opened || shown <= cap
+            ? []
+            : [
+                `words capped at ${cap} lines show ${shown}: “${(words.textContent ?? "").slice(0, 30)}”`,
+              ];
+        }
+      )
+    )
+  );
+
 const shoot = async (
   browser: Browser,
   origin: string,
@@ -10065,6 +10856,7 @@ const shoot = async (
           ...(await layoutProblems(page)),
           ...(await cutBadges(page)),
           ...(STRICT_PAGES.has(scene.page) ? await strictProblems(page) : []),
+          ...(await capProblems(page)),
         ]
       : [];
 

@@ -43,8 +43,13 @@ export interface RowOpen {
 export interface RowParts {
   /** At most three, most telling first: due, step progress, linked windows, pins. */
   readonly badges: readonly RowBadge[];
-  /** A file without a source carries its badges on its name's line; every other row on its source line. */
-  readonly badgesOn: "source" | "file";
+  /**
+   * Where the badges sit. A file without a source carries them on its name's
+   * line. Any other row without a source has no line for them while it is
+   * open but its foot, so they sit there, before Details, and take no line of
+   * their own. Every other row carries them on its source line.
+   */
+  readonly badgesOn: "source" | "file" | "foot";
   /** Null while the row is closed. */
   readonly open: RowOpen | null;
   /** The first attachments as tiles, open or closed, and how many more only details show; null when the item has none. */
@@ -66,17 +71,26 @@ const MAX_BADGES = 3;
 /** An open text row's links take one line each once its description passes this many lines. */
 export const LINKS_FOLD_AFTER = 3;
 
-/** A window's thumbnail with the gap after it, and the "+N" after the last one with its gap, in pixels (item-meta.tsx WindowStrip). */
-const WINDOW_STEP = 48 + 6;
-const WINDOW_MORE = 44 + 6;
+/**
+ * The open row's one line of linked windows, in pixels. WindowStrip
+ * (item-meta.tsx) draws its thumbnails, its gap and the room for "+N" from
+ * these, and windowsThatFit counts with them, so the two can't drift apart.
+ */
+export const WINDOW_STRIP = {
+  /** Between two thumbnails, and between the last one and the words of "+N". */
+  gap: 6,
+  /** The room "+N" has after that gap: enough for "+25". */
+  more: 30,
+  thumb: { height: 32, width: 48 },
+} as const;
 
 /** How many linked windows fit on the open row's one line of thumbnails `width` wide, leaving room for "+N" when some don't. */
 export const windowsThatFit = (width: number, total: number): number => {
-  const all = Math.floor((width + 6) / WINDOW_STEP);
+  const { gap, more, thumb } = WINDOW_STRIP;
+  const step = thumb.width + gap;
+  const all = Math.floor((width + gap) / step);
 
-  return total <= all
-    ? total
-    : Math.max(0, Math.floor((width + 6 - WINDOW_MORE) / WINDOW_STEP));
+  return total <= all ? total : Math.max(0, Math.floor((width - more) / step));
 };
 
 /** How many attachments a row shows as tiles; the rest are a "+N" that opens details. */
@@ -149,6 +163,18 @@ const badgesOf = (item: ShelfItem, open: boolean): readonly RowBadge[] => {
   return badges.slice(0, MAX_BADGES);
 };
 
+const badgesOn = (item: ShelfItem, open: boolean): RowParts["badgesOn"] => {
+  if (item.context !== null) {
+    return "source";
+  }
+
+  if (item.kind === "file") {
+    return "file";
+  }
+
+  return open ? "foot" : "source";
+};
+
 const stepList = (
   steps: readonly Step[],
   checkedAtOpen: ReadonlySet<string>
@@ -200,7 +226,7 @@ export const rowParts = (
   checkedAtOpen: ReadonlySet<string> = checkedSteps(item.steps)
 ): RowParts => ({
   badges: badgesOf(item, open),
-  badgesOn: item.kind === "file" && item.context === null ? "file" : "source",
+  badgesOn: badgesOn(item, open),
   open: open ? openOf(item, checkedAtOpen) : null,
   strip: rowList(item.attachments.length, ROW_STRIP_MAX),
 });
