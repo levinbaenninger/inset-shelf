@@ -12,7 +12,6 @@ import type { ScreenshotView, ShotPlaced } from "@shared/contracts";
 import type { ItemId } from "@shared/shelf";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ComponentProps, RefObject } from "react";
 
 import {
   Tooltip,
@@ -26,7 +25,6 @@ import { coach } from "@/tutorial/anchors";
 import { PageHints } from "@/tutorial/hint-layer";
 
 import { cardAdds, PILL_LABEL } from "./card-adds";
-import type { AddId, AddLine } from "./card-adds";
 import { fitName } from "./fit-name";
 
 const api = screenshotBridge();
@@ -128,19 +126,13 @@ const PILL_LABELS = Object.values(PILL_LABEL);
 /** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. Its tile there opens to annotate, saved or not. The dimmed button says where on hover; the failure message says it for the keyboard (ON_SHELF). */
 const ANNOTATE_OFF = "Annotate it in its item’s details";
 
-/**
- * “Name”, cut inside the quotes so the closing one always shows, right after
- * the ellipsis (fit-name.ts); `stacked` puts the name on a line of its own
- * under the lead.
- */
+/** “Name”, cut inside the quotes so the closing one always shows, right after the ellipsis (fit-name.ts). */
 const Quoted = ({
   lead,
   name,
-  stacked = false,
 }: {
   readonly lead: string;
   readonly name: string;
-  readonly stacked?: boolean;
 }) => {
   const line = useRef<HTMLSpanElement>(null);
   const whole = useRef<HTMLSpanElement>(null);
@@ -205,20 +197,13 @@ const Quoted = ({
     };
   }, [name]);
 
-  const leadText = (
-    <span className="shrink-0 whitespace-pre">
-      {stacked ? lead : `${lead} `}
-    </span>
-  );
-
   return (
     <span
-      className={cn("flex w-full min-w-0", stacked && "flex-col items-center")}
+      className="flex w-full min-w-0"
       title={tooltipText(`${lead} “${name}”`)}
     >
-      {stacked ? leadText : null}
       <span className="flex w-full min-w-0 justify-center" ref={line}>
-        {stacked ? null : leadText}
+        <span className="shrink-0 whitespace-pre">{`${lead} `}</span>
         <span className="shrink-0">“</span>
         <span className="relative min-w-0 overflow-hidden whitespace-nowrap">
           {shown}
@@ -237,7 +222,7 @@ const Quoted = ({
   );
 };
 
-/** The words under Retry that only name the item: the look of the Add to “…” line (Button's overlay-text and line), without being a button. */
+/** The words under Retry that only name the item: white words on the picture's darkened foot, not a button. */
 const FOOT_CAPTION =
   "w-full px-0.5 py-0.5 text-xs leading-4 tracking-tight text-white/90 text-shadow-xs text-shadow-black/60";
 
@@ -277,108 +262,23 @@ const FailureBar = ({
   </div>
 );
 
-/** The add whose button left the card with the keyboard on it, until the card has drawn what replaces it. */
-type Carried = RefObject<AddId | null>;
-
-/**
- * The button of one add, drawn as the pill or as the line. Its add is its
- * `key` at both places, so React never turns it into the button of another
- * add: a press goes where the button said when the keyboard came to it. When
- * it leaves with the keyboard on it and the same add is drawn at the other
- * place in the same change, that button takes the keyboard.
- */
-const AddButton = ({
-  add,
-  carried,
-  ...props
-}: ComponentProps<typeof Button> & {
-  readonly add: AddId;
-  readonly carried: Carried;
-}) => {
-  const button = useRef<HTMLButtonElement>(null);
-
-  useLayoutEffect(() => {
-    const { current } = button;
-
-    if (carried.current === add) {
-      current?.focus();
-    }
-
-    return () => {
-      if (current !== null && current === document.activeElement) {
-        carried.current = add;
-      }
-    };
-  }, [add, carried]);
-
-  return <Button ref={button} {...props} />;
-};
-
-/** The line of words under the pill, between the bottom corner buttons. */
-const FootLine = ({
-  carried,
-  line,
-  onAdd,
-  saving,
-}: {
-  readonly carried: Carried;
-  readonly line: AddLine;
-  readonly onAdd: (item: ItemId) => void;
-  readonly saving: boolean;
-}) =>
-  line.kind === "caption" ? (
-    // The pill's name already says it all to a screen reader.
-    <p aria-hidden="true" className={FOOT_CAPTION}>
-      <Quoted lead={line.lead} name={line.name} />
-    </p>
-  ) : (
-    <AddButton
-      add={line.add}
-      aria-disabled={saving ? true : undefined}
-      aria-label={
-        line.kind === "saving" ? "Saving…" : `${line.lead} “${line.name}”`
-      }
-      carried={carried}
-      className="w-full"
-      key={line.add}
-      onClick={() => {
-        onAdd(line.item);
-      }}
-      size="line"
-      variant="overlay-text"
-    >
-      {line.kind === "saving" ? (
-        "Saving…"
-      ) : (
-        <Quoted lead={line.lead} name={line.name} stacked={line.stacked} />
-      )}
-    </AddButton>
-  );
-
 /**
  * A screenshot card beside the shelf. Add to Shelf shows at once and is the
- * first key stop. When an item can be named, Add to “…” is a line of words
- * under it, on the picture's darkened foot. On hover or keyboard focus the
- * picture dims, Copy shows beside Add to Shelf, and the corner actions show.
- * While a save runs its button reads Saving…; a failed save keeps every
- * action in view, says why under the picture, and offers Retry. Once the
- * screenshot is on its item, not saved, Retry is the one pill and the line
- * under it only names the item. Dragging the picture into another app drops
- * it as a file.
+ * first key stop. On hover or keyboard focus the picture dims, Copy shows
+ * beside Add to Shelf, and the corner actions show. While a save runs the
+ * pill reads Saving…; a failed save keeps every action in view, says why
+ * under the picture, and offers Retry. Once the screenshot is on its item,
+ * not saved, Retry is the one pill and a line under it only names the item.
+ * Dragging the picture onto an item in the shelf attaches it there; into
+ * another app, it drops as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
   const { save, seq } = view;
   const [held, setHeld] = useState(false);
-  const carried = useRef<AddId | null>(null);
   const saving = save.state === "saving";
   const { line, pill, sole } = cardAdds(view);
 
-  // After the add buttons drawn in this change had their turn: an add that left and wasn't drawn again hands the keyboard to no later button.
-  useLayoutEffect(() => {
-    carried.current = null;
-  });
-
-  /** A press of an add: to the item its button named, or to the shelf. */
+  /** A press of the pill: to the item it named, or to the shelf. */
   const add = (item: ItemId | null): void => {
     if (saving) {
       return;
@@ -399,16 +299,15 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
     >
       <div className="relative min-h-0 flex-1">
         {/*
-          First in the page, so Tab lands on Add to Shelf first, then Copy, then Add to “…”; drawn above the picture and its dimming.
-          Add to Shelf is in the card's middle, and Copy shows beside it without taking room in the row, so it never moves; Add to “…” is a line under it, between the corner buttons.
+          First in the page, so Tab lands on Add to Shelf first, then Copy; drawn above the picture and its dimming.
+          Add to Shelf is in the card's middle, and Copy shows beside it without taking room in the row, so it never moves; under the only Retry, a line names its item, between the corner buttons.
         */}
         <div className="absolute inset-x-12 bottom-3 z-10 flex flex-col items-center gap-y-1">
           <div className="relative flex">
-            <AddButton
-              add={pill.add}
+            {/* Keyed by its add, so React never turns it into the button of another add: a press goes where the button said when the keyboard came to it. */}
+            <Button
               aria-disabled={saving ? true : undefined}
               aria-label={pill.name}
-              carried={carried}
               key={pill.add}
               onClick={() => {
                 add(pill.item);
@@ -417,7 +316,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
               variant="overlay"
             >
               <Steady labels={PILL_LABELS} shown={pill.label} />
-            </AddButton>
+            </Button>
             {/* An icon, not the word: beside Add to Shelf in the card's middle, the word would reach under the corner button. */}
             <span
               className={cn(
@@ -444,16 +343,14 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             </span>
           </div>
           {line === null ? null : (
-            <FootLine
-              carried={carried}
-              line={line}
-              onAdd={add}
-              saving={saving}
-            />
+            // The pill's name already says it all to a screen reader.
+            <p aria-hidden="true" className={FOOT_CAPTION}>
+              <Quoted lead={line.lead} name={line.name} />
+            </p>
           )}
         </div>
         <button
-          aria-label="Drag the screenshot into another app"
+          aria-label="Drag the screenshot onto an item or into another app"
           className="block h-full w-full cursor-grab active:cursor-grabbing"
           draggable
           onDragStart={(event) => {
@@ -471,13 +368,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
         </button>
         {/* The line under the pill is white words with no pill of their own: the picture's foot darkens under them, so they read on a white picture too. */}
         {line === null ? null : (
-          <div
-            className={cn(
-              "pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 via-black/60 to-transparent",
-              // Two lines of words when a failed Add to “…” names its item under Retry adding to.
-              line.kind === "add" && line.stacked ? "h-20" : "h-14"
-            )}
-          />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-linear-to-t from-black/80 via-black/60 to-transparent" />
         )}
         {/* The other actions show while the pointer is on the card or the keyboard is on one of them; between them the picture still drags. */}
         <div

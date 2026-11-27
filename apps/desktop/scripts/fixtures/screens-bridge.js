@@ -64,9 +64,6 @@ globalThis.__applied = [];
 /** Every operation and copy the shelf asked main for, in order: `{ call: "copy", arg: id }`. */
 globalThis.__calls = [];
 
-/** Every item the shelf page told main it has selected or open in details, in order. */
-globalThis.__selection = [];
-
 const logged = (call, answer) => (arg) => {
   // A call without an argument logs null, so the log reads back as JSON.
   globalThis.__calls.push({ arg: arg ?? null, call });
@@ -303,7 +300,7 @@ if (page === "shelf") {
       menuOpen: (open) => {
         globalThis.__menuOpen.push(open);
       },
-      // A report for the trial log, kept apart as `selection` is.
+      // A report for the trial log, kept apart, so scenes that compare what the page asked for stay exact.
       noticeShown: (notice) => {
         globalThis.__noticesShown.push(notice);
       },
@@ -376,10 +373,6 @@ if (page === "shelf") {
       // Files dropped or pasted on the shelf, as new items.
       addFiles: logged("addFiles", nothing),
       pickFilesFor: logged("pickFilesFor", nothing),
-      // A report, not an action: kept apart, so scenes that compare what the page asked for stay exact.
-      selection: (id) => {
-        globalThis.__selection.push(id);
-      },
       startAttachmentDrag: logged("startAttachmentDrag", nothing),
     },
     nothing

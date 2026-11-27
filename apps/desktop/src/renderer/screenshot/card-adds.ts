@@ -1,44 +1,27 @@
 import type { ScreenshotView } from "@shared/contracts";
 import type { ItemId } from "@shared/shelf";
 
-/** What the pill reads: its add, Saving… while it writes, Retry once it failed. */
+/** What the pill reads: its add, Saving… while any save writes, Retry once it failed. */
 export const PILL_LABEL = {
   failed: "Retry",
   idle: "Add to Shelf",
   saving: "Saving…",
 } as const;
 
-/** What Add to “…” reads before the item's name. */
-const ITEM_LEAD = { failed: "Retry adding to", idle: "Add to" } as const;
+/** The only Retry's whole name, before the item's: after the pill's word, the caption under it reads the same. */
+const RETRY_LEAD = "Retry adding to";
 
-/** Under Retry, once it is the only add: where it adds to. After the pill's word it reads as ITEM_LEAD.failed does. */
+/** Under Retry, once it is the only add: where it adds to. */
 const SOLE_LEAD = "adding to";
 
 /**
- * Where an add puts the screenshot, as one word: the shelf, or one item. The
- * card keeps one button for each, whether it is drawn as the pill or as the
- * line. So a button the keyboard is on never comes to add somewhere else, and
- * when its add moves between the line and the pill, the keyboard moves with it.
+ * Where the pill's add puts the screenshot, as one word: the shelf, or one
+ * item. The pill is keyed by it, so a button the keyboard is on never comes
+ * to add somewhere else.
  */
 export type AddId = "shelf" | `item:${string}`;
 
-/** The line of words under the pill. */
-export type AddLine =
-  /** Add to “…”, or Retry adding to “…” with the name on a second line: a press adds to the item. */
-  | {
-      readonly add: AddId;
-      readonly item: ItemId;
-      readonly kind: "add";
-      readonly lead: string;
-      readonly name: string;
-      readonly stacked: boolean;
-    }
-  /** That add while it writes. */
-  | { readonly add: AddId; readonly item: ItemId; readonly kind: "saving" }
-  /** Only names the item the pill's Retry adds to: not a button. */
-  | { readonly kind: "caption"; readonly lead: string; readonly name: string };
-
-/** The card's adds: the white pill, and the line under it when an item can be named. */
+/** The card's adds: the white pill, and under it the item its only Retry adds to. */
 export interface CardAdds {
   readonly pill: {
     readonly add: AddId;
@@ -49,7 +32,8 @@ export interface CardAdds {
     /** The item a press adds the screenshot to; null for the shelf. */
     readonly item: ItemId | null;
   };
-  readonly line: AddLine | null;
+  /** Only names the item the pill's Retry adds to: not a button. */
+  readonly line: { readonly lead: string; readonly name: string } | null;
   /**
    * The screenshot is on its item, not saved: Retry adding to it is the only
    * add, so it is the pill.
@@ -65,14 +49,12 @@ const shelfPill = (state: keyof typeof PILL_LABEL): CardAdds["pill"] => ({
 });
 
 /**
- * Which adds the card offers. While the shelf holds the screenshot
- * (`save.placed`), the add for that place is the only one. Else Add to Shelf
- * is the pill, and Add to “…” the line under it when an item can be named.
+ * Which add the card offers. While the shelf holds the screenshot
+ * (`save.placed`), the add for that place is the only one. Else it is Add to
+ * Shelf, which reads Saving… while any save writes, and Retry when it was
+ * Add to Shelf that failed. Adding to an item is a drag of the picture.
  */
-export const cardAdds = ({
-  save,
-  target,
-}: Pick<ScreenshotView, "save" | "target">): CardAdds => {
+export const cardAdds = ({ save }: Pick<ScreenshotView, "save">): CardAdds => {
   if (save.state !== "idle" && save.placed !== null) {
     const { placed, state } = save;
 
@@ -81,46 +63,29 @@ export const cardAdds = ({
     }
 
     return {
-      line: { kind: "caption", lead: SOLE_LEAD, name: placed.label },
+      line: { lead: SOLE_LEAD, name: placed.label },
       pill: {
         add: `item:${placed.id}`,
         item: placed.id,
         label: PILL_LABEL[state],
         name:
           state === "failed"
-            ? `${ITEM_LEAD.failed} “${placed.label}”`
+            ? `${RETRY_LEAD} “${placed.label}”`
             : PILL_LABEL[state],
       },
       sole: true,
     };
   }
 
-  const pill = shelfPill(
-    save.state !== "idle" && save.to === "shelf" ? save.state : "idle"
-  );
-
-  if (target === null) {
-    return { line: null, pill, sole: false };
+  if (save.state === "saving") {
+    return { line: null, pill: shelfPill("saving"), sole: false };
   }
 
-  const item =
-    save.state !== "idle" && save.to === "item" ? save.state : "idle";
-
-  const add: AddId = `item:${target.id}`;
-
   return {
-    line:
-      item === "saving"
-        ? { add, item: target.id, kind: "saving" }
-        : {
-            add,
-            item: target.id,
-            kind: "add",
-            lead: ITEM_LEAD[item],
-            name: target.label,
-            stacked: item === "failed",
-          },
-    pill,
+    line: null,
+    pill: shelfPill(
+      save.state === "failed" && save.to === "shelf" ? "failed" : "idle"
+    ),
     sole: false,
   };
 };

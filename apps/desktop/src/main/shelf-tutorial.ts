@@ -111,7 +111,7 @@ export const shelfHints = (mac: boolean): readonly TutorialHint[] => {
       page: "screenshot",
       placement: "inside",
       task: SHELF_TASK_IDS.screenshot,
-      text: "Hover for Copy and Add to Shelf. Drag the card into another app to drop it as a file.",
+      text: "Hover for Copy and Add to Shelf. Drag the card onto an open item to attach it, or into another app as a file.",
       title: null,
     },
     {

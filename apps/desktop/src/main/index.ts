@@ -984,9 +984,6 @@ const start = async (): Promise<void> => {
       attachments.attachTo(id, [{ image, kind: "image", name: shotName() }])
     );
 
-  /** The item selected or open in details in the shelf, or null; the page reports it. */
-  let shelfSelection: ItemId | null = null;
-
   /** The section an item is in, as a notice names it. */
   const sectionName = (id: ItemId): string => {
     const { doc } = controller.view();
@@ -1000,7 +997,7 @@ const start = async (): Promise<void> => {
 
   /**
    * The card's screenshot is saved to `to`: a notice says where it is, by
-   * the section's name or the item's words. Add to “…” also ends the
+   * the section's name or the item's words. A drop on an item also ends the
    * tutorial's screenshot step here; Add to Shelf ended it when its row was
    * made.
    */
@@ -1039,11 +1036,9 @@ const start = async (): Promise<void> => {
     },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
-    items: () => controller.snapshot().doc.items,
     notify: (message, tone) => {
       notify(message, tone);
     },
-    now: () => Date.now(),
     comesBack: controller.comesBack,
     onWrite: controller.onWrite,
     persisted: async () =>
@@ -1056,9 +1051,7 @@ const start = async (): Promise<void> => {
     saved: shotAdded,
     scale: () =>
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor,
-    selection: () => shelfSelection,
     setTimer,
-    shelfVisible: () => shelf.isVisible(),
     stored: controller.stored,
     writePicture: async (current) => await store.writeAttachment(current.png),
   });
@@ -2323,14 +2316,6 @@ const start = async (): Promise<void> => {
         }
       })();
     },
-    selection: (id: ItemId | null): void => {
-      shelfSelection = id;
-      shotSaves.retarget();
-      e2eLog(
-        "itemSelected",
-        shelfSelection === null ? {} : { itemId: shelfSelection }
-      );
-    },
     startAttachmentDrag: ({
       attachmentId,
       id,
@@ -2950,13 +2935,10 @@ const start = async (): Promise<void> => {
     toast.send({ type: "shelfShown" });
     e2eLog("shelfShown", { bounds });
     refreshTray();
-    shotSaves.retarget();
   });
-  // A hidden shelf's selection is no target the user can know.
   shelf.onHidden(() => {
     e2eLog("shelfHidden");
     refreshTray();
-    shotSaves.retarget();
   });
 
   const shortcutsRegistered = globalShortcut.register(

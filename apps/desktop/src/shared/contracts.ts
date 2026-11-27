@@ -202,8 +202,6 @@ const attachmentMethods = {
   startAttachmentDrag: send(
     z.object({ attachmentId: AttachmentIdSchema, id: ItemIdSchema })
   ),
-  /** The item selected or open in details, so main knows what an attachment from outside the shelf goes to. */
-  selection: send(ItemIdSchema.nullable()),
   /** New Drawing in details: a blank page in the drawing window, saved as this item's attachment. */
   newDrawingFor: send(ItemIdSchema),
   /** Opens an attached picture in the drawing window, to look at or draw on; `pinMode` with the Pin tool. */
@@ -337,13 +335,11 @@ export interface ScreenshotView {
   readonly imageUrl: string;
   readonly widthPx: number;
   readonly heightPx: number;
-  /** The item Add to “…” attaches it to, and its name on the button; null when there is none the user can know, it holds all it can, or the shelf holds the screenshot already (`save.placed`). */
-  readonly target: { readonly id: ItemId; readonly label: string } | null;
   /** Where its save stands. */
   readonly save: ShotSave;
 }
 
-/** Which add saves the screenshot: Add to Shelf, or Add to “…”. */
+/** Which add saves the screenshot: Add to Shelf, or a drop on an item. */
 export type ShotSaveTo = "shelf" | "item";
 
 /**
@@ -357,20 +353,14 @@ export type ShotPlaced =
   | { readonly to: "item"; readonly id: ItemId; readonly label: string };
 
 /**
- * A screenshot card's save: none yet, writing (its button reads Saving…), or
- * failed (the card says why). `placed` is read from the shelf each time the
- * view is sent. While it is null, nothing holds the screenshot and the card
- * offers both adds.
+ * A screenshot card's save: none yet, writing (its button reads Saving…, a
+ * drop's save too), or failed (the card says why). `placed` is read from the
+ * shelf each time the view is sent. While it is null, nothing holds the
+ * screenshot and the card offers Add to Shelf, and a drop on an item.
  */
 export type ShotSave =
   | { readonly state: "idle" }
-  | { readonly state: "saving"; readonly placed: ShotPlaced }
-  | {
-      readonly state: "saving";
-      readonly placed: null;
-      /** The add that writes. */
-      readonly to: ShotSaveTo;
-    }
+  | { readonly state: "saving"; readonly placed: ShotPlaced | null }
   | {
       readonly state: "failed";
       readonly message: string;
@@ -380,8 +370,8 @@ export type ShotSave =
       readonly state: "failed";
       readonly message: string;
       readonly placed: null;
-      /** The add that reads Retry; null when none does (the item it went to is gone or full, or the card names another now). */
-      readonly to: ShotSaveTo | null;
+      /** "shelf" when Add to Shelf reads Retry; null when it reads Add to Shelf (a failed drop's retry is another drag). */
+      readonly to: "shelf" | null;
     };
 
 const Seq = z.number().int().min(0);
@@ -426,7 +416,7 @@ export const screenshotContract = defineContract({
   methods: {
     ...tutorialMethods,
     addToShelf: send(Seq),
-    /** Attaches it to the item the card named when pressed; main refuses once the card names another. */
+    /** The only Retry adding to “…”: main refuses it once the shelf shows the screenshot on another item, or on none. */
     addToItem: send(z.object({ id: ItemIdSchema, seq: Seq })),
     /** Adds it to the shelf and opens it to draw on. */
     annotate: send(Seq),
@@ -439,7 +429,7 @@ export const screenshotContract = defineContract({
     hover: send(z.boolean()),
     /** Saves it as a PNG in the Downloads folder. */
     saveToDownloads: send(Seq),
-    /** Drags the screenshot out as a file. */
+    /** Drags the screenshot out as a file: onto an item in the shelf, or into another app. */
     startDrag: send(Seq),
   },
   name: "screenshot",

@@ -13,7 +13,6 @@ export type E2eEvent =
   | "selection"
   | "itemAdded"
   /** The item selected or open in details in the shelf changed. */
-  | "itemSelected"
   | "drawingShown"
   | "screenshotShown"
   | "saveFailed"
