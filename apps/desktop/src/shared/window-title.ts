@@ -2,25 +2,28 @@
  * How a window's app and title read once what the system adds to them is
  * gone: the one cleaning a source's label, a window link's name, the window
  * picker and recall's matching all use. It takes a title as the window has
- * it ("Page - Microsoft Edge") and as the shelf keeps it, with the app's name
- * already off, and gives the same for both.
+ * it ("Page - Microsoft Edge") and the shelf keeps it as read, and cleans it
+ * where it is shown or compared, never when it is kept, so no title is
+ * cleaned twice. Each rule here is for the app and the system it is known
+ * from; any other title and app stay as they are.
  */
 
 /** Zero-width characters; Edge writes a zero-width space inside its name. */
 const INVISIBLE = /[\u200B-\u200D\u2060\uFEFF]/gu;
 
-/** A program file's name, which get-windows reports for an app whose program has no description (Windows 11's Notepad). */
-const PROGRAM_FILE = /\.exe$/iu;
-
-const nameOf = (app: string): string => {
-  const name = app.replace(PROGRAM_FILE, "").trim();
-
-  return name === "" ? app : name;
-};
+/**
+ * Apps get-windows names by their program file on Windows, and the name they
+ * show under. Read from a Windows 11 PC (2026-11-27): Notepad has no file
+ * description there. Any other name keeps its ".exe": "Ledger.exe" can be
+ * an app's own description, apart from an app called "Ledger".
+ */
+const PROGRAM_NAMES: ReadonlyMap<string, string> = new Map([
+  ["notepad.exe", "Notepad"],
+]);
 
 /** An app's name as the shelf shows it: "Notepad.exe" reads "Notepad". Any other name stays as it is. */
 export const appName = (app: string | null): string | null =>
-  app === null ? null : nameOf(app);
+  app === null ? null : (PROGRAM_NAMES.get(app.toLowerCase()) ?? app);
 
 /** Names apps end their window titles with when these differ from the app's own name. */
 const TITLE_NAMES = {
@@ -32,50 +35,33 @@ const hasTitleName = (app: string): app is keyof typeof TITLE_NAMES =>
 
 const DASHES = [" - ", " — ", " – "] as const;
 
-/**
- * Edge writes its profile, and a count of the window's other tabs, between
- * the page's title and its own name: "Example Domain and 1 more page -
- * Profile 1 - Microsoft Edge" (Edge 158 on Windows 11). Chrome 158 writes
- * neither: two tabs read "Example Domain - Google Chrome".
- */
 const EDGE = "Microsoft Edge";
+const NOTEPAD = "Notepad";
 
-/** Edge's count of the other tabs, after the page's title. Its English wording only. */
+/** Edge's count of the window's other tabs, after the page's title. Its English wording only. */
 const MORE_PAGES = /\s+and \d+ more pages?$/u;
 
-/** The page's own title, from a window's title without the app's name: for Edge, without its profile and its count of other tabs. */
-const pageTitle = (rest: string, app: string): string => {
-  if (app !== EDGE) {
-    return rest;
-  }
-
-  const profileAt = rest.lastIndexOf(" - ");
-  const page = profileAt > 0 ? rest.slice(0, profileAt) : rest;
-
-  return page.replace(MORE_PAGES, "").trim();
-};
+/** Notepad's mark for unsaved changes, first in its title. */
+const NOTEPAD_MARK = /^\*\s*/u;
 
 /**
- * A window's title without what the app adds at its end. Windows titles read
- * "Page - Google Chrome", "Notes.txt - Notepad" or "Page — Mozilla Firefox",
- * where macOS titles only name the page or document; Edge also names its
- * profile and counts its other tabs there, which go too. Only a title that
- * ends in the app's name is changed: that is what tells a browser's window
- * from an installed web app's.
+ * A window's title without the app's name at its end, or null when it
+ * doesn't end in it. Windows titles read "Page - Google Chrome", "Notes.txt -
+ * Notepad" or "Page — Mozilla Firefox", where macOS titles only name the page
+ * or document. What it keeps is what stays between the title and the app's name.
  */
-export const withoutAppName = (title: string, app: string | null): string => {
+const withoutName = (title: string, app: string | null): string | null => {
   if (app === null) {
-    return title;
+    return null;
   }
 
-  const shown = nameOf(app);
-
+  const shown = appName(app) ?? app;
   const visible = title.replaceAll(INVISIBLE, "");
 
   const names = [
     ...new Set([
-      shown,
       app,
+      shown,
       ...(hasTitleName(shown) ? TITLE_NAMES[shown] : []),
     ]),
   ];
@@ -85,20 +71,52 @@ export const withoutAppName = (title: string, app: string | null): string => {
       const suffix = `${dash}${name}`;
 
       if (visible.endsWith(suffix) && visible.length > suffix.length) {
-        return pageTitle(visible.slice(0, -suffix.length).trim(), shown);
+        return visible.slice(0, -suffix.length).trim();
       }
     }
   }
 
-  return title;
+  return null;
+};
+
+/**
+ * The page's or file's own name, from a title read as the window has it.
+ * Only a title that ends in the app's name is changed, and what else goes
+ * is read from that app's own windows on Windows: Edge also writes its
+ * profile after the page's title (the last " - ") and counts its other tabs
+ * before it (Edge 158: "Example Domain and 1 more page - Profile 1 -
+ * Microsoft Edge"; Chrome 158 writes neither), and Notepad marks unsaved
+ * changes with a leading "*". An Edge window without Edge's name is an
+ * installed web app's, and its title is the page's own.
+ */
+const pageTitle = (title: string, app: string | null): string => {
+  const rest = withoutName(title, app);
+
+  if (rest === null) {
+    return title;
+  }
+
+  const shown = appName(app);
+
+  if (shown === EDGE) {
+    const profileAt = rest.lastIndexOf(" - ");
+    const page = profileAt > 0 ? rest.slice(0, profileAt) : rest;
+
+    return page.replace(MORE_PAGES, "").trim();
+  }
+
+  return shown === NOTEPAD ? rest.replace(NOTEPAD_MARK, "") : rest;
 };
 
 const UNREAD = /^\(\d+\)\s+/u;
 
-/** Marks for unsaved changes: Code's dot, and the asterisk Windows apps such as Notepad put first. */
-const DIRTY = /^[●•*]\s*/u;
+/** The mark of unsaved changes in Code and others: a dot first in the title. */
+const DIRTY = /^[●•]\s*/u;
 
-/** A window's title as it names what it shows: without the app's name, an unread count or an unsaved mark; null when nothing is left or it only names the app. For showing. */
+const tidy = (title: string): string =>
+  title.trim().replace(UNREAD, "").replace(DIRTY, "").trim();
+
+/** A window's title as it names what it shows: without the app's name and what that app adds, an unread count or an unsaved mark; null when nothing is left or it only names the app. For showing. */
 export const shownTitle = (
   title: string | null,
   app: string | null
@@ -107,11 +125,7 @@ export const shownTitle = (
     return null;
   }
 
-  const clean = withoutAppName(title, app)
-    .trim()
-    .replace(UNREAD, "")
-    .replace(DIRTY, "")
-    .trim();
+  const clean = tidy(pageTitle(title, app));
 
   return clean === "" || clean === app || clean === appName(app) ? null : clean;
 };
@@ -124,6 +138,28 @@ export const cleanTitle = (
   const clean = shownTitle(title, app);
 
   return clean === null || clean.length < 3 ? null : clean;
+};
+
+/**
+ * What a window's title can be called when two windows are compared: the
+ * title as it is cleaned now, and as a build before this one cleaned it,
+ * with only the app's name off. Items kept by that build hold the second
+ * (Edge's profile still on it), and that form is unchanged by cleaning.
+ */
+export const titleKeys = (
+  title: string | null,
+  app: string | null
+): readonly string[] => {
+  const earlier = title === null ? "" : tidy(withoutName(title, app) ?? title);
+
+  return [
+    ...new Set(
+      [
+        cleanTitle(title, app),
+        earlier.length < 3 || earlier === app ? null : earlier,
+      ].filter((key) => key !== null)
+    ),
+  ];
 };
 
 /** A linked window in a few words: its cleaned title, else its app's name. */

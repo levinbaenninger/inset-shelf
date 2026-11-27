@@ -13,7 +13,7 @@ import type {
   ShelfOp,
 } from "./shelf";
 import { serviceOfHost, sourceLabel } from "./web-source";
-import { appName, cleanTitle } from "./window-title";
+import { appName, cleanTitle, titleKeys } from "./window-title";
 
 /**
  * Context recall: which open items came from the window in front. All of it
@@ -152,9 +152,9 @@ export const samePlace = (
     return project === projectOf(front) ? "project" : null;
   }
 
-  const title = cleanTitle(item.title, item.app);
+  const theirs = titleKeys(front.title, front.app);
 
-  return title !== null && title === cleanTitle(front.title, front.app)
+  return titleKeys(item.title, item.app).some((key) => theirs.includes(key))
     ? "title"
     : null;
 };

@@ -268,12 +268,6 @@ describe(samePlace, () => {
       "title",
     ],
     [
-      "a Notepad file kept by an older build against its window named as now",
-      source({ app: "Notepad.exe", title: "explore-notes.txt - Notepad" }),
-      source({ app: "Notepad", title: "*explore-notes.txt" }),
-      "title",
-    ],
-    [
       // Edge's title counts the other tabs once there are two (finding 2).
       "an Edge page saved from one tab against its window with two",
       source({
@@ -299,11 +293,86 @@ describe(samePlace, () => {
       source({ app: "Microsoft Edge", title: "Example Domain" }),
       "title",
     ],
+    // An item kept by the build before this one: Edge's name off its title, the profile still on. The window is read as it is now, with no address.
+    [
+      "an Edge page kept by an older build against its window as it reads now",
+      source({ app: "Microsoft Edge", title: "Example Domain - Profile 1" }),
+      source({
+        app: "Microsoft Edge",
+        title: "Example Domain - Profile 1 - Microsoft​ Edge",
+      }),
+      "title",
+    ],
+    [
+      "an Edge page kept as the window read, against the window with two tabs",
+      source({
+        app: "Microsoft Edge",
+        title: "Example Domain - Profile 1 - Microsoft​ Edge",
+      }),
+      source({
+        app: "Microsoft Edge",
+        title: "Example Domain and 1 more page - Profile 1 - Microsoft​ Edge",
+      }),
+      "title",
+    ],
+    // A window link keeps the caption as read, and the window is read the same way: one cleaning each, so a page named after Edge keeps its own name.
+    [
+      "a page named after Edge against its own window",
+      source({
+        app: "Microsoft Edge",
+        title:
+          "Edge release notes - Microsoft Edge - Profile 1 - Microsoft​ Edge",
+      }),
+      source({
+        app: "Microsoft Edge",
+        title:
+          "Edge release notes - Microsoft Edge - Profile 1 - Microsoft​ Edge",
+      }),
+      "title",
+    ],
+    [
+      "a Notepad file kept by Windows 10's Notepad against its window on Windows 11",
+      source({ app: "Notepad", title: "recall-notes.txt - Notepad" }),
+      source({ app: "Notepad.exe", title: "*recall-notes.txt - Notepad" }),
+      "title",
+    ],
+    [
+      "a Notepad file kept with its unsaved mark by an older build against its window as it reads now",
+      source({ app: "Notepad.exe", title: "*recall-notes.txt" }),
+      source({ app: "Notepad.exe", title: "*recall-notes.txt - Notepad" }),
+      "title",
+    ],
   ] as const)("%s → %s", (_, item, front, rule) => {
     expect(samePlace(item, front)).toBe(rule);
   });
 
   it.each([
+    [
+      "two macOS documents, one named with a leading asterisk",
+      source({ app: "TextEdit", title: "*Budget.rtf" }),
+      source({ app: "TextEdit", title: "Budget.rtf" }),
+    ],
+    [
+      "an Edge installed app's window with and without a leading asterisk",
+      source({ app: "Microsoft Edge", title: "*Outlook - Mail" }),
+      source({ app: "Microsoft Edge", title: "Outlook - Mail" }),
+    ],
+    [
+      "two apps whose names differ only by .exe",
+      source({ app: "Ledger.exe", title: "Dashboard" }),
+      source({ app: "Ledger", title: "Dashboard" }),
+    ],
+    [
+      "two Edge pages whose titles differ after a dash",
+      source({
+        app: "Microsoft Edge",
+        title: "Budget - Q4 - Profile 1 - Microsoft​ Edge",
+      }),
+      source({
+        app: "Microsoft Edge",
+        title: "Budget - Q3 - Profile 1 - Microsoft​ Edge",
+      }),
+    ],
     [
       "two pages with the same title",
       source({
@@ -384,6 +453,18 @@ describe(placeOf, () => {
     expect(placeOf(source({ app: "Finder" }))).toBeNull();
   });
 
+  it("tells a macOS document with a leading asterisk from the one without", () => {
+    expect(placeOf(source({ app: "TextEdit", title: "*Budget.rtf" }))).not.toBe(
+      placeOf(source({ app: "TextEdit", title: "Budget.rtf" }))
+    );
+  });
+
+  it("tells two apps whose names differ only by .exe apart", () => {
+    expect(placeOf(source({ app: "Ledger.exe", title: "Dashboard" }))).not.toBe(
+      placeOf(source({ app: "Ledger", title: "Dashboard" }))
+    );
+  });
+
   it("stays one place while Notepad marks its file unsaved, and across how its app is named", () => {
     const saved = placeOf(
       source({ app: "Notepad.exe", title: "explore-notes.txt - Notepad" })
@@ -396,7 +477,7 @@ describe(placeOf, () => {
       )
     ).toBe(saved);
     expect(
-      placeOf(source({ app: "Notepad", title: "*explore-notes.txt" }))
+      placeOf(source({ app: "Notepad", title: "*explore-notes.txt - Notepad" }))
     ).toBe(saved);
   });
 });

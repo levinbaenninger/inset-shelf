@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { WindowCandidate } from "@shared/contracts";
 import { WindowIdSchema } from "@shared/shelf";
 import type { WindowRef } from "@shared/shelf";
-import { appName, shownTitle } from "@shared/window-title";
+import { appName, windowName } from "@shared/window-title";
 import { desktopCapturer, systemPreferences } from "electron";
 import type { DesktopCapturerSource } from "electron";
 import { openWindows } from "get-windows";
@@ -134,7 +134,7 @@ export const createWindowLinker = (deps: {
 
           return windowRef(
             {
-              app: appName(orNull(window?.owner.name)),
+              app: orNull(window?.owner.name),
               appPath: appBundle(window?.owner.path),
               document: origin.document,
               thumb:
@@ -185,12 +185,15 @@ export const createWindowLinker = (deps: {
         const source = found.find((each) => each.id === candidate.sourceId);
         const app = orNull(candidate.listed?.owner.name);
 
-        // Named as the link will be; the full title stays with the candidate for the lookup on capture.
+        // Named as the link will be, cleaned once from the title as read; the candidate keeps that title for the lookup on capture.
         return {
           app: appName(app),
           id,
           thumb: source?.thumbnail.toDataURL() ?? "",
-          title: shownTitle(candidate.title, app) ?? candidate.title,
+          title:
+            candidate.title === null
+              ? null
+              : windowName({ app, title: candidate.title }),
         };
       });
     },

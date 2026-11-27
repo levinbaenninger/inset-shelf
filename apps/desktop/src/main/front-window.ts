@@ -11,7 +11,6 @@ import {
 } from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
 import { desktopLink, t3Thread, webUrl } from "@shared/web-source";
-import { appName, withoutAppName } from "@shared/window-title";
 import { app, screen, systemPreferences } from "electron";
 import type { Rectangle } from "electron";
 import { activeWindow } from "get-windows";
@@ -184,7 +183,7 @@ export const frontWindow = async (
 
     const { height, width, x, y } = toDip(front.bounds);
 
-    const owner = appName(orNull(front.owner.name));
+    const owner = orNull(front.owner.name);
 
     const shown =
       options.page === true
@@ -194,9 +193,8 @@ export const frontWindow = async (
           )
         : null;
 
-    const title = orNull(
-      isMac ? front.title : withoutAppName(front.title, owner)
-    );
+    // As the window has it: the shelf cleans a title where it shows or compares it, src/shared/window-title.ts.
+    const title = orNull(front.title);
 
     const document =
       shown === null || shown.document === null
