@@ -1,8 +1,9 @@
 import { z } from "zod";
 
+import { codeEditor, titleParts } from "./code-editors";
 import type { ItemGroup, ItemId, ShelfDoc, ShelfItem } from "./shelf";
 import { serviceOfHost, sourceLabel } from "./web-source";
-import { withoutAppName } from "./window-title";
+import { cleanTitle } from "./window-title";
 
 /**
  * Context recall: which open items came from the window in front. All of it
@@ -25,29 +26,6 @@ export interface PlaceSource {
   readonly title: string | null;
   readonly url: string | null;
 }
-
-/** Which end of an editor's window title names its project. */
-export type TitleEnd = "first" | "last";
-
-/**
- * Open decision 2: code editors whose windows match every file of the same
- * project, and which end of the window's title names it. Code's macOS title
- * reads "file — folder" (read from a running Code 2026-11-25:
- * ".claude.json — levin"). Cursor's is inferred from Code, which it forks;
- * not read from a running Cursor. An empty table makes editors match by
- * exact title only.
- */
-export const PROJECT_PART: ReadonlyMap<string, TitleEnd> = new Map([
-  ["Code", "last"],
-  ["Cursor", "last"],
-]);
-
-/** Names an editor's title may hold where it names no project. */
-const PRODUCT_NAMES: ReadonlySet<string> = new Set([
-  "Code",
-  "Cursor",
-  "Visual Studio Code",
-]);
 
 const TRACKING = /^(?:utm_.*|fbclid|gclid|ref)$/u;
 
@@ -120,48 +98,13 @@ export const pageKey = (raw: string): PlaceKey | null => {
     : null;
 };
 
-const UNREAD = /^\(\d+\)\s+/u;
-const DIRTY = /^[●•]\s*/u;
-
-/** A window's title as it names what it shows: without the app's name, an unread count or an unsaved mark; null when that says nothing. */
-const cleanTitle = (
-  title: string | null,
-  app: string | null
-): string | null => {
-  if (title === null) {
-    return null;
-  }
-
-  const clean = withoutAppName(title, app)
-    .trim()
-    .replace(UNREAD, "")
-    .replace(DIRTY, "")
-    .trim();
-
-  return clean.length < 3 || clean === app ? null : clean;
-};
-
-const TITLE_PARTS = /\s[—–-]\s/u;
-
 /** The project an editor's window shows, or null when its title names none. */
 const projectOf = (source: PlaceSource): string | null => {
-  const part = source.app === null ? undefined : PROJECT_PART.get(source.app);
+  const editor = codeEditor(source.app);
 
-  const title = cleanTitle(source.title, source.app);
-
-  if (part === undefined || title === null) {
-    return null;
-  }
-
-  const parts = title.split(TITLE_PARTS).map((each) => each.trim());
-  const project = part === "first" ? parts.at(0) : parts.at(-1);
-
-  return parts.length < 2 ||
-    project === undefined ||
-    project === "" ||
-    PRODUCT_NAMES.has(project)
+  return editor === undefined
     ? null
-    : project;
+    : titleParts(editor, source.title, source.app).project;
 };
 
 const linkOf = (source: PlaceSource): string | null => source.appLink ?? null;
