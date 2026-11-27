@@ -18,7 +18,8 @@ describe(createDragStaging, () => {
     // macOS keeps temporary files under /var, a link to /private/var: the app is handed one spelling, a drop can name the other.
     const link = `${real}-link`;
 
-    symlinkSync(real, link);
+    // A junction on Windows, which needs no rights to make; other systems ignore the type.
+    symlinkSync(real, link, "junction");
 
     const staging = createDragStaging(link);
 

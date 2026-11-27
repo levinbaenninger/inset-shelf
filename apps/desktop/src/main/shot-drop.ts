@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 import type { AttachResult, ShotSaveTo } from "@shared/contracts";
@@ -46,6 +46,17 @@ const onDisk = (file: string): string => {
   }
 };
 
+/** A file's size and when it was last written; null when it can't be read. */
+const stamp = (file: string): string | null => {
+  try {
+    const { mtimeMs, size } = statSync(file);
+
+    return `${size}:${mtimeMs}`;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * How many drags keep their record. One drag runs at a time, so once a drag
  * starts, the one before it has ended, though its drop can still be on its
@@ -67,10 +78,14 @@ const NOTHING: AttachResult = { attached: [], message: null };
  * the shelf's plain route.
  */
 export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
-  // Each drag whose drop can still come, oldest first, by where its file is on disk, with the folder it staged its file in.
+  // Each drag whose drop can still come, oldest first, by where its file is on disk, with the folder it staged its file in and the file as it was written.
   const drags = new Map<
     string,
-    { readonly drag: ShotDrag<S>; readonly folder: string }
+    {
+      readonly drag: ShotDrag<S>;
+      readonly folder: string;
+      readonly written: string | null;
+    }
   >();
 
   // Drags so far: each stages its file in a folder of its own, so no two drags share a file, or a record.
@@ -92,7 +107,11 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
     }
 
     drags.delete(file);
-    deps.unstage(record.folder);
+
+    // An app the drag went to first may have saved the user's edit into the file: it stays until quit.
+    if (stamp(file) === record.written) {
+      deps.unstage(record.folder);
+    }
 
     return record.drag;
   };
@@ -152,7 +171,7 @@ export const createShotDrop = <S extends NamedShot>(deps: ShotDropDeps<S>) => {
         return null;
       }
 
-      drags.set(onDisk(file), { drag, folder });
+      drags.set(onDisk(file), { drag, folder, written: stamp(file) });
 
       for (const old of drags.keys()) {
         if (drags.size <= DRAGS_KEPT) {

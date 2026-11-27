@@ -2276,6 +2276,34 @@ describe("the card's file dropped on the shelf", () => {
     );
   });
 
+  it("keeps a drag's file when another app saved an edit into it before it came back to the shelf", async () => {
+    const card = setup();
+    const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
+
+    card.saves.show(shot(1));
+
+    const { drop } = dropping(card, {
+      stage: (_, each) => {
+        const file = path.join(folder, each, "Screenshot.png");
+
+        mkdirSync(path.dirname(file));
+        writeFileSync(file, new Uint8Array([137, 80, 78, 71]));
+
+        return file;
+      },
+      unstage: (each) => {
+        rmSync(path.join(folder, each), { force: true, recursive: true });
+      },
+    });
+
+    const file = drop.drag(1)?.file ?? "";
+
+    // The drag went to Preview, which saved the user's marks into the copy; its proxy icon then brings it back.
+    writeFileSync(file, new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
+    await drop.onItem(card.note, [file]);
+    expect({ kept: existsSync(file) }).toStrictEqual({ kept: true });
+  });
+
   it("knows the card's file by where it is on disk, whichever way the drop spells the path", async () => {
     const card = setup();
     const folder = mkdtempSync(path.join(tmpdir(), "inset-shot-"));
