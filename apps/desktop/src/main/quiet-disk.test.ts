@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -11,7 +12,7 @@ import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import { quietDisk } from "./quiet-disk";
 import type { QuietFs } from "./quiet-disk";
@@ -117,6 +118,10 @@ const inProtected = (touched: readonly string[]): boolean =>
   );
 
 describe(quietDisk, () => {
+  afterAll(() => {
+    rmSync(given, { force: true, recursive: true });
+  });
+
   it("finds a file in the home folder", async () => {
     const found = await disk.find(source);
 
