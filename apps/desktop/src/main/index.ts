@@ -89,6 +89,8 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
+import { lineInFile, lineToOpen } from "./code-line";
+import type { SourceReader } from "./code-line";
 import { chatGptThreadLink } from "./codex-threads";
 import { createContextRecall } from "./context-recall";
 import { createCopyCommands } from "./copy-commands";
@@ -821,12 +823,46 @@ const start = async (): Promise<void> => {
     toast.send({ title: message, tone, type: "notified" });
   };
 
-  /** Opens a code item's file in the editor it came from (src/main/open-code.ts). */
+  /** How main reads a code item's file for the line its words are on (src/main/code-line.ts). */
+  const sourceReader: SourceReader = {
+    home,
+    platform: process.platform,
+    readFile: async (file) => await readFile(file, "utf-8"),
+    stat,
+  };
+
+  /**
+   * A capture's line in its code file, found once the item is added so the
+   * capture is no slower: a step of its own, which counts only while the item
+   * still names that file.
+   */
+  const findCodeLine = async (
+    id: ItemId,
+    place: CodePlace | null,
+    text: string
+  ): Promise<void> => {
+    const line =
+      place === null ? null : await lineInFile(place.file, text, sourceReader);
+
+    if (place !== null && line !== null) {
+      controller.apply({ file: place.file, id, line, type: "setCodeLine" });
+    }
+
+    e2eLog("codePlace", {
+      fileFound: place !== null,
+      lineFound: line !== null,
+    });
+  };
+
+  /** Opens a code item's file in the editor it came from (src/main/open-code.ts), at the line its words are on now. */
   const openCodeItem = async (
     name: string | null,
-    place: CodePlace
+    place: CodePlace,
+    text: string | null
   ): Promise<void> => {
-    await openCode(codeEditor(name, EDITORS), place, {
+    const at = { ...place, line: await lineToOpen(place, text, sourceReader) };
+
+    await openCode(codeEditor(name, EDITORS), at, {
       bringForward: async (address) => {
         const editor = await app.getApplicationInfoForProtocol(address);
 
@@ -1193,6 +1229,7 @@ const start = async (): Promise<void> => {
       }
 
       e2eLog("itemAdded", { itemId: id, kind: "text", via: "selection" });
+      void findCodeLine(id, context?.code ?? null, result.text);
       tutorial.complete(SHELF_TASK_IDS.doubleShift);
 
       if (shelf.isVisible()) {
@@ -2402,7 +2439,11 @@ const start = async (): Promise<void> => {
 
         // An item from a code editor opens its file there again, by an address only main builds.
         if (url === undefined && context !== null && context.code !== null) {
-          void openCodeItem(context.app, context.code);
+          void openCodeItem(
+            context.app,
+            context.code,
+            item?.kind === "text" ? item.text : null
+          );
 
           return;
         }
