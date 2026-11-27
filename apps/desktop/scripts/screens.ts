@@ -27,6 +27,7 @@ import { chromium } from "playwright";
 import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
 
+import { fellBackMessage, goneMessage } from "../src/shared/code-place.ts";
 import {
   SHELF_MAX_HEIGHT_DIP,
   SHELF_MIN_WIDTH_DIP,
@@ -8064,6 +8065,417 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map(stress);
 
+// Code location as context, slice C4 (release/ux-rounds/plans/code-location.md, section 6)
+
+/** The home folder main reports; no part of it may show on the page. */
+const CODE_HOME = "/Users/anna";
+const CODE_ROOT = `${CODE_HOME}/Developer/inset-shelf`;
+const CODE_FILE = `${CODE_ROOT}/apps/desktop/src/shared/recall.ts`;
+
+const CODE_TOOLTIP =
+  "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
+
+// A name longer than the room a tooltip keeps for a path: the line above the path must hold it whole.
+const CODE_LONG_FILE = `${"verschachtelte-Komponente-".repeat(4)}Übersicht.tsx`;
+
+const CODE_LONG_FOLDERS =
+  "packages/kundenportal/src/features/rechnungen/ansichten";
+
+const CODE_LONG_ROOT = `${CODE_HOME}/Developer/${LONG_WORD}`;
+
+/** A thought captured from a code editor, with the file it showed, or only its title. */
+const codeItem = (
+  app: string,
+  title: string,
+  code: { file: string; line: number | null; root: string | null } | null
+) => ({
+  ...base(760, 5),
+  context: { app, appLink: null, code, title, url: null },
+  html: null,
+  kind: "text",
+  links: [],
+  text: "The pill counts done items as open",
+  via: "selection",
+});
+
+const codeView = (one: ReturnType<typeof codeItem>) => ({
+  ...shelfView(),
+  doc: { ...DOC, items: [one] },
+  home: CODE_HOME,
+});
+
+/** The code item's source line: its words without spaces, whether it is a button, its tooltip, and whether it has a mark. */
+const codeSource = async (page: Page, words: string) =>
+  z
+    .object({
+      button: z.boolean(),
+      mark: z.boolean(),
+      text: z.string(),
+      title: z.string().nullable(),
+    })
+    .nullable()
+    .parse(
+      await page.evaluate(
+        (first) => {
+          const line = [...document.querySelectorAll("p, button")].find(
+            (element) =>
+              element.querySelector("p, button") === null &&
+              (element.textContent ?? "")
+                .replaceAll(/\s/gu, "")
+                .startsWith(first)
+          );
+
+          return line === undefined
+            ? null
+            : {
+                button: line.tagName === "BUTTON",
+                mark: line.querySelector("svg") !== null,
+                text: (line.textContent ?? "").replaceAll(/\s/gu, ""),
+                title: line.getAttribute("title"),
+              };
+        },
+        words.split(" ")[0] ?? words
+      )
+    );
+
+const CODE_PLACE = { file: CODE_FILE, line: 147, root: CODE_ROOT };
+
+/** A file whose name an editor's address would read as a line. */
+const CODE_COLON = {
+  file: `${CODE_ROOT}/a:12.ts`,
+  line: null,
+  root: CODE_ROOT,
+};
+
+/** The code item's source line, as a button: on its row, or in its details. */
+const codeLink = (page: Page) =>
+  page
+    .getByRole("button", { name: /^recall\.ts:147/u })
+    .filter({ visible: true });
+
+/** The page asked main to open the code item once, by its id alone: never an address. */
+const openedOnce = async (page: Page): Promise<string | null> => {
+  const all = await calls(page);
+  const sent = all.filter((call) => call.call === "openLink");
+
+  return isDeepStrictEqual(sent, [{ arg: { id: uuid(760) }, call: "openLink" }])
+    ? null
+    : `the page asked main to open ${JSON.stringify(sent)}`;
+};
+
+/**
+ * The source line reads `words` with a code mark and `tooltip`, and no part
+ * of the home folder shows. With a file (a tooltip), it is a button whose
+ * tooltip ends "Open in Code"; with only a title, plain text.
+ */
+const codeChecks = async (
+  page: Page,
+  words: string,
+  tooltip: string | null,
+  cut = false
+): Promise<string | null> => {
+  const source = await codeSource(page, words);
+  const shown = await page.evaluate("document.body.innerText");
+
+  if (source === null) {
+    return `no source line reads "${words}"`;
+  }
+
+  if (source.text !== words.replaceAll(" ", "")) {
+    return `the source line reads "${source.text}", not "${words}"`;
+  }
+
+  if (!source.mark) {
+    return "the source line has no code mark";
+  }
+
+  if (source.button !== (tooltip !== null)) {
+    return tooltip === null
+      ? "a code item without a file must not open anything"
+      : "a code item with a file must open it: its source line is no button";
+  }
+
+  if (tooltip !== null && source.title?.endsWith("\nOpen in Code") !== true) {
+    return `the tooltip is "${source.title}", which doesn't end "Open in Code"`;
+  }
+
+  // A line that shows cut is whole in the tooltip, name and all, so the path
+  // under it is the folder alone. It loses its start to "…", never its end.
+  const where =
+    cut && tooltip !== null
+      ? tooltip.slice(0, tooltip.lastIndexOf("/") + 1)
+      : tooltip;
+
+  const pathLine = source.title
+    ?.split("\n")
+    .find((line) =>
+      line.startsWith("…")
+        ? line.length > 12 && where?.endsWith(line.slice(1)) === true
+        : line === where
+    );
+
+  if (tooltip !== null && pathLine === undefined) {
+    return `the tooltip is "${source.title}", which holds no line for "${where}"`;
+  }
+
+  if (cut && source.title?.split("\n").includes(words) !== true) {
+    return `the tooltip is "${source.title}", which doesn't hold the whole line "${words}"`;
+  }
+
+  return String(shown).includes(CODE_HOME)
+    ? "the home folder shows on the page"
+    : null;
+};
+
+const CODE_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) =>
+        await codeChecks(page, "recall.ts:147 · inset-shelf", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset-shelf", {
+            file: CODE_FILE,
+            line: 147,
+            root: CODE_ROOT,
+          })
+        ),
+      },
+      name: "item-code-line",
+    },
+    {
+      check: async (page) =>
+        await codeChecks(page, "recall.ts · inset-shelf", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset-shelf", {
+            file: CODE_FILE,
+            line: null,
+            root: CODE_ROOT,
+          })
+        ),
+      },
+      name: "item-code-no-line",
+    },
+    {
+      // A workspace names no folder of the file: the title's name stands in.
+      check: async (page) =>
+        await codeChecks(page, "recall.ts · inset (Workspace)", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset (Workspace)", {
+            file: CODE_FILE,
+            line: null,
+            root: null,
+          })
+        ),
+      },
+      name: "item-code-no-root",
+    },
+    {
+      // Windows reads no file: the title alone, tidied, with no tooltip.
+      check: async (page) =>
+        await codeChecks(page, "recall.ts · inset-shelf", null),
+      data: {
+        view: codeView(
+          codeItem(
+            "Visual Studio Code",
+            "recall.ts - inset-shelf - Visual Studio Code",
+            null
+          )
+        ),
+      },
+      name: "item-code-title",
+    },
+    {
+      check: async (page) =>
+        await codeChecks(
+          page,
+          `${CODE_LONG_FILE}:9999999 · ${LONG_WORD}`,
+          `~/Developer/${LONG_WORD}/${CODE_LONG_FOLDERS}/${CODE_LONG_FILE}`,
+          true
+        ),
+      data: {
+        view: codeView(
+          codeItem("Code", `${CODE_LONG_FILE} — ${LONG_WORD}`, {
+            file: `${CODE_LONG_ROOT}/${CODE_LONG_FOLDERS}/${CODE_LONG_FILE}`,
+            line: 9_999_999,
+            root: CODE_LONG_ROOT,
+          })
+        ),
+      },
+      name: "item-code-long-path",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 760);
+      },
+      check: async (page) =>
+        await codeChecks(page, "recall.ts:147 · inset-shelf", CODE_TOOLTIP),
+      data: {
+        view: codeView(
+          codeItem("Code", "recall.ts — inset-shelf", {
+            file: CODE_FILE,
+            line: 147,
+            root: CODE_ROOT,
+          })
+        ),
+      },
+      name: "details-code",
+    },
+    {
+      act: async (page) => {
+        await codeLink(page).click();
+      },
+      check: async (page) => await openedOnce(page),
+      data: {
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      keepPointer: true,
+      name: "item-code-open",
+    },
+    {
+      act: async (page) => {
+        await details(page, 760);
+        await codeLink(page).click();
+      },
+      check: async (page) => await openedOnce(page),
+      data: {
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "details-code-open",
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 760);
+      },
+      check: async (page) => {
+        const entries = await menuEntries(page);
+        const open = entries.find((entry) => entry.startsWith("Open in Code"));
+
+        return open?.endsWith("⌘O") === true
+          ? null
+          : `the menu offers ${JSON.stringify(entries)}, with no "Open in Code ⌘O"`;
+      },
+      data: {
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "menu-code-open",
+    },
+    {
+      act: async (page) => {
+        await codeLink(page).click();
+        await page.locator("[data-sonner-toast]").first().waitFor();
+        await page.waitForTimeout(500);
+      },
+      check: async (page) => {
+        const toast =
+          (await page.locator("[data-sonner-toast]").first().textContent()) ??
+          "";
+
+        return toast.includes("recall.ts is no longer at this path")
+          ? await openedOnce(page)
+          : `the shelf says "${toast}", not that recall.ts is gone`;
+      },
+      data: {
+        openNotice: { message: goneMessage(CODE_PLACE), tone: "failed" },
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "item-code-gone",
+    },
+    {
+      // No address opens a path with a colon as itself: the click shows it in its folder, and says so first.
+      check: async (page) => {
+        const source = await codeSource(page, "a:12.ts · inset-shelf");
+
+        if (source?.button !== true) {
+          return "a code file shown in its folder must still be a button";
+        }
+
+        return /\nShow in (?:Finder|Folder)$/u.test(source.title ?? "")
+          ? null
+          : `the tooltip is "${source.title}", which doesn't end with showing the file in its folder`;
+      },
+      data: {
+        view: codeView(codeItem("Code", "a:12.ts — inset-shelf", CODE_COLON)),
+      },
+      name: "item-code-folder",
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 760);
+      },
+      check: async (page) => {
+        const entries = await menuEntries(page);
+
+        const show = entries.find((entry) =>
+          /^Show in (?:Finder|Folder)/u.test(entry)
+        );
+
+        if (entries.some((entry) => entry.startsWith("Open in Code"))) {
+          return `the menu offers ${JSON.stringify(entries)}: Code can't open this file by address`;
+        }
+
+        return show?.endsWith("⌘O") === true
+          ? null
+          : `the menu offers ${JSON.stringify(entries)}, with no "Show in Finder ⌘O"`;
+      },
+      data: {
+        view: codeView(codeItem("Code", "a:12.ts — inset-shelf", CODE_COLON)),
+      },
+      name: "menu-code-folder",
+    },
+    {
+      // Only an editor the shelf has a row for opens a file: any other app's item shows where it is from and opens nothing.
+      check: async (page) => {
+        const source = await codeSource(page, "recall.ts · inset-shelf");
+
+        if (source === null) {
+          return "no source line reads recall.ts · inset-shelf";
+        }
+
+        return source.button
+          ? "an item from an app the shelf has no row for must not open a file"
+          : null;
+      },
+      data: {
+        view: codeView(
+          codeItem("Zed", "recall.ts — inset-shelf", {
+            ...CODE_PLACE,
+            line: null,
+          })
+        ),
+      },
+      name: "item-code-unknown-app",
+    },
+    {
+      act: async (page) => {
+        await codeLink(page).click();
+        await page.locator("[data-sonner-toast]").first().waitFor();
+        await page.waitForTimeout(500);
+      },
+      check: async (page) => {
+        const toast =
+          (await page.locator("[data-sonner-toast]").first().textContent()) ??
+          "";
+
+        return toast.includes("so Inset tries to show it in its folder")
+          ? await openedOnce(page)
+          : `the shelf says "${toast}", not that Inset tries to show the file in its folder`;
+      },
+      data: {
+        openNotice: {
+          message: fellBackMessage(CODE_PLACE, "Code"),
+          tone: "failed",
+        },
+        view: codeView(codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE)),
+      },
+      name: "item-code-fell-back",
+    },
+  ] satisfies readonly StressScene[]
+).map(stress);
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -10958,6 +11370,7 @@ const SCENES: readonly Scene[] = [
   ...STRESS_SCENES,
   ...DRAWING_STRESS_SCENES,
   ...PILL_SCENES,
+  ...CODE_SCENES,
   ...ATTACHMENT_SCENES,
 ];
 

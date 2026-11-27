@@ -3,12 +3,11 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 /** A tooltip longer than this is cut: it is there to finish a line, not to be read like a page. */
-const TOOLTIP_MAX = 300;
+export const TOOLTIP_MAX = 300;
 
-export const tooltipText = (text: string): string =>
-  text.length > TOOLTIP_MAX
-    ? `${text.slice(0, TOOLTIP_MAX - 1).trimEnd()}…`
-    : text;
+/** `text` cut to `max` characters, ending "…" when cut; `max` leaves room for a line kept whole after it. */
+export const tooltipText = (text: string, max = TOOLTIP_MAX): string =>
+  text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 
 /**
  * Calls `measure` with the element now, and again whenever what decides the

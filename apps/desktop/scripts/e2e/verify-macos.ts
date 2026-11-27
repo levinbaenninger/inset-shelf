@@ -8,10 +8,11 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -30,7 +31,7 @@ import type { NoticeFate } from "../../src/shared/notice-fate.ts";
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
 
-/** A trial name (`reopen`, `say-why`, `recall`, `card`, `reroute`, …: see `main`) runs only that trial (README.md, Testing). */
+/** A trial name (`reopen`, `say-why`, `recall`, `card`, `code`, `reroute`, …: see `main`) runs only that trial (README.md, Testing). */
 const only = process.argv[3] ?? "";
 
 const packagedApp = path.join(
@@ -47,7 +48,22 @@ const bin = path.join(work, "bin");
 const userData = path.join(work, "userData");
 const logFile = path.join(work, "events.jsonl");
 const sourceBundleId = "ch.inset.e2e.source";
-const sourceApp = path.join(bin, "source.app");
+
+// The source app lives under the repo, not in the temp folder: Launch Services
+// lists an app in a temp folder too, but never opens a scheme with it. Its
+// folder is the run's own, straight under release, so removing it leaves nothing.
+const sourceHome = path.join(root, "release", path.basename(work));
+const sourceApp = path.join(sourceHome, "source.app");
+
+// The scheme the source app opens files by, as an editor does (E2E_EDITORS in src/main/e2e-log.ts).
+const sourceScheme = "inset-e2e-source";
+
+// Each address the source app was asked to open, one per line (scripts/e2e/source.swift).
+const sourceOpened = path.join(sourceHome, "opened.txt");
+
+const lsregister =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
 const CLIPBOARD_SENTINEL = "inset-shelf-e2e-clipboard";
 
 const EventSchema = z.object({
@@ -163,6 +179,14 @@ const ShelfFileSchema = z.looseObject({
       context: z
         .looseObject({
           app: z.string().nullable(),
+          code: z
+            .looseObject({
+              file: z.string(),
+              line: z.number().nullable(),
+              root: z.string().nullable(),
+            })
+            .nullable()
+            .optional(),
           title: z.string().nullable(),
         })
         .nullable()
@@ -433,11 +457,15 @@ const stopSource = (): void => {
   source = undefined;
 };
 
-/** Opens the source app in front with this text, all of it selected or none, in a window with this title, full screen if asked. */
+/** Opens the source app in front with this text, all of it selected or none, in a window with this title, full screen if asked, naming a file if given. */
 const showSource = async (
   text: string,
   selection: "all" | "none",
-  window: { readonly title?: string; readonly fullScreen?: boolean } = {}
+  window: {
+    readonly title?: string;
+    readonly fullScreen?: boolean;
+    readonly document?: string;
+  } = {}
 ): Promise<boolean> => {
   stopSource();
   source = spawn(
@@ -446,7 +474,8 @@ const showSource = async (
       text,
       selection,
       window.title ?? "Source",
-      ...(window.fullScreen === true ? ["fullscreen"] : []),
+      window.fullScreen === true ? "fullscreen" : "window",
+      ...(window.document === undefined ? [] : [window.document]),
     ],
     {
       stdio: "ignore",
@@ -487,12 +516,14 @@ const buildHelpers = (): void => {
   mkdirSync(path.join(sourceApp, "Contents/MacOS"), { recursive: true });
   writeFileSync(
     path.join(sourceApp, "Contents/Info.plist"),
-    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${sourceBundleId}</string><key>CFBundleExecutable</key><string>source</string><key>CFBundleName</key><string>source</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${sourceBundleId}</string><key>CFBundleExecutable</key><string>source</string><key>CFBundleName</key><string>source</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleTypeRole</key><string>Editor</string><key>CFBundleURLName</key><string>${sourceBundleId}</string><key>CFBundleURLSchemes</key><array><string>${sourceScheme}</string></array></dict></array></dict></plist>`
   );
 
   swift("input", path.join(bin, "input"));
   swift("windows", path.join(bin, "windows"));
   swift("source", path.join(sourceApp, "Contents/MacOS/source"));
+  // The scheme counts as registered only once Launch Services knows the bundle; the run's end forgets it.
+  execFileSync(lsregister, ["-f", sourceApp]);
 };
 
 const launch = (env: Record<string, string> = {}): ChildProcess => {
@@ -801,6 +832,398 @@ const checkSelection = async (): Promise<void> => {
     "right Shift works the same",
     (await waitFor("selection", right)) !== undefined
   );
+};
+
+/**
+ * A capture from an editor keeps the file its window names and the project
+ * folder its title names, and no line; a window that names no file keeps
+ * none (src/shared/code-editors.ts; the source app is an editor under the
+ * test). A click finds the line (src/main/code-line.ts). The paths are
+ * compared here and written to the results only from the run's folder on.
+ */
+const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
+  for (let waited = 0; waited < ms; waited += 200) {
+    if (test()) {
+      return true;
+    }
+
+    // oxlint-disable-next-line no-await-in-loop -- polling the disk and the screen.
+    await delay(200);
+  }
+
+  return test();
+};
+
+/** The addresses the source app was asked to open, oldest first. */
+const openedInSource = (): readonly string[] =>
+  existsSync(sourceOpened)
+    ? readFileSync(sourceOpened, "utf-8").split("\n").filter(Boolean)
+    : [];
+
+/** The file and line an address of the source app's scheme names, or null for any other address. */
+const placeOfAddress = (
+  address: string
+): { readonly file: string; readonly line: number | null } | null => {
+  try {
+    const url = new URL(address);
+
+    if (url.protocol !== `${sourceScheme}:` || url.host !== "file") {
+      return null;
+    }
+
+    // A ":" inside the path is encoded: only the line's is left as it is.
+    const at = /:(?<line>\d+)$/u.exec(url.pathname);
+
+    return at === null
+      ? { file: decodeURIComponent(url.pathname), line: null }
+      : {
+          file: decodeURIComponent(url.pathname.slice(0, at.index)),
+          line: Number(at.groups?.line),
+        };
+  } catch {
+    return null;
+  }
+};
+
+/** A path as an address spells it: each part encoded, as src/shared/code-editors.ts builds one. */
+const addressPath = (at: string): string =>
+  at.split("/").map(encodeURIComponent).join("/");
+
+/**
+ * What the stand-in editor received, for a result's detail: every address,
+ * with the run's folder as "<run>" and the home folder as "~", so no user
+ * name is written to the results; "none" when it received nothing.
+ */
+const received = (asked: readonly string[]): string =>
+  asked.length === 0
+    ? "received none"
+    : `received ${asked
+        .map((address) =>
+          address
+            .replaceAll(addressPath(realpathSync(sourceHome)), "<run>")
+            .replaceAll(addressPath(homedir()), "~")
+        )
+        .join(", ")}`;
+
+/** Clicks a code item's source line in the shelf, such as "a.ts · proj": the only button that holds `name`. */
+const clickCodeLine = async (name: string, attempts = 10): Promise<boolean> => {
+  const found = jxa(`const hit = ${processElements}.findLast((e) => {
+      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => (t ?? "").includes(${JSON.stringify(name)})); } catch { return false; }
+    });
+    hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
+
+  if (found !== "") {
+    const [x = "0", y = "0"] = found.split(" ");
+
+    input("click", x, y);
+
+    return true;
+  }
+
+  if (attempts <= 1) {
+    return false;
+  }
+
+  await delay(500);
+
+  return await clickCodeLine(name, attempts - 1);
+};
+
+/**
+ * Whether the stand-in editor takes its scheme here. Without it a click
+ * would show the file in Finder, and leave that window open: no click is
+ * tried then.
+ */
+const standInTakesScheme = (): boolean => {
+  const handler = jxa(`ObjC.import("AppKit");
+    const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString(${JSON.stringify(`${sourceScheme}://file/a`)}));
+    app.isNil() ? "" : ObjC.unwrap(app.path);`);
+
+  record(
+    "the stand-in editor takes its scheme",
+    handler === sourceApp,
+    handler === "" ? "no app takes it" : handler
+  );
+
+  return handler === sourceApp;
+};
+
+/**
+ * The way back (src/main/open-code.ts): a click on a code item's source line
+ * opens its file in the editor it came from, through the address the
+ * editor's scheme takes, here the source app's own. A file that is gone
+ * opens nothing and brings the editor forward. No other editor is touched.
+ */
+const checkCodeWayBack = async (file: string): Promise<void> => {
+  enableWebAccessibility();
+  rmSync(sourceOpened, { force: true });
+  showShelfFromTray();
+
+  const clicked = await clickCodeLine("a.ts");
+
+  await waitUntil(() => openedInSource().length > 0);
+
+  const asked = openedInSource();
+
+  record("the code item's source line is a button", clicked);
+  record(
+    "a click on it opens its file in the editor it came from, by the editor's address, at no line where its words are not in the file",
+    asked.length === 1 &&
+      asked
+        .map(placeOfAddress)
+        .every((at) => at?.file === file && at.line === null),
+    received(asked)
+  );
+
+  // Gone, and with the editor quit: only the bring-forward can start it again.
+  rmSync(file);
+  stopSource();
+  rmSync(sourceOpened, { force: true });
+  await delay(800);
+  showShelfFromTray();
+
+  const clickedGone = await clickCodeLine("a.ts");
+
+  await waitUntil(() => frontmost() === "source", 6000);
+  // A wrong open would start the editor too, and its record could land just after.
+  await delay(1000);
+  record(
+    "a file that is gone opens nothing",
+    clickedGone && openedInSource().length === 0,
+    received(openedInSource())
+  );
+  record(
+    "and brings its editor forward",
+    frontmost() === "source",
+    frontmost()
+  );
+
+  try {
+    osa(`tell application id "${sourceBundleId}" to quit`);
+  } catch {
+    // Already gone.
+  }
+};
+
+/** Line `n` of the code trial's file of 40 lines. */
+const lineText = (n: number): string => `const line${n} = codePlaceLine(${n});`;
+
+/**
+ * Clicks the source line of the code item from `name` ("lines.ts"), with
+ * nothing the stand-in received before: the line the address it receives
+ * opens at, null for none, or undefined when it receives no address of
+ * `file`, or more than one.
+ */
+const openedAtLine = async (
+  name: string,
+  file: string
+): Promise<{
+  readonly line: number | null | undefined;
+  readonly detail: string;
+}> => {
+  enableWebAccessibility();
+  rmSync(sourceOpened, { force: true });
+  showShelfFromTray();
+
+  const clicked = await clickCodeLine(name);
+
+  await waitUntil(() => openedInSource().length > 0);
+
+  const asked = openedInSource();
+  const [place] = asked.map(placeOfAddress);
+
+  return {
+    detail: received(asked),
+    line:
+      clicked && asked.length === 1 && place?.file === file
+        ? place.line
+        : undefined,
+  };
+};
+
+/**
+ * The line is found when the source line is clicked, never at capture
+ * (src/main/open-code.ts, src/main/code-line.ts): the file opens at the line
+ * the captured words are on now, and at the line they moved to after an
+ * edit of the file. Words in the file twice open at no line. An item whose
+ * own words were edited opens at no line: that is left to unit tests
+ * (src/main/open-code.test.ts), since typing into the shelf here could reach
+ * another app named Electron.
+ */
+const checkCodeLineWayBack = async ({
+  lines,
+  twice,
+}: {
+  readonly lines: string;
+  readonly twice: string;
+}): Promise<void> => {
+  const stored = await openedAtLine("lines.ts", lines);
+
+  record(
+    "a click opens the file at the line its captured words are on",
+    stored.line === 12,
+    stored.detail
+  );
+
+  const before = readFileSync(lines, "utf-8");
+
+  writeFileSync(lines, `${"// moved down\n".repeat(10)}${before}`);
+
+  const moved = await openedAtLine("lines.ts", lines);
+
+  record(
+    "after its words moved 10 lines down, a click opens at the line they are on now",
+    before.split("\n")[11] === lineText(12) && moved.line === 22,
+    moved.detail
+  );
+
+  const inTwo = await openedAtLine("twice.ts", twice);
+
+  record(
+    "words that are in the file twice open it at no line",
+    inTwo.line === null,
+    inTwo.detail
+  );
+};
+
+/**
+ * Captures `text` from the source app, all of it selected, in a window
+ * titled `title` that names `document`. Waits until the item is on disk.
+ */
+const captureCode = async (
+  text: string,
+  document?: string,
+  title = "a.ts — proj"
+) => {
+  if (await showSource(text, "all", { document, title })) {
+    const mark = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("itemAdded", mark);
+  } else {
+    record("source app in front for the code place", false, frontmost());
+  }
+
+  // The event comes with the item in memory; the shelf file is written after it.
+  const saved = () =>
+    items().find((item) => item.kind === "text" && item.text === text);
+
+  await waitUntil(() => saved() !== undefined, 4000);
+
+  return saved();
+};
+
+/**
+ * A capture reads no file and stores no line, whether its words are in the
+ * file once or twice: the line is found when it is clicked. Gives the two
+ * files, of 40 lines each: one with the captured words on line 12, one with
+ * them on lines 20 and 30.
+ */
+const checkCapturedLines = async (
+  project: string
+): Promise<{ readonly lines: string; readonly twice: string }> => {
+  const lines = path.join(project, "src", "lines.ts");
+  const twice = path.join(project, "src", "twice.ts");
+  const twiceWords = "retryTwice(); // the same words twice";
+
+  const numbered = (n: number): string =>
+    `${Array.from({ length: 40 }, (_, index) =>
+      n === 2 && (index === 19 || index === 29)
+        ? twiceWords
+        : lineText(index + 1)
+    ).join("\n")}\n`;
+
+  writeFileSync(lines, numbered(1));
+  writeFileSync(twice, numbered(2));
+
+  const inOne = await captureCode(lineText(12), lines, "lines.ts — proj");
+
+  record(
+    "a capture of words on one line of its file keeps the file and no line",
+    inOne?.context?.code?.file === lines && inOne.context.code.line === null
+  );
+
+  await delay(3000);
+
+  const inTwo = await captureCode(twiceWords, twice, "twice.ts — proj");
+
+  record(
+    "a capture of words that are in the file twice keeps the file and no line",
+    inTwo?.context?.code?.file === twice && inTwo.context.code.line === null
+  );
+
+  await delay(3000);
+
+  return { lines, twice };
+};
+
+/** The folder holding `at` that the shelf never looks in for a code file, however capitalised (src/main/quiet-disk.ts). */
+const shutFolder = (at: string): string | undefined => {
+  const home = realpathSync(homedir());
+
+  return [
+    ...["Desktop", "Documents", "Downloads", "Library"].map((name) =>
+      path.join(home, name)
+    ),
+    "/Volumes",
+  ].find((folder) =>
+    `${at.toLowerCase()}/`.startsWith(`${folder.toLowerCase()}/`)
+  );
+};
+
+const checkCodePlace = async (): Promise<void> => {
+  // Under the run's own folder in the repo, in the home folder: the only place
+  // the shelf looks for a code file (src/main/quiet-disk.ts).
+  const shut = shutFolder(realpathSync(root));
+
+  if (shut !== undefined) {
+    record(
+      "the checkout is outside every folder the shelf never looks in for a code file",
+      false,
+      `it is in ${shut}`
+    );
+
+    return;
+  }
+
+  const code = path.join(sourceHome, "code");
+
+  mkdirSync(path.join(code, "proj", "src"), { recursive: true });
+
+  const project = path.join(realpathSync(code), "proj");
+  const file = path.join(project, "src", "a.ts");
+
+  writeFileSync(file, "export const answer = 42;\n");
+
+  const inFile = await captureCode("Code place sentence in a file", file);
+
+  record(
+    "a capture from an editor keeps the file its window names",
+    inFile?.context?.code?.file === file
+  );
+  record(
+    "and the project folder its title names",
+    inFile?.context?.code?.root === project
+  );
+  record("and no line", inFile?.context?.code?.line === null);
+
+  // Once the capture notice has gone, as in checkSelection.
+  await delay(3000);
+
+  const lined = await checkCapturedLines(project);
+  const noFile = await captureCode("Code place sentence in no file");
+
+  record(
+    "a window that names no file keeps no place in the code",
+    noFile?.context?.app === "source" && noFile.context.code === null
+  );
+
+  if (standInTakesScheme()) {
+    await checkCodeLineWayBack(lined);
+    await checkCodeWayBack(file);
+  }
 };
 
 const checkNoFalseTaps = async (): Promise<void> => {
@@ -1411,19 +1834,6 @@ const shelfMtime = (): number => {
   const file = path.join(userData, "shelf.json");
 
   return existsSync(file) ? statSync(file).mtimeMs : 0;
-};
-
-const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
-  for (let waited = 0; waited < ms; waited += 200) {
-    if (test()) {
-      return true;
-    }
-
-    // oxlint-disable-next-line no-await-in-loop -- polling the disk and the screen.
-    await delay(200);
-  }
-
-  return test();
 };
 
 /** A picture as the shelf file holds it: an image item, or an attached image. */
@@ -3481,66 +3891,76 @@ const main = async (): Promise<void> => {
       version: 1,
     })}\n`
   );
-  buildHelpers();
 
-  if (only === "recall") {
-    seedRecallShelf();
-  }
-
-  const seeded = SEEDED_TRIALS.get(only);
-
-  seeded?.seed();
-
-  const clipboardBefore = pbpaste();
-
-  // The card's trial and the failed paste start on a disk that refuses the first write.
-  let app = launch(failingWrite(only));
-
+  // The stand-in editor's own scope, from its first file on: whatever fails
+  // after, a build, a seed or the clipboard's read, it is forgotten and removed.
   try {
-    await checkLaunch();
+    buildHelpers();
 
-    if (only === "reopen") {
-      await showSource("", "none");
-      await checkReopenCaret();
-    } else if (only === "say-why") {
-      await checkSayWhy();
-    } else if (only === "say-why-failed") {
-      await checkSayWhyFailed();
-    } else if (only === "recall") {
-      app = await checkRecall(app);
-    } else if (only === "card") {
-      await checkScreenshotCard();
-    } else if (only === "added" || only === "added-failed") {
-      await checkAddedNotice(only === "added-failed");
-    } else if (seeded === undefined) {
-      await checkShelfStaysInFront();
-      await checkComposer();
-      await checkSelection();
-      await checkSayWhy();
-      await checkNoFalseTaps();
-      await checkToggle();
-      await checkCopy();
-      await checkDrawing();
-      await checkSettings();
-      await checkReopenCaret();
-      app = await checkRestart(app);
-      await checkFailedWrite();
-    } else {
-      app = await seeded.run(app);
+    if (only === "recall") {
+      seedRecallShelf();
+    }
+
+    const seeded = SEEDED_TRIALS.get(only);
+
+    seeded?.seed();
+
+    const clipboardBefore = pbpaste();
+
+    // The card's trial and the failed paste start on a disk that refuses the first write.
+    let app = launch(failingWrite(only));
+
+    try {
+      await checkLaunch();
+
+      if (only === "reopen") {
+        await showSource("", "none");
+        await checkReopenCaret();
+      } else if (only === "say-why") {
+        await checkSayWhy();
+      } else if (only === "say-why-failed") {
+        await checkSayWhyFailed();
+      } else if (only === "recall") {
+        app = await checkRecall(app);
+      } else if (only === "code") {
+        await checkCodePlace();
+      } else if (only === "card") {
+        await checkScreenshotCard();
+      } else if (only === "added" || only === "added-failed") {
+        await checkAddedNotice(only === "added-failed");
+      } else if (seeded === undefined) {
+        await checkShelfStaysInFront();
+        await checkComposer();
+        await checkSelection();
+        await checkSayWhy();
+        await checkNoFalseTaps();
+        await checkToggle();
+        await checkCopy();
+        await checkDrawing();
+        await checkSettings();
+        await checkReopenCaret();
+        app = await checkRestart(app);
+        await checkFailedWrite();
+      } else {
+        app = await seeded.run(app);
+      }
+    } finally {
+      stopSource();
+      quitApp(app);
+      await exited(app);
+
+      // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
+      if (clipboardBefore === "") {
+        jxa(
+          'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
+        );
+      } else {
+        pbcopy(clipboardBefore);
+      }
     }
   } finally {
-    stopSource();
-    quitApp(app);
-    await exited(app);
-
-    // pbcopy("") leaves an empty text item, which the app reads as a held clipboard: clear it instead.
-    if (clipboardBefore === "") {
-      jxa(
-        'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.clearContents; ""'
-      );
-    } else {
-      pbcopy(clipboardBefore);
-    }
+    spawnSync(lsregister, ["-u", sourceApp]);
+    rmSync(sourceHome, { force: true, recursive: true });
   }
 
   writeFileSync(

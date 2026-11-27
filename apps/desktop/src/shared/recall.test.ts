@@ -209,6 +209,39 @@ describe(samePlace, () => {
       "project",
     ],
     [
+      // Windows names the app "Visual Studio Code" and ends the title with it.
+      "two files of one Code project on Windows",
+      source({
+        app: "Visual Studio Code",
+        title: "index.ts - inset-shelf - Visual Studio Code",
+      }),
+      source({
+        app: "Visual Studio Code",
+        title: "● shelf.ts - inset-shelf - Visual Studio Code",
+      }),
+      "project",
+    ],
+    [
+      "two files of one Code project on Windows, the app's name already off",
+      source({ app: "Visual Studio Code", title: "index.ts - inset-shelf" }),
+      source({ app: "Visual Studio Code", title: "shelf.ts - inset-shelf" }),
+      "project",
+    ],
+    [
+      // Code puts a folder location and a profile after the project.
+      "a Code window with a profile against one without",
+      source({ app: "Code", title: "a.ts — inset-shelf — Work" }),
+      source({ app: "Code", title: "b.ts — inset-shelf" }),
+      "project",
+    ],
+    [
+      // The title's own dash is the longest one in it: a file's name may hold a shorter one.
+      "a Code file whose name holds a dash, against another file of its project",
+      source({ app: "Code", title: "Design - notes.md — inset-shelf" }),
+      source({ app: "Code", title: "README.md — inset-shelf" }),
+      "project",
+    ],
+    [
       "the same title, an unread count and an unsaved mark aside",
       source({ app: "Notes", title: "Standup" }),
       source({ app: "Notes", title: "(3) • Standup" }),
@@ -271,6 +304,16 @@ describe(samePlace, () => {
       source({ app: "Code", title: "index.ts — inset-shelf" }),
     ],
     [
+      "two Code files whose names hold the same words after a dash, in two projects",
+      source({ app: "Code", title: "Design - notes.md — inset-shelf" }),
+      source({ app: "Code", title: "Release - notes.md — inset-web" }),
+    ],
+    [
+      "two Code projects in the same profile",
+      source({ app: "Code", title: "a.ts — inset-shelf — Work" }),
+      source({ app: "Code", title: "a.ts — inset-web — Work" }),
+    ],
+    [
       "two ChatGPT threads",
       source({ app: "ChatGPT", appLink: "codex://threads/1" }),
       source({ app: "ChatGPT", appLink: "codex://threads/2" }),
@@ -293,6 +336,9 @@ describe(placeOf, () => {
     expect(placeOf(source({ app: "Code", title: "a.ts — inset-shelf" }))).toBe(
       placeOf(source({ app: "Code", title: "b.ts — inset-shelf" }))
     );
+    expect(
+      placeOf(source({ app: "Code", title: "a.ts — inset-shelf — Work" }))
+    ).toBe(placeOf(source({ app: "Code", title: "b.ts — inset-shelf" })));
     expect(placeOf(source({ app: "Notes", title: "Standup" }))).not.toBe(
       placeOf(source({ app: "TextEdit", title: "Standup" }))
     );
@@ -316,6 +362,7 @@ const env = (start = 10): OpEnv => {
 const PR: ItemContext = {
   app: "Safari",
   appLink: null,
+  code: null,
   title: "Fix the build",
   url: "https://github.com/acme/app/pull/12",
 };
@@ -564,6 +611,7 @@ describe(hereWith, () => {
     const home = {
       app: "Safari",
       appLink: null,
+      code: null,
       title: "Example Domain",
       url: "https://example.com/",
     };

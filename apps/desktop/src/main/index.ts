@@ -4,6 +4,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import type { CodePlace } from "@shared/code-place";
 import {
   drawingContract,
   onboardingContract,
@@ -88,7 +89,9 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
+import { lineInFile } from "./code-line";
 import { chatGptThreadLink } from "./codex-threads";
+import { contained } from "./contained";
 import { createContextRecall } from "./context-recall";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -100,7 +103,7 @@ import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
-import { frontWindow } from "./front-window";
+import { EDITORS, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import {
@@ -110,6 +113,7 @@ import {
 } from "./menu-open";
 import { createOnboardingWindow } from "./onboarding-window";
 import { openApp, openAppAt } from "./open-app";
+import { fileIsThere, openCode } from "./open-code";
 import { createPageSettle, followPage } from "./page-settle";
 import { appBundlePath, createAppTile } from "./permissions/bundle";
 import { createOnboarding } from "./permissions/onboarding";
@@ -118,6 +122,7 @@ import { createOnboardingStore } from "./permissions/store";
 import { createPermissionChecks } from "./permissions/system";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
+import { quietDisk } from "./quiet-disk";
 import {
   createQuitHold,
   drawingMarks,
@@ -682,12 +687,17 @@ const start = async (): Promise<void> => {
    */
   const HERE_CHIP = true;
 
-  const viewWithHere = () => {
+  const home = app.getPath("home");
+
+  /** What the shelf's page is shown: the shelf, what is from the window beside it, the home folder paths show from, and the editors whose items open. */
+  const pageView = () => {
     const view = controller.view();
 
     return {
       ...view,
+      editors: EDITORS,
       here: hereOpening === null ? null : hereWith(hereOpening, view.doc),
+      home,
     };
   };
 
@@ -841,6 +851,77 @@ const start = async (): Promise<void> => {
   ) => {
     e2eLog("noticeSent", { text: message, tone, via: "toast" });
     toast.send({ title: message, tone, type: "notified" });
+  };
+
+  /** Where main may look for a code item's file with no chance of a system prompt (src/main/quiet-disk.ts). */
+  const codeDisk = quietDisk({ home });
+
+  /** Opens a code item's file in the editor it came from (src/main/open-code.ts), at the line its words are on now. */
+  const openCodeItem = async (
+    name: string | null,
+    place: CodePlace,
+    text: string | null
+  ): Promise<void> => {
+    await openCode(name, place, text, EDITORS, {
+      bringForward: async (address) => {
+        const editor = await app.getApplicationInfoForProtocol(address);
+
+        openAppAt(editor.path);
+      },
+      fileIsThere: async (file) => await fileIsThere(file, codeDisk),
+      lineOf: async (file, captured) =>
+        await lineInFile(file, captured, codeDisk),
+      notify: (message) => {
+        notify(message, "failed");
+      },
+      open: async (address) => {
+        await shell.openExternal(address);
+      },
+      registered: (address) =>
+        app.getApplicationNameForProtocol(address) !== "",
+      reveal: (file) => {
+        shell.showItemInFolder(file);
+      },
+    });
+  };
+
+  /**
+   * Opens where an item came from, or a link in it. Run only through
+   * `contained`: a step here may throw or reject.
+   */
+  const openSource = async (id: ItemId, url?: string): Promise<void> => {
+    const item = controller.item(id);
+    const context = item?.context ?? null;
+
+    // An item from a code editor opens its file there again, by an address only main builds.
+    if (url === undefined && context !== null && context.code !== null) {
+      await openCodeItem(
+        context.app,
+        context.code,
+        item?.kind === "text" ? item.text : null
+      );
+
+      return;
+    }
+
+    const fromApp = openingApp(context, isMac, EDITORS);
+
+    // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
+    if (url === undefined && fromApp !== null) {
+      await openInApp(fromApp, context);
+
+      return;
+    }
+
+    // Only the item's own page or a link in it opens: a web page, or a page from a file.
+    const target =
+      url === undefined
+        ? (context?.url ?? null)
+        : itemAddresses(item, url).find((known) => known === url);
+
+    if (target !== undefined && target !== null && isPageAddress(target)) {
+      await shell.openExternal(target);
+    }
   };
 
   // Pictures and files attached to an item after capture (attachments.ts).
@@ -2314,7 +2395,7 @@ const start = async (): Promise<void> => {
       drafts: pageSettle.setDrafts,
       settled: pageSettle.answered,
       getTutorial: () => tutorial.view(HOME_PAGE),
-      getView: () => viewWithHere(),
+      getView: () => pageView(),
       gettingStarted: () => {
         tutorial.showChecklist();
       },
@@ -2351,25 +2432,14 @@ const start = async (): Promise<void> => {
         onboarding.open("accessibility");
       },
       openLink: ({ id, url }) => {
-        const item = controller.item(id);
-        const fromApp = openingApp(item?.context ?? null, isMac);
-
-        // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
-        if (url === undefined && fromApp !== null) {
-          void openInApp(fromApp, item?.context ?? null);
-
-          return;
-        }
-
-        // Only the item's own page or a link in it opens: a web page, or a page from a file.
-        const target =
-          url === undefined
-            ? (item?.context?.url ?? null)
-            : itemAddresses(item, url).find((known) => known === url);
-
-        if (target !== undefined && target !== null && isPageAddress(target)) {
-          void shell.openExternal(target);
-        }
+        void contained(
+          async () => {
+            await openSource(id, url);
+          },
+          () => {
+            notify("Couldn’t open where this item came from", "failed");
+          }
+        );
       },
       openSettings: () => {
         settingsWindow.open();
@@ -2665,7 +2735,7 @@ const start = async (): Promise<void> => {
   };
 
   emitShelfView = () => {
-    shelfServer.emit("view", viewWithHere());
+    shelfServer.emit("view", pageView());
   };
 
   notify = (message, tone = "done") => {
@@ -2857,7 +2927,7 @@ const start = async (): Promise<void> => {
     }
   });
   controller.subscribe(() => {
-    shelfServer.emit("view", viewWithHere());
+    shelfServer.emit("view", pageView());
     shotSaves.retarget();
     refreshTray();
     refreshAppMenu();

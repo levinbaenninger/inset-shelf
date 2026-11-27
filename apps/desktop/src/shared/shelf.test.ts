@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { z } from "zod";
 
+import { CodePlaceSchema, isCapturedText } from "./code-place";
 import v3 from "./fixtures/shelf-v3.json";
 import {
   applyOp,
@@ -15,9 +16,11 @@ import {
   ATTACHMENTS_MAX,
   AttachedImageSchema,
   AttachmentSchema,
+  ContextSchema,
   ItemIdSchema,
   parseComposer,
   SectionIdSchema,
+  TEXT_MAX,
   ShelfDocSchema,
   UNDO_MAX,
   fitText,
@@ -512,7 +515,13 @@ describe("selections with links", () => {
 
     const { doc } = apply(emptyShelf(INBOX), [
       {
-        context: { app: "Zen", appLink: null, title: "Anmeldung", url },
+        context: {
+          app: "Zen",
+          appLink: null,
+          code: null,
+          title: "Anmeldung",
+          url,
+        },
         html: null,
         text: "Anmeldung",
         type: "addText",
@@ -866,6 +875,7 @@ describe(itemsAsList, () => {
           context: {
             app: "Chrome",
             appLink: null,
+            code: null,
             title: "Pricing",
             url: "https://example.com/pricing",
           },
@@ -1070,7 +1080,11 @@ describe("attachments on an item (format 4)", () => {
 
     expect(doc).toStrictEqual({
       ...v3,
-      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      items: v3.items.map((item) => ({
+        ...item,
+        attachments: [],
+        context: item.context === null ? null : { ...item.context, code: null },
+      })),
       schemaVersion: 4,
     });
     expect(doc === null ? [] : doc.items.map(storedFilesOf)).toStrictEqual([
@@ -1330,5 +1344,177 @@ describe("attachment operations", () => {
       { ...picture, pins: [{ label: "Corner", x: 959, y: 0 }] },
       file,
     ]);
+  });
+});
+
+/** A context from Code holding this file and project folder, as the system would report it. */
+const codeContext = (file: string, root: string | null) => ({
+  app: "Code",
+  appLink: null,
+  code: { file, line: null, root },
+  title: "a.ts — proj",
+  url: null,
+});
+
+describe("where in the code an item came from", () => {
+  it("reads a version 4 shelf saved before it with no place in the code", () => {
+    const savedBefore = {
+      ...v3,
+      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      schemaVersion: 4,
+    };
+
+    const doc = parseShelfDocument(JSON.stringify(savedBefore));
+
+    expect(doc?.schemaVersion).toBe(4);
+    expect(doc?.items.map((item) => item.context?.code)).toStrictEqual(
+      v3.items.map((item) => (item.context === null ? undefined : null))
+    );
+  });
+
+  it("keeps a file and the project folder it sits in", () => {
+    const context = codeContext(
+      "/Users/anna/dev/proj/src/a.ts",
+      "/Users/anna/dev/proj"
+    );
+
+    expect(ContextSchema.parse(context).code).toStrictEqual(context.code);
+  });
+
+  it.each([
+    ["a folder elsewhere", "/Users/anna/dev/other"],
+    ["a folder whose name only starts the same", "/Users/anna/dev/pro"],
+    ["the file itself", "/Users/anna/dev/proj/src/a.ts"],
+  ])("refuses %s as the project", (_, root) => {
+    expect(
+      CodePlaceSchema.safeParse(
+        codeContext("/Users/anna/dev/proj/src/a.ts", root).code
+      ).success
+    ).toBeFalsy();
+  });
+
+  it("refuses a path longer than the shelf keeps", () => {
+    const file = `/${"a".repeat(4096)}`;
+
+    expect(file).toHaveLength(4097);
+    expect(
+      CodePlaceSchema.safeParse(codeContext(file, null).code).success
+    ).toBeFalsy();
+  });
+
+  it.each([
+    ["a file that is no whole path", "src/a.ts", null],
+    [
+      "a file that steps out of its project",
+      "/Users/anna/dev/proj/../other/a.ts",
+      "/Users/anna/dev/proj",
+    ],
+    ["a file with a dot step", "/Users/anna/dev/proj/./a.ts", null],
+  ])("refuses %s", (_, file, root) => {
+    expect(
+      CodePlaceSchema.safeParse(codeContext(file, root).code).success
+    ).toBeFalsy();
+  });
+
+  it("reads an item whose place in the code is odd without that place, never without the item", () => {
+    const context = codeContext("src/a.ts", "/Users/anna/dev/other");
+
+    expect(ContextSchema.parse(context)).toStrictEqual({
+      ...context,
+      code: null,
+    });
+  });
+});
+
+/** Whether the shelf's first item still holds the words it was captured with. */
+const asCaptured = (doc: ShelfDoc): boolean => {
+  const [item] = doc.items;
+  const place = item?.context?.code ?? null;
+
+  return (
+    item?.kind === "text" && place !== null && isCapturedText(place, item.text)
+  );
+};
+
+describe("a capture's words, known again when its file is opened", () => {
+  const file = "/Users/anna/dev/proj/src/a.ts";
+  const start = emptyShelf(INBOX);
+  // The first id env() gives.
+  const id = ItemIdSchema.parse(uuid(11));
+
+  const captured = (text: string): MainOp => ({
+    context: codeContext(file, "/Users/anna/dev/proj"),
+    html: null,
+    text,
+    type: "addText",
+    via: "selection",
+  });
+
+  it("knows a capture's words for its own, in the one step that adds it", () => {
+    const { doc } = apply(start, [captured("retry();")]);
+
+    expect(asCaptured(doc)).toBeTruthy();
+    expect(doc.items[0]?.context?.code).toMatchObject({ file, line: null });
+  });
+
+  it("no longer does once the words are edited, and does again when the edit is taken back", () => {
+    const edited = apply(start, [
+      captured("retry();"),
+      { id, text: "other();", type: "editText" },
+    ]);
+
+    expect(asCaptured(edited.doc)).toBeFalsy();
+    expect(
+      asCaptured(
+        applyOp(
+          edited.doc,
+          { id, text: "retry();", type: "editText" },
+          env(),
+          edited.pending
+        ).doc
+      )
+    ).toBeTruthy();
+  });
+
+  it("knows a capture's words when they are as long as the shelf keeps", () => {
+    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX))]);
+
+    expect(asCaptured(doc)).toBeTruthy();
+  });
+
+  it("knows no words for a capture longer than the shelf keeps, so a click looks for no line", () => {
+    // The words kept are only the selection's start: the whole of it may be nowhere in the file.
+    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX + 5))]);
+
+    expect(asCaptured(doc)).toBeFalsy();
+    expect(doc.items[0]?.context?.code).toMatchObject({ file, line: null });
+  });
+
+  it("keeps nothing of the words but a mark that survives the shelf's own file", () => {
+    const { doc } = apply(start, [captured("retry();")]);
+    const read = ShelfDocSchema.parse(structuredClone(doc));
+
+    expect(asCaptured(read)).toBeTruthy();
+    expect(JSON.stringify(read.items[0]?.context)).not.toContain("retry");
+  });
+
+  it("knows no words for an item saved before the mark, or with one that reads odd", () => {
+    const { doc } = apply(start, [captured("retry();")]);
+
+    const without = (mark: string | number | undefined): ShelfDoc =>
+      ShelfDocSchema.parse({
+        ...doc,
+        items: doc.items.map((item) => ({
+          ...item,
+          context: {
+            ...item.context,
+            code: { file, line: null, mark, root: "/Users/anna/dev/proj" },
+          },
+        })),
+      });
+
+    expect(asCaptured(without(undefined))).toBeFalsy();
+    expect(asCaptured(without("../../etc"))).toBeFalsy();
+    expect(without(42).items[0]?.context?.code).toMatchObject({ file });
   });
 });

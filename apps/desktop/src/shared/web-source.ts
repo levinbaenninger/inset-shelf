@@ -1,3 +1,12 @@
+import {
+  CODE_EDITORS,
+  codeEditor,
+  codeLabel,
+  codeWay,
+  shownTitleParts,
+} from "./code-editors";
+import type { CodeEditor } from "./code-editors";
+import type { CodePlace } from "./code-place";
 import { withoutAppName } from "./window-title";
 
 /** A link inside copied text: the words it was on and where it points. */
@@ -225,18 +234,29 @@ interface AppSource {
   readonly app: string | null;
   readonly appLink: string | null;
   readonly url: string | null;
+  /** The file a code editor showed, which opens there again. */
+  readonly code: CodePlace | null;
 }
 
 /**
- * The desktop app an item opens in again, or null when its page opens in the
- * browser instead. macOS brings any of these apps forward by name; elsewhere
- * an app needs a link to open at: a Claude chat, a Notion page, a T3 Code
- * thread.
+ * The app an item opens in again, or null when its page opens in the
+ * browser instead. A code editor among `editors` opens the file it showed,
+ * wherever the shelf read one; a file from any other app opens nothing.
+ * macOS brings any of the desktop apps forward by name;
+ * elsewhere an app needs a link to open at: a Claude chat, a Notion page, a
+ * T3 Code thread.
  */
 export const openingApp = (
   source: AppSource | null,
-  anyApp: boolean
+  anyApp: boolean,
+  editors: readonly CodeEditor[] = CODE_EDITORS
 ): string | null => {
+  if (source !== null && source.code !== null) {
+    return codeWay(source.app, source.code, editors) === null
+      ? null
+      : source.app;
+  }
+
   const app = desktopApp(source?.app ?? null);
 
   if (app === null || anyApp) {
@@ -255,12 +275,16 @@ export interface SourceLabel {
   /** A site the shelf knows, shown with its mark. */
   readonly service: Service | null;
   readonly label: string;
+  /** A code editor's: shown with a code mark, and where the file is from the home folder when the item knows it. */
+  readonly code?: { readonly path: string | null };
 }
 
 interface SourceParts {
   readonly app: string | null;
   readonly title: string | null;
   readonly url: string | null;
+  /** The file a code editor showed; absent where only the window is known. */
+  readonly code?: CodePlace | null;
 }
 
 const SERVICE_NAME: Readonly<Record<Service, string>> = {
@@ -445,15 +469,58 @@ const fromTitle = (app: string | null, title: string | null): SourceLabel => {
 };
 
 /**
- * Where an item came from, in a few words: the site and what on it for pages
- * the shelf knows (GitHub, ChatGPT, Claude, X, YouTube), else the site or app
- * and the window's title, without the app's name Windows adds to it.
+ * A code editor's window as its file and project: "recall.ts:147 ·
+ * inset-shelf" from a code place, else as its title names them through the
+ * registry. Null for another app, or a title that names neither.
  */
-export const sourceLabel = (source: SourceParts): SourceLabel => {
+const fromCode = (
+  source: SourceParts,
+  home: string | null
+): SourceLabel | null => {
+  const editor = codeEditor(source.app);
+
+  const named =
+    editor === undefined
+      ? { file: null, project: null }
+      : shownTitleParts(editor, source.title, source.app);
+
+  const place = source.code ?? null;
+
+  if (place !== null) {
+    const { file, path, project } = codeLabel(place, home);
+
+    return {
+      code: { path },
+      label: join(file, project ?? named.project),
+      service: null,
+    };
+  }
+
+  return editor === undefined || (named.file ?? named.project) === null
+    ? null
+    : {
+        code: { path: null },
+        label: join(named.file, named.project),
+        service: null,
+      };
+};
+
+/**
+ * Where an item came from, in a few words: the site and what on it for pages
+ * the shelf knows (GitHub, ChatGPT, Claude, X, YouTube), the file and project
+ * for a code editor, else the site or app and the window's title, without the
+ * app's name Windows adds to it. A path is shown from `home` as "~/…".
+ */
+export const sourceLabel = (
+  source: SourceParts,
+  home: string | null = null
+): SourceLabel => {
   const title =
     source.title === null ? null : withoutAppName(source.title, source.app);
 
-  return source.url === null || webUrl(source.url) === null
-    ? fromTitle(source.app, title)
-    : fromUrl(source.url, title);
+  if (source.url === null || webUrl(source.url) === null) {
+    return fromCode(source, home) ?? fromTitle(source.app, title);
+  }
+
+  return fromUrl(source.url, title);
 };

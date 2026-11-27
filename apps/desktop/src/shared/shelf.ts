@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+import {
+  atLine,
+  CodePlaceSchema,
+  PATH_MAX,
+  pathInProject,
+  textMark,
+} from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
 import {
   isAppLink,
@@ -133,7 +140,6 @@ export const WindowIdSchema = z.string().regex(LOWER_UUID).brand<"WindowId">();
 
 export const WINDOW_TITLE_MAX = 500;
 export const APP_NAME_MAX = 200;
-export const PATH_MAX = 4096;
 export const PAGE_URL_MAX = 2000;
 
 /** Text the system reported, cut to what the saved shelf keeps, ending in "…" when cut. */
@@ -198,6 +204,8 @@ export const ContextSchema = z.object({
    * thread, a Claude chat, a Notion page. Only known app schemes.
    */
   appLink: z.string().refine(isAppLink).nullable().default(null),
+  /** The file and project a code editor showed (src/shared/code-editors.ts). One that reads odd is left out: it never costs the item or the shelf. */
+  code: CodePlaceSchema.nullable().default(null).catch(null),
   title: z.string().max(WINDOW_TITLE_MAX).nullable(),
   url: z
     .url({ protocol: /^(?:https?|file)$/u })
@@ -1078,6 +1086,21 @@ const replaceImage = (
   };
 };
 
+/**
+ * The context of a capture whose kept text is `text`: its place in the code
+ * knows that text for its own. Not when the shelf kept only the selection's
+ * start (`clipped`): the whole of it may be nowhere in the file, so a click
+ * looks for no line.
+ */
+const withTextMark = (
+  context: ItemContext | null,
+  text: string,
+  clipped: boolean
+): ItemContext | null =>
+  context === null || context.code === null || clipped
+    ? context
+    : { ...context, code: { ...context.code, mark: textMark(text) } };
+
 /** A selection or other text from main; blank text adds nothing. */
 const addText = (
   doc: ShelfDoc,
@@ -1088,10 +1111,12 @@ const addText = (
     return unchanged(doc);
   }
 
+  const text = op.text.slice(0, TEXT_MAX);
+
   return addItem(doc, {
     ...NO_META,
     color: null,
-    context: op.context,
+    context: withTextMark(op.context, text, op.text.length > TEXT_MAX),
     createdAt: env.now().toISOString(),
     done: false,
     html: op.html !== null && op.html.length <= HTML_MAX ? op.html : null,
@@ -1105,7 +1130,7 @@ const addText = (
             (link) => LinkSchema.safeParse(link).success
           ),
     sectionId: doc.activeSectionId,
-    text: op.text.slice(0, TEXT_MAX),
+    text,
     via: op.via,
     windows: (op.windows ?? []).slice(0, WINDOWS_MAX),
   });
@@ -1761,6 +1786,8 @@ const searchableText = (item: ShelfItem): string =>
     item.context?.app ?? "",
     item.context?.title ?? "",
     item.context?.url ?? "",
+    // The file's path inside its project, its name among it; never the whole path.
+    item.context?.code ? pathInProject(item.context.code) : "",
     ...item.attachments.flatMap((attachment) => [
       attachmentName(attachment),
       ...(attachment.kind === "image"
@@ -1892,7 +1919,13 @@ export const detailLines = (
     ]),
     ...(full && source !== null && (source.app ?? source.title) !== null
       ? [
-          `From: ${[source.app, source.title]
+          `From: ${[
+            source.app,
+            // Where in the project, never the whole path, which can name the user.
+            source.code === null
+              ? source.title
+              : atLine(pathInProject(source.code), source.code),
+          ]
             .filter((part) => part !== null && part !== "")
             .join(" · ")}`,
         ]

@@ -1,0 +1,373 @@
+import { constants } from "node:fs";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
+
+import { FsErrorSchema } from "./save-error";
+
+/**
+ * The folder Inset may look in for a code file: the user's home, which it
+ * lives in already. Only the home folder: another, the temp folder say, can
+ * be set to a place macOS asks about, and finding where it is would touch it.
+ */
+export interface QuietRoots {
+  readonly home: string;
+}
+
+/** What is at a path, as `lstat` says it: a link is not followed. */
+export interface Entry {
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly isFile: () => boolean;
+  readonly isDirectory: () => boolean;
+  readonly isSymbolicLink: () => boolean;
+}
+
+/** A file opened for reading, as the policy uses it: what the opening holds, never the path again. */
+export interface OpenFile {
+  /** What the opening holds, as `fstat` says it. */
+  readonly stat: () => Promise<Entry>;
+  readonly read: (
+    into: Uint8Array,
+    offset: number,
+    length: number,
+    position: number
+  ) => Promise<{ readonly bytesRead: number }>;
+  readonly close: () => Promise<void>;
+}
+
+/** The disk calls the policy makes: Node's, or a test's that notes each path asked about. */
+export interface QuietFs {
+  readonly lstat: (at: string) => Promise<Entry>;
+  readonly readlink: (at: string) => Promise<string>;
+  /** Only for the roots themselves. */
+  readonly realpath: (at: string) => Promise<string>;
+  /** Opens a file to read: never through a link at its end, never waiting on a pipe or a device. */
+  readonly open: (at: string) => Promise<OpenFile>;
+}
+
+export type Looked =
+  /** Something is there: `path` is where it really is, with no link left in it. */
+  | { readonly kind: "there"; readonly path: string; readonly entry: Entry }
+  /** Nothing is there, at a place Inset may look. */
+  | { readonly kind: "gone" }
+  /** Inset may not look there, or the disk would not say. */
+  | { readonly kind: "unsure" };
+
+export interface QuietDisk {
+  /** What is at `file`, found without touching any place macOS could ask the user about. */
+  readonly find: (file: string) => Promise<Looked>;
+  /**
+   * The bytes of the regular file at `file`, when it holds `max` or fewer,
+   * found as `find` finds it and opened once; else null. Nothing else is read.
+   */
+  readonly read: (file: string, max: number) => Promise<Uint8Array | null>;
+}
+
+const UNSURE: Looked = { kind: "unsure" };
+const GONE: Looked = { kind: "gone" };
+
+/** Where macOS asks the user before an app reads a file (Files and Folders), by the home folder's own names. */
+const ASKED_IN_HOME = ["Desktop", "Documents", "Downloads", "Library"];
+
+/** Where disks other than the Mac's own are mounted. */
+const VOLUMES = "/Volumes";
+
+/** More links than any real path holds: a path that leads to itself ends here. */
+const LINKS_MAX = 32;
+
+/** The errors that mean nothing is at a path, as against one the system won't say about. */
+const NOTHING_THERE = new Set(["ENOENT", "ENOTDIR", "ENAMETOOLONG"]);
+
+/** A path as a Mac's disk compares names: composed, and with no capitals told apart. */
+const fold = (at: string): string => at.normalize("NFC").toLowerCase();
+
+/** Whether `folder` is `at` or holds it, by whole names spelled the same. */
+const holds = (folder: string, at: string): boolean =>
+  at === folder || at.startsWith(`${folder}/`);
+
+/**
+ * Whether the shut `folder` holds `at` however either is spelled: a disk
+ * that tells no capitals apart reaches it by any of them. Only a denial
+ * folds: a place is let in only by its own spelling.
+ */
+const shuts = (folder: string, at: string): boolean =>
+  holds(fold(folder), fold(at));
+
+/** A folder Inset may look in, as the disk spells it, and the disk it is on. */
+interface Root {
+  readonly path: string;
+  readonly dev: number;
+}
+
+interface Policy {
+  readonly roots: readonly Root[];
+  /** Places never touched, whatever holds them. */
+  readonly shut: readonly string[];
+}
+
+/** The root that holds `at`, when no shut place does. */
+const rootOf = (at: string, { roots, shut }: Policy): Root | undefined =>
+  shut.some((each) => shuts(each, at))
+    ? undefined
+    : roots.find((root) => holds(root.path, at));
+
+/**
+ * Whether Inset may ask the disk about `at`: the one place this is decided,
+ * before every call. A place in a root may be touched; so may a folder on
+ * the way down to a root, and a name at the top of the disk, where the
+ * system keeps links of its own (/var, /tmp). Nothing shut may, and nothing
+ * else: a place not known to be safe is not touched.
+ */
+const mayTouch = (at: string, policy: Policy): boolean =>
+  !policy.shut.some((each) => shuts(each, at)) &&
+  (at.lastIndexOf("/") === 0 ||
+    policy.roots.some((root) => holds(at, root.path) || holds(root.path, at)));
+
+type Touched<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly looked: Looked };
+
+/** One call to the disk, made only where the policy allows it. */
+const touch = async <T>(
+  at: string,
+  policy: Policy,
+  call: (at: string) => Promise<T>
+): Promise<Touched<T>> => {
+  if (!mayTouch(at, policy)) {
+    return { looked: UNSURE, ok: false };
+  }
+
+  try {
+    return { ok: true, value: await call(at) };
+  } catch (error) {
+    const code = FsErrorSchema.safeParse(error).data?.code ?? "";
+
+    return { looked: NOTHING_THERE.has(code) ? GONE : UNSURE, ok: false };
+  }
+};
+
+/** The disk itself. */
+const NODE_FS: QuietFs = {
+  lstat,
+  open: async (at) =>
+    await open(
+      at,
+      // oxlint-disable-next-line no-bitwise -- open(2) takes its flags as one number.
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    ),
+  readlink,
+  realpath,
+};
+
+/** Whether two looks at a path saw the same file: one on the same disk, at the same place on it. */
+const sameFile = (one: Entry, other: Entry): boolean =>
+  one.dev === other.dev && one.ino === other.ino;
+
+/** Reads `file` into `bytes` from `from` on, until they are full or it ends: how many bytes it gave. */
+const fill = async (
+  file: OpenFile,
+  bytes: Uint8Array,
+  from: number
+): Promise<number> => {
+  if (from === bytes.length) {
+    return from;
+  }
+
+  const { bytesRead } = await file.read(bytes, from, bytes.length - from, from);
+
+  return bytesRead === 0 ? from : await fill(file, bytes, from + bytesRead);
+};
+
+/**
+ * The bytes of an opened file, when the opening holds the regular file
+ * `looked` saw, of `max` bytes or fewer; else null. At most one byte more
+ * than it said it holds is read: a file that grew since is not read on.
+ */
+const readOpened = async (
+  file: OpenFile,
+  looked: Entry,
+  max: number
+): Promise<Uint8Array | null> => {
+  const now = await file.stat();
+
+  if (!now.isFile() || !sameFile(now, looked) || now.size > max) {
+    return null;
+  }
+
+  const bytes = new Uint8Array(now.size + 1);
+  const length = await fill(file, bytes, 0);
+
+  return length > now.size ? null : bytes.subarray(0, length);
+};
+
+/**
+ * The policy over `fs`: `find` resolves a path one link at a time, and asks
+ * the policy before each step, so a link is never followed into a place
+ * Inset may not look. A folder on another disk than its root's is a mounted
+ * volume, and ends the walk there.
+ */
+export const quietDisk = (
+  { home }: QuietRoots,
+  fs: QuietFs = NODE_FS
+): QuietDisk => {
+  /** The root as the disk spells it; none when it is not there, or on a mounted volume, which is not touched even to find it. */
+  const rootAt = async (folder: string): Promise<readonly Root[]> => {
+    if (shuts(VOLUMES, folder)) {
+      return [];
+    }
+
+    try {
+      const real = await fs.realpath(folder);
+
+      if (shuts(VOLUMES, real)) {
+        return [];
+      }
+
+      const entry = await fs.lstat(real);
+
+      return [{ dev: entry.dev, path: real }];
+    } catch {
+      return [];
+    }
+  };
+
+  const policyNow = async (): Promise<Policy> => {
+    const homes = await rootAt(home);
+
+    return {
+      roots: homes,
+      shut: [
+        VOLUMES,
+        ...homes.flatMap((root) =>
+          ASKED_IN_HOME.map((name) => `${root.path}/${name}`)
+        ),
+      ],
+    };
+  };
+
+  /** Walks `left` down from the folder `above`, whose own names hold no link. */
+  const walk = async (
+    policy: Policy,
+    above: readonly string[],
+    left: readonly string[],
+    links: number,
+    last: Entry | null
+  ): Promise<Looked> => {
+    const [step, ...rest] = left;
+
+    if (step === undefined) {
+      const path = `/${above.join("/")}`;
+
+      return last === null || rootOf(path, policy) === undefined
+        ? UNSURE
+        : { entry: last, kind: "there", path };
+    }
+
+    if (step === "" || step === ".") {
+      return await walk(policy, above, rest, links, last);
+    }
+
+    if (step === "..") {
+      return await walk(policy, above.slice(0, -1), rest, links, null);
+    }
+
+    const at = `/${[...above, step].join("/")}`;
+    // Left open: the folders above `at` were each looked at before, and one
+    // can be swapped for a link between that look and this call, or the
+    // file's opening after the walk. Holding them needs openat, which Node
+    // does not have.
+    const found = await touch(at, policy, fs.lstat);
+
+    if (!found.ok) {
+      return found.looked;
+    }
+
+    const entry = found.value;
+    const root = rootOf(at, policy);
+
+    // Left open: a volume mounted in the home folder is known only by this
+    // lstat of the folder it is mounted on, which already asks its disk.
+    // Nothing tells a folder's disk without a call on that folder.
+    if (root !== undefined && entry.dev !== root.dev) {
+      return UNSURE;
+    }
+
+    if (entry.isSymbolicLink()) {
+      const target =
+        links < LINKS_MAX ? await touch(at, policy, fs.readlink) : null;
+
+      if (target === null || !target.ok) {
+        return target?.looked ?? UNSURE;
+      }
+
+      const leads = target.value.split("/");
+
+      return await walk(
+        policy,
+        target.value.startsWith("/") ? [] : above,
+        [...leads, ...rest],
+        links + 1,
+        null
+      );
+    }
+
+    // More names follow, or a slash that says folder: only a folder holds them.
+    return rest.length > 0 && !entry.isDirectory()
+      ? GONE
+      : await walk(policy, [...above, step], rest, links, entry);
+  };
+
+  /** What is at `file`, under the policy it was looked for by. */
+  const look = async (
+    file: string
+  ): Promise<{ readonly policy: Policy; readonly looked: Looked } | null> => {
+    if (!file.startsWith("/")) {
+      return null;
+    }
+
+    const policy = await policyNow();
+
+    return {
+      looked: await walk(policy, [], file.split("/"), 0, null),
+      policy,
+    };
+  };
+
+  return {
+    find: async (file) => {
+      const found = await look(file);
+
+      return found?.looked ?? UNSURE;
+    },
+    read: async (file, max) => {
+      const found = await look(file);
+
+      if (
+        found?.looked.kind !== "there" ||
+        !found.looked.entry.isFile() ||
+        found.looked.entry.size > max
+      ) {
+        return null;
+      }
+
+      // The path `find` gave holds no link: opened with the policy asked again, its end not followed.
+      const opened = await touch(found.looked.path, found.policy, fs.open);
+
+      if (!opened.ok) {
+        return null;
+      }
+
+      try {
+        return await readOpened(opened.value, found.looked.entry, max);
+      } catch {
+        return null;
+      } finally {
+        try {
+          await opened.value.close();
+        } catch {
+          // Only read: a close that fails loses nothing.
+        }
+      }
+    },
+  };
+};

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { CODE_EDITORS, codeEditor, codePlace } from "@shared/code-editors";
 import { rect } from "@shared/geometry";
 import type { Rect } from "@shared/geometry";
 import {
@@ -16,9 +17,11 @@ import type { Rectangle } from "electron";
 import { activeWindow } from "get-windows";
 
 import { chatGptThreadLink } from "./codex-threads";
-import { readWebAreas } from "./page-address";
-import type { WebArea } from "./page-address";
+import { E2E_EDITORS } from "./e2e-log";
+import { NO_WINDOW, readFocusedWindow } from "./page-address";
+import type { FocusedWindow, WebArea } from "./page-address";
 import { t3ThreadTitle } from "./t3-threads";
+import { documentPath } from "./window-origin";
 
 export interface FrontWindow {
   readonly bounds: Rect<"screen"> | null;
@@ -111,25 +114,31 @@ const sourceContext = async (
       ? appLink
       : null;
 
-  return fitted({ app: window.app, appLink: openable, title, url });
+  return fitted({ ...window, appLink: openable, title, url });
 };
 
-/** The pages a window shows: its web areas, read with `pid`, and the page the copied text came from. */
-const pageAreas = async (
+/** What a window shows: its document and web areas, read with `pid`, and the page the copied text came from. */
+const shownBy = async (
   pid: number | null,
   copiedFrom: Promise<string | null> | undefined
-): Promise<readonly WebArea[]> => {
-  const [tree, copied] = await Promise.all([
-    pid === null ? [] : readWebAreas(pid),
+): Promise<FocusedWindow> => {
+  const [read, copied] = await Promise.all([
+    pid === null ? NO_WINDOW : readFocusedWindow(pid),
     copiedFrom ?? null,
   ]);
 
-  return copied === null ? tree : [...tree, { title: "", url: copied }];
+  return copied === null
+    ? read
+    : { ...read, areas: [...read.areas, { title: "", url: copied }] };
 };
+
+/** The editors main knows: the registry, and the desktop test's stand-in under its log. */
+export const EDITORS = [...CODE_EDITORS, ...E2E_EDITORS];
 
 /**
  * The window in front, read before Inset takes focus: its bounds for docking,
- * and the app, window title and browser page as an item's source. It asks
+ * and the app, window title and browser page as an item's source, with the
+ * file a code editor shows on macOS. It asks
  * only for what is already granted, so it never prompts: the title needs
  * Screen Recording, the page address needs Accessibility. Chrome, Safari and
  * their kin also need the user's one-time consent to Automation; with
@@ -177,21 +186,31 @@ export const frontWindow = async (
 
     const owner = orNull(front.owner.name);
 
-    const areas =
+    const shown =
       options.page === true
-        ? await pageAreas(
+        ? await shownBy(
             isMac && trusted ? front.owner.processId : null,
             options.copiedFrom
           )
         : null;
 
+    const title = orNull(
+      isMac ? front.title : withoutAppName(front.title, owner)
+    );
+
+    const document =
+      shown === null || shown.document === null
+        ? null
+        : documentPath(shown.document);
+
     const context = await sourceContext(
       {
         app: owner,
-        title: orNull(isMac ? front.title : withoutAppName(front.title, owner)),
+        code: codePlace(codeEditor(owner, EDITORS), document, title, owner),
+        title,
         url: "url" in front ? pageUrl(front.url) : null,
       },
-      areas
+      shown?.areas ?? null
     );
 
     return {
