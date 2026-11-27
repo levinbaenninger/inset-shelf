@@ -1008,6 +1008,229 @@ describe(createCopyCommands, () => {
     ).resolves.toStrictEqual([{ "image/png": "PNG" }]);
   });
 
+  /**
+   * Notes as the shelf stores them (note-markdown.test.ts shows each typed
+   * note's stored form), with what Copy puts on the clipboard for each: the
+   * words as the shelf shows them, and the shelf's own rendering of them.
+   */
+  const NOTES: readonly {
+    readonly stored: string;
+    readonly text: string;
+    readonly html: string;
+  }[] = [
+    {
+      html: "<p>type &amp;copy; or &amp;#123; here</p>",
+      stored: "type &amp;copy; or &amp;#123; here",
+      text: "type &copy; or &#123; here",
+    },
+    {
+      html: "<p>use &lt;draft> here</p>",
+      stored: "use &lt;draft> here",
+      text: "use <draft> here",
+    },
+    {
+      html: "<p>x &lt;b>y&lt;/b> z</p>",
+      stored: "x &lt;b>y&lt;/b> z",
+      text: "x <b>y</b> z",
+    },
+    {
+      html: "<p>Tom &amp; Jerry, R&amp;D, a &lt; b, x -> y</p>",
+      stored: "Tom & Jerry, R&D, a < b, x -> y",
+      text: "Tom & Jerry, R&D, a < b, x -> y",
+    },
+    {
+      html: "<p>a_b_c and snake_case_name</p>",
+      stored: "a_b_c and snake_case_name",
+      text: "a_b_c and snake_case_name",
+    },
+    {
+      html: "<p>__init__</p>",
+      stored: String.raw`\_\_init\_\_`,
+      text: "__init__",
+    },
+    {
+      html: "<p>*not bold*</p>",
+      stored: String.raw`\*not bold\*`,
+      text: "*not bold*",
+    },
+    {
+      html: String.raw`<p>\*not bold\*</p>`,
+      stored: String.raw`\\\*not bold\\\*`,
+      text: String.raw`\*not bold\*`,
+    },
+    {
+      html: "<p>~x~ and ~/dev</p>",
+      stored: String.raw`\~x\~ and \~/dev`,
+      text: "~x~ and ~/dev",
+    },
+    {
+      html: String.raw`<p>C:\Users\x\</p>`,
+      stored: "C:\\Users\\x\\",
+      text: "C:\\Users\\x\\",
+    },
+    {
+      html: "<p>[x] and [x](y)</p>",
+      stored: String.raw`[x] and [x\](y)`,
+      text: "[x] and [x](y)",
+    },
+    {
+      html: "<p>don`t, a `b` c</p>",
+      stored: "don\\`t, a \\`b\\` c",
+      text: "don`t, a `b` c",
+    },
+    { html: "<p>> quote</p>", stored: "&gt; quote", text: "> quote" },
+    { html: "<p>* item</p>", stored: String.raw`\* item`, text: "* item" },
+    {
+      html: "<ul>\n<li>[x] task</li>\n</ul>",
+      stored: String.raw`- \[x] task`,
+      text: "- [x] task",
+    },
+    {
+      html: '<p>email <a href="mailto:bob@example.com">bob@example.com</a> about</p>',
+      stored: "email bob@example.com about",
+      text: "email bob@example.com about",
+    },
+    {
+      html: '<p>email <a href="mailto:bob@example.com">bob@example.com</a> about snake_case</p>',
+      stored:
+        "email [bob@example.com](mailto:bob@example.com) about snake\\_case",
+      text: "email bob@example.com about snake_case",
+    },
+    {
+      html: '<p><a href="https://example.com" title="API docs">https://example.com</a></p>',
+      stored: '[https://example.com](https://example.com "API docs")',
+      text: "https://example.com",
+    },
+    {
+      html: "<p>a <strong>bold</strong> and <em>slanted</em> <del>word</del></p>",
+      stored: "a **bold** and *slanted* ~~word~~",
+      text: "a bold and slanted word",
+    },
+    {
+      html: '<p>see <a href="https://example.com/docs">the docs</a></p>',
+      stored: "see [the docs](https://example.com/docs)",
+      text: "see the docs",
+    },
+    {
+      html: '<p><a href="">run</a></p>',
+      stored: "[run](javascript:alert(1))",
+      text: "run",
+    },
+    {
+      html: "<p>run <code>a_b*c\\ &lt;b></code> now</p>",
+      stored: "run `a_b*c\\ <b>` now",
+      text: "run a_b*c\\ <b> now",
+    },
+    {
+      html: "<pre><code>const total = sum(items);\n  return total;\n</code></pre>",
+      stored: "```\nconst total = sum(items);\n  return total;\n```",
+      text: "const total = sum(items);\n  return total;",
+    },
+    {
+      html: '<pre><code class="language-ts">let a_b = 1;\n</code></pre>',
+      stored: "```ts\nlet a_b = 1;\n```",
+      text: "let a_b = 1;",
+    },
+    {
+      html: "<ul>\n<li>one</li>\n<li>two\n<ul>\n<li>under two</li>\n</ul>\n</li>\n</ul>",
+      stored: "- one\n- two\n  - under two",
+      text: "- one\n- two\n  - under two",
+    },
+    {
+      html: '<ol start="3">\n<li>third</li>\n<li>fourth</li>\n</ol>',
+      stored: "3. third\n4. fourth",
+      text: "3. third\n4. fourth",
+    },
+    {
+      html: "<p>one<br>\ntwo</p>\n<p>three</p>\n<p>after a blank line</p>",
+      stored: "one\ntwo\n\nthree\n\n\n\nafter a blank line",
+      text: "one\ntwo\n\nthree\n\nafter a blank line",
+    },
+    {
+      html: "<h2>Plan &amp; *.ts</h2>\n<blockquote>\n<p>> said</p>\n</blockquote>",
+      stored: "## Plan & *.ts\n\n> &gt; said",
+      text: "Plan & *.ts\n\n> said",
+    },
+    {
+      html: "<p>see chart and x y z</p>",
+      stored: "see ![chart](https://example.com/c.png) and x <span>y</span> z",
+      text: "see chart and x y z",
+    },
+    {
+      html: "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>C</td>\n<td>D</td>\n</tr>\n</tbody>\n</table>",
+      stored: "| A | B |\n| --- | --- |\n| C | D |",
+      text: "A\tB\nC\tD",
+    },
+  ];
+
+  it.each(NOTES)(
+    "copies the note stored as $stored as the shelf shows it, and its rendering as HTML",
+    async ({ html, stored, text }) => {
+      const { commands, controller, items, written } = await setup();
+
+      controller.apply({ id: items.text, text: stored, type: "editText" });
+
+      await commands.copy(items.text);
+
+      await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+        "text/html": html,
+        "text/plain": text,
+      });
+    }
+  );
+
+  it("copies a note's details, as a list and with its link, as the shelf shows its words", async () => {
+    const { commands, controller, items, written } = await setup();
+
+    controller.apply({
+      id: items.text,
+      text: "type &amp;copy; **now**",
+      type: "editText",
+    });
+
+    await commands.copyDetails(items.text);
+    await commands.copyList([items.text]);
+    await commands.copyWithLink(items.text);
+
+    const [details, list, withLink] = await Promise.all(
+      written.map(async (contents) => await formats(contents[0]))
+    );
+
+    expect({ details, list, withLink }).toStrictEqual({
+      details: {
+        "text/html":
+          "<p>type &amp;copy; <strong>now</strong></p><p>Before Friday</p>",
+        "text/plain": "type &copy; now\n\nBefore Friday",
+      },
+      list: {
+        "text/html": "<ol><li>type &amp;copy; now<br>Before Friday</li></ol>",
+        "text/plain": "1. type &copy; now\n   Before Friday",
+      },
+      withLink: { "text/plain": "type &copy; now\n\nBefore Friday" },
+    });
+  });
+
+  it("copies a selection exactly as it was copied, its HTML beside its text, until it is edited", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: null,
+        html: "<b>snake_case</b> &amp; more",
+        text: "**snake_case** &amp; more",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await commands.copy(id);
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": "<b>snake_case</b> &amp; more",
+      "text/plain": "**snake_case** &amp; more",
+    });
+  });
+
   it("says when the item has gone and copies nothing", async () => {
     const { commands, controller, items, written } = await setup();
 
