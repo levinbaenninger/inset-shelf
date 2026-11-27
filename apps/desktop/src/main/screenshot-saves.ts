@@ -157,18 +157,22 @@ interface Held<S extends Shot> {
   write: Promise<WriteResult> | null;
 }
 
+interface Unplaced {
+  readonly ok: false;
+  readonly message: string;
+  readonly stays: true;
+}
+
 type Placed =
   | { readonly ok: true }
-  /** Nothing was placed: by the time the picture file was written, the user's Undo had the screenshot back on the shelf. */
-  | { readonly ok: false; readonly message: string; readonly stays: true }
+  /** Nothing was placed: by the time the picture file was written, the user's Undo had the screenshot back on the shelf, or in a write on its way. */
+  | Unplaced
   | {
       readonly ok: false;
       readonly message: string;
       /** False when trying again can't help: the item holds all it can. */
       readonly retry?: false;
     };
-
-const STAYS: Placed = { message: SHOT_STAYS, ok: false, stays: true };
 
 const isFull = (item: ShelfItem | undefined): boolean =>
   item !== undefined && item.attachments.length >= ATTACHMENTS_MAX;
@@ -264,32 +268,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     return null;
   };
 
-  /**
-   * The screenshot as the shelf keeps a picture, its file written for a
-   * place still to be made. Null when the shelf shows the screenshot by
-   * then, since the user can Undo a delete while the file is written:
-   * nothing is placed, and the file is gone again. The caller awaits nothing
-   * between this and placing.
-   */
-  const pictureFor = async (now: Held<S>): Promise<ShelfImage | null> => {
-    // Read at the press: the pointer can be on a display with another scale by the time the file is written.
-    const pixelsPerDip = deps.scale();
-    const file = await deps.writePicture(now.shot);
-
-    if (shown(now) === null) {
-      return {
-        file,
-        heightPx: now.shot.heightPx,
-        pixelsPerDip,
-        widthPx: now.shot.widthPx,
-      };
-    }
-
-    deps.dropPicture(file);
-
-    return null;
-  };
-
   /** A write landed the screenshot where it is. */
   const landed = (at: Placement): boolean =>
     within(deps.stored(at.item), at) !== undefined;
@@ -303,6 +281,45 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     now.places.some(
       (at) => landed(at) || within(deps.onItsWay(at.item), at) !== undefined
     );
+
+  /**
+   * Why no new place may be made for the screenshot now: the shelf shows it,
+   * or the disk doesn't hold yet that the user took it off. Null when one may.
+   */
+  const elsewhere = (now: Held<S>): string | null => {
+    if (shown(now) !== null) {
+      return SHOT_STAYS;
+    }
+
+    return kept(now) ? SHOT_REMOVAL_UNSAVED : null;
+  };
+
+  /**
+   * The screenshot as the shelf keeps a picture, its file written for a
+   * place still to be made. While the file is written the user's Undo can
+   * bring the screenshot back, and a write can start that holds it there:
+   * then nothing is placed, the file is gone again, and the user hears why.
+   * The caller awaits nothing between this and placing.
+   */
+  const pictureFor = async (now: Held<S>): Promise<ShelfImage | Unplaced> => {
+    // Read at the press: the pointer can be on a display with another scale by the time the file is written.
+    const pixelsPerDip = deps.scale();
+    const file = await deps.writePicture(now.shot);
+    const message = elsewhere(now);
+
+    if (message === null) {
+      return {
+        file,
+        heightPx: now.shot.heightPx,
+        pixelsPerDip,
+        widthPx: now.shot.widthPx,
+      };
+    }
+
+    deps.dropPicture(file);
+
+    return { message, ok: false, stays: true };
+  };
 
   /**
    * The write that holds the screenshot where the shelf shows it, or the
@@ -608,8 +625,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
         const image = await pictureFor(now);
 
-        if (image === null) {
-          return STAYS;
+        if ("stays" in image) {
+          return image;
         }
 
         const id = deps.addItem(image);
@@ -662,8 +679,8 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
         const image = await pictureFor(now);
 
-        if (image === null) {
-          return STAYS;
+        if ("stays" in image) {
+          return image;
         }
 
         const result = deps.attach(image, id);
