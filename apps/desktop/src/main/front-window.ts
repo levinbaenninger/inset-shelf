@@ -11,7 +11,7 @@ import {
 } from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
 import { desktopLink, t3Thread, webUrl } from "@shared/web-source";
-import { withoutAppName } from "@shared/window-title";
+import { appName, withoutAppName } from "@shared/window-title";
 import { app, screen, systemPreferences } from "electron";
 import type { Rectangle } from "electron";
 import { activeWindow } from "get-windows";
@@ -184,7 +184,7 @@ export const frontWindow = async (
 
     const { height, width, x, y } = toDip(front.bounds);
 
-    const owner = orNull(front.owner.name);
+    const owner = appName(orNull(front.owner.name));
 
     const shown =
       options.page === true

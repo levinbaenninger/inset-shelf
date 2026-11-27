@@ -1,6 +1,19 @@
 /** Zero-width characters; Edge writes a zero-width space inside its name. */
 const INVISIBLE = /[\u200B-\u200D\u2060\uFEFF]/gu;
 
+/** A program file's name, which get-windows reports for an app whose program has no description (Windows 11's Notepad). */
+const PROGRAM_FILE = /\.exe$/iu;
+
+const nameOf = (app: string): string => {
+  const name = app.replace(PROGRAM_FILE, "").trim();
+
+  return name === "" ? app : name;
+};
+
+/** An app's name as the shelf shows it: "Notepad.exe" reads "Notepad". Any other name stays as it is. */
+export const appName = (app: string | null): string | null =>
+  app === null ? null : nameOf(app);
+
 /** Names apps end their window titles with when these differ from the app's own name. */
 const TITLE_NAMES = {
   Firefox: ["Mozilla Firefox"],
@@ -22,8 +35,17 @@ export const withoutAppName = (title: string, app: string | null): string => {
     return title;
   }
 
+  const shown = nameOf(app);
+
   const visible = title.replaceAll(INVISIBLE, "");
-  const names = [app, ...(hasTitleName(app) ? TITLE_NAMES[app] : [])];
+
+  const names = [
+    ...new Set([
+      shown,
+      app,
+      ...(hasTitleName(shown) ? TITLE_NAMES[shown] : []),
+    ]),
+  ];
 
   for (const name of names) {
     for (const dash of DASHES) {
@@ -39,7 +61,9 @@ export const withoutAppName = (title: string, app: string | null): string => {
 };
 
 const UNREAD = /^\(\d+\)\s+/u;
-const DIRTY = /^[●•]\s*/u;
+
+/** Marks for unsaved changes: Code's dot, and the asterisk Windows apps such as Notepad put first. */
+const DIRTY = /^[●•*]\s*/u;
 
 /** A window's title as it names what it shows: without the app's name, an unread count or an unsaved mark; null when that says nothing. */
 export const cleanTitle = (
@@ -56,5 +80,7 @@ export const cleanTitle = (
     .replace(DIRTY, "")
     .trim();
 
-  return clean.length < 3 || clean === app ? null : clean;
+  return clean.length < 3 || clean === app || clean === appName(app)
+    ? null
+    : clean;
 };

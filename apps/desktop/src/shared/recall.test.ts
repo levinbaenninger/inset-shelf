@@ -260,6 +260,19 @@ describe(samePlace, () => {
       }),
       "title",
     ],
+    // Read from this PC's windows (Windows 11, 2026-11-27): get-windows names Notepad by its program file, which then marks unsaved changes.
+    [
+      "a Notepad file saved before an edit against its window after",
+      source({ app: "Notepad.exe", title: "explore-notes.txt - Notepad" }),
+      source({ app: "Notepad.exe", title: "*explore-notes.txt - Notepad" }),
+      "title",
+    ],
+    [
+      "a Notepad file kept by an older build against its window named as now",
+      source({ app: "Notepad.exe", title: "explore-notes.txt - Notepad" }),
+      source({ app: "Notepad", title: "*explore-notes.txt" }),
+      "title",
+    ],
   ] as const)("%s → %s", (_, item, front, rule) => {
     expect(samePlace(item, front)).toBe(rule);
   });
@@ -343,6 +356,22 @@ describe(placeOf, () => {
       placeOf(source({ app: "TextEdit", title: "Standup" }))
     );
     expect(placeOf(source({ app: "Finder" }))).toBeNull();
+  });
+
+  it("stays one place while Notepad marks its file unsaved, and across how its app is named", () => {
+    const saved = placeOf(
+      source({ app: "Notepad.exe", title: "explore-notes.txt - Notepad" })
+    );
+
+    expect(saved).not.toBeNull();
+    expect(
+      placeOf(
+        source({ app: "Notepad.exe", title: "*explore-notes.txt - Notepad" })
+      )
+    ).toBe(saved);
+    expect(
+      placeOf(source({ app: "Notepad", title: "*explore-notes.txt" }))
+    ).toBe(saved);
   });
 });
 
