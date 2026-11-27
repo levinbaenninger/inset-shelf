@@ -29,8 +29,8 @@ export interface ShotDropDeps<S> {
   readonly dragFailed: (why: string) => void;
   /** A drop threw after the shelf had its reply: the user hears why, once. */
   readonly dropFailed: (why: string) => void;
-  /** Writes the card's picture to a file of the drag's own, named as the screenshot is, and returns it; never a file of the user's. */
-  readonly stage: (shot: S) => string;
+  /** Writes the card's picture into `folder`, the drag's own folder in staging, named as the screenshot is, and returns the file; never a file of the user's. */
+  readonly stage: (shot: S, folder: string) => string;
 }
 
 /** Where a file is on disk: macOS can name a temporary file under /var or under /private/var. */
@@ -68,6 +68,8 @@ const NOTHING: AttachResult = { attached: [], message: null };
 export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
   // The file the card's last drag handed out, and the screenshot it is, however long its drop takes.
   let drag: { readonly seq: number; readonly file: string } | null = null;
+  // Drags so far: each stages its file in a folder of its own, so no two drags share a file.
+  let drags = 0;
 
   const classify = (paths: readonly string[]): Drop => {
     const [only] = paths;
@@ -111,8 +113,10 @@ export const createShotDrop = <S>(deps: ShotDropDeps<S>) => {
   };
 
   const staged = (shot: S): string | null => {
+    drags += 1;
+
     try {
-      return deps.stage(shot);
+      return deps.stage(shot, `screenshot-drag-${drags}`);
     } catch (error) {
       deps.dragFailed(errorMessage(error));
 
