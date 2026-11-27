@@ -204,8 +204,8 @@ const setup = (options: { readonly minutesAgo?: number } = {}) => {
     },
     now: () => clock,
     onWrite: (listener) => controller.onWrite(listener),
-    persisted: async (accept) =>
-      await controller.persisted(controller.snapshot().rev, accept),
+    persisted: async () =>
+      await controller.persisted(controller.snapshot().rev),
     // As index.ts wires it: the reason the shelf gives for an item its last write was refused.
     refusal: (id) => {
       const state = controller.copyState([id], controller.snapshot().doc);
@@ -1949,6 +1949,29 @@ describe("a write that landed while the user had the screenshot off the shelf", 
     }).toStrictEqual({
       disk: { attached: 0, items: 1 },
       saved: ["shelf"],
+      view: null,
+    });
+  });
+
+  it("names the row the shelf shows, not the row this press made, when Undo brings an earlier row back in its place during the save", async () => {
+    const card = await refused("shelf");
+    const first = rowOf(card);
+
+    card.controller.apply({ id: first, type: "remove" });
+    card.failWrites({ ok: true });
+    await settled(card);
+
+    const end = card.holdWrite();
+    const adding = card.saves.addToShelf(1);
+
+    await placedOnShelf(card);
+    card.controller.apply({ id: rowOf(card), type: "remove" });
+    card.controller.apply({ id: first, type: "undoRemove" });
+    end({ ok: true });
+
+    await expect(adding).resolves.toBe(first);
+    expect({ disk: card.disk().at(-1), view: card.view() }).toStrictEqual({
+      disk: { attached: 0, items: 1 },
       view: null,
     });
   });

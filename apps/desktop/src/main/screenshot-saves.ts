@@ -89,8 +89,8 @@ export interface ShotSavesDeps<S extends Shot> {
   readonly addItem: (shot: S, file: string) => ItemId | null;
   /** Attaches the screenshot, with its picture file written, to an item, and deletes the file when the item doesn't take it. Awaits nothing, as `addItem`. */
   readonly attach: (shot: S, file: string, id: ItemId) => AttachResult;
-  /** Waits for the current revision and any queued writes needed to satisfy `accept`. */
-  readonly persisted: (accept: () => boolean) => Promise<WriteResult>;
+  /** The write of every change so far, however long the disk takes: how it ended. The card's wait for it has a limit, the write has none. */
+  readonly persisted: () => Promise<WriteResult>;
   /** Runs `run` after `ms`, unless the function it returns is called first. */
   readonly setTimer: (run: () => void, ms: number) => () => void;
   /** The item as the disk holds it; undefined while no write of it has landed. */
@@ -149,7 +149,7 @@ interface Held<S extends Shot> {
 }
 
 type Placed =
-  | { readonly ok: true; readonly id: ItemId }
+  | { readonly ok: true }
   /** Nothing was placed: by the time the picture file was written, the user's Undo had the screenshot back on the shelf. */
   | { readonly ok: false; readonly message: string; readonly stays: true }
   | {
@@ -276,6 +276,24 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
   /** A write landed the screenshot where it is. */
   const landed = (at: Placement): boolean =>
     within(deps.stored(at.item), at) !== undefined;
+
+  /**
+   * The write that holds the screenshot where the shelf shows it, or the
+   * first one refused on the way. A write that read the shelf while the user
+   * had the screenshot off it lands without it; their Undo since is a later
+   * change, and the write of that is the one that counts.
+   */
+  const holding = async (now: Held<S>): Promise<WriteResult> => {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- each write follows the user's last change.
+      const ended = await deps.persisted();
+      const on = shown(now);
+
+      if (!ended.ok || on === null || landed(on.at)) {
+        return ended;
+      }
+    }
+  };
 
   /** The item Add to “…” names while the shelf holds the screenshot nowhere: the one the user can know, unless it holds all it can. */
   const offered = (): ScreenshotView["target"] => {
@@ -464,8 +482,6 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     card.holdForSave();
     retarget();
 
-    let placed: ItemId | null = null;
-
     const written = await reportSaveError(async () => {
       const result = await place();
 
@@ -473,15 +489,9 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return result;
       }
 
-      placed = result.id;
       // The shelf holds it now: the card shows no other add while it is written.
       retarget();
-      now.write = deps.persisted(() => {
-        // Undo can bring the screenshot back after a write that didn't hold it started.
-        const on = shown(now);
-
-        return on === null || landed(on.at);
-      });
+      now.write = holding(now);
 
       return await withinWait(now.write, deps.setTimer);
     });
@@ -506,28 +516,19 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
         return null;
       }
 
-      if (!landed(on.at)) {
-        // A new Undo can bring it back between the write ending and this save returning.
-        if (mine) {
-          retarget();
-        }
-
-        return null;
-      }
-
       if (held === now) {
         held = null;
         card.hide();
       }
 
-      if (on.at.to !== to || on.at.item !== placed) {
-        // Undo restored an older placement. Don't report success for the add that no longer holds it.
+      // Their Undo brought back a place the other add made, and the write landed it there: the notice names that place, not this press's.
+      if (on.at.to !== to) {
         deps.saved(on.at.to, on.at.item);
 
         return null;
       }
 
-      return placed;
+      return on.at.item;
     }
 
     // Nothing failed: the screenshot is where the user's Undo put it back, and the card says how it stands there.
@@ -568,7 +569,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return await save(now, "shelf", async () => {
         // Its row is on the shelf: Retry saves that row, and never makes a second.
         if (at !== null) {
-          return { id: at.item, ok: true };
+          return { ok: true };
         }
 
         const file = await pictureFor(now);
@@ -590,7 +591,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
 
         now.places = [{ item: id, to: "shelf" }, ...now.places];
 
-        return { id, ok: true };
+        return { ok: true };
       });
     },
 
@@ -622,7 +623,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
       return await save(now, "item", async () => {
         // Its attachment is on the item: Retry saves it there, and never attaches a second.
         if (at !== null) {
-          return { id, ok: true };
+          return { ok: true };
         }
 
         const file = await pictureFor(now);
@@ -652,7 +653,7 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
           ...now.places,
         ];
 
-        return { id, ok: true };
+        return { ok: true };
       });
     },
 

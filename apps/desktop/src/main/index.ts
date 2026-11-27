@@ -948,8 +948,8 @@ const start = async (): Promise<void> => {
     },
     now: () => Date.now(),
     onWrite: controller.onWrite,
-    persisted: async (accept) =>
-      await controller.persisted(controller.snapshot().rev, accept),
+    persisted: async () =>
+      await controller.persisted(controller.snapshot().rev),
     refusal: (id) => {
       const state = controller.copyState([id], controller.snapshot().doc);
 
