@@ -1723,15 +1723,17 @@ const start = async (): Promise<void> => {
   };
 
   /**
-   * Shows the shelf with the saved image; when Copy and Save could not copy,
-   * it says why there. `saving`: a new drawing copied before it reached the
-   * disk, which says so if it never does.
+   * Shows the shelf with the saved image, where it is when it shows already;
+   * when Copy and Save could not copy, it says why there. `saving`: a new
+   * drawing copied before it reached the disk, which says so if it never does.
    */
   const showSaved = async (
     copied: ActionResult | null,
     saving: Promise<WriteResult> | null = null
   ): Promise<void> => {
-    await showShelf();
+    if (!focusShelf()) {
+      await showShelf();
+    }
 
     if (copied !== null && !copied.ok) {
       notify(copied.message, "failed");
