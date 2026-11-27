@@ -4,6 +4,8 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { codeEditor } from "@shared/code-editors";
+import type { CodePlace } from "@shared/code-place";
 import {
   drawingContract,
   onboardingContract,
@@ -99,7 +101,7 @@ import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
-import { frontWindow } from "./front-window";
+import { EDITORS, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
 import {
@@ -109,6 +111,7 @@ import {
 } from "./menu-open";
 import { createOnboardingWindow } from "./onboarding-window";
 import { openApp, openAppAt } from "./open-app";
+import { fileIsThere, openCode } from "./open-code";
 import { createPageSettle, followPage } from "./page-settle";
 import { appBundlePath, createAppTile } from "./permissions/bundle";
 import { createOnboarding } from "./permissions/onboarding";
@@ -816,6 +819,32 @@ const start = async (): Promise<void> => {
     tone = "done"
   ) => {
     toast.send({ title: message, tone, type: "notified" });
+  };
+
+  /** Opens a code item's file in the editor it came from (src/main/open-code.ts). */
+  const openCodeItem = async (
+    name: string | null,
+    place: CodePlace
+  ): Promise<void> => {
+    await openCode(codeEditor(name, EDITORS), place, {
+      bringForward: async (address) => {
+        const editor = await app.getApplicationInfoForProtocol(address);
+
+        openAppAt(editor.path);
+      },
+      fileIsThere,
+      notify: (message) => {
+        notify(message, "failed");
+      },
+      open: async (address) => {
+        await shell.openExternal(address);
+      },
+      registered: (address) =>
+        app.getApplicationNameForProtocol(address) !== "",
+      reveal: (file) => {
+        shell.showItemInFolder(file);
+      },
+    });
   };
 
   // Pictures and files attached to an item after capture (attachments.ts).
@@ -2369,11 +2398,20 @@ const start = async (): Promise<void> => {
       },
       openLink: ({ id, url }) => {
         const item = controller.item(id);
-        const fromApp = openingApp(item?.context ?? null, isMac);
+        const context = item?.context ?? null;
+
+        // An item from a code editor opens its file there again, by an address only main builds.
+        if (url === undefined && context !== null && context.code !== null) {
+          void openCodeItem(context.app, context.code);
+
+          return;
+        }
+
+        const fromApp = openingApp(context, isMac);
 
         // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
         if (url === undefined && fromApp !== null) {
-          void openInApp(fromApp, item?.context ?? null);
+          void openInApp(fromApp, context);
 
           return;
         }
@@ -2381,7 +2419,7 @@ const start = async (): Promise<void> => {
         // Only the item's own page or a link in it opens: a web page, or a page from a file.
         const target =
           url === undefined
-            ? (item?.context?.url ?? null)
+            ? (context?.url ?? null)
             : itemAddresses(item, url).find((known) => known === url);
 
         if (target !== undefined && target !== null && isPageAddress(target)) {

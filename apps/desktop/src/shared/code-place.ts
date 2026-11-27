@@ -53,3 +53,7 @@ export const fromHome = (path: string, home: string): string | null => {
     ? `~${path.slice(folder.length)}`
     : null;
 };
+
+/** What the shelf says when a code item's file has moved or been deleted since it was captured. */
+export const goneMessage = (place: CodePlace): string =>
+  `${fileName(place)} is no longer at this path`;
