@@ -350,6 +350,7 @@ describe(createAttachments, () => {
 
   it("keeps a dropped or picked picture's own name, on the shelf and when it is dragged back out", async () => {
     const { attachments, controller, id } = setup(0);
+
     const op = await attachments.prepareItem(
       "/Users/someone/Desktop/chart-sample.png"
     );

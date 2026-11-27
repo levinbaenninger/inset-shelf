@@ -5,26 +5,19 @@ import { autolinks, noteMarkdown, noteMarkdownManager } from "./note-markdown";
 
 const markdown = noteMarkdownManager();
 
-type Run = string | { readonly text: string; readonly href: string };
+/** Words typed as they are. */
+const plain = (text: string): JSONContent => ({ text, type: "text" });
 
-/** One typed line as the field holds it: plain runs, and runs it linked as they were typed. */
-const typed = (...runs: readonly Run[]): JSONContent => ({
-  content: [
-    {
-      content: runs.map((run) =>
-        typeof run === "string"
-          ? { text: run, type: "text" }
-          : {
-              marks: [
-                { attrs: { href: run.href, title: null }, type: "link" },
-              ],
-              text: run.text,
-              type: "text",
-            }
-      ),
-      type: "paragraph",
-    },
-  ],
+/** An address the field linked as it was typed. */
+const linked = (text: string, href: string): JSONContent => ({
+  marks: [{ attrs: { href, title: null }, type: "link" }],
+  text,
+  type: "text",
+});
+
+/** One typed line as the field holds it. */
+const typed = (...runs: readonly JSONContent[]): JSONContent => ({
+  content: [{ content: [...runs], type: "paragraph" }],
   type: "doc",
 });
 
@@ -38,9 +31,9 @@ describe(noteMarkdown, () => {
       noteMarkdown(
         markdown,
         typed(
-          "email ",
-          { href: "mailto:bob@example.com", text: "bob@example.com" },
-          " about ticket #42 | priority high"
+          plain("email "),
+          linked("bob@example.com", "mailto:bob@example.com"),
+          plain(" about ticket #42 | priority high")
         )
       )
     ).toBe("email bob@example.com about ticket #42 | priority high");
@@ -51,13 +44,10 @@ describe(noteMarkdown, () => {
       noteMarkdown(
         markdown,
         typed(
-          "see ",
-          {
-            href: "https://example.com/a_b?x=1",
-            text: "https://example.com/a_b?x=1",
-          },
-          " and ",
-          { href: "http://www.example.com", text: "www.example.com" }
+          plain("see "),
+          linked("https://example.com/a_b?x=1", "https://example.com/a_b?x=1"),
+          plain(" and "),
+          linked("www.example.com", "http://www.example.com")
         )
       )
     ).toBe("see https://example.com/a_b?x=1 and www.example.com");
@@ -71,11 +61,11 @@ describe(noteMarkdown, () => {
     "[draft] plan",
     "ticket #42 | priority high",
   ])("stores %s as typed", (text) => {
-    expect(noteMarkdown(markdown, typed(text))).toBe(text);
+    expect(noteMarkdown(markdown, typed(plain(text)))).toBe(text);
   });
 
   it("keeps the one escape a note needs to read as typed", () => {
-    expect(noteMarkdown(markdown, typed("*not bold*"))).toBe(
+    expect(noteMarkdown(markdown, typed(plain("*not bold*")))).toBe(
       String.raw`*not bold\*`
     );
   });

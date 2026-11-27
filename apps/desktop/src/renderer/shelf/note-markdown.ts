@@ -47,14 +47,14 @@ export const noteMarkdownManager = (): MarkdownManager =>
 /** A backslash escape or an HTML entity, as TipTap writes them around plain characters. */
 const ESCAPE = /\\[\\`*_[\]~]|&(?:amp|lt|gt);/gu;
 
-const ENTITY: Readonly<Record<string, string>> = {
-  "&amp;": "&",
-  "&gt;": ">",
-  "&lt;": "<",
-};
+const ENTITY = new Map([
+  ["&amp;", "&"],
+  ["&gt;", ">"],
+  ["&lt;", "<"],
+]);
 
 /** A link written out, which reads the same bare when its words are its own address. */
-const LINK = /\[([^\]\n]*)\]\([^)\s]*\)/gu;
+const LINK = /\[(?<words>[^\]\n]*)\]\([^)\s]*\)/gu;
 
 /**
  * `text` with as many of `pattern`'s matches written bare as `same` allows,
@@ -123,11 +123,16 @@ const simplest = (markdown: MarkdownManager, block: string): string => {
   const unescaped = withoutNeedless(
     block,
     ESCAPE,
-    ([match]) => ENTITY[match] ?? match.slice(1),
+    ([match]) => ENTITY.get(match) ?? match.slice(1),
     same
   );
 
-  return withoutNeedless(unescaped, LINK, ([, words]) => words ?? "", same);
+  return withoutNeedless(
+    unescaped,
+    LINK,
+    (match) => match.groups?.words ?? "",
+    same
+  );
 };
 
 /**

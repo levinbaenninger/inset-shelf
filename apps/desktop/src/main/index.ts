@@ -41,7 +41,6 @@ import type {
   AttachmentId,
   ItemContext,
   ItemId,
-  MainOp,
   Picture,
   Pin,
   ShelfImage,
