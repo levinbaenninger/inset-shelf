@@ -863,10 +863,10 @@ const fileOfAddress = (address: string): string | null => {
   }
 };
 
-/** Clicks the code item's source line, "a.ts · proj", in the shelf. */
+/** Clicks the code item's source line, "a.ts · proj", in the shelf: the only button that names the file. */
 const clickCodeLine = async (attempts = 10): Promise<boolean> => {
   const found = jxa(`const hit = ${processElements}.findLast((e) => {
-      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => /^a\\.ts\\b/u.test(t ?? "")); } catch { return false; }
+      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => (t ?? "").includes("a.ts")); } catch { return false; }
     });
     hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
 
@@ -921,6 +921,8 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   const clickedGone = await clickCodeLine();
 
   await waitUntil(() => frontmost() === "source", 6000);
+  // A wrong open would start the editor too, and its record could land just after.
+  await delay(1000);
   record(
     "a file that is gone opens nothing",
     clickedGone && openedInSource().length === 0
@@ -930,7 +932,12 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
     frontmost() === "source",
     frontmost()
   );
-  osa(`tell application id "${sourceBundleId}" to quit`);
+
+  try {
+    osa(`tell application id "${sourceBundleId}" to quit`);
+  } catch {
+    // Already gone.
+  }
 };
 
 const checkCodePlace = async (): Promise<void> => {
