@@ -259,7 +259,10 @@ const baseline = async <S>(
   const snapshot = await deps.snapshot().catch(() => null);
 
   if (snapshot !== null && deps.readable(snapshot)) {
-    const verdict = await verdictOn(deps, snapshot, copied, afterHold);
+    // A read that can't be listed says nothing either.
+    const verdict = await verdictOn(deps, snapshot, copied, afterHold).catch(
+      (): Verdict => "unsure"
+    );
 
     if (verdict !== "unsure") {
       return verdict === "ours"

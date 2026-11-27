@@ -465,3 +465,19 @@ describe("a cut and a copy of the same file", () => {
     expect(clip.items()).toStrictEqual([draft]);
   });
 });
+
+describe("a read the capture can't open", () => {
+  it("leaves the clipboard as it is, and says it wasn't put back, when what a read holds can't be listed", async () => {
+    const clip = clipboard({ copied: [list(A)], initial: [EARLIER] });
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        content: async () =>
+          await Promise.reject(new Error("clipboard unavailable")),
+      })
+    ).resolves.toMatchObject({ kind: "files", restored: false });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
