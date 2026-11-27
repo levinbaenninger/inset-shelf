@@ -21,6 +21,8 @@ export interface LiveEdits {
     readonly send: (text: string) => void;
     /** The item the field edits, so Discard changes can stop it. */
     readonly owner?: string;
+    /** The words are code: they are sent exactly as typed, every space and blank line kept. */
+    readonly code?: boolean;
   }) => LiveEdit;
   /** Sends every edit still waiting for its pause: before a quit, a copy or a drag. */
   readonly flushAll: () => void;
@@ -28,12 +30,14 @@ export interface LiveEdits {
   readonly drop: (owner: string) => void;
 }
 
-/** The words without blank lines around them: the first line keeps its indentation, which code needs. */
-const clean = (markdown: string): string =>
-  markdown
-    .replace(/^\s*\n/u, "")
-    .trimEnd()
-    .slice(0, TEXT_MAX);
+/** A note's words without the spaces around them, so spaces before its first line never make it code; code as typed. Either is empty when only spaces are left. */
+const clean = (text: string, code: boolean): string => {
+  if (text.trim() === "") {
+    return "";
+  }
+
+  return (code ? text : text.trim()).slice(0, TEXT_MAX);
+};
 
 /**
  * The page's only drafts: words typed into a text item's field that have
@@ -75,7 +79,7 @@ export const createLiveEdits = (deps: {
         entry.flush();
       }
     },
-    open: ({ original, owner, send }) => {
+    open: ({ code = false, original, owner, send }) => {
       const key = Symbol("edit");
       const opened = owner === undefined ? 0 : (drops.get(owner) ?? 0);
 
@@ -88,7 +92,7 @@ export const createLiveEdits = (deps: {
 
       // The words as they go to main: trimmed and cut to fit, but the item's own words, left as they opened, go back as they were.
       const settled = (markdown: string): string =>
-        markdown === original ? original : clean(markdown);
+        markdown === original ? original : clean(markdown, code);
 
       const stop = (): void => {
         cancelTimer?.();

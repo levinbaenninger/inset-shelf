@@ -674,7 +674,12 @@ export const TextEditor = ({
   const edit = (): LiveEdit => {
     const current =
       live.current ??
-      liveEdits.open({ original: item.text, owner: item.id, send: onSave });
+      liveEdits.open({
+        code,
+        original: item.text,
+        owner: item.id,
+        send: onSave,
+      });
 
     live.current = current;
 
@@ -695,7 +700,8 @@ export const TextEditor = ({
     }
 
     cancelled.current = true;
-    edit().finish(markdown);
+    // Words never changed are never saved: an edit drops the item's HTML, and the field's rewrite of them is not the user's.
+    live.current?.finish(markdown);
     onDone();
   };
 
