@@ -1,7 +1,7 @@
+import { PATH_MAX } from "@shared/code-place";
 import {
   APP_NAME_MAX,
   fitText,
-  PATH_MAX,
   WINDOW_TITLE_MAX,
   WindowRefSchema,
 } from "@shared/shelf";

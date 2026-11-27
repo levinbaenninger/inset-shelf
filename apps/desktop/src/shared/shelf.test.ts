@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { z } from "zod";
 
+import { CodePlaceSchema } from "./code-place";
 import v3 from "./fixtures/shelf-v3.json";
 import {
   applyOp,
@@ -15,7 +16,6 @@ import {
   ATTACHMENTS_MAX,
   AttachedImageSchema,
   AttachmentSchema,
-  CodePlaceSchema,
   ContextSchema,
   ItemIdSchema,
   parseComposer,

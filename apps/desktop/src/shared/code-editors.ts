@@ -1,5 +1,5 @@
-import { CodePlaceSchema } from "./shelf";
-import type { CodePlace } from "./shelf";
+import { CodePlaceSchema } from "./code-place";
+import type { CodePlace } from "./code-place";
 import { cleanTitle } from "./window-title";
 
 /**
