@@ -43,6 +43,7 @@ import type {
   MainOp,
   Picture,
   Pin,
+  ShelfImage,
   ShelfItem,
   WindowRef,
 } from "@shared/shelf";
@@ -851,8 +852,17 @@ const start = async (): Promise<void> => {
     writeAttachment: async (png) => await store.writeAttachment(png),
   });
 
-  /** The card's screenshot became an item of its own, or the shelf refused it (null): the trials' log and the tutorial's screenshot step hear of the item. */
-  const shotItemAdded = (id: ItemId | null): ItemId | null => {
+  /** Makes the card's screenshot an item in the section new items go to; the trials' log and the tutorial's screenshot step hear of it. */
+  const addShotItem = (image: ShelfImage) => {
+    const id = controller.apply({
+      context: null,
+      image,
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "screenshot",
+    });
+
     if (id !== null) {
       e2eLog("itemAdded", { itemId: id, kind: "image", via: "screenshot" });
       tutorial.complete(SHELF_TASK_IDS.screenshot);
@@ -861,49 +871,11 @@ const start = async (): Promise<void> => {
     return id;
   };
 
-  /** Makes the card's screenshot an item in the section new items go to. */
-  const addShotItem = async (current: CardShot) => {
-    const { scaleFactor } = screen.getDisplayNearestPoint(
-      screen.getCursorScreenPoint()
-    );
-
-    return shotItemAdded(
-      controller.apply({
-        context: null,
-        image: {
-          file: await store.writeAttachment(current.png),
-          heightPx: current.heightPx,
-          pixelsPerDip: scaleFactor,
-          widthPx: current.widthPx,
-        },
-        pins: [],
-        source: null,
-        type: "addImage",
-        via: "screenshot",
-      })
-    );
-  };
-
   /** The screenshot attached to an item, named as the system names a screenshot. */
-  const attachShotTo = async (current: CardShot, id: ItemId) => {
-    const { scaleFactor } = screen.getDisplayNearestPoint(
-      screen.getCursorScreenPoint()
+  const attachShotTo = (image: ShelfImage, id: ItemId) =>
+    attachResult(
+      attachments.attachTo(id, [{ image, kind: "image", name: shotName() }])
     );
-
-    return attachResult(
-      attachments.attachTo(id, [
-        await attachments.storePicture(
-          {
-            heightPx: current.heightPx,
-            png: current.png,
-            widthPx: current.widthPx,
-          },
-          shotName(),
-          scaleFactor
-        ),
-      ])
-    );
-  };
 
   /** The item selected or open in details in the shelf, or null; the page reports it. */
   let shelfSelection: ItemId | null = null;
@@ -945,24 +917,18 @@ const start = async (): Promise<void> => {
   const shotSaves = createShotSaves<CardShot>({
     addItem: addShotItem,
     attach: attachShotTo,
-    attachmentToRow: (id, attachmentId) =>
-      shotItemAdded(
-        controller.apply({
-          attachmentId,
-          id,
-          type: "attachmentToItem",
-          via: "screenshot",
-        })
-      ),
     card: {
       hide: screenshotCard.hide,
-      hold: screenshotCard.hold,
+      holdForSave: screenshotCard.holdForSave,
       isVisible: screenshotCard.isVisible,
       show: (view) => {
         screenshotCard.show(view, shelf.bounds());
       },
       update: screenshotCard.update,
       view: screenshotCard.view,
+    },
+    dropPicture: (file) => {
+      void store.deleteAttachment(file);
     },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
@@ -971,36 +937,23 @@ const start = async (): Promise<void> => {
       notify(message, tone);
     },
     now: () => Date.now(),
-    onItsWay: controller.onItsWay,
+    comesBack: controller.comesBack,
     onWrite: controller.onWrite,
     persisted: async () =>
       await controller.persisted(controller.snapshot().rev),
-    rowToAttachment: (from, id) => {
-      const attachmentId = AttachmentIdSchema.parse(randomUUID());
+    refusal: (id) => {
+      const state = controller.copyState([id], controller.snapshot().doc);
 
-      controller.apply({
-        attachmentId,
-        from,
-        id,
-        name: shotName(),
-        type: "itemToAttachment",
-      });
-
-      return {
-        attached:
-          controller
-            .item(id)
-            ?.attachments.some((each) => each.id === attachmentId) === true
-            ? [attachmentId]
-            : [],
-        message: null,
-      };
+      return state.kind === "failed" ? state.message : null;
     },
     saved: shotAdded,
+    scale: () =>
+      screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor,
     selection: () => shelfSelection,
     setTimer,
     shelfVisible: () => shelf.isVisible(),
     stored: controller.stored,
+    writePicture: async (current) => await store.writeAttachment(current.png),
   });
 
   let shotSeq = 0;

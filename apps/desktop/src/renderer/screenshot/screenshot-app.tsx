@@ -8,7 +8,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
-import type { ScreenshotView } from "@shared/contracts";
+import type { ScreenshotView, ShotPlaced } from "@shared/contracts";
+import type { ItemId } from "@shared/shelf";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, RefObject } from "react";
@@ -78,8 +79,12 @@ const CornerButton = ({
     <div className={cn("absolute", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* A disabled button takes no pointer: the span around it still says why it is off. */}
-          {off === undefined ? button : <span className="flex">{button}</span>}
+          {/* A disabled button takes no pointer: the span around it does, among corners that let the pointer through to the picture, and says why the button is off. */}
+          {off === undefined ? (
+            button
+          ) : (
+            <span className="pointer-events-auto flex">{button}</span>
+          )}
         </TooltipTrigger>
         <TooltipContent>{off ?? label}</TooltipContent>
       </Tooltip>
@@ -120,8 +125,8 @@ const Steady = ({
 
 const PILL_LABELS = Object.values(PILL_LABEL);
 
-/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and it stays on its item. The dimmed button says it on hover. The keyboard never reaches a button that is off, so the failure message ends with it too. */
-const ANNOTATE_OFF = "Annotate it on its item, once Retry has saved it";
+/** Why Annotate is off while Retry is the only add: it would add the screenshot to the shelf, and the shelf holds it on its item. Its tile there opens to annotate, saved or not. The dimmed button says where on hover; the failure message says it for the keyboard (ON_SHELF). */
+const ANNOTATE_OFF = "Annotate it in its item’s details";
 
 /**
  * “Name”, cut inside the quotes so the closing one always shows, right after
@@ -239,6 +244,16 @@ const FOOT_CAPTION =
 /** Shown after the reason a save failed: what it means for the screenshot. */
 const NOT_KEPT = "The screenshot isn’t saved yet.";
 
+/** While the shelf holds the screenshot, Retry is the only add: that it isn't saved, and what the user does on the shelf to get the other add back. For an attachment the place to act comes first, so the card's two lines hold it. There the tile opens to annotate, which the keyboard can't learn from a button that is off, and the tile's own removal brings the other add back (not Discard changes, which would put back the item's other changes too). */
+const ON_SHELF = {
+  item: "The screenshot is in its item’s details, not saved yet. Annotate it there, or remove it to add it elsewhere.",
+  shelf: `${NOT_KEPT} Delete it on the shelf to add it elsewhere.`,
+} as const;
+
+/** What follows the reason a save failed: the screenshot isn't saved, and where the shelf holds it, what to do there. */
+const afterFailure = (placed: ShotPlaced | null): string =>
+  placed === null ? NOT_KEPT : ON_SHELF[placed.to];
+
 /** Why the save failed, reason first, then what `after` says it means for the screenshot, in a compact bar under the picture: two lines, the rest in its tooltip and, with the keyboard on it, scrolled into view. */
 const FailureBar = ({
   after,
@@ -308,7 +323,7 @@ const FootLine = ({
 }: {
   readonly carried: Carried;
   readonly line: AddLine;
-  readonly onAdd: () => void;
+  readonly onAdd: (item: ItemId) => void;
   readonly saving: boolean;
 }) =>
   line.kind === "caption" ? (
@@ -326,7 +341,9 @@ const FootLine = ({
       carried={carried}
       className="w-full"
       key={line.add}
-      onClick={onAdd}
+      onClick={() => {
+        onAdd(line.item);
+      }}
       size="line"
       variant="overlay-text"
     >
@@ -345,36 +362,32 @@ const FootLine = ({
  * picture dims, Copy shows beside Add to Shelf, and the corner actions show.
  * While a save runs its button reads Saving…; a failed save keeps every
  * action in view, says why under the picture, and offers Retry. Once the
- * screenshot must stay on its item, Retry is the one pill and the line under
- * it only names the item. Dragging the picture into another app drops it as
- * a file.
+ * screenshot is on its item, not saved, Retry is the one pill and the line
+ * under it only names the item. Dragging the picture into another app drops
+ * it as a file.
  */
 const Card = ({ view }: { readonly view: ScreenshotView }) => {
-  const { save, seq, target } = view;
+  const { save, seq } = view;
   const [held, setHeld] = useState(false);
-  const [wasSole, setWasSole] = useState(false);
   const carried = useRef<AddId | null>(null);
   const saving = save.state === "saving";
-  const { line, pill, sole } = cardAdds(view, wasSole);
-
-  if (sole !== wasSole) {
-    setWasSole(sole);
-  }
+  const { line, pill, sole } = cardAdds(view);
 
   // After the add buttons drawn in this change had their turn: an add that left and wasn't drawn again hands the keyboard to no later button.
   useLayoutEffect(() => {
     carried.current = null;
   });
 
-  const addToItem = (): void => {
-    if (!saving && target !== null) {
-      api.addToItem({ id: target.id, seq });
+  /** A press of an add: to the item its button named, or to the shelf. */
+  const add = (item: ItemId | null): void => {
+    if (saving) {
+      return;
     }
-  };
 
-  const addToShelf = (): void => {
-    if (!saving) {
+    if (item === null) {
       api.addToShelf(seq);
+    } else {
+      api.addToItem({ id: item, seq });
     }
   };
 
@@ -397,7 +410,9 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
               aria-label={pill.name}
               carried={carried}
               key={pill.add}
-              onClick={pill.to === "item" ? addToItem : addToShelf}
+              onClick={() => {
+                add(pill.item);
+              }}
               size="pill-sm"
               variant="overlay"
             >
@@ -432,7 +447,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
             <FootLine
               carried={carried}
               line={line}
-              onAdd={addToItem}
+              onAdd={add}
               saving={saving}
             />
           )}
@@ -515,10 +530,7 @@ const Card = ({ view }: { readonly view: ScreenshotView }) => {
         </div>
       </div>
       {save.state === "failed" ? (
-        <FailureBar
-          after={sole ? `${NOT_KEPT} ${ANNOTATE_OFF}.` : NOT_KEPT}
-          message={save.message}
-        />
+        <FailureBar after={afterFailure(save.placed)} message={save.message} />
       ) : null}
     </main>
   );

@@ -96,13 +96,12 @@ const pictureName = (fileName: string): string =>
 export const createAttachments = (deps: AttachmentDeps) => {
   const storePicture = async (
     image: DecodedImage,
-    name: string,
-    pixelsPerDip = 1
+    name: string
   ): Promise<StoredUpload> => ({
     image: {
       file: await deps.writeAttachment(image.png),
       heightPx: image.heightPx,
-      pixelsPerDip,
+      pixelsPerDip: 1,
       widthPx: image.widthPx,
     },
     kind: "image",
@@ -236,7 +235,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
       : attachTo(id, [await storePicture(copied.image, PASTED_NAME)]);
   };
 
-  return { attachFilesTo, attachTo, pasteImageTo, prepare, storePicture };
+  return { attachFilesTo, attachTo, pasteImageTo, prepare };
 };
 
 /**
