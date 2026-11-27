@@ -2289,7 +2289,7 @@ const start = async (): Promise<void> => {
       try {
         shotStaging.remove(file);
       } catch (error) {
-        // Windows keeps a file another app has open: it stays in the temporary folder.
+        // Windows keeps a file another app has open: the router keeps its record, and the sweep at quit tries again.
         console.warn(
           `A dragged screenshot's copy couldn't be removed: ${errorMessage(error)}`
         );

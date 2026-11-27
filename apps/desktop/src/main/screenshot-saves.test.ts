@@ -2521,6 +2521,29 @@ describe("a drag's copy of the card's screenshot on disk", () => {
       edited: onDisk(edited),
     }).toStrictEqual({ canceled: null, edited: marked });
   });
+
+  it("imports no second copy when a placed screenshot's copy that couldn't be removed comes back again", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    // Windows keeps a file another app has open: removing it fails, and the copy stays.
+    const { added, drop, plain } = dropping(card, { unstage: () => {} });
+    const file = drop.drag(1)?.file ?? "";
+
+    await drop.onItem(card.note, [file]);
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
+    await drop.onItem(card.note, [file]);
+    await settled(card);
+    expect({
+      attached: card.attachmentsOn(card.note),
+      notices: card.notices,
+      plain,
+    }).toStrictEqual({ attached: 1, notices: [SHOT_ON_SHELF], plain: [] });
+  });
 });
 
 /** A press of the pill, the add the card shows first: it goes where the pill says. */
