@@ -3,6 +3,7 @@ import type { JSONContent } from "@tiptap/react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { Markdown } from "./markdown";
 import {
@@ -29,9 +30,13 @@ const marked = (text: string, ...marks: readonly string[]): JSONContent => ({
   type: "text",
 });
 
-/** An address the field linked as it was typed. */
-const linked = (text: string, href: string): JSONContent => ({
-  marks: [{ attrs: { href, title: null }, type: "link" }],
+/** An address the field linked as it was typed, or words linked with a title. */
+const linked = (
+  text: string,
+  href: string,
+  title: string | null = null
+): JSONContent => ({
+  marks: [{ attrs: { href, title }, type: "link" }],
   text,
   type: "text",
 });
@@ -183,6 +188,29 @@ const TYPED: readonly { readonly doc: JSONContent; readonly text: string }[] = [
     text: "[http://localhost:3000](http://localhost:3000)",
   },
   {
+    doc: typed(plain("see "), linked("alpha]", "https://example.com")),
+    text: String.raw`see [alpha\]](https://example.com)`,
+  },
+  {
+    doc: typed(
+      plain("see "),
+      linked("a [draft]", "https://example.com"),
+      plain(" now")
+    ),
+    text: String.raw`see [a \[draft\]](https://example.com) now`,
+  },
+  {
+    doc: typed(linked("C:\\", "https://example.com")),
+    text: String.raw`[C:\\](https://example.com)`,
+  },
+  {
+    doc: typed(
+      linked("https://example.com", "https://example.com", "API docs")
+    ),
+    text: '[https://example.com](https://example.com "API docs")',
+  },
+  { doc: typed(plain("x "), marked("a\\", "bold")), text: "x **a\\\\**" },
+  {
     doc: note({
       content: [line(plain("> nested and snake_case"))],
       type: "blockquote",
@@ -313,6 +341,39 @@ describe(noteMarkdown, () => {
   });
 });
 
+/** A document as JSON, as the field's getJSON() gives it. */
+const JSONContentSchema: z.ZodType<JSONContent> = z.lazy(() =>
+  z.object({
+    attrs: z.record(z.string(), z.unknown()).optional(),
+    content: z.array(JSONContentSchema).optional(),
+    marks: z
+      .array(
+        z.object({
+          attrs: z.record(z.string(), z.unknown()).optional(),
+          type: z.string(),
+        })
+      )
+      .optional(),
+    text: z.string().optional(),
+    type: z.string(),
+  })
+);
+
+/** A stored note opened in a field, changed there until it reads as `after`, and closed. */
+const editedTo = (before: string, after: string): string => {
+  const opened = {
+    doc: schema.nodeFromJSON(markdown.parse(before)),
+    markdown: before,
+  };
+
+  // As the field holds it: every attribute filled in.
+  const doc = schema.nodeFromJSON(markdown.parse(after));
+
+  const json: unknown = doc.toJSON();
+
+  return storedNote(opened, doc, JSONContentSchema.parse(json));
+};
+
 describe(storedNote, () => {
   const before =
     "email [bob@example.com](mailto:bob@example.com) about snake\\_case";
@@ -330,7 +391,7 @@ describe(storedNote, () => {
     }).toStrictEqual({ typedAndUndone: before, untouched: before });
   });
 
-  it("stores a note changed in the field as it now reads", () => {
+  it("stores a note changed in the field as it now reads, the link it did not change as it was", () => {
     const changed = typed(
       plain("email "),
       linked("bob@example.com", "mailto:bob@example.com"),
@@ -338,8 +399,58 @@ describe(storedNote, () => {
     );
 
     expect(storedNote(opened, schema.nodeFromJSON(changed), changed)).toBe(
-      "email bob@example.com about snake_case, done"
+      "email [bob@example.com](mailto:bob@example.com) about snake_case, done"
     );
+  });
+
+  it.each([
+    [
+      `${String.raw`[alpha\]](https://example.com)`}\n\nedit me`,
+      `${String.raw`[alpha\]](https://example.com)`}\n\nedit me, done`,
+    ],
+    [
+      String.raw`see [alpha\]](https://example.com)`,
+      String.raw`look at [alpha\]](https://example.com)`,
+    ],
+    [
+      '[https://example.com](https://example.com "API docs")',
+      '[https://example.com](https://example.com "API docs")\n\nmore',
+    ],
+    [
+      "[docs](<https://example.com/a b> 'API') and x",
+      "[docs](<https://example.com/a b> 'API') and y",
+    ],
+    ["<https://example.com> and x", "<https://example.com> and y"],
+  ])(
+    "keeps each link of %j the edit did not change byte for byte",
+    (was, now) => {
+      expect(editedTo(was, now)).toBe(now);
+    }
+  );
+
+  it("writes a link the edit changed as it now reads", () => {
+    expect(
+      editedTo(
+        "[docs](https://example.com/docs 'API') and x",
+        "[guide](https://example.com/docs 'API') and x"
+      )
+    ).toBe('[guide](https://example.com/docs "API") and x');
+  });
+
+  it("keeps a long line of links it did not change within a keystroke", () => {
+    const links = Array.from(
+      { length: 1000 },
+      (_, index) => `[x\\_${index}](https://a.co/${index})`
+    ).join(" ");
+
+    const start = performance.now();
+    const first = editedTo(links, `${links} done`);
+    const firstMs = performance.now() - start;
+
+    expect({ first, fast: firstMs < 500 }).toStrictEqual({
+      fast: true,
+      first: `${links} done`,
+    });
   });
 });
 
