@@ -6231,6 +6231,131 @@ const PILL_SCENES: readonly Scene[] = (
       width: NARROWEST,
     },
     {
+      // Filtered to the items from here, the composer names the window a note typed now goes with; × and its name are a Tab away.
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: /^New note in/u });
+
+        await field.click();
+        await page.keyboard.press("Tab");
+
+        const onRemove = await page.evaluate(() =>
+          document.activeElement?.getAttribute("aria-label")
+        );
+
+        await field.click();
+        await page.keyboard.type("Ask about the flaky test");
+        await page.keyboard.press("Enter");
+
+        const ops = await applied(page);
+        const sent = ops.filter((op) => op.type === "compose");
+
+        if (onRemove !== "Type notes without GitHub · inset/shelf #482") {
+          return `Tab from the note field must reach the chip's ×, named for its window: ${String(onRemove)}`;
+        }
+
+        return isDeepStrictEqual(sent, [
+          { here: 1, text: "Ask about the flaky test", type: "compose" },
+        ])
+          ? null
+          : `Return under the chip must send the note with its opening: ${JSON.stringify(sent)}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here-note",
+      page: "shelf",
+    },
+    {
+      // × from the keyboard takes the chip off: the note is plain, and the field keeps the keyboard. Leaving the filter and coming back brings the chip back.
+      act: async (page) => {
+        await page.getByRole("textbox", { name: /^New note in/u }).click();
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Enter");
+      },
+      check: async (page) => {
+        const chip = page.getByRole("button", {
+          name: "Type notes without GitHub · inset/shelf #482",
+        });
+
+        const gone = (await chip.count()) === 0;
+
+        const inField = await page.evaluate(
+          () =>
+            document.activeElement
+              ?.getAttribute("aria-label")
+              ?.startsWith("New note in") === true
+        );
+
+        await page.keyboard.type("Ask about the flaky test");
+        await page.keyboard.press("Enter");
+
+        const ops = await applied(page);
+        const sent = ops.filter((op) => op.type === "compose");
+
+        await page.getByRole("button", { name: "Clear Search" }).click();
+        await page
+          .getByRole("button", { name: "Show the item from here" })
+          .click();
+
+        const back = await chip.count();
+
+        return gone &&
+          inField &&
+          back === 1 &&
+          isDeepStrictEqual(sent, [
+            { text: "Ask about the flaky test", type: "compose" },
+          ])
+          ? null
+          : `× must take the chip off and leave the field the keyboard, the note go plain, and the filter put back bring the chip back: ${JSON.stringify({ back, gone, inField, sent })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here-note-off",
+      page: "shelf",
+    },
+    {
+      // A long German window name at the shelf's narrowest: cut with a tooltip that holds it, × still in view.
+      check: async (page) => {
+        const remove = page.getByRole("button", {
+          name: `Type notes without Safari · ${LONG_TITLE}`,
+        });
+
+        const tooltip = await page
+          .getByText(`Safari · ${LONG_TITLE}`, { exact: true })
+          .getAttribute("title");
+
+        return (await remove.isVisible()) &&
+          tooltip?.includes(LONG_TITLE) === true
+          ? null
+          : `the chip must keep its × in view and the whole name in its tooltip: ${String(tooltip)}`;
+      },
+      data: { view: hereView(true, `Safari · ${LONG_TITLE}`) },
+      name: "shelf-from-here-note-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      // “# Name” under the chip: both chips at once, at the shelf's narrowest.
+      act: async (page) => {
+        await page.getByRole("textbox", { name: /^New note in/u }).click();
+        await page.keyboard.type("# Quartalsübersicht und Zwischenablage");
+      },
+      check: async (page) => {
+        const here = await page
+          .getByRole("button", { name: /^Type notes without Safari/u })
+          .isVisible();
+
+        const section = await page
+          .getByText(/^New section ‘Quartalsübersicht/u)
+          .isVisible();
+
+        return here && section
+          ? null
+          : `typing “# Name” under the chip must show both chips: ${JSON.stringify({ here, section })}`;
+      },
+      data: { view: hereView(true, `Safari · ${LONG_TITLE}`) },
+      name: "shelf-from-here-note-section-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
       // The why field couldn't get the keyboard: the shelf opens at the item's description instead.
       act: async (page) => {
         await page.evaluate(
