@@ -26,13 +26,13 @@ describe(threadOfWindow, () => {
   it("finds the thread from the title as the window has it or without ChatGPT's name", () => {
     const threads = parseThreadIndex(INDEX);
 
-    expect(threadOfWindow(threads, "Plan - ChatGPT")).toBe(
+    expect(threadOfWindow(threads, "Plan - ChatGPT", true)).toBe(
       "01a0a981-8186-7a92-af7d-c414d6adda1a"
     );
-    expect(threadOfWindow(threads, "Plan")).toBe(
+    expect(threadOfWindow(threads, "Plan", true)).toBe(
       "01a0a981-8186-7a92-af7d-c414d6adda1a"
     );
-    expect(threadOfWindow(threads, "Other - ChatGPT")).toBeNull();
+    expect(threadOfWindow(threads, "Other - ChatGPT", true)).toBeNull();
   });
 
   it("links no thread for a title that is one thread as Windows shows it and another's own name, but finds either by its name alone", () => {
@@ -44,13 +44,17 @@ describe(threadOfWindow, () => {
     );
 
     expect({
-      ambiguous: threadOfWindow(threads, "Plan - ChatGPT"),
-      saved: threadOfWindow(threads, "Plan"),
-      shown: threadOfWindow(threads, "Plan - ChatGPT - ChatGPT"),
+      ambiguous: threadOfWindow(threads, "Plan - ChatGPT", true),
+      saved: threadOfWindow(threads, "Plan", true),
+      shown: threadOfWindow(threads, "Plan - ChatGPT - ChatGPT", true),
     }).toStrictEqual({
       ambiguous: null,
       saved: "01a0a981-8186-7a92-af7d-c414d6adda1a",
       shown: "02b1ba92-9297-7ba3-b0bf-d525e7eeeb2b",
     });
+    // A Mac adds no name to the title: it is the thread's own.
+    expect(threadOfWindow(threads, "Plan - ChatGPT", false)).toBe(
+      "02b1ba92-9297-7ba3-b0bf-d525e7eeeb2b"
+    );
   });
 });
