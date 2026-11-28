@@ -286,7 +286,7 @@ export const ATTACHMENT_NAME_MAX = 255;
 
 const ImageFields = {
   ...PictureFields,
-  /** The name of the file the picture was added from, without its extension: it drags out under it. Captured and pasted pictures have none. */
+  /** The name of the file the picture was added from, without its extension, or a PNG's whole name when it spells .png another way: it drags out under it. Captured and pasted pictures have none. */
   fileName: z.string().min(1).max(ATTACHMENT_NAME_MAX).optional(),
   kind: z.literal("image"),
   note: z.string().max(TEXT_MAX),
@@ -324,6 +324,8 @@ export const AttachedImageSchema = z.object({
   kind: z.literal("image"),
   /** Shown in tooltips, used as the file name when dragged out and in plain-text copies. No extension. */
   name: z.string().min(1).max(ATTACHMENT_NAME_MAX),
+  /** The whole name of the PNG it was added from, when that spells .png another way (.PNG): it drags out under it in place of `name`. */
+  fileName: z.string().min(1).max(ATTACHMENT_NAME_MAX).optional(),
 });
 
 export type AttachedImage = z.output<typeof AttachedImageSchema>;

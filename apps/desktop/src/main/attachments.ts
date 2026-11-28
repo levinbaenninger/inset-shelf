@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AttachResult } from "@shared/contracts";
 import { ATTACHMENTS_MAX } from "@shared/shelf";
 import type {
+  AttachedImage,
   Attachment,
   AttachmentId,
   ItemId,
@@ -28,6 +29,8 @@ export type StoredUpload =
       readonly image: ShelfImage;
       /** The picture's own name, without its extension. */
       readonly name: string;
+      /** A PNG's whole file name, as it spelled it. */
+      readonly fileName?: string;
     }
   | { readonly kind: "file"; readonly file: StoredFile };
 
@@ -75,17 +78,24 @@ const toAttachment = (
   upload: StoredUpload,
   id: AttachmentId,
   addedAt: string
-): Attachment =>
-  upload.kind === "image"
-    ? {
-        addedAt,
-        id,
-        image: upload.image,
-        kind: "image",
-        name: upload.name,
-        pins: [],
-      }
-    : { addedAt, file: upload.file, id, kind: "file" };
+): Attachment => {
+  if (upload.kind === "file") {
+    return { addedAt, file: upload.file, id, kind: "file" };
+  }
+
+  const picture: AttachedImage = {
+    addedAt,
+    id,
+    image: upload.image,
+    kind: "image",
+    name: upload.name,
+    pins: [],
+  };
+
+  return upload.fileName === undefined
+    ? picture
+    : { ...picture, fileName: upload.fileName };
+};
 
 const storedFiles = (upload: StoredUpload): readonly string[] =>
   upload.kind === "image" ? [upload.image.file] : [upload.file.stored];
@@ -97,7 +107,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
   const storePicture = async (
     image: DecodedImage,
     name: string
-  ): Promise<StoredUpload> => ({
+  ): Promise<Extract<StoredUpload, { kind: "image" }>> => ({
     image: {
       file: await deps.writeAttachment(image.png),
       heightPx: image.heightPx,
@@ -126,7 +136,12 @@ export const createAttachments = (deps: AttachmentDeps) => {
       const image = added.kind === "image" ? deps.readImage(filePath) : null;
 
       if (image !== null) {
-        return await storePicture(image, pictureName(added.name));
+        const stored = await storePicture(image, pictureName(added.name));
+
+        // A PNG that doesn't spell its name ".png" drags out under its own spelling.
+        return added.extension === "png" && !added.name.endsWith(".png")
+          ? { ...stored, fileName: added.name }
+          : stored;
       }
 
       return {
@@ -246,7 +261,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
     return upload.kind === "image"
       ? {
           context: null,
-          fileName: upload.name,
+          fileName: upload.fileName ?? upload.name,
           image: upload.image,
           pins: [],
           source: null,

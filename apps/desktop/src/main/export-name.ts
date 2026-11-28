@@ -32,16 +32,20 @@ export const exportFileName = (note: string): string => {
   );
 };
 
+const PNG_NAMED = /\.png$/iu;
+
 /**
  * A picture's own name as the file it drags out as: as it is, spaces, dots
  * and length too, but for what no file name can hold. A space or dot at its
- * end stays, since ".png" comes after it.
+ * end stays, since ".png" comes after it; a PNG's whole name keeps its own
+ * spelling of it.
  */
-export const ownFileName = (name: string): string => pngNamed(fileSafe(name));
+export const ownFileName = (name: string): string =>
+  PNG_NAMED.test(name) ? fileSafe(name) : pngNamed(fileSafe(name));
 
 /** The file a picture attached to an item drags out as. */
 export const attachedFileName = (attachment: AttachedImage): string =>
-  ownFileName(attachment.name);
+  ownFileName(attachment.fileName ?? attachment.name);
 
 /** The file an image item drags out as: the name of the file it was added from, else named after its note. */
 export const imageFileName = (item: ImageItem): string =>
