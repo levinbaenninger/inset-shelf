@@ -61,6 +61,40 @@ globalThis.__emit = (name, payload) => {
 
 globalThis.__applied = [];
 
+// `menuKeys`: macOS's menu bar, which Electron hands every key down a page leaves unhandled
+// (WebContents::PlatformHandleKeyboardEvent). Each is a plain key of the real menu (src/main/app-menu.ts)
+// that types a character, with the command main sends the shelf for it. Main shows the shelf to run it,
+// so the pill's why field gives way. Checked once the page's own listeners have had the key.
+if (data?.menuKeys !== undefined) {
+  window.addEventListener("keydown", (event) => {
+    const entry = data.menuKeys.find(
+      (each) =>
+        each.key === event.key &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+    );
+
+    if (entry === undefined || event.isComposing) {
+      return;
+    }
+
+    setTimeout(() => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      globalThis.__calls.push({ arg: entry.command, call: "menuKey" });
+
+      if (page === "toast") {
+        globalThis.__emit("view", null);
+      } else {
+        globalThis.__emit("command", entry.command);
+      }
+    }, 0);
+  });
+}
+
 /** Every operation and copy the shelf asked main for, in order: `{ call: "copy", arg: id }`. */
 globalThis.__calls = [];
 

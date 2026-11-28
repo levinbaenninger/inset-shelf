@@ -20,6 +20,7 @@ import { once } from "node:events";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { registerHooks } from "node:module";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -28,6 +29,7 @@ import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
 
 import { fellBackMessage, goneMessage } from "../src/shared/code-place.ts";
+import type { ItemAction } from "../src/shared/contracts.ts";
 import {
   SHELF_HEIGHT_DIP,
   SHELF_MIN_WIDTH_DIP,
@@ -10101,6 +10103,230 @@ const SETTINGS_SCENES: readonly Scene[] = [
   },
 ];
 
+const ignore = (): void => undefined;
+
+/**
+ * The menu bar's plain keys that type a character on macOS, from the real
+ * template, each with the command main sends the shelf for it. The bridge
+ * hands them every such key a page leaves unhandled, as macOS does.
+ */
+const macMenuKeys = async () => {
+  // The main process's modules import without extensions, as its bundler allows.
+  registerHooks({
+    resolve: (specifier, context, next) => {
+      try {
+        return next(specifier, context);
+      } catch (error) {
+        if (specifier.startsWith(".")) {
+          return next(`${specifier}.ts`, context);
+        }
+
+        throw error;
+      }
+    },
+  });
+
+  const { appMenuTemplate } = await import("../src/main/app-menu.ts");
+
+  const { emptyShelf, SectionIdSchema } =
+    await import("../src/shared/shelf.ts");
+
+  const sent: ItemAction[] = [];
+
+  // Main's Item entries reach the shelf as an item command (commandShelf in src/main/index.ts); no other entry has a plain key.
+  const template = appMenuTemplate(
+    {
+      doc: emptyShelf(SectionIdSchema.parse(INBOX)),
+      floatOnTop: false,
+      setUpPermissions: true,
+      update: { kind: "idle" },
+    },
+    {
+      checkForUpdates: ignore,
+      clearDone: ignore,
+      closeWindow: ignore,
+      copy: ignore,
+      copyAsList: ignore,
+      field: ignore,
+      find: ignore,
+      gettingStarted: ignore,
+      item: (action: ItemAction) => {
+        sent.push(action);
+      },
+      newDrawing: ignore,
+      newNote: ignore,
+      newSection: ignore,
+      newWindowLink: ignore,
+      openHelp: ignore,
+      openSettings: ignore,
+      redo: ignore,
+      restartToUpdate: ignore,
+      selectAll: ignore,
+      selectSection: ignore,
+      setFloatOnTop: ignore,
+      setUpPermissions: ignore,
+      showMeAround: ignore,
+      showShortcuts: ignore,
+      undo: ignore,
+    }
+  );
+
+  type Entry = (typeof template)[number];
+
+  const plain = (entries: readonly Entry[]): Entry[] =>
+    entries.flatMap((entry) => [
+      ...(entry.accelerator === "Space" || entry.accelerator?.length === 1
+        ? [entry]
+        : []),
+      ...(Array.isArray(entry.submenu) ? plain(entry.submenu) : []),
+    ]);
+
+  return plain(template).map((entry) => {
+    if (entry.click !== undefined) {
+      // oxlint-disable-next-line anti-slop/no-reflect-apply -- click takes Electron's MenuItem, which exists only in Electron; the Item entries read no argument.
+      Reflect.apply(entry.click, undefined, []);
+    }
+
+    return {
+      command: { action: sent.at(-1), kind: "item" },
+      key: entry.accelerator === "Space" ? " " : entry.accelerator,
+    };
+  });
+};
+
+const MAC_MENU_KEYS = await macMenuKeys();
+
+const SpaceSchema = z.object({
+  checked: z.string().nullable(),
+  text: z.string(),
+});
+
+/**
+ * "a b" typed over a field's words. Null when the space stayed in the field,
+ * no menu key acted, and the item and its steps kept their done state; else
+ * what went wrong.
+ */
+const keepsSpace = async (
+  page: Page,
+  checkbox: Locator
+): Promise<string | null> => {
+  const seen = SpaceSchema.parse(
+    await checkbox.evaluate((box) => {
+      const field = document.activeElement;
+
+      const control =
+        field instanceof HTMLTextAreaElement ||
+        field instanceof HTMLInputElement;
+
+      const editable = field instanceof HTMLElement && field.isContentEditable;
+      let text = "";
+
+      if (control) {
+        text = field.value;
+      } else if (editable) {
+        text = field.textContent;
+      }
+
+      return { checked: box.getAttribute("aria-checked"), text };
+    })
+  );
+
+  const menu = await callsTo(page, ["menuKey"]);
+
+  const ops = await applied(page);
+
+  const toggled = ops.filter(
+    (op) => op.type === "toggleDone" || op.type === "toggleStep"
+  );
+
+  if (menu.length > 0 || toggled.length > 0 || seen.checked !== "false") {
+    return `Space checked off instead of typing: menu ${JSON.stringify(menu)}, ops ${JSON.stringify(toggled)}, checkbox ${String(seen.checked)}`;
+  }
+
+  return seen.text === "a b"
+    ? null
+    : `the field holds “${seen.text}”, not “a b”`;
+};
+
+/** Words typed over a field that has the keyboard: "a b". */
+const typeAB = async (page: Page): Promise<void> => {
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("a b");
+  await page.waitForTimeout(100);
+};
+
+/** A row's own checkbox, the one that checks the item off. */
+const rowCheck = (page: Page, n: number) =>
+  item(page, n).getByRole("checkbox").first();
+
+/** Return on a selected row edits its words in place: a text's, or a picture's or file's note. */
+const editRow = async (page: Page, n: number): Promise<void> => {
+  await select(page, n);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement instanceof HTMLTextAreaElement || document.activeElement?.isContentEditable === true"
+  );
+};
+
+/** Space types a space in every field the shelf and the pill own, on macOS too, where the menu bar hears each key a page leaves alone. */
+const SPACE_SCENES: readonly Scene[] = [
+  ...[
+    { n: 12, name: "space-row-text" },
+    { n: 11, name: "space-row-image" },
+    { n: 13, name: "space-row-file" },
+  ].map(({ n, name }): Scene => ({
+    act: async (page) => {
+      await editRow(page, n);
+      await typeAB(page);
+    },
+    check: async (page) => await keepsSpace(page, rowCheck(page, n)),
+    data: { menuKeys: MAC_MENU_KEYS, view: shelfView() },
+    name,
+    page: "shelf",
+  })),
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await stepBox(page).focus();
+      await typeAB(page);
+    },
+    check: async (page) =>
+      await keepsSpace(
+        page,
+        page.getByRole("checkbox", { exact: true, name: "a b" })
+      ),
+    data: { menuKeys: MAC_MENU_KEYS, view: shelfView() },
+    name: "space-details-step",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await page.getByRole("textbox", { name: "Why this matters" }).waitFor();
+      await page.keyboard.type("a b");
+      await page.waitForTimeout(100);
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", { name: "Why this matters" });
+
+      if ((await field.count()) === 0) {
+        return `the field closed: ${JSON.stringify(await callsTo(page, ["menuKey"]))}`;
+      }
+
+      const typed = await callsTo(page, ["whyInput"]);
+
+      return (await field.inputValue()) === "a b" &&
+        isDeepStrictEqual(typed.at(-1)?.arg, { seq: 2, text: "a b" })
+        ? null
+        : `the field holds “${await field.inputValue()}”, not “a b”`;
+    },
+    data: { menuKeys: MAC_MENU_KEYS, view: whyView("taking") },
+    keepPointer: true,
+    name: "space-pill-why",
+    page: "toast",
+    width: WHY_WIDTH,
+  },
+];
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -13754,6 +13980,7 @@ const SCENES: readonly Scene[] = [
   ...ATTACHMENT_SCENES,
   ...KEEPS_PLACE_SCENES,
   ...SETTINGS_SCENES,
+  ...SPACE_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
