@@ -2049,6 +2049,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             api.newWindowLink();
           },
         }}
+        filtering={parseSearch(query).here}
+        here={view.here}
         hidden={inDetails}
         sectionNames={doc.sections.map((section) => section.name)}
         onEscape={() => {
@@ -2062,10 +2064,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             selectItem(last);
           }
         }}
-        onSubmit={(text) => {
+        onSubmit={(text, here) => {
           // A note lands in the section new items go to, which opens to show it.
           setOpen(doc.activeSectionId, true);
-          apply({ text, type: "compose" });
+          apply({ here, text, type: "compose" });
         }}
         ref={composerRef}
         sectionName={sectionName}

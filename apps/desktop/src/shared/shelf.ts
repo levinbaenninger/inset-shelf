@@ -660,7 +660,12 @@ export const parseComposer = (raw: string): ComposerEntry => {
 
 /** Operations the shelf window may request. Images are only added by the main process. */
 export const ShelfOpSchema = z.discriminatedUnion("type", [
-  z.object({ text: z.string().max(TEXT_MAX), type: z.literal("compose") }),
+  z.object({
+    /** Typed under the from-here chip: the opening it showed for (ShelfHere.seq). Main gives the note that window's source. */
+    here: z.number().int().optional(),
+    text: z.string().max(TEXT_MAX),
+    type: z.literal("compose"),
+  }),
   z.object({
     id: ItemIdSchema,
     text: z.string().min(1).max(TEXT_MAX),
