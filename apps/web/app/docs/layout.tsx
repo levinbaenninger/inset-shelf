@@ -1,9 +1,9 @@
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import type { ReactNode } from "react";
 
+import { DocsActions } from "@/components/docs/actions";
 import { DocsProvider } from "@/components/docs/provider";
 import { ShelfMark } from "@/components/logo";
-import { DOWNLOADS, REPO_URL } from "@/lib/site";
 import { source } from "@/lib/source";
 
 const Layout = ({ children }: { children: ReactNode }) => (
@@ -21,13 +21,7 @@ const Layout = ({ children }: { children: ReactNode }) => (
         ),
         url: "/",
       }}
-      githubUrl={REPO_URL}
-      links={[
-        { text: "Home", url: "/" },
-        { text: "Download for Apple silicon", url: DOWNLOADS.mac },
-        { text: "Download for Intel Mac", url: DOWNLOADS.macIntel },
-        { text: "Download for Windows", url: DOWNLOADS.windows },
-      ]}
+      sidebar={{ footer: <DocsActions /> }}
       themeSwitch={{ enabled: false }}
     >
       {children}

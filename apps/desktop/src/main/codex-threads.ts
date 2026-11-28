@@ -35,13 +35,27 @@ export const threadNamed = (
     .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ??
   null;
 
-/** The thread a ChatGPT window shows: found by its title as read, else without the app's name Windows adds to it, which items kept by an earlier build also lack. */
+/**
+ * The thread a ChatGPT window shows: found by its title as read, or without
+ * the app's name Windows adds to it, which items kept by an earlier build
+ * also lack. For a caption Windows shows now, null when both name a thread:
+ * `Plan - ChatGPT` is then thread Plan, or the thread of that name, and
+ * nothing says which. A Mac's caption and a saved title are the title as
+ * read first.
+ */
 export const threadOfWindow = (
   threads: readonly Thread[],
-  title: string
-): string | null =>
-  threadNamed(threads, title) ??
-  threadNamed(threads, withoutAppName(title, "ChatGPT"));
+  title: string,
+  windowsCaption: boolean
+): string | null => {
+  const asRead = threadNamed(threads, title);
+  const bare = withoutAppName(title, "ChatGPT");
+  const shown = bare === title ? null : threadNamed(threads, bare);
+
+  return windowsCaption && asRead !== null && shown !== null
+    ? null
+    : (asRead ?? shown);
+};
 
 /**
  * The ChatGPT desktop app (built on Codex) names its window after the open
@@ -49,7 +63,8 @@ export const threadOfWindow = (
  * by its title opens again with a codex:// link; null when there is none.
  */
 export const chatGptThreadLink = async (
-  title: string | null
+  title: string | null,
+  windowsCaption: boolean
 ): Promise<string | null> => {
   if (title === null) {
     return null;
@@ -61,7 +76,7 @@ export const chatGptThreadLink = async (
       "utf-8"
     );
 
-    const id = threadOfWindow(parseThreadIndex(text), title);
+    const id = threadOfWindow(parseThreadIndex(text), title, windowsCaption);
 
     return id === null ? null : `codex://threads/${id}`;
   } catch {
