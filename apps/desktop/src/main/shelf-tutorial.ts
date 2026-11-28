@@ -206,7 +206,7 @@ export const shelfExamples = (mac: boolean): readonly ExampleItem[] => {
       context: {
         app: null,
         appLink: null,
-        title: "Inset Shelf: README",
+        title: "Inset Shelf user guide",
         url: HELP_URL,
       },
       text: "Saved from a web page: the line below says where, and opens it again",
