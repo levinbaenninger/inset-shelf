@@ -4,7 +4,7 @@ import { codeLanguage, isCodeCapture } from "./code-editors";
 import {
   atLine,
   CodePlaceSchema,
-  fileName,
+  fileName as codeFileName,
   PATH_MAX,
   pathInProject,
   textMark,
@@ -1972,7 +1972,7 @@ const codeSource = (item: ShelfItem): string | null => {
     return label;
   }
 
-  const short = atLine(fileName(code), code);
+  const short = atLine(codeFileName(code), code);
 
   return label.startsWith(short)
     ? `${pathInProject(code)}${label.slice(short.length)}`
