@@ -399,6 +399,12 @@ export const TextItemSchema = z
      * before this field reads a selection as captured as it stands.
      */
     captured: z.string().max(TEXT_MAX).nullable().optional(),
+    /**
+     * The HTML a selection was copied with, set aside while its words differ
+     * from `captured`. `html` is then null, so a build that knows only
+     * `html` never copies the captured HTML beside other words.
+     */
+    capturedHtml: z.string().max(HTML_MAX).optional(),
   })
   .transform((item) => ({
     ...item,
@@ -917,6 +923,24 @@ const unchanged = (doc: ShelfDoc): OpResult => ({
 });
 
 const changed = (doc: ShelfDoc): OpResult => ({ ...unchanged(doc) });
+
+/**
+ * A text item with new words. The HTML it was copied with sits beside them
+ * only while they are the captured words, and is set aside otherwise, so
+ * going back to them copies it again.
+ */
+const withWords = (item: TextItem, text: string): TextItem => {
+  const { capturedHtml, ...rest } = item;
+  const copiedHtml = capturedHtml ?? item.html;
+
+  if (text === item.captured) {
+    return { ...rest, html: copiedHtml, text };
+  }
+
+  return copiedHtml === null
+    ? { ...rest, html: null, text }
+    : { ...rest, capturedHtml: copiedHtml, html: null, text };
+};
 
 const mapItem = (
   doc: ShelfDoc,
@@ -1732,7 +1756,7 @@ export const applyOp = (
     case "editText": {
       return changed(
         mapItem(doc, op.id, (item) =>
-          item.kind === "text" ? { ...item, text: op.text } : null
+          item.kind === "text" ? withWords(item, op.text) : null
         )
       );
     }

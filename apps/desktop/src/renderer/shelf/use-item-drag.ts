@@ -5,6 +5,12 @@ import type { DragEvent } from "react";
 /** Marks a drag of an item within the shelf, apart from files dragged in from elsewhere. */
 const ITEM_TYPE = "application/x-inset-shelf-item";
 
+/** An item's words as a drag into other apps carries them: as Copy gives them, with HTML when Copy gives some. */
+export interface DraggedWords {
+  readonly text: string;
+  readonly html: string | null;
+}
+
 export interface ItemDrag {
   /** The item being dragged, shown faded. */
   readonly draggingId: ItemId | null;
@@ -13,7 +19,7 @@ export interface ItemDrag {
   /** On an item's card: it drags as itself, and as its words into other apps. */
   readonly itemProps: (
     id: ItemId,
-    text: string
+    words: DraggedWords
   ) => {
     readonly draggable: true;
     readonly onDragStart: (event: DragEvent) => void;
@@ -78,12 +84,17 @@ export const useItemDrag = ({
   return {
     draggingId,
     draggingOut: () => outRef.current !== null,
-    itemProps: (id, text) => ({
+    itemProps: (id, { html, text }) => ({
       draggable: true,
       onDragEnd: finish,
       onDragStart: (event) => {
         event.dataTransfer.setData(ITEM_TYPE, id);
         event.dataTransfer.setData("text/plain", text);
+
+        if (html !== null) {
+          event.dataTransfer.setData("text/html", html);
+        }
+
         event.dataTransfer.effectAllowed = "copyMove";
         setDraggingId(id);
       },
