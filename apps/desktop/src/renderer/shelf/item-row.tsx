@@ -18,7 +18,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
-import { codeAction, codeWay } from "@shared/code-editors";
+import { codeAction, codeWay, isCodeCapture } from "@shared/code-editors";
 import type { CodeEditor } from "@shared/code-editors";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
@@ -68,13 +68,14 @@ import { coach } from "@/tutorial/anchors";
 import { AttachmentStrip } from "./attachment-strip";
 import type { AttachmentHandlers } from "./attachment-strip";
 import { NotSavedLine } from "./banners";
+import { CodeField } from "./code-field";
 import { liveEdits } from "./drafts";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import { fileSizeText, whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import { KnownEditors } from "./known-editors";
 import type { LiveEdit } from "./live-edits";
-import { Markdown } from "./markdown";
+import { CODE_BLOCK, Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
 import type { MarkdownFieldHandle, ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
@@ -665,6 +666,7 @@ export const TextEditor = ({
   /** Where a click started the edit: the caret goes there, else to the end. */
   readonly caretAt?: ScreenPoint | null;
 }) => {
+  const code = isCodeCapture(item, use(KnownEditors));
   // Escape throws the edit away; the blur that follows must not save it.
   const cancelled = useRef(false);
   const live = useRef<LiveEdit | null>(null);
@@ -673,7 +675,12 @@ export const TextEditor = ({
   const edit = (): LiveEdit => {
     const current =
       live.current ??
-      liveEdits.open({ original: item.text, owner: item.id, send: onSave });
+      liveEdits.open({
+        code,
+        original: item.text,
+        owner: item.id,
+        send: onSave,
+      });
 
     live.current = current;
 
@@ -694,48 +701,51 @@ export const TextEditor = ({
     }
 
     cancelled.current = true;
-    edit().finish(markdown);
+    // Words never changed are never saved: an edit drops the item's HTML, and the field's rewrite of them is not the user's.
+    live.current?.finish(markdown);
     onDone();
   };
 
-  const field = useRef<MarkdownFieldHandle>(null);
+  const handle = useRef<MarkdownFieldHandle>(null);
 
   // Return and Esc hand the keyboard back to the words, in the row or in details, where Return edits again; a row the edit took out of the search's results hands it to the search.
   const backToWords = (): void => {
     const words =
-      field.current?.element()?.closest("[data-item-id], [data-details]") ??
+      handle.current?.element()?.closest("[data-item-id], [data-details]") ??
       null;
 
     focusRowOrSearchLater(words);
   };
 
-  return (
-    <MarkdownField
-      ariaLabel="Edit item"
-      autoFocus
-      caretAt={caretAt}
-      // The read text's own type, so the words stay exactly where they were.
-      className={cn("min-h-0", WORDS, item.done && DONE, EDITING)}
-      keys={{
-        onEscape: () => {
-          cancelled.current = true;
-          live.current?.cancel();
-          onDone();
-          backToWords();
-        },
-        onSubmit: (markdown) => {
-          finish(markdown);
-          backToWords();
-        },
-      }}
-      onBlur={finish}
-      followValue={false}
-      ref={field}
-      onChange={(markdown) => {
-        edit().change(markdown);
-      }}
-      value={item.text}
-    />
+  const field = {
+    ariaLabel: "Edit item",
+    caretAt,
+    // The read text's own type, so the words stay exactly where they were.
+    className: cn("min-h-0", WORDS, item.done && DONE, EDITING),
+    keys: {
+      onEscape: () => {
+        cancelled.current = true;
+        live.current?.cancel();
+        onDone();
+        backToWords();
+      },
+      onSubmit: (markdown: string) => {
+        finish(markdown);
+        backToWords();
+      },
+    },
+    onBlur: finish,
+    onChange: (markdown: string) => {
+      edit().change(markdown);
+    },
+    ref: handle,
+    value: item.text,
+  };
+
+  return code ? (
+    <CodeField {...field} />
+  ) : (
+    <MarkdownField {...field} autoFocus followValue={false} />
   );
 };
 
@@ -1038,6 +1048,7 @@ const TextBody = ({
   | "onStopEditing"
 >) => {
   const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+  const code = isCodeCapture(item, use(KnownEditors));
 
   if (editing) {
     return (
@@ -1056,12 +1067,19 @@ const TextBody = ({
     <>
       {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Ten lines at most until Show more; an edit shows all of it.
-        <Clamp className={WORDS} lines={ROW_CAPS.words} what="the text">
+        // Ten lines at most until Show more; an edit shows all of it. Code is cut in its own lines, inside its block.
+        <Clamp
+          className={code ? cn(CODE_BLOCK, "pt-1.5", item.done && DONE) : WORDS}
+          lines={ROW_CAPS.words}
+          what="the text"
+        >
           {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
           {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
           <div
-            className="cursor-text rounded-sm outline-none"
+            className={cn(
+              "cursor-text rounded-sm outline-none",
+              code && "pb-1.5"
+            )}
             data-row-keys
             onClick={(event) => {
               const point = editPoint(wordsClick(event));
@@ -1073,12 +1091,16 @@ const TextBody = ({
             }}
             tabIndex={-1}
           >
-            <Markdown
-              className={words}
-              interactive
-              onOpenLink={onOpenLink}
-              text={item.text}
-            />
+            {code ? (
+              <code>{item.text}</code>
+            ) : (
+              <Markdown
+                className={words}
+                interactive
+                onOpenLink={onOpenLink}
+                text={item.text}
+              />
+            )}
           </div>
         </Clamp>
       ) : (
@@ -1095,6 +1117,7 @@ const TextBody = ({
         >
           <Markdown
             className="line-clamp-2"
+            code={code}
             interactive={false}
             onOpenLink={onOpenLink}
             text={item.text}

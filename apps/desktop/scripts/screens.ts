@@ -8549,8 +8549,362 @@ const codeChecks = async (
     : null;
 };
 
+/** Lines selected in a code editor: indented two and four spaces, one far wider than the shelf at 300. */
+const CODE_SNIPPET = [
+  "export interface PlaceSource {",
+  "  readonly app: string | null;",
+  "    readonly title: string | null; // the window's title as the system reported it, before the shelf tidies it",
+  "}",
+].join("\n");
+
+/** The snippet captured on macOS, with the file Code showed. */
+const snippetMac = {
+  ...codeItem("Code", "recall.ts — inset-shelf", CODE_PLACE),
+  text: CODE_SNIPPET,
+};
+
+/** The snippet captured on Windows, where Code's title is all the shelf reads. */
+const snippetWindows = {
+  ...codeItem(
+    "Visual Studio Code",
+    "recall.ts - inset-shelf - Visual Studio Code",
+    null
+  ),
+  text: CODE_SNIPPET,
+};
+
+/**
+ * The snippet in `where` reads as code: in a monospace face, every line's
+ * indentation kept. `open`, a line too long for it wraps and nothing
+ * scrolls sideways.
+ */
+const snippetChecks = async (
+  where: Locator,
+  open: boolean
+): Promise<string | null> => {
+  const shown = await where.evaluate((root) => {
+    // A field for code is the block itself; read text is code inside one.
+    if (root instanceof HTMLTextAreaElement) {
+      return {
+        font: getComputedStyle(root).fontFamily,
+        height: Math.round(root.getBoundingClientRect().height),
+        inner: root.scrollWidth,
+        outer: root.clientWidth,
+        scrolls: false,
+        text: root.value,
+      };
+    }
+
+    const code = root.querySelector("code");
+    const block = code?.parentElement;
+
+    return code === null || block === null || block === undefined
+      ? null
+      : {
+          font: getComputedStyle(code).fontFamily,
+          height: Math.round(block.getBoundingClientRect().height),
+          inner: block.scrollWidth,
+          outer: block.clientWidth,
+          scrolls: getComputedStyle(block).overflowX !== "visible",
+          text: block.textContent,
+        };
+  });
+
+  if (shown === null) {
+    return "the code snippet shows in no code block";
+  }
+
+  if (!shown.font.includes("monospace")) {
+    return `the code snippet is set in ${shown.font}, not a monospace face`;
+  }
+
+  if (
+    !shown.text.includes("\n  readonly app") ||
+    !shown.text.includes("\n    readonly title")
+  ) {
+    return `the code snippet lost its indentation: ${JSON.stringify(shown.text)}`;
+  }
+
+  if (!open) {
+    return null;
+  }
+
+  if (shown.scrolls || shown.inner > shown.outer + 1) {
+    return `a long code line must wrap, not scroll sideways: ${JSON.stringify(shown)}`;
+  }
+
+  // Five lines of 16 px or more: the long one wraps.
+  return shown.height >= 80
+    ? null
+    : `the snippet's long line must wrap: ${JSON.stringify(shown)}`;
+};
+
+/** The edits sent for the code item: their words. */
+const editedTexts = async (page: Page): Promise<readonly string[]> => {
+  const ops = await applied(page);
+
+  return ops.filter((op) => op.type === "editText").map((op) => op.text ?? "");
+};
+
+/** The code item open in its field, the caret at the end of its words. */
+const editSnippet = async (page: Page): Promise<void> => {
+  await select(page, 760);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+};
+
+/** The code item's field saved with ⌘↩ (Ctrl+↩): null when it sent `expected` last. */
+const savesAs = async (
+  page: Page,
+  expected: string
+): Promise<string | null> => {
+  await page.keyboard.press("ControlOrMeta+Enter");
+
+  const sent = await editedTexts(page);
+
+  return sent.at(-1) === expected
+    ? null
+    : `saving sent ${JSON.stringify(sent)}, not ${JSON.stringify(expected)}`;
+};
+
+/** Code as a selection brings it: a blank line first, a tab, spaces at a line's end, a last line break. */
+const LOOSE_CODE = "\n\tcall()  \n";
+
+/** Saving code left as it opened sends nothing: an edit would drop its HTML and change what Copy gives. */
+const sendsNothing = async (page: Page): Promise<string | null> => {
+  const sent = await editedTexts(page);
+
+  return sent.length === 0
+    ? null
+    : `code left as it opened was saved as ${JSON.stringify(sent)}`;
+};
+
+/** `count` short lines of code, indented zero to four spaces, none wide enough to wrap. */
+const codeLines = (count: number): string =>
+  Array.from(
+    { length: count },
+    (_, at) => `${"  ".repeat(at % 3)}step(${at + 1});`
+  ).join("\n");
+
+/**
+ * The open code item shows `count` lines under the row's cap of ten: ten or
+ * fewer whole, with no Show more; more cut after the tenth, the edge where
+ * its words stop showing between the tenth line and the eleventh.
+ */
+const codeCap = async (page: Page, count: number): Promise<string | null> => {
+  const shown = await item(page, 760).evaluate((row) => {
+    const words = row.querySelector<HTMLElement>("[style*='--lines']");
+    const text = words?.querySelector("code")?.firstChild;
+
+    if (words === null || words === undefined || !(text instanceof Text)) {
+      return null;
+    }
+
+    // Where each line's first character shows.
+    const lines = text.data.split("\n");
+    let at = 0;
+
+    const tops = lines.map((line) => {
+      const range = document.createRange();
+
+      range.setStart(text, at);
+      range.setEnd(text, at + 1);
+      at += line.length + 1;
+
+      return range.getBoundingClientRect();
+    });
+
+    const style = getComputedStyle(words);
+
+    const edge =
+      words.getBoundingClientRect().bottom -
+      Number(style.borderBottomWidth.replace("px", "")) -
+      (style.overflowClipMargin.includes("content-box")
+        ? Number(style.paddingBottom.replace("px", ""))
+        : 0);
+
+    return {
+      edge,
+      eleventh: tops[10]?.top ?? null,
+      more:
+        row.querySelector("button[aria-label='Show more of the text']") !==
+        null,
+      tenth: tops[Math.min(9, tops.length - 1)]?.bottom ?? 0,
+    };
+  });
+
+  if (shown === null) {
+    return "the code item shows in no capped code block";
+  }
+
+  if (count <= 10) {
+    return !shown.more && shown.tenth <= shown.edge + 0.5
+      ? null
+      : `${count} lines of code must show whole, without Show more: ${JSON.stringify(shown)}`;
+  }
+
+  if (!shown.more) {
+    return `${count} lines of code must be cut after ten, with Show more`;
+  }
+
+  return shown.tenth <= shown.edge + 0.5 &&
+    shown.eleventh !== null &&
+    shown.eleventh >= shown.edge - 0.5
+    ? null
+    : `the cut must fall between the tenth line and the eleventh, not through one: ${JSON.stringify(shown)}`;
+};
+
 const CODE_SCENES: readonly Scene[] = (
   [
+    {
+      check: async (page) => await snippetChecks(item(page, 760), false),
+      data: { view: codeView(snippetMac) },
+      name: "item-code-snippet",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 760);
+      },
+      // Code's title alone, as on Windows: the editor's name says it is code.
+      check: async (page) => await snippetChecks(item(page, 760), true),
+      data: { view: codeView(snippetWindows) },
+      height: 620,
+      name: "item-code-snippet-open",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 760);
+      },
+      check: async (page) =>
+        await snippetChecks(page.locator("[data-details-view]"), true),
+      data: { view: codeView(snippetMac) },
+      name: "details-code-snippet",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 760);
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(
+          "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+        );
+        await page.keyboard.type("x");
+      },
+      // Edited in place, the snippet still reads as code, and saving keeps every line's indentation: the typed letter changes only the end.
+      check: async (page) => {
+        const field = await snippetChecks(
+          item(page, 760).getByRole("textbox", { name: "Edit item" }),
+          true
+        );
+
+        if (field !== null) {
+          return `while it is edited: ${field}`;
+        }
+
+        await page.keyboard.press("ControlOrMeta+Enter");
+
+        const sent = await editedTexts(page);
+
+        return sent.at(-1) === `${CODE_SNIPPET}x`
+          ? null
+          : `editing the code snippet sent ${JSON.stringify(sent)}, not its lines with an x at the end`;
+      },
+      data: { view: codeView(snippetMac) },
+      name: "item-code-snippet-edit",
+      width: NARROWEST,
+    },
+    {
+      act: editSnippet,
+      check: async (page) => {
+        await page.keyboard.press("ControlOrMeta+Enter");
+
+        return await sendsNothing(page);
+      },
+      data: { view: codeView({ ...snippetMac, text: LOOSE_CODE }) },
+      name: "item-code-snippet-keep-submit",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      act: editSnippet,
+      check: async (page) => {
+        await page.evaluate(() => {
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+        });
+
+        return await sendsNothing(page);
+      },
+      data: { view: codeView({ ...snippetMac, text: LOOSE_CODE }) },
+      name: "item-code-snippet-keep-blur",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      // Select All, then a paste of plain text with a blank line: the field holds exactly what was pasted. The host's ⌘A stands in for Windows' Ctrl+A: both select the whole field.
+      act: async (page) => {
+        await page
+          .context()
+          .grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.evaluate(async () => {
+          await navigator.clipboard.writeText("a\n\n  b");
+        });
+        await editSnippet(page);
+        await page.keyboard.press("ControlOrMeta+A");
+        await page.keyboard.press("ControlOrMeta+V");
+      },
+      check: async (page) => await savesAs(page, "a\n\n  b"),
+      data: { view: codeView(snippetWindows) },
+      name: "item-code-snippet-paste",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    ...[10, 11, 13].map((count) => ({
+      act: async (page: Page) => {
+        await select(page, 760);
+      },
+      check: async (page: Page) => await codeCap(page, count),
+      data: { view: codeView({ ...snippetWindows, text: codeLines(count) }) },
+      name: `item-code-lines-${count}-open`,
+      width: NARROWEST,
+    })),
+    {
+      // ↑ at the very start stays in the code: the letter typed next goes before its first line.
+      act: async (page) => {
+        await editSnippet(page);
+        await page.keyboard.press("ControlOrMeta+ArrowUp");
+        await page.keyboard.press("ArrowUp");
+        await page.keyboard.type("y");
+      },
+      check: async (page) => await savesAs(page, `y${CODE_SNIPPET}`),
+      data: { view: codeView(snippetWindows) },
+      name: "item-code-snippet-start-up",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
+    {
+      // ⌫ at the very start changes nothing, and Return after it adds a line instead of saving.
+      act: async (page) => {
+        await editSnippet(page);
+        await page.keyboard.press("ControlOrMeta+ArrowUp");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.press("Enter");
+        await page.keyboard.type("z");
+      },
+      check: async (page) => await savesAs(page, `\nz${CODE_SNIPPET}`),
+      data: { view: codeView(snippetWindows) },
+      name: "item-code-snippet-start-backspace",
+      platforms: ["macos", "windows"],
+      width: NARROWEST,
+    },
     {
       check: async (page) =>
         await codeChecks(page, "recall.ts:147 · inset-shelf", CODE_TOOLTIP),
@@ -13564,10 +13918,16 @@ const capProblems = async (page: Page): Promise<readonly string[]> =>
             Number(words.style.getPropertyValue("--lines")) +
             (words.dataset.spare === undefined ? 0 : 1);
 
-          const line =
-            Number(getComputedStyle(words).lineHeight.replace("px", "")) || 20;
+          const style = getComputedStyle(words);
+          const line = Number(style.lineHeight.replace("px", "")) || 20;
 
-          const shown = Math.round(words.getBoundingClientRect().height / line);
+          // The cap counts lines of the box's content: code keeps its padding.
+          const shown = Math.round(
+            (words.getBoundingClientRect().height -
+              Number(style.paddingTop.replace("px", "")) -
+              Number(style.paddingBottom.replace("px", ""))) /
+              line
+          );
 
           const opened =
             words.nextElementSibling?.getAttribute("aria-expanded") === "true";

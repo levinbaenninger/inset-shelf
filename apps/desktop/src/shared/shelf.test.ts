@@ -688,6 +688,84 @@ describe("selections with links", () => {
   });
 });
 
+const capture = (file: string, text: string, html: string | null) => {
+  const added = apply(emptyShelf(INBOX), [
+    {
+      context: {
+        app: "Code",
+        appLink: null,
+        code: {
+          file: `/Users/anna/p/${file}`,
+          line: null,
+          root: "/Users/anna/p",
+        },
+        title: `${file} — p`,
+        url: null,
+      },
+      html,
+      text,
+      type: "addText",
+      via: "selection",
+    },
+  ]).doc;
+
+  const [item] = added.items;
+
+  if (item === undefined) {
+    throw new Error("missing item");
+  }
+
+  return { added, item };
+};
+
+const copiedAfter = (file: string, edit: string) => {
+  const { added, item } = capture(
+    file,
+    "def __init__(self):\n    pass\n",
+    "<span>def __init__</span>"
+  );
+
+  const [edited] = apply(added, [{ id: item.id, text: edit, type: "editText" }])
+    .doc.items;
+
+  return edited?.kind === "text" ? copiedNote(edited) : null;
+};
+
+describe("a code capture's copy", () => {
+  it("copies as captured, HTML beside it, while its text is the captured words", () => {
+    const { item } = capture(
+      "recall.py",
+      "def __init__(self):\n    pass\n",
+      "<span>def __init__</span>"
+    );
+
+    expect(item.kind === "text" ? copiedNote(item) : null).toStrictEqual({
+      html: "<span>def __init__</span>",
+      text: "def __init__(self):\n    pass\n",
+    });
+  });
+
+  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> in HTML, the same text in both", () => {
+    expect([
+      copiedAfter("recall.py", "def __init__(self):\n    return *a*  # <1>"),
+      copiedAfter("recall.py", "call()\n"),
+    ]).toStrictEqual([
+      {
+        html: "<pre><code>def __init__(self):\n    return *a*  # &lt;1></code></pre>",
+        text: "def __init__(self):\n    return *a*  # <1>",
+      },
+      { html: "<pre><code>call()\n</code></pre>", text: "call()\n" },
+    ]);
+  });
+
+  it("copies an edited Markdown file's selection as the Markdown the shelf shows", () => {
+    expect(copiedAfter("notes.md", "__bold__ and *plain*")).toStrictEqual({
+      html: "<p><strong>bold</strong> and <em>plain</em></p>",
+      text: "bold and plain",
+    });
+  });
+});
+
 describe("sections", () => {
   const e = env();
 

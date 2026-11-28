@@ -1136,12 +1136,12 @@ describe(createCopyCommands, () => {
       text: "run a_b*c\\ <b> now",
     },
     {
-      html: "<pre><code>const total = sum(items);\n  return total;\n</code></pre>",
+      html: "<pre><code>const total = sum(items);\n  return total;</code></pre>",
       stored: "```\nconst total = sum(items);\n  return total;\n```",
       text: "const total = sum(items);\n  return total;",
     },
     {
-      html: '<pre><code class="language-ts">let a_b = 1;\n</code></pre>',
+      html: '<pre><code class="language-ts">let a_b = 1;</code></pre>',
       stored: "```ts\nlet a_b = 1;\n```",
       text: "let a_b = 1;",
     },
@@ -1491,6 +1491,51 @@ describe(createCopyCommands, () => {
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
       "text/html": "<p><strong>init</strong> runs</p>",
       "text/plain": "init runs",
+    });
+  });
+
+  it("copies and drags out a code capture edited in the shelf as the code block it shows, as typed in plain text", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: {
+          app: "Code",
+          appLink: null,
+          code: {
+            file: "/Users/anna/p/recall.py",
+            line: null,
+            root: "/Users/anna/p",
+          },
+          title: "recall.py — p",
+          url: null,
+        },
+        html: "<span>def __init__</span>",
+        text: "def __init__(self):",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    controller.apply({
+      id,
+      text: "def __init__(self):\n    return *a*",
+      type: "editText",
+    });
+
+    await commands.copy(id);
+    const item = controller.item(id);
+
+    expect({
+      copied: await formats(written[0]?.[0]),
+      dragged: item === undefined ? undefined : itemText(item),
+    }).toStrictEqual({
+      copied: {
+        "text/html":
+          "<pre><code>def __init__(self):\n    return *a*</code></pre>",
+        "text/plain": "def __init__(self):\n    return *a*",
+      },
+      dragged: "def __init__(self):\n    return *a*",
     });
   });
 

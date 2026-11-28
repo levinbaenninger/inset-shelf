@@ -18,6 +18,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button, buttonVariants } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
+import { isCodeCapture } from "@shared/code-editors";
 import type { DetailField, ShelfView } from "@shared/contracts";
 import { dateText, dueChipText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
@@ -43,7 +44,7 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { use, useEffect, useEffectEvent, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
@@ -81,6 +82,7 @@ import {
   WindowThumb,
 } from "./item-meta";
 import { LinkList, SourceLine, TextEditor } from "./item-row";
+import { KnownEditors } from "./known-editors";
 import { Markdown } from "./markdown";
 import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
@@ -1131,6 +1133,7 @@ const TextContent = ({
   readonly item: TextItem;
 }) => {
   const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+  const code = isCodeCapture(item, use(KnownEditors));
 
   return editing ? (
     // The same card as the words read in, so starting an edit moves nothing.
@@ -1162,6 +1165,7 @@ const TextContent = ({
     >
       <Markdown
         className="text-sm leading-snug break-words"
+        code={code}
         interactive
         onOpenLink={onOpenLink}
         text={item.text}

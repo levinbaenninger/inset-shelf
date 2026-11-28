@@ -6,6 +6,7 @@ import {
   pathInProject,
 } from "./code-place";
 import type { CodePlace } from "./code-place";
+import type { TextItem } from "./shelf";
 import { cleanTitle } from "./window-title";
 
 /**
@@ -433,4 +434,73 @@ export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
   }
 
   return mac ? "Show in Finder" : "Show in Folder";
+};
+
+/** Files whose words are prose, which read as Markdown even from a code editor. */
+const PROSE_FILES = new Set([".md", ".mdx", ".markdown", ".txt"]);
+
+/** A file name's extension, lower case, or "" for none (a dot file such as .env has none). */
+const extensionOf = (name: string): string => {
+  const dot = name.lastIndexOf(".");
+
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+};
+
+/**
+ * The file a code editor's title names, for telling code from prose: by the
+ * row's parts, else the whole title when it holds no dash, as Code titles a
+ * file opened on its own, unless what follows its last dot has a space, as
+ * a workspace's label does. Whether that lone part is a file or a folder
+ * only its extension says, which is all this is read for.
+ */
+const titledFile = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): string | null => {
+  const named = titleParts(editor, title, app).file;
+
+  if (named !== null || partsOf(editor, title, app).length > 0) {
+    return named;
+  }
+
+  const lone = cleanTitle(title, app);
+
+  // A file's name has no space in its extension; a label such as "release.v2 (Workspace)" does.
+  return lone === null || /\s/u.test(extensionOf(lone)) ? null : lone;
+};
+
+/**
+ * Whether a text item is code: a selection from a file a code editor
+ * showed, that is not Markdown or plain text. The file is the code place's
+ * (macOS), else the one the title names by the editor's row among `editors`
+ * (Windows), where a name without an extension (Welcome, Untitled-1) is not
+ * taken for a file. A selection from an editor with no file named, such as
+ * a panel, is prose. Code reads and edits with every line's whitespace kept.
+ */
+export const isCodeCapture = (
+  { context, via }: Pick<TextItem, "context" | "via">,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): boolean => {
+  if (via !== "selection" || context === null) {
+    return false;
+  }
+
+  // Read as the source line reads it (web-source.ts): a context may hold no code field at all.
+  const place = context.code ?? null;
+
+  if (place !== null) {
+    return !PROSE_FILES.has(extensionOf(fileName(place)));
+  }
+
+  const editor = codeEditor(context.app, editors);
+
+  const file =
+    editor === undefined
+      ? null
+      : titledFile(editor, context.title, context.app);
+
+  const extension = file === null ? "" : extensionOf(file);
+
+  return extension !== "" && !PROSE_FILES.has(extension);
 };

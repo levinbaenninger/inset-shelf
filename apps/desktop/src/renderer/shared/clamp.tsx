@@ -158,9 +158,19 @@ export const hideCutControls = (
   }
 };
 
-/** Words cut to `--lines` lines, the last one fading: only the lines below are cut, so a space hanging past a line's end isn't. */
+/** How tall a box's words are whole, under any padding above them, whether or not they are cut now. */
+const wordsHeight = (element: HTMLElement): number =>
+  element.scrollHeight -
+  Number(getComputedStyle(element).paddingTop.replace("px", ""));
+
+/**
+ * Words cut to `--lines` lines, the last one fading: only the lines below
+ * are cut, so a space hanging past a line's end isn't. Padding above the
+ * words (code's block) is kept whole. Space under them belongs inside them,
+ * since padding there would show the line after the cut.
+ */
 export const CUT_LINES =
-  "max-h-[calc(var(--lines)*1lh)] overflow-y-clip [mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]";
+  "box-content max-h-[calc(var(--lines)*1lh)] overflow-y-clip [mask-image:linear-gradient(to_bottom,#000_calc(100%-1lh),rgb(0_0_0/0.3))]";
 
 /**
  * Words cut to `lines` lines, the last one fading, with a quiet button
@@ -188,7 +198,7 @@ export const Clamp = ({
   readonly spare?: boolean;
   /** Told how many lines the words take whole, whether or not they are cut, each time they are measured. */
   readonly onLines?: (lines: number) => void;
-  /** Takes the line-height of the words, which `lines` counts in. */
+  /** Takes the line-height of the words, which `lines` counts in, and any padding above them. */
   readonly className?: string;
   readonly more?: string;
   readonly less?: string;
@@ -204,12 +214,13 @@ export const Clamp = ({
 
   useMeasure(ref, (element) => {
     // The words' whole height, whether or not they are cut now.
-    const hidden = element.scrollHeight - lines * lineHeight(element);
+    const whole = wordsHeight(element);
+    const hidden = whole - lines * lineHeight(element);
     const isLong = hidden >= (spare ? 2 : 1) * lineHeight(element) - 1;
 
     setLong(isLong);
     hideCutControls(element, isLong && !open);
-    onLines?.(Math.round(element.scrollHeight / lineHeight(element)));
+    onLines?.(Math.round(whole / lineHeight(element)));
   });
 
   const label = open ? less : more;

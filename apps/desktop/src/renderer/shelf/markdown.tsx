@@ -76,21 +76,23 @@ const Code = ({ children }: Children) => (
 );
 
 /**
- * An open card wraps a long code line, so reading it takes no sideways scroll.
- * A closed one keeps its lines and clips them, so a two-line clamp counts
- * lines of code and not lines of wrapping.
+ * How code reads, and is typed in (code-field.tsx): it keeps its spaces and
+ * lines, and wraps a long line, open or closed, so reading it takes no
+ * sideways scroll and nothing is cut at the card's edge.
  */
+export const CODE_BLOCK =
+  "bg-foreground/5 rounded-md px-2 font-mono text-xs wrap-anywhere whitespace-pre-wrap";
+
 const CodeBlock = ({ children }: Children) => {
   const { interactive } = use(Mode);
 
   return (
     <Block
       className={cn(
-        "bg-foreground/5 rounded-md px-2 font-mono text-xs [&_code]:bg-transparent [&_code]:p-0",
+        CODE_BLOCK,
+        "[&_code]:bg-transparent [&_code]:p-0",
         // Padding under a clamped block would show a sliver of the line after the cut.
-        interactive
-          ? "py-1.5 wrap-anywhere whitespace-pre-wrap"
-          : "whitespace-pre"
+        interactive && "py-1.5"
       )}
     >
       {children}
@@ -147,16 +149,17 @@ const COMPONENTS: Components = {
   ul: List,
 };
 
-/** A text item's words as Markdown. */
+/** A text item's words as Markdown, or with `code` as one block of code, every space and line kept. */
 export const Markdown = ({
   className,
+  code = false,
   interactive,
   onOpenLink,
   text,
-}: MarkdownMode & { readonly text: string } & Pick<
-    ComponentProps<"div">,
-    "className"
-  >) => {
+}: MarkdownMode & {
+  readonly text: string;
+  readonly code?: boolean;
+} & Pick<ComponentProps<"div">, "className">) => {
   const Root = interactive ? "div" : "span";
 
   const mode = useMemo(
@@ -175,13 +178,19 @@ export const Markdown = ({
           className
         )}
       >
-        <ReactMarkdown
-          components={COMPONENTS}
-          remarkPlugins={NOTE_PLUGINS}
-          skipHtml
-        >
-          {text}
-        </ReactMarkdown>
+        {code ? (
+          <CodeBlock>
+            <code>{text}</code>
+          </CodeBlock>
+        ) : (
+          <ReactMarkdown
+            components={COMPONENTS}
+            remarkPlugins={NOTE_PLUGINS}
+            skipHtml
+          >
+            {text}
+          </ReactMarkdown>
+        )}
       </Root>
     </Mode>
   );
