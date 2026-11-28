@@ -382,6 +382,8 @@ describe(createAttachments, () => {
     ["Screen Shot.PNG", "Screen Shot.PNG"],
     ["Screen Shot.Png", "Screen Shot.Png"],
     ["photo.JPG", "photo.png"],
+    ["chart.png.png", "chart.png.png"],
+    ["chart.PNG.jpg", "chart.PNG.png"],
   ])(
     "drags a picture added from %j out as %j: a PNG's own spelling, a picture made PNG with .png",
     async (name, dragged) => {
