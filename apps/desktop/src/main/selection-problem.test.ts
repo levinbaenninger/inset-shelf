@@ -34,12 +34,13 @@ describe("the clipboard warning of a capture", () => {
 
   it("keeps a failed save's reason, saying the clipboard after it in the same notice", () => {
     const failed = {
-      message: "Inset couldn't save the shelf.",
+      headline: "Inset couldn't save the shelf.",
+      reasons: [],
       tone: "failed",
     } as const;
 
     expect(warningToUser(NOT_PUT_BACK, false, failed)).toStrictEqual({
-      message: `${failed.message} ${selectionProblem(NOT_PUT_BACK)}`,
+      message: `${failed.headline} ${selectionProblem(NOT_PUT_BACK)}`,
       tone: "failed",
     });
   });
@@ -62,7 +63,8 @@ describe("the clipboard warning of a capture", () => {
   it("replaces a success notice, which the shelf's items already show", () => {
     expect(
       warningToUser(NOT_PUT_BACK, false, {
-        message: "Added 1 file",
+        headline: "Added 1 file",
+        reasons: [],
         tone: "done",
       })?.message
     ).toBe(selectionProblem(NOT_PUT_BACK));
