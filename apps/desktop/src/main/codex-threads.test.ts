@@ -52,7 +52,7 @@ describe(threadOfWindow, () => {
       saved: "01a0a981-8186-7a92-af7d-c414d6adda1a",
       shown: "02b1ba92-9297-7ba3-b0bf-d525e7eeeb2b",
     });
-    // A Mac adds no name to the title: it is the thread's own.
+    // A Mac's caption, or a title an item saved, is the thread's own name first.
     expect(threadOfWindow(threads, "Plan - ChatGPT", false)).toBe(
       "02b1ba92-9297-7ba3-b0bf-d525e7eeeb2b"
     );

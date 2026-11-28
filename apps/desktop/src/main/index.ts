@@ -355,11 +355,12 @@ const openInApp = async (
 ): Promise<void> => {
   const stored = context?.appLink ?? null;
 
+  // The title is a saved one, not a caption: an older build's names the thread as it is.
   const link =
     (stored !== null && isAppLink(stored) ? stored : null) ??
     desktopLink(name, context?.url ?? null) ??
     (name === "ChatGPT"
-      ? await chatGptThreadLink(context?.title ?? null)
+      ? await chatGptThreadLink(context?.title ?? null, false)
       : null);
 
   if (link !== null) {
