@@ -10,9 +10,11 @@ import {
 import type { Attachment } from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
+import { addedNotice } from "./added-file";
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachmentDeps, DecodedImage } from "./attachments";
 import { imageFileName, ownFileName } from "./export-name";
+import { selectionProblem, warningToUser } from "./selection-problem";
 import { createShelfController } from "./shelf-controller";
 
 const uuid = (n: number) =>
@@ -257,6 +259,39 @@ describe(createAttachments, () => {
       },
       stored: [`${uuid(12)}.txt`],
     });
+  });
+
+  it("names a long file in short, so a hidden shelf's toast still says why it wasn't added after the clipboard's warning", async () => {
+    const { attachments } = setup(0);
+    const file = `huge ${"q".repeat(220)}.pdf`;
+
+    const prepared = await attachments.prepare(`/a/${file}`);
+    const reason = "problem" in prepared ? prepared.problem : "";
+
+    // A file capture whose clipboard was never put back.
+    const notPutBack = {
+      kind: "files",
+      paths: [`/a/${file}`],
+      restored: false,
+      unchecked: false,
+    } as const;
+
+    const warning = warningToUser(
+      notPutBack,
+      false,
+      addedNotice(0, 1, [reason], "file")
+    );
+
+    // The toast's tooltip: its words, then a line of its own, cut at 300 characters (TOOLTIP_MAX).
+    const tooltip = `${warning?.message ?? ""}\nClick to open the shelf`;
+
+    expect({
+      reason: reason.endsWith(".pdf is larger than 200 MB."),
+      tooltip: tooltip.length <= 300,
+      warned: tooltip.startsWith(
+        `Nothing was added. ${selectionProblem(notPutBack)} ${reason}`
+      ),
+    }).toStrictEqual({ reason: true, tooltip: true, warned: true });
   });
 
   it("says what landed first when a drop of a file and a folder attaches only the file", async () => {
