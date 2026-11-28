@@ -37,3 +37,24 @@ export const withoutAppName = (title: string, app: string | null): string => {
 
   return title;
 };
+
+const UNREAD = /^\(\d+\)\s+/u;
+const DIRTY = /^[●•]\s*/u;
+
+/** A window's title as it names what it shows: without the app's name, an unread count or an unsaved mark; null when that says nothing. */
+export const cleanTitle = (
+  title: string | null,
+  app: string | null
+): string | null => {
+  if (title === null) {
+    return null;
+  }
+
+  const clean = withoutAppName(title, app)
+    .trim()
+    .replace(UNREAD, "")
+    .replace(DIRTY, "")
+    .trim();
+
+  return clean.length < 3 || clean === app ? null : clean;
+};
