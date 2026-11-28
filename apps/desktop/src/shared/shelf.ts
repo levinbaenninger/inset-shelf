@@ -286,10 +286,14 @@ export type Picture = z.output<z.ZodObject<typeof PictureFields>>;
 
 export const ATTACHMENT_NAME_MAX = 255;
 
+const PNG_EXTENSION = z.string().regex(/^\.png$/iu);
+
 const ImageFields = {
   ...PictureFields,
   /** The name of the file the picture was added from, without its extension: it drags out under it. Captured and pasted pictures have none. */
   fileName: z.string().min(1).max(ATTACHMENT_NAME_MAX).optional(),
+  /** How the PNG it was added from spelled its extension (.PNG), where that isn't .png: it drags out with it. */
+  extension: PNG_EXTENSION.optional(),
   kind: z.literal("image"),
   note: z.string().max(TEXT_MAX),
   /** The display an area or pin was captured on. */
@@ -326,6 +330,8 @@ export const AttachedImageSchema = z.object({
   kind: z.literal("image"),
   /** Shown in tooltips, used as the file name when dragged out and in plain-text copies. No extension. */
   name: z.string().min(1).max(ATTACHMENT_NAME_MAX),
+  /** How the PNG it was added from spelled its extension (.PNG), where that isn't .png: it drags out with it. */
+  extension: PNG_EXTENSION.optional(),
 });
 
 export type AttachedImage = z.output<typeof AttachedImageSchema>;
@@ -838,6 +844,7 @@ export type MainOp =
       readonly image: ShelfImage;
       /** A picture added from a file is titled with the file's name, and keeps it to drag out under. */
       readonly fileName?: string;
+      readonly extension?: string;
       readonly title?: string;
       readonly scene?: DrawingScene;
       readonly pins: readonly Pin[];
@@ -1675,6 +1682,17 @@ const applyAttachmentOp = (doc: ShelfDoc, op: AttachmentOp): OpResult => {
   }
 };
 
+/** A picture added from a file keeps the file's name, and a PNG its spelling of .png, to drag out under. */
+const fromFile = (
+  item: ImageItem,
+  fileName: string | undefined,
+  extension: string | undefined
+): ImageItem => {
+  const named = fileName === undefined ? item : { ...item, fileName };
+
+  return extension === undefined ? named : { ...named, extension };
+};
+
 /**
  * Applies one operation. `pending` holds the deleted items that can still be
  * put back, oldest first; a delete past UNDO_MAX discards the oldest for good.
@@ -1728,13 +1746,12 @@ export const applyOp = (
         via: op.via,
       };
 
-      const named =
-        op.fileName === undefined ? item : { ...item, fileName: op.fileName };
+      const spelled = fromFile(item, op.fileName, op.extension);
 
       // An image with no marks kept has no scene at all, as on shelves from before them.
       return addItem(
         doc,
-        op.scene === undefined ? named : { ...named, scene: op.scene }
+        op.scene === undefined ? spelled : { ...spelled, scene: op.scene }
       );
     }
 

@@ -48,6 +48,11 @@ const isInlineControl = (target: EventTarget | null): boolean => {
 /** The keys that act on the row, which an inline control keeps from it. */
 const ROW_KEYS = new Set(["Enter", " ", "Backspace", "Delete"]);
 
+/** ⌫ on a button, checkbox or link in a row: the shelf doesn't delete the item, so the keyboard stays in the row. */
+export const leavesRowAlone = (event: KeyboardEvent): boolean =>
+  (event.key === "Backspace" || event.key === "Delete") &&
+  isInlineControl(event.target);
+
 /** An open menu handles its own keys, typing included. */
 const inMenu = (target: EventTarget | null): boolean =>
   target instanceof Element && target.closest("[role=menu]") !== null;

@@ -271,6 +271,22 @@ export const openingApp = (
     : null;
 };
 
+/**
+ * The title to find a ChatGPT thread by when the item opens in no app
+ * otherwise: on Windows an item kept without a link to its thread, as an
+ * older build kept them. Null for every other item.
+ */
+export const chatGptTitleToFind = (
+  source: (AppSource & { readonly title: string | null }) | null,
+  anyApp: boolean,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): string | null =>
+  source !== null &&
+  desktopApp(source.app) === "ChatGPT" &&
+  openingApp(source, anyApp, editors) === null
+    ? source.title
+    : null;
+
 export interface SourceLabel {
   /** A site the shelf knows, shown with its mark. */
   readonly service: Service | null;
