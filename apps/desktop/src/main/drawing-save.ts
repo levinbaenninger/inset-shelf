@@ -44,8 +44,8 @@ export interface DrawingSaveInput {
 export type DrawingTarget =
   /** New Drawing: a new item. */
   | { readonly kind: "new" }
-  /** Annotate on an image item. */
-  | { readonly kind: "item"; readonly id: ItemId }
+  /** Annotate on an image item; `screenshot`: the screenshot card's, made as its Annotate opened. */
+  | { readonly kind: "item"; readonly id: ItemId; readonly screenshot?: true }
   /** New Drawing in an item's details: a new attachment of that item. */
   | { readonly kind: "newAttachment"; readonly id: ItemId }
   /** Annotate on a picture attached to an item. */
@@ -101,6 +101,10 @@ export interface DrawingSaveDeps {
   readonly added: (id: ItemId, via: "annotation" | "drawing") => void;
   /** The shelf selects an item and brings it into view, as after a capture, which also leaves details. */
   readonly focus: (id: ItemId) => void;
+  /** The screenshot card's item, once its Annotate's Save closes it: the shelf says where the screenshot went, and open details stay. */
+  readonly shotSaved: (id: ItemId) => void;
+  /** The screenshot card's item, once its Annotate closes without a Save: a notice says where the screenshot went, the shelf shown or not. */
+  readonly shotClosed: (id: ItemId) => void;
   /** After the user's own Save: the shelf shows the item, and says so when a copy failed or a copied drawing never reached the disk. */
   readonly show: (
     copied: ActionResult | null,
@@ -121,8 +125,10 @@ export interface DrawingSaveState {
 export interface DrawingSaves {
   /** Reads what Annotate opens a picture on; changes nothing, so the caller can check the window is still free once it has. */
   readonly opening: (picture: Picture) => Promise<DrawingOpening>;
-  /** The window opens on a picture, with what was read for it, or on a blank page. */
+  /** The window opens on a picture, with what was read for it, or on a blank page; a screenshot card's Annotate it replaces is announced. */
   readonly open: (target: DrawingTarget, opening?: DrawingOpening) => void;
+  /** The window has hidden, after Save, Cancel or its close button. */
+  readonly hidden: () => void;
   /** The picture the window opened on, to draw the marks into; the same bytes however often it saves. */
   readonly image: () => Promise<Uint8Array | null>;
   /** The page's Save, Copy and Save, or Retry in a held quit (`forQuit`). */
@@ -220,6 +226,8 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
   // The picture the window opened on, which the page shows under its marks; null for a blank page.
   let openedPicture: ShelfImage | null = null;
   let quitStop: AbortSignal | null = null;
+  // The screenshot card's item while its Annotate is open: closed without a Save, the window's hide still announces it.
+  let unannounced: ItemId | null = null;
   // The item as a held quit's save left it: the marks count as on the shelf only while the shelf still holds exactly that.
   let applied: ShelfItem | null = null;
   let error: string | null = null;
@@ -559,15 +567,40 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
 
   /**
    * Marks that went to an item of their own, new or annotated, bring it into
-   * view. Marks on an attachment leave the shelf where the user was: in the
-   * details the picture was opened from, or on the list.
+   * view, except on the screenshot card's item, which main announces. Marks
+   * on an attachment leave the shelf where the user was: in the details the
+   * picture was opened from, or on the list.
    */
   const landed = (put: Put): void => {
     deps.added(put.placed.id, put.via);
 
-    if (put.placed.kind === "item") {
+    if (put.placed.kind !== "item") {
+      return;
+    }
+
+    if (opened.kind === "item" && opened.screenshot === true) {
+      deps.shotSaved(put.placed.id);
+    } else {
       deps.focus(put.placed.id);
     }
+  };
+
+  /** The screenshot card's Annotate ended without a Save: main still says where the screenshot went, if it is still on the shelf. */
+  const closedUnsaved = (): void => {
+    const id = unannounced;
+
+    unannounced = null;
+
+    if (id !== null && deps.controller.item(id) !== undefined) {
+      deps.shotClosed(id);
+    }
+  };
+
+  /** Save or Retry closes the window on the marks: the save announces the screenshot's item itself, so the window's hide doesn't. */
+  const closeOn = (put: Put): void => {
+    unannounced = null;
+    deps.close();
+    landed(put);
   };
 
   /** The user's own Save: the window closes at once; a copy waits for its own save. */
@@ -595,8 +628,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       }
     }
 
-    deps.close();
-    landed(put);
+    closeOn(put);
     deps.show(copied, saving);
 
     return { ok: true };
@@ -623,8 +655,7 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
       return written;
     }
 
-    deps.close();
-    landed(put);
+    closeOn(put);
 
     return { ok: true };
   };
@@ -679,9 +710,13 @@ export const createDrawingSaves = (deps: DrawingSaveDeps): DrawingSaves => {
     forQuit: (stop) => {
       quitStop = stop;
     },
+    hidden: closedUnsaved,
     image: async () => await base,
     open: (to, opening) => {
+      // A clean window takes the next drawing without hiding.
+      closedUnsaved();
       opened = to;
+      unannounced = to.kind === "item" && to.screenshot === true ? to.id : null;
       made = null;
       applied = null;
       error = null;

@@ -1,9 +1,4 @@
-import type {
-  DetailField,
-  NotSavedItem,
-  ShelfStatus,
-  ShelfView,
-} from "@shared/contracts";
+import type { NotSavedItem, ShelfStatus, ShelfView } from "@shared/contracts";
 import { applyOp, storedFilesOf, UNDO_MAX } from "@shared/shelf";
 import type {
   Attachment,
@@ -53,13 +48,16 @@ export type CopyState =
   | { readonly kind: "pending" }
   | { readonly kind: "failed"; readonly message: string };
 
+/** How the shelf shows the item main brings into view. */
+export type FocusHow = Omit<NonNullable<ShelfView["focus"]>, "id" | "seq">;
+
 export interface ShelfController {
   readonly view: () => ShelfView;
   /** Returns the id of an item the operation added. */
   readonly apply: (op: ShelfOp | MainOp) => ItemId | null;
   readonly item: (id: ItemId) => ShelfItem | undefined;
-  /** Selects an item in the shelf; `edit` opens its text for typing, `field` its details at that field. */
-  readonly focus: (id: ItemId, edit?: boolean, field?: DetailField) => void;
+  /** Selects an item in the shelf; `edit` opens its text for typing, `field` its details at that field, and `keepDetails` leaves open details as they are. */
+  readonly focus: (id: ItemId, how?: FocusHow) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
   /**
@@ -645,15 +643,9 @@ export const createShelfController = (
     },
     discards: (ids) => ids.reduce((sum, id) => sum + epochOf(id), 0),
     flush: async () => await persisted(version),
-    focus: (id, edit, field) => {
+    focus: (id, how = {}) => {
       focusSeq += 1;
-      focus =
-        edit === true ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
-
-      if (field !== undefined) {
-        focus = { ...focus, field };
-      }
-
+      focus = { ...how, id, seq: focusSeq };
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),

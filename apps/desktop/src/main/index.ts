@@ -783,7 +783,7 @@ const start = async (): Promise<void> => {
         await showShelf();
 
         if (item !== null) {
-          controller.focus(item, false, field ?? undefined);
+          controller.focus(item, field === null ? {} : { field });
         }
       })();
     },
@@ -838,8 +838,8 @@ const start = async (): Promise<void> => {
     url: pageUrl("screenshot"),
   });
 
-  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
-  let notify: (message: string, tone?: NoticeTone) => void = (
+  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden. `show`: the item the shelf's toast offers to show from open details.
+  let notify: (message: string, tone?: NoticeTone, show?: ItemId) => void = (
     message,
     tone = "done"
   ) => {
@@ -1008,13 +1008,13 @@ const start = async (): Promise<void> => {
 
   /**
    * The card's screenshot is saved to `to`: a notice says where it is, by
-   * the section's name or the item's words. A drop on an item also ends the
-   * tutorial's screenshot step here; Add to Shelf ended it when its row was
-   * made.
+   * the section's name or the item's words, and offers to show a new item
+   * from open details. A drop on an item also ends the tutorial's
+   * screenshot step here; Add to Shelf ended it when its row was made.
    */
   const shotAdded = (to: ShotSaveTo, id: ItemId): void => {
     if (to === "shelf") {
-      notify(`Added to ${sectionName(id)}`);
+      notify(`Added to ${sectionName(id)}`, "done", id);
 
       return;
     }
@@ -1027,6 +1027,15 @@ const start = async (): Promise<void> => {
         ? "Added to the item"
         : `Added to “${excerpt(itemText(item))}”`
     );
+  };
+
+  /** The card's own add saved its screenshot: the visible shelf shows a new row, or keeps open details, and a notice says where it is. */
+  const shotLanded = (to: ShotSaveTo, id: ItemId): void => {
+    if (to === "shelf" && shelf.isVisible()) {
+      controller.focus(id, { keepDetails: true });
+    }
+
+    shotAdded(to, id);
   };
 
   const shotSaves = createShotSaves<CardShot>({
@@ -1662,7 +1671,7 @@ const start = async (): Promise<void> => {
 
         if (id !== null) {
           e2eLog("itemAdded", { itemId: id, kind: "text", via: "windowLink" });
-          controller.focus(id, true);
+          controller.focus(id, { edit: true });
         }
       } else {
         controller.apply({
@@ -1733,15 +1742,17 @@ const start = async (): Promise<void> => {
   };
 
   /**
-   * Shows the shelf with the saved image; when Copy and Save could not copy,
-   * it says why there. `saving`: a new drawing copied before it reached the
-   * disk, which says so if it never does.
+   * Shows the shelf with the saved image, where it is when it shows already;
+   * when Copy and Save could not copy, it says why there. `saving`: a new
+   * drawing copied before it reached the disk, which says so if it never does.
    */
   const showSaved = async (
     copied: ActionResult | null,
     saving: Promise<WriteResult> | null = null
   ): Promise<void> => {
-    await showShelf();
+    if (!focusShelf()) {
+      await showShelf();
+    }
 
     if (copied !== null && !copied.ok) {
       notify(copied.message, "failed");
@@ -1784,6 +1795,18 @@ const start = async (): Promise<void> => {
     },
     focus: (id) => {
       controller.focus(id);
+    },
+    // The shelf hidden, Save shows it at the item as after any Annotate.
+    shotSaved: (id) => {
+      if (shelf.isVisible()) {
+        shotLanded("shelf", id);
+      } else {
+        controller.focus(id);
+      }
+    },
+    // Nothing shows the shelf then: as after Add to Shelf, the notice is the native one while it is hidden.
+    shotClosed: (id) => {
+      shotLanded("shelf", id);
     },
     readFile: async (file) => {
       try {
@@ -2112,15 +2135,15 @@ const start = async (): Promise<void> => {
       : null;
   };
 
-  /** Opens a picture to draw on, an image item's or an attached one, with the marks a save kept beside it to edit again. */
+  /** Opens a picture to draw on, an image item's or an attached one, with the marks a save kept beside it to edit again. False when the window stays as it was. */
   const openPicture = async (
     target: Extract<DrawingTarget, { readonly kind: "item" | "attachment" }>,
     pinMode = false
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const before = pictureAt(target);
 
     if (before === null || drawingTaken(target)) {
-      return;
+      return false;
     }
 
     const opening = await drawingSaves.opening(before.picture);
@@ -2128,16 +2151,14 @@ const start = async (): Promise<void> => {
 
     // Anything can happen while the marks are read: the window and the picture are checked again, as they are now.
     if (now === null || drawingTaken(target)) {
-      return;
+      return false;
     }
 
     if (
       now.picture.image.file !== before.picture.image.file ||
       now.picture.scene?.file !== before.picture.scene?.file
     ) {
-      await openPicture(target, pinMode);
-
-      return;
+      return await openPicture(target, pinMode);
     }
 
     const { picture } = opening;
@@ -2161,6 +2182,8 @@ const start = async (): Promise<void> => {
       ),
       pinMode,
     });
+
+    return true;
   };
 
   /** Opens an image item to draw on, with the marks a save kept beside it to edit again. */
@@ -2260,15 +2283,6 @@ const start = async (): Promise<void> => {
         icon: exported.image.resize({ width: 128 }),
       });
     }
-  };
-
-  /** The card's own add saved its screenshot: a new row is shown on the visible shelf, and a notice says where it is. */
-  const shotLanded = (to: ShotSaveTo, id: ItemId): void => {
-    if (to === "shelf" && shelf.isVisible()) {
-      controller.focus(id);
-    }
-
-    shotAdded(to, id);
   };
 
   // The card's own file dropped back on the shelf goes through the card's add, so a screenshot keeps one place.
@@ -2502,6 +2516,8 @@ const start = async (): Promise<void> => {
     drawingServer.emit("confirmClose", drawingSaves.kept());
   });
 
+  drawing.onHidden(drawingSaves.hidden);
+
   const screenshotServer = serveContract(
     screenshotContract,
     {
@@ -2539,8 +2555,15 @@ const start = async (): Promise<void> => {
             return;
           }
 
-          controller.focus(id);
-          await openImage(id);
+          controller.focus(id, { keepDetails: true });
+
+          // Unsaved marks that took the window meanwhile keep it; the screenshot is only saved then.
+          if (
+            !(await openPicture({ id, kind: "item", screenshot: true })) &&
+            controller.item(id) !== undefined
+          ) {
+            shotAdded("shelf", id);
+          }
         })();
       },
       copy: (seq) => {
@@ -2752,13 +2775,17 @@ const start = async (): Promise<void> => {
     shelfServer.emit("view", pageView());
   };
 
-  notify = (message, tone = "done") => {
+  notify = (message, given, show) => {
+    const tone = given ?? "done";
     const via = shelf.isVisible() ? "shelf" : "toast";
 
     e2eLog("noticeSent", { text: message, tone, via });
 
     if (via === "shelf") {
-      shelfServer.emit("notice", { message, tone });
+      shelfServer.emit(
+        "notice",
+        show === undefined ? { message, tone } : { message, show, tone }
+      );
     } else {
       toast.send({ title: message, tone, type: "notified" });
     }

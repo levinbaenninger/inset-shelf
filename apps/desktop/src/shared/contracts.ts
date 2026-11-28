@@ -88,6 +88,8 @@ export interface ShelfView {
     readonly edit?: boolean;
     /** Opens the item's details at this field: the why field's way in when the pill couldn't get the keyboard. */
     readonly field?: DetailField;
+    /** A screenshot's item: open details stay open, and the notice main sends offers Show. */
+    readonly keepDetails?: true;
   } | null;
   /** An item can be restored with undoRemove. */
   readonly canUndo: boolean;
@@ -227,8 +229,12 @@ export const shelfContract = defineContract({
     command: event<ShelfCommand>(),
     /** Quitting: the page sends every edit it still holds, then answers with `settled` and this number. */
     settle: event<number>(),
-    /** A short note on something main did, shown as a toast: a confirmation, or why it failed. */
-    notice: event<{ readonly message: string; readonly tone: NoticeTone }>(),
+    /** A short note on something main did, shown as a toast: a confirmation, or why it failed. `show`: the item it names, which open details offer to show. */
+    notice: event<{
+      readonly message: string;
+      readonly tone: NoticeTone;
+      readonly show?: ItemId;
+    }>(),
     view: event<ShelfView>(),
     /** Main showed the shelf: the page puts the caret in the note field unless something is under way. */
     shown: event<null>(),

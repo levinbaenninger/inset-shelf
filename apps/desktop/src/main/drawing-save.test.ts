@@ -23,6 +23,7 @@ import {
 } from "vite-plus/test";
 
 import { createDrawingSaves } from "./drawing-save";
+import type { DrawingSaveDeps } from "./drawing-save";
 import { createQuitHold, drawingMarks } from "./quit-hold";
 import { createShelfController } from "./shelf-controller";
 import { nodeStoreFs, openShelfStore } from "./shelf-store";
@@ -134,6 +135,8 @@ const setup = async (dir: string, blocked = false) => {
   const saves = createDrawingSaves({
     added: () => {},
     focus: () => {},
+    shotSaved: () => {},
+    shotClosed: () => {},
     clearStaging: () => {},
     close: () => {
       window.visible = false;
@@ -250,10 +253,17 @@ const setup = async (dir: string, blocked = false) => {
 };
 
 /** Saves that read the pictures and marks from the disk, as main's do. */
-const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
+const savesReading = (
+  app: Awaited<ReturnType<typeof setup>>,
+  shelf: Partial<
+    Pick<DrawingSaveDeps, "close" | "focus" | "shotClosed" | "shotSaved">
+  > = {}
+) =>
   createDrawingSaves({
     added: () => {},
     focus: () => {},
+    shotSaved: () => {},
+    shotClosed: () => {},
     clearStaging: () => {},
     close: () => {},
     controller: app.controller,
@@ -275,6 +285,7 @@ const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
     },
     show: () => {},
     store: app.store,
+    ...shelf,
   });
 
 const HELLO: readonly StrokeMark[] = [
@@ -389,6 +400,82 @@ const annotating = async (app: Awaited<ReturnType<typeof setup>>) => {
     reopened,
     saves,
   };
+};
+
+/**
+ * The screenshot card's item, and what the shelf hears as its Annotate
+ * closes: the window's hide follows every close, as in main.
+ */
+const cardShot = async (app: Awaited<ReturnType<typeof setup>>) => {
+  const file = await app.store.writeAttachment(new Uint8Array([1, 2, 3]));
+
+  const id = app.controller.apply({
+    context: null,
+    image: { file, heightPx: 3, pixelsPerDip: 1, widthPx: 4 },
+    pins: [],
+    source: null,
+    type: "addImage",
+    via: "screenshot",
+  });
+
+  if (id === null) {
+    throw new Error("not added");
+  }
+
+  await app.controller.flush();
+
+  const shown: string[] = [];
+  // The window's hide, as main hears of it: after Save, Cancel or its close button alike.
+  const window = { hidden: (): void => {} };
+
+  const saves = savesReading(app, {
+    close: () => {
+      window.hidden();
+    },
+    focus: () => {
+      shown.push("brought into view");
+    },
+    shotClosed: () => {
+      shown.push("announced as closed");
+    },
+    shotSaved: () => {
+      shown.push("announced as saved");
+    },
+  });
+
+  window.hidden = saves.hidden;
+
+  /** Annotate opens the image, from the card or not. */
+  const annotate = async (screenshot: boolean) => {
+    const item = app.controller.item(id);
+
+    if (item?.kind !== "image") {
+      throw new Error("no image");
+    }
+
+    saves.open(
+      screenshot ? { id, kind: "item", screenshot } : { id, kind: "item" },
+      await saves.opening(item)
+    );
+  };
+
+  /** Save, or Retry in a held quit (`forQuit`), puts the marks on it and closes the window; the shelf is on the disk once it returns. */
+  const save = async (forQuit = false) => {
+    if (forQuit) {
+      saves.forQuit(new AbortController().signal);
+    }
+
+    await saves.save({
+      copy: false,
+      forQuit,
+      marks: HELLO,
+      pins: [],
+      png: PNG,
+    });
+    await app.controller.flush();
+  };
+
+  return { annotate, id, save, saves, shown };
 };
 
 describe(createDrawingSaves, () => {
@@ -721,6 +808,8 @@ describe(createDrawingSaves, () => {
     const saves = createDrawingSaves({
       added: () => {},
       focus: () => {},
+      shotSaved: () => {},
+      shotClosed: () => {},
       clearStaging: () => {},
       close: () => {},
       controller: app.controller,
@@ -766,6 +855,45 @@ describe(createDrawingSaves, () => {
     await setImmediate();
 
     expect({ image, reads }).toStrictEqual({ image: original, reads: [file] });
+  });
+
+  it("leaves the shelf to main's notice once the screenshot card's Annotate closes, saved or not, telling main which, and brings any other annotated image into view", async () => {
+    const { annotate, save, saves, shown } = await cardShot(await setup(dir));
+
+    await annotate(true);
+    await save();
+    // Cancel.
+    await annotate(true);
+    saves.hidden();
+    await annotate(false);
+    await save();
+    saves.hidden();
+
+    expect(shown).toStrictEqual([
+      "announced as saved",
+      "announced as closed",
+      "brought into view",
+    ]);
+  });
+
+  it("announces the screenshot card's item once when Retry in a held quit saves its marks", async () => {
+    const { annotate, save, shown } = await cardShot(await setup(dir));
+
+    await annotate(true);
+    await save(true);
+
+    expect(shown).toStrictEqual(["announced as saved"]);
+  });
+
+  it("announces the screenshot card's item when another drawing takes its clean window", async () => {
+    const { annotate, id, saves, shown } = await cardShot(await setup(dir));
+
+    await annotate(true);
+    // New Drawing in the item's details opens in the same window, which never hides.
+    saves.open({ id, kind: "newAttachment" });
+    saves.hidden();
+
+    expect(shown).toStrictEqual(["announced as closed"]);
   });
 
   describe("the marks kept beside the picture (feedback round 13)", () => {
@@ -1026,6 +1154,8 @@ const noteWith = async (app: Awaited<ReturnType<typeof setup>>, held = 1) => {
     focus: (shown) => {
       focused.push(shown);
     },
+    shotSaved: () => {},
+    shotClosed: () => {},
     controller: app.controller,
     copies: {
       copy: async () => await Promise.resolve({ ok: true }),

@@ -958,6 +958,46 @@ const details = async (page: Page, n: number): Promise<void> => {
   await page.getByRole("button", { name: "Back to the list" }).waitFor();
 };
 
+/** Main shows the screenshot card's item (11) and says where it went, as after Add to Shelf or Annotate's Save. */
+const shotAdded = async (page: Page): Promise<void> => {
+  await page.evaluate(
+    `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), focus: { id: uuid(11), keepDetails: true, seq: 1 } })})`
+  );
+  await page.evaluate(
+    `globalThis.__emit("notice", ${JSON.stringify({ message: "Added to Office move", show: uuid(11), tone: "done" })})`
+  );
+  await page.locator("[data-sonner-toast]").first().waitFor();
+  await page.waitForTimeout(500);
+};
+
+/** The notice's Show, which brings the item it names into view. */
+const noticeShow = (page: Page) =>
+  page
+    .locator("[data-sonner-toast]")
+    .getByRole("button", { exact: true, name: "Show" });
+
+/** The shelf as main sends it after the screenshot's item (11) changed: moved to `section`, or deleted (null). */
+const shotChanged = async (
+  page: Page,
+  section: string | null
+): Promise<void> => {
+  const items = ITEMS.flatMap((entry) => {
+    if (entry.id !== uuid(11)) {
+      return [entry];
+    }
+
+    return section === null ? [] : [{ ...entry, sectionId: section }];
+  });
+
+  await page.evaluate(
+    `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), doc: { ...DOC, items } })})`
+  );
+};
+
+/** An item's details are on screen. */
+const detailsShown = async (page: Page): Promise<boolean> =>
+  await page.getByRole("button", { name: "Back to the list" }).isVisible();
+
 /** The drawing window's pins, and the one selected. */
 const drawingPins = (page: Page) => page.locator("span[style*='--pin-x']");
 
@@ -10268,6 +10308,121 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-focus-behind-search",
+    page: "shelf",
+  },
+  {
+    // Add to Shelf on the screenshot card, or Annotate and Save, with A's details open: they stay, and the notice offers Show.
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+    },
+    check: async (page) => {
+      const shown = await detailsShown(page);
+      const show = await noticeShow(page).count();
+
+      return shown && show === 1
+        ? null
+        : `the screenshot's item ${shown ? "kept" : "closed"} A's details, and its notice has ${show} Show buttons, not 1`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-keeps-details",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+      await noticeShow(page).click();
+      await page.locator("[data-details-view]").waitFor({ state: "detached" });
+    },
+    check: async (page) => {
+      const selected = await item(page, 11).getAttribute("aria-current");
+
+      // The frames details take to give the keyboard back, once they are gone.
+      await page.evaluate(
+        "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+      );
+
+      const keyboard = await keyboardPlace(page);
+
+      if (selected !== "true") {
+        return "Show on the screenshot's notice went back to the list without selecting its item";
+      }
+
+      return keyboard.row === uuid(11)
+        ? null
+        : `Show on the screenshot's notice selected its item but left the keyboard on ${placeText(keyboard)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-keeps-details-show",
+    page: "shelf",
+  },
+  {
+    // Back on the list, the screenshot moves to a folded section before Show: Show finds it where it is now.
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+      await page.getByRole("button", { name: "Back to the list" }).click();
+      await page.locator("[data-details-view]").waitFor({ state: "detached" });
+      await page.locator(`button[title="Fold “Inbox” away"]`).click();
+      await shotChanged(page, INBOX);
+      await noticeShow(page).click();
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => {
+      const shown = await item(page, 11).isVisible();
+
+      const selected =
+        shown && (await item(page, 11).getAttribute("aria-current")) === "true";
+
+      return selected
+        ? null
+        : `Show left the screenshot's item, moved to a folded section, ${shown ? "unselected" : "out of view"}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-show-moved",
+    page: "shelf",
+  },
+  {
+    // The screenshot is deleted before Show: A's details stay as they are, and the shelf says it is gone.
+    act: async (page) => {
+      await details(page, ENTRY_A);
+      await shotAdded(page);
+      await shotChanged(page, null);
+      await noticeShow(page).click();
+      await page.waitForTimeout(300);
+    },
+    check: async (page) => {
+      const shown = await detailsShown(page);
+
+      const gone = await page
+        .locator("[data-sonner-toast]")
+        .filter({ hasText: "no longer on the shelf" })
+        .count();
+
+      return shown && gone === 1
+        ? null
+        : `Show on a deleted screenshot ${shown ? "kept" : "closed"} A's details, and ${gone === 1 ? "said" : "didn't say"} it is gone`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-show-gone",
+    page: "shelf",
+  },
+  {
+    // With no details open, the shelf shows the screenshot's item as before, and the notice needs no Show.
+    act: async (page) => {
+      await shotAdded(page);
+    },
+    check: async (page) => {
+      const selected = await item(page, 11).getAttribute("aria-current");
+      const show = await noticeShow(page).count();
+
+      return selected === "true" && show === 0
+        ? null
+        : `on the list the screenshot's item is ${selected === "true" ? "selected" : "not selected"}, and its notice has ${show} Show buttons, not 0`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-screenshot-shows-item",
     page: "shelf",
   },
   {
