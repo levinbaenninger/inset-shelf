@@ -9626,6 +9626,37 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // Delete on Show details acts on nothing, so the row keeps watching: when main's held view takes the row out of the results, the keyboard goes to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+      await page.waitForFunction(
+        "document.activeElement?.closest('[data-row-keys]') !== null"
+      );
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Delete");
+    },
+    check: async (page) => {
+      const pressed = await keyboardPlace(page);
+
+      await page.evaluate("globalThis.__releaseViews()");
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+      const removed = await removes(page);
+
+      return pressed.label === "Show details" &&
+        removed === 0 &&
+        left.label === "Search the shelf"
+        ? null
+        : `Delete on ${placeText(pressed)} removed ${removed} rows, and when the view left the search's results focus was on ${placeText(left)}, not on the search`;
+    },
+    data: { echo: "held", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-tabbed-delete",
+    page: "shelf",
+  },
+  {
     // Focus moved out of the row before main's view takes the row away stays where it went.
     act: async (page) => {
       await searchFor(page, "monday");
