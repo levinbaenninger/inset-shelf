@@ -138,16 +138,59 @@ export const quietDisk = (
   { home }: QuietRoots,
   fs: QuietFs = NODE_FS
 ): QuietDisk => {
-  /** The root as the disk spells it; none when it is not there, or on a mounted volume, which is not touched even to find it. */
-  const rootAt = async (folder: string): Promise<readonly Root[]> => {
-    if (shuts(VOLUMES, folder)) {
-      return [];
+  /** `left` below `above` with no link left in it, found one name at a time, so no link is followed onto a mounted volume; null when one leads there. */
+  const unlinked = async (
+    above: readonly string[],
+    left: readonly string[],
+    links: number
+  ): Promise<string | null> => {
+    const [step, ...rest] = left;
+
+    if (step === undefined) {
+      return `/${above.join("/")}`;
     }
 
-    try {
-      const real = await fs.realpath(folder);
+    if (step === "" || step === ".") {
+      return await unlinked(above, rest, links);
+    }
 
-      if (shuts(VOLUMES, real)) {
+    if (step === "..") {
+      return await unlinked(above.slice(0, -1), rest, links);
+    }
+
+    const at = `/${[...above, step].join("/")}`;
+
+    if (shuts(VOLUMES, at)) {
+      return null;
+    }
+
+    const entry = await fs.lstat(at);
+
+    if (!entry.isSymbolicLink()) {
+      return await unlinked([...above, step], rest, links);
+    }
+
+    if (links >= LINKS_MAX) {
+      return null;
+    }
+
+    const target = await fs.readlink(at);
+
+    return await unlinked(
+      target.startsWith("/") ? [] : above,
+      [...target.split("/"), ...rest],
+      links + 1
+    );
+  };
+
+  /** The root as the disk spells it; none when it is not there, or on a mounted volume, which is not touched even to find it. */
+  const rootAt = async (folder: string): Promise<readonly Root[]> => {
+    try {
+      const linkless = await unlinked([], folder.split("/"), 0);
+      // Only the spelling is left to find: no link is left to follow.
+      const real = linkless === null ? null : await fs.realpath(linkless);
+
+      if (real === null || shuts(VOLUMES, real)) {
         return [];
       }
 

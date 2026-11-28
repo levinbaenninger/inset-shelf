@@ -198,8 +198,10 @@ describe(quietDisk, () => {
     await expect(
       quietDisk({ home }, fs).find("/Volumes/Disk/proj/a.ts")
     ).resolves.toStrictEqual({ kind: "unsure" });
-    // The home folder itself is looked at, to know where it is.
-    expect(touched.filter((at) => !at.startsWith(base))).toStrictEqual([]);
+    // The home folder and the folders above it are looked at, to know where it is.
+    expect(
+      touched.filter((at) => !at.startsWith(base) && !base.startsWith(`${at}/`))
+    ).toStrictEqual([]);
   });
 
   it("stops at a folder on another disk, a volume mounted in the home folder", async () => {
@@ -289,6 +291,7 @@ describe(quietDisk, () => {
     "touches nothing on a volume, not even to find it, for a home folder at /Users/me when %s links to /Volumes",
     async (link) => {
       const touched: string[] = [];
+
       const onVolume = (at: string): string =>
         at.startsWith(link) ? `/Volumes/Disk${at}` : at;
 
