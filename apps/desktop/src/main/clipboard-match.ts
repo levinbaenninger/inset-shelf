@@ -213,7 +213,9 @@ export const clipboardContent = async (
     cut: await filesCut(
       read,
       !windows ||
-        read.some((item) => Object.keys(item).some((type) => type.startsWith(RAW)))
+        read.some((item) =>
+          Object.keys(item).some((type) => type.startsWith(RAW))
+        )
     ),
     files,
     html: await textIn(read, "text/html"),
