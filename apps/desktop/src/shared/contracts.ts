@@ -287,7 +287,7 @@ export const shelfContract = defineContract({
     /** Copy and Undo inside a text field, done by the window's own edit commands. */
     nativeEdit: send(z.enum(["copy", "undo", "redo", "selectAll"])),
     newDrawing: send(z.void()),
-    /** The user guide, in the browser; Help › Inset Shelf Help. */
+    /** The user guide, in the browser: Help in the shelf's ⋯, and Help › Inset Shelf Help. */
     openHelp: send(z.void()),
     /** Shows an image large in the drawing window, to look at or draw on. */
     openImage: send(ItemIdSchema),

@@ -652,7 +652,7 @@ const SPOTLIGHT_STEPS = [
   {
     anchor: "shelf-menu",
     id: "menu",
-    text: "New sections, Settings and Keyboard Shortcuts are here. The menu bar icon has them too.",
+    text: "New sections, Settings and Help are here. Help opens the guide in your browser.",
     title: "Settings and more",
   },
 ];
@@ -1920,6 +1920,56 @@ const swallowedKeysCheck = async (page: Page): Promise<string | null> => {
   return (await menuSignal(page)) === false
     ? null
     : "the page didn't tell main that the last menu closed";
+};
+
+/**
+ * The shelf's menu, opened by `open`, still answers ⌘/ and ⇧⌘L though it
+ * shows neither: it closes, and Keyboard Shortcuts shows or a window link
+ * starts.
+ */
+const shelfMenuChordsCheck = async (
+  page: Page,
+  where: string,
+  open: () => Promise<void>
+): Promise<string | null> => {
+  const mod = await commandKey(page);
+
+  const closesOn = async (combo: string): Promise<boolean> => {
+    await open();
+    await page.getByRole("menu").waitFor();
+    await page.keyboard.press(combo);
+
+    return await page
+      .getByRole("menu")
+      .waitFor({ state: "detached", timeout: 1000 })
+      .then(() => true)
+      .catch(() => false);
+  };
+
+  if (!(await closesOn(`${mod}+/`))) {
+    return `${mod}+/ in ${where} left the menu open`;
+  }
+
+  const sheet = page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+
+  if (!(await sheet.isVisible())) {
+    return `${mod}+/ in ${where} didn't show Keyboard Shortcuts`;
+  }
+
+  await sheet.getByRole("button", { name: "Close" }).click();
+  await sheet.waitFor({ state: "detached" });
+
+  const before = await callCount(page);
+
+  if (!(await closesOn(`Shift+${mod}+l`))) {
+    return `Shift+${mod}+L in ${where} left the menu open`;
+  }
+
+  const sent = await calls(page, before);
+
+  return sent.some((call) => call.call === "newWindowLink")
+    ? null
+    : `Shift+${mod}+L in ${where} sent ${JSON.stringify(sent)}, not newWindowLink`;
 };
 
 /**
@@ -10212,6 +10262,84 @@ const SCENES: readonly Scene[] = [
     check: pendingEditCheck,
     data: { echo: "later", view: shelfView(MENU_DOC) },
     name: "shelf-copy-pending-edit",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // The ⋯ at the top: New Section, Settings and Help, which opens the docs; a window link and Keyboard Shortcuts have their own ways in.
+    act: async (page) => {
+      await page
+        .locator("header")
+        .getByRole("button", { name: "More" })
+        .click();
+      await page.getByRole("menu").waitFor();
+    },
+    check: async (page) => {
+      const entries = await page.getByRole("menuitem").allTextContents();
+
+      const gone = entries.filter((entry) =>
+        /^(?:New Window Link|Keyboard Shortcuts)/u.test(entry)
+      );
+
+      if (gone.length > 0) {
+        return `the ⋯ menu still lists ${gone.join(", ")}`;
+      }
+
+      await page.getByRole("menuitem", { name: /^Help/u }).click();
+      await page.waitForTimeout(150);
+
+      const sent = await calls(page);
+
+      return sent.some((call) => call.call === "openHelp")
+        ? null
+        : "Help in the ⋯ menu didn't open the docs";
+    },
+    data: { view: shelfView() },
+    name: "shelf-menu-help",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // With the ⋯ or a right-click on empty space open, ⇧⌘L and ⌘/ still start a window link and show Keyboard Shortcuts: the menu closes and the key runs, though no entry shows it.
+    act: async (page) => {
+      await page
+        .locator("header")
+        .getByRole("button", { name: "More" })
+        .click();
+      await page.getByRole("menu").waitFor();
+    },
+    check: async (page) => {
+      await page.keyboard.press("Escape");
+      await menuClosed(page);
+
+      return (
+        (await shelfMenuChordsCheck(page, "the ⋯ at the top", async () => {
+          await page
+            .locator("header")
+            .getByRole("button", { name: "More" })
+            .click();
+        })) ??
+        (await shelfMenuChordsCheck(
+          page,
+          "the menu on empty space",
+          async () => {
+            const list = await boxOf(page.locator(".shelf-list").first());
+
+            const last = await boxOf(
+              page.locator(".shelf-list > section").last()
+            );
+
+            await page.mouse.click(
+              list.left + 60,
+              Math.min(last.bottom + 24, list.bottom - 8),
+              { button: "right" }
+            );
+          }
+        ))
+      );
+    },
+    data: { view: shelfView(SHORT_DOC) },
+    name: "shelf-menu-chords",
     page: "shelf",
     platforms: ["macos", "windows"],
   },

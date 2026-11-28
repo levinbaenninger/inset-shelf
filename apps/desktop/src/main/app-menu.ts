@@ -5,6 +5,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import { updateMenuItem } from "./update-state";
 import type { UpdateState } from "./update-state";
 
+/** The docs on the Inset Shelf site (apps/web, SITE_URL): Help in the menu bar and in the shelf's ⋯ open them. */
 export const HELP_URL = "https://inset-shelf.levexis.workers.dev/docs";
 
 /** Sections past the ninth have no shortcut. */

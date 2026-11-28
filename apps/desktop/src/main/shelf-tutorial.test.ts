@@ -1,12 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { shelfMenu } from "@shared/menus";
 import { ItemIdSchema } from "@shared/shelf";
 import type { ItemId } from "@shared/shelf";
 import { shortcutLabels } from "@shared/shortcut";
 import { DRAWING_TOOL_KEYS, shortcutSheet } from "@shared/shortcuts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { HELP_URL } from "./app-menu";
 import {
   removeShelfExamples,
   SHELF_TASK_IDS,
@@ -103,6 +105,37 @@ describe("Inset Shelf's tutorial", () => {
     });
   });
 
+  it("names at the ⋯ stop only what that menu holds, Help among them", () => {
+    const words = [
+      "Float on Top",
+      "Help",
+      "Keyboard Shortcuts",
+      "New Window Link",
+      "Settings",
+    ];
+
+    const named = (mac: boolean) => {
+      const stop = shelfSpotlight(mac).find((step) => step.id === "menu");
+
+      const labels = new Set(
+        shelfMenu(mac ? null : { floatOnTop: false }).flatMap((entry) =>
+          entry.kind === "choice" ? [entry.label.replace("…", "")] : []
+        )
+      );
+
+      const said = words.filter((word) => stop?.text.includes(word) === true);
+
+      return {
+        missing: said.filter((word) => !labels.has(word)),
+        namesHelp: said.includes("Help"),
+      };
+    };
+
+    for (const mac of [true, false]) {
+      expect(named(mac)).toStrictEqual({ missing: [], namesHelp: true });
+    }
+  });
+
   it("writes the examples' keys for the system, and gives one a source line", () => {
     const mac = shelfExamples(true).map((example) => example.text);
     const windows = shelfExamples(false).map((example) => example.text);
@@ -115,6 +148,12 @@ describe("Inset Shelf's tutorial", () => {
         (text) => text.includes("Shift Shift") || text.includes("Ctrl+C")
       ),
     }).toMatchObject({ mac: { length: 2 }, source: 1, windows: { length: 2 } });
+  });
+
+  it("names the docs on the source line that opens them", () => {
+    expect(
+      shelfExamples(true).find((example) => example.context !== null)?.context
+    ).toMatchObject({ title: "Inset Shelf user guide", url: HELP_URL });
   });
 });
 

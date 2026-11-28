@@ -66,8 +66,6 @@ export type MenuIcon =
   | "addHere"
   | "clear"
   | "newSection"
-  | "windowLink"
-  | "keyboard"
   | "details"
   | "settings"
   | "float"
@@ -117,8 +115,10 @@ const SEPARATOR: MenuEntry = { kind: "separator" };
 
 /**
  * The ⋯ at the top of the shelf, and a right-click on empty space: start a
- * section, open Settings. Without a menu bar (`windowMenu`, on Windows) it
- * also holds what the Window and Help menus would: Float on Top and Help.
+ * section, open Settings, open the docs. Without a menu bar (`windowMenu`, on
+ * Windows) it also holds what the Window and Help menus would: Float on Top
+ * and the tutorial. A window link (+, ⇧⌘L) and Keyboard Shortcuts (⌘/, the
+ * Help menu, the tray) have their own ways in.
  */
 export const shelfMenu = (
   windowMenu: { readonly floatOnTop: boolean } | null = null
@@ -130,14 +130,6 @@ export const shelfMenu = (
     icon: "newSection",
     kind: "choice",
     label: "New Section",
-  },
-  {
-    accelerator: "Shift+CommandOrControl+L",
-    choice: { kind: "newWindowLink" },
-    enabled: true,
-    icon: "windowLink",
-    kind: "choice",
-    label: "New Window Link…",
   },
   SEPARATOR,
   ...(windowMenu === null
@@ -161,14 +153,6 @@ export const shelfMenu = (
     kind: "choice",
     label: "Settings",
   },
-  {
-    accelerator: "CommandOrControl+/",
-    choice: { kind: "shortcuts" },
-    enabled: true,
-    icon: "keyboard",
-    kind: "choice",
-    label: "Keyboard Shortcuts",
-  },
   ...(windowMenu === null
     ? []
     : [
@@ -186,14 +170,14 @@ export const shelfMenu = (
           kind: "choice",
           label: "Show Me Around",
         } as const,
-        {
-          choice: { kind: "openHelp" },
-          enabled: true,
-          icon: "help",
-          kind: "choice",
-          label: "Inset Shelf Help",
-        } as const,
       ]),
+  {
+    choice: { kind: "openHelp" },
+    enabled: true,
+    icon: "help",
+    kind: "choice",
+    label: "Help",
+  },
 ];
 
 /** A section's ⋯ and right-click: new items here, rename, clear checked items, delete. */
@@ -500,7 +484,11 @@ const pressesKey = (press: MenuKeyPress, key: string, mac: boolean): boolean =>
     (press.key.toLowerCase() === key.toLowerCase() ||
       (mac && press.code === `Key${key.toUpperCase()}`)));
 
-/** Whether a key press is an accelerator, such as "Alt+CommandOrControl+C", on this system. */
+/**
+ * Whether a key press is an accelerator, such as "Alt+CommandOrControl+C", on
+ * this system. Punctuation that needs Shift on some layouts (/ is Shift+7 on a
+ * German one) matches with or without it, as in the app menu.
+ */
 export const pressesAccelerator = (
   press: MenuKeyPress,
   accelerator: string,
@@ -510,42 +498,62 @@ export const pressesAccelerator = (
   const key = parts.at(-1) ?? "";
   const command = mac ? press.metaKey : press.ctrlKey;
   const other = mac ? press.ctrlKey : press.metaKey;
+  const punctuation = key.length === 1 && !/^[a-z0-9]$/iu.test(key);
 
   return (
     !other &&
     command === parts.includes("CommandOrControl") &&
     press.altKey === parts.includes("Alt") &&
-    press.shiftKey === parts.includes("Shift") &&
+    (punctuation || press.shiftKey === parts.includes("Shift")) &&
     pressesKey(press, key, mac)
   );
 };
 
+/** A key a menu answers without an entry that shows it. */
+export interface MenuKey {
+  readonly accelerator: string;
+  readonly choice: MenuChoice;
+}
+
 /**
- * The choice a key press runs while an item's menu is open: the entry that
- * shows that key, for the item the menu belongs to, whichever entry is
- * highlighted. A held key acts once.
+ * The shelf's own keys for what its menu no longer lists: a window link (+,
+ * the File menu) and Keyboard Shortcuts (the Help menu, the tray). They still
+ * work while the menu is open.
+ */
+export const SHELF_MENU_KEYS: readonly MenuKey[] = [
+  {
+    accelerator: "Shift+CommandOrControl+L",
+    choice: { kind: "newWindowLink" },
+  },
+  { accelerator: "CommandOrControl+/", choice: { kind: "shortcuts" } },
+];
+
+/**
+ * The choice a key press runs while a menu is open: the entry that shows
+ * that key, for the item the menu belongs to, whichever entry is
+ * highlighted, or else one of the menu's unseen `keys`. A held key acts once.
  */
 export const menuChoiceForKey = (
   entries: readonly MenuEntry[],
   press: MenuKeyPress,
-  mac: boolean
+  mac: boolean,
+  keys: readonly MenuKey[] = []
 ): MenuChoice | null => {
   if (press.repeat) {
     return null;
   }
 
-  for (const entry of entries) {
-    if (
-      entry.kind === "choice" &&
-      entry.enabled &&
-      entry.accelerator !== undefined &&
-      pressesAccelerator(press, entry.accelerator, mac)
-    ) {
-      return entry.choice;
-    }
-  }
+  const shown = entries.flatMap((entry) =>
+    entry.kind === "choice" && entry.enabled && entry.accelerator !== undefined
+      ? [{ accelerator: entry.accelerator, choice: entry.choice }]
+      : []
+  );
 
-  return null;
+  return (
+    [...shown, ...keys].find((key) =>
+      pressesAccelerator(press, key.accelerator, mac)
+    )?.choice ?? null
+  );
 };
 
 const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift", "AltGraph"]);

@@ -308,6 +308,7 @@ if (page === "shelf") {
         globalThis.__noticesShown.push(notice);
       },
       newWindowLink: logged("newWindowLink", nothing),
+      openHelp: logged("openHelp", nothing),
       // `retryWorks`: the disk has room again, so Retry saves every change.
       retrySave: logged("retrySave", () => {
         if (data.retryWorks !== true) {

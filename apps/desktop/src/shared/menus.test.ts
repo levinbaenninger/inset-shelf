@@ -6,6 +6,7 @@ import {
   menuChoiceForKey,
   pickedMenu,
   sectionMenu,
+  SHELF_MENU_KEYS,
   shelfMenu,
 } from "./menus";
 import type { MenuEntry, MenuKeyPress } from "./menus";
@@ -74,35 +75,38 @@ const image: ImageItem = {
 };
 
 describe(shelfMenu, () => {
-  it("starts a section and opens Settings, without listing the sections", () => {
+  it("starts a section, opens Settings and Help, without listing the sections", () => {
     expect(labels(shelfMenu())).toStrictEqual([
       "New Section",
-      "New Window Link…",
       "---",
       "Settings",
-      "Keyboard Shortcuts",
+      "Help",
     ]);
   });
 
-  it("holds Float on Top, the tutorial and Help where there is no menu bar", () => {
+  it("holds Float on Top and the tutorial too where there is no menu bar", () => {
     const entries = shelfMenu({ floatOnTop: true });
 
     expect(labels(entries)).toStrictEqual([
       "New Section",
-      "New Window Link…",
       "---",
       "Float on Top",
       "---",
       "Settings",
-      "Keyboard Shortcuts",
       "Getting Started",
       "Show Me Around",
-      "Inset Shelf Help",
+      "Help",
     ]);
-    expect(entries[3]).toMatchObject({
+    expect(entries[2]).toMatchObject({
       checked: true,
       choice: { kind: "setFloatOnTop", on: false },
     });
+  });
+
+  it("opens the docs from Help on every system", () => {
+    for (const entries of [shelfMenu(), shelfMenu({ floatOnTop: false })]) {
+      expect(entries.at(-1)).toMatchObject({ choice: { kind: "openHelp" } });
+    }
   });
 });
 
@@ -543,6 +547,43 @@ describe(menuChoiceForKey, () => {
         true
       )
     ).toStrictEqual({ ids: [doc.items[0]?.id, image.id], kind: "copyList" });
+  });
+});
+
+describe("the keys the shelf's menu answers unseen", () => {
+  it("starts a window link and shows Keyboard Shortcuts from the shelf's menu, which shows neither", () => {
+    for (const [mac, modifier, entries] of [
+      [true, { metaKey: true }, shelfMenu()],
+      [false, { ctrlKey: true }, shelfMenu({ floatOnTop: false })],
+    ] as const) {
+      expect(
+        menuChoiceForKey(
+          entries,
+          press("l", { ...modifier, shiftKey: true }),
+          mac,
+          SHELF_MENU_KEYS
+        )
+      ).toStrictEqual({ kind: "newWindowLink" });
+      expect(
+        menuChoiceForKey(entries, press("/", modifier), mac, SHELF_MENU_KEYS)
+      ).toStrictEqual({ kind: "shortcuts" });
+    }
+  });
+
+  it("shows Keyboard Shortcuts for a / that needs Shift, as Ctrl+Shift+7 types it on a German layout", () => {
+    for (const [mac, modifier, entries] of [
+      [true, { metaKey: true }, shelfMenu()],
+      [false, { ctrlKey: true }, shelfMenu({ floatOnTop: false })],
+    ] as const) {
+      expect(
+        menuChoiceForKey(
+          entries,
+          { ...press("/", { ...modifier, shiftKey: true }), code: "Digit7" },
+          mac,
+          SHELF_MENU_KEYS
+        )
+      ).toStrictEqual({ kind: "shortcuts" });
+    }
   });
 });
 
