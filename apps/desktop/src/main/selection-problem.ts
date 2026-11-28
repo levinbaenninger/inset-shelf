@@ -1,3 +1,4 @@
+import type { AddedNotice } from "./added-file";
 import type { SelectionResult } from "./selection";
 
 /** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
@@ -20,14 +21,23 @@ export const selectionProblem = (result: SelectionResult): string | null => {
 /**
  * The notice that carries the clipboard problem to the user where they are.
  * The shelf's banner shows it only while the shelf is open; a hidden shelf
- * would keep it out of sight behind the capture's success notice. Sent after
- * that notice, it is the one left showing.
+ * would keep it out of sight behind the capture's own notice (`shown`). Sent
+ * after that notice, it is the one left showing, so a failed one's reason is
+ * said first in it.
  */
 export const warningToUser = (
   result: SelectionResult,
-  shelfVisible: boolean
+  shelfVisible: boolean,
+  shown: AddedNotice | null = null
 ): { readonly message: string; readonly tone: "failed" } | null => {
   const message = selectionProblem(result);
 
-  return message === null || shelfVisible ? null : { message, tone: "failed" };
+  if (message === null || shelfVisible) {
+    return null;
+  }
+
+  return {
+    message: shown?.tone === "failed" ? `${shown.message} ${message}` : message,
+    tone: "failed",
+  };
 };
