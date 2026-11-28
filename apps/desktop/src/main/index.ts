@@ -49,6 +49,7 @@ import type {
 } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
+  chatGptTitleToFind,
   desktopLink,
   isAppLink,
   isPageAddress,
@@ -907,6 +908,19 @@ const start = async (): Promise<void> => {
     }
 
     const fromApp = openingApp(context, isMac, EDITORS);
+
+    const threadTitle =
+      url === undefined ? chatGptTitleToFind(context, isMac, EDITORS) : null;
+
+    // Strict, as for a caption: a title that names two threads opens neither.
+    const thread =
+      threadTitle === null ? null : await chatGptThreadLink(threadTitle, true);
+
+    if (thread !== null && app.getApplicationNameForProtocol(thread) !== "") {
+      await shell.openExternal(thread);
+
+      return;
+    }
 
     // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
     if (url === undefined && fromApp !== null) {
