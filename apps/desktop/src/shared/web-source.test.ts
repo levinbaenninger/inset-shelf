@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  chatGptTitleToFind,
   desktopApp,
   desktopLink,
   isAppLink,
@@ -219,6 +220,30 @@ describe(desktopApp, () => {
     expect(desktopApp("Claude")).toBe("Claude");
     expect(desktopApp("Zen")).toBeNull();
     expect(desktopApp(null)).toBeNull();
+  });
+});
+
+describe(chatGptTitleToFind, () => {
+  const chat = {
+    app: "ChatGPT",
+    appLink: null,
+    code: null,
+    title: "Plan",
+    url: null,
+  };
+
+  it("finds a ChatGPT thread by its title on Windows when the item kept no link to it", () => {
+    expect(chatGptTitleToFind(chat, false)).toBe("Plan");
+  });
+
+  it("leaves an item with its own link, a Mac's item and another app's to openingApp", () => {
+    expect(
+      chatGptTitleToFind({ ...chat, appLink: "codex://threads/7" }, false)
+    ).toBeNull();
+    expect(chatGptTitleToFind(chat, true)).toBeNull();
+    expect(chatGptTitleToFind({ ...chat, app: "Notepad" }, false)).toBeNull();
+    expect(chatGptTitleToFind({ ...chat, title: null }, false)).toBeNull();
+    expect(chatGptTitleToFind(null, false)).toBeNull();
   });
 });
 

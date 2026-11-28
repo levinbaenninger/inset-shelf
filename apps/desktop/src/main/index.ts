@@ -49,6 +49,7 @@ import type {
 } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
+  chatGptTitleToFind,
   desktopLink,
   isAppLink,
   isPageAddress,
@@ -102,7 +103,7 @@ import { createDrawingSaves, sameTarget } from "./drawing-save";
 import type { DrawingTarget } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
-import { imageFileName, ownFileName } from "./export-name";
+import { attachedFileName, imageFileName } from "./export-name";
 import { createDragStaging, createShotStaging, exportImage } from "./exports";
 import { EDITORS, frontKind, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
@@ -345,11 +346,12 @@ const openInApp = async (
 ): Promise<void> => {
   const stored = context?.appLink ?? null;
 
+  // The title is a saved one, not a caption: an older build's names the thread as it is.
   const link =
     (stored !== null && isAppLink(stored) ? stored : null) ??
     desktopLink(name, context?.url ?? null) ??
     (name === "ChatGPT"
-      ? await chatGptThreadLink(context?.title ?? null)
+      ? await chatGptThreadLink(context?.title ?? null, false)
       : null);
 
   if (link !== null) {
@@ -493,7 +495,6 @@ const start = async (): Promise<void> => {
   app.setAboutPanelOptions({
     applicationName: PRODUCT_NAME,
     applicationVersion: app.getVersion(),
-    credits: "A prototype for the Inset capture experiments.",
   });
   secureSession();
 
@@ -897,6 +898,19 @@ const start = async (): Promise<void> => {
     }
 
     const fromApp = openingApp(context, isMac, EDITORS);
+
+    const threadTitle =
+      url === undefined ? chatGptTitleToFind(context, isMac, EDITORS) : null;
+
+    // Strict, as for a caption: a title that names two threads opens neither.
+    const thread =
+      threadTitle === null ? null : await chatGptThreadLink(threadTitle, true);
+
+    if (thread !== null && app.getApplicationNameForProtocol(thread) !== "") {
+      await shell.openExternal(thread);
+
+      return;
+    }
 
     // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
     if (url === undefined && fromApp !== null) {
@@ -2260,7 +2274,7 @@ const start = async (): Promise<void> => {
 
     if (attachment !== undefined && exported !== null) {
       shelf.webContents.startDrag({
-        file: staging.write(folder, ownFileName(attachment.name), exported.png),
+        file: staging.write(folder, attachedFileName(attachment), exported.png),
         icon: exported.image.resize({ width: 128 }),
       });
     }
