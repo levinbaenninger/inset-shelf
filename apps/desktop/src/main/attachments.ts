@@ -138,7 +138,8 @@ export const createAttachments = (deps: AttachmentDeps) => {
       if (image !== null) {
         const stored = await storePicture(image, pictureName(added.name));
 
-        const extension = path.extname(added.name);
+        // From the name on disk: `added.name` is capped, and can lose it.
+        const extension = path.extname(path.basename(filePath));
 
         // A PNG that spells its extension another way (.PNG) drags out with it.
         return added.extension === "png" && extension !== ".png"
