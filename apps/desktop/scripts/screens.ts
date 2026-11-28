@@ -8807,6 +8807,43 @@ const PlaceSchema = z.object({
   within: z.string(),
 });
 
+/** Holds every animation frame the page asks for until `releaseFrames`, so a key can land before a frame's handoff runs. */
+const holdFrames = async (page: Page): Promise<void> => {
+  await page.evaluate(`(() => {
+    const held = [];
+    const real = globalThis.requestAnimationFrame;
+
+    globalThis.__releaseFrames = () => {
+      globalThis.requestAnimationFrame = real;
+      for (const run of held.splice(0)) run(performance.now());
+    };
+    globalThis.requestAnimationFrame = (run) => held.push(run);
+  })()`);
+};
+
+/** Runs the frames `holdFrames` held, then waits for two more. */
+const releaseFrames = async (page: Page): Promise<void> => {
+  await page.evaluate(`new Promise((resolve) => {
+    globalThis.__releaseFrames();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  })`);
+};
+
+/** Marks what has the keyboard, so a later look can tell whether it kept it, and names it. */
+const markKeyboard = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(`(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.dataset.tabbedTo = "";
+      return active?.getAttribute("aria-label") || active?.tagName || "";
+    })()`)
+  );
+
+const keptMark = async (page: Page): Promise<boolean> =>
+  (await page.evaluate(
+    "document.activeElement instanceof HTMLElement && document.activeElement.dataset.tabbedTo !== undefined"
+  )) === true;
+
 /** Where the keyboard is: a text field or not, the named part of details it sits in, and the list row. */
 const keyboardPlace = async (page: Page) =>
   PlaceSchema.parse(
@@ -9193,6 +9230,41 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-row-note",
     page: "shelf",
   },
+  ...(
+    [
+      { label: "Edit item", n: 12, what: "words" },
+      { label: "Note for this image", n: 11, what: "note" },
+    ] as const
+  ).map(({ label, n, what }) => ({
+    // Return in a row's ${what}, then Tab before the next frame: the keyboard stays where Tab took it, and the row's handoff doesn't take it back.
+    act: async (page: Page) => {
+      await select(page, n);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        `document.activeElement?.getAttribute('aria-label') === '${label}'`
+      );
+      await page.keyboard.type(" today");
+      await holdFrames(page);
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Tab");
+    },
+    check: async (page: Page) => {
+      const tabbed = await markKeyboard(page);
+
+      await releaseFrames(page);
+
+      if (await keptMark(page)) {
+        return null;
+      }
+
+      const left = await keyboardPlace(page);
+
+      return `Tab after Return in a row's ${what} went to “${tabbed}”, then the row's handoff moved it to ${placeText(left)}`;
+    },
+    data: { view: shelfView() },
+    name: `shelf-keeps-place-row-${what}-tab`,
+    page: "shelf" as const,
+  })),
   {
     // ⌘F, a word, ↓ selects the first result and → opens it, as the list's own keys do.
     act: async (page) => {
