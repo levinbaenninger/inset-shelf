@@ -1,9 +1,10 @@
-import { app, BrowserWindow, nativeTheme } from "electron";
+import { app, BrowserWindow, nativeTheme, screen } from "electron";
 import type { WebContents } from "electron";
 
 import { followThemeInCaption, headerChrome } from "./caption-buttons";
 import { hideWindow } from "./hide-window";
 import { keepOnTop } from "./keep-on-top";
+import { clampSettingsHeight } from "./settings-height";
 import { harden, secureWebPreferences } from "./window-security";
 
 const WIDTH = 420;
@@ -44,6 +45,7 @@ export const createSettingsWindow = (options: {
   readonly handOff: () => boolean;
 }): SettingsWindow => {
   let height = FIRST_HEIGHT;
+  let wanted = FIRST_HEIGHT;
 
   const window = new BrowserWindow({
     backgroundColor: background(),
@@ -78,13 +80,22 @@ export const createSettingsWindow = (options: {
     hideWindow(window, { handOff: options.handOff, raise });
   });
 
+  /** Sizes the window to the page, limited to the display it is on. */
+  const fit = (): void => {
+    height = clampSettingsHeight(
+      wanted,
+      screen.getDisplayMatching(window.getBounds()).workArea.height
+    );
+    window.setContentSize(WIDTH, height);
+  };
+
   return {
     close: () => {
       hideWindow(window, { handOff: options.handOff, raise });
     },
     fitHeight: (next) => {
-      height = next;
-      window.setContentSize(WIDTH, height);
+      wanted = next;
+      fit();
     },
     isFocused: () => window.isVisible() && window.isFocused(),
     load: async () => {
@@ -93,7 +104,7 @@ export const createSettingsWindow = (options: {
     open: () => {
       if (!window.isVisible()) {
         // On Windows the app menu, attached and hidden after the window was made, changes its size.
-        window.setContentSize(WIDTH, height);
+        fit();
         window.center();
       }
 

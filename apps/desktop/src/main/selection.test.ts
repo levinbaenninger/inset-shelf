@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { readableClipboard, sameClipboard } from "./clipboard-match";
+import { ConcealedClipboardError } from "./clipboard-privacy";
 import { captureSelection } from "./selection";
 import type { SelectionDeps } from "./selection";
 
@@ -612,5 +613,75 @@ describe(captureSelection, () => {
         },
       })
     ).resolves.toMatchObject({ restored: false });
+  });
+});
+
+describe("captureSelection with a private clipboard", () => {
+  it("stops at the first private read of the original clipboard, without waiting", async () => {
+    const clip = fakeClipboard("secret", "x");
+    let snapshots = 0;
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        snapshot: async () => {
+          snapshots += 1;
+
+          return await Promise.reject(new ConcealedClipboardError());
+        },
+      })
+    ).resolves.toStrictEqual({
+      kind: "concealed",
+      restored: true,
+      unchecked: false,
+      which: "original",
+    });
+    expect(snapshots).toBe(1);
+    expect(clip.cleared()).toBe(0);
+  });
+
+  it("stops polling at a private selection and puts the original clipboard back", async () => {
+    const clip = fakeClipboard("earlier", "hunter2");
+    let reads = 0;
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        readText: async () => {
+          reads += 1;
+
+          return await Promise.reject(new ConcealedClipboardError());
+        },
+      })
+    ).resolves.toStrictEqual({
+      kind: "concealed",
+      restored: true,
+      unchecked: false,
+      which: "selection",
+    });
+    expect(reads).toBe(1);
+    expect(clip.restoredWith).toStrictEqual([clip.snapshot]);
+  });
+
+  it("keeps a normal capture when a password manager conceals the clipboard during the restore", async () => {
+    const clip = fakeClipboard("earlier", "Total ignores the discount");
+    let snapshots = 0;
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        snapshot: async () => {
+          snapshots += 1;
+
+          // The first read is the original clipboard; every later one meets the new secret.
+          return snapshots === 1
+            ? await clip.deps.snapshot()
+            : await Promise.reject(new ConcealedClipboardError());
+        },
+      })
+    ).resolves.toMatchObject({
+      kind: "text",
+      text: "Total ignores the discount",
+    });
   });
 });
