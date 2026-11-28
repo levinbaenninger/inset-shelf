@@ -28,6 +28,7 @@ export interface SettingsWindow {
   readonly open: () => void;
   readonly close: () => void;
   readonly isFocused: () => boolean;
+  readonly isOpen: () => boolean;
   /** Sizes the window to the page's content. */
   readonly fitHeight: (height: number) => void;
 }
@@ -87,6 +88,7 @@ export const createSettingsWindow = (options: {
       window.setContentSize(WIDTH, height);
     },
     isFocused: () => window.isVisible() && window.isFocused(),
+    isOpen: () => window.isVisible(),
     load: async () => {
       await window.loadURL(options.url);
     },

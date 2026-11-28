@@ -252,11 +252,21 @@ if (page === "shelf") {
       : [...view.notSaved, { id: op.id, undo: known ? "discard" : "delete" }];
   };
 
-  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC; `ipc: true` sends a copy, as IPC's structured clone does.
+  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC; `echo: "held"` holds it until the scene calls `__releaseViews()`; `ipc: true` sends a copy, as IPC's structured clone does.
+  const held = [];
+
+  globalThis.__releaseViews = () => {
+    for (const next of held.splice(0)) {
+      globalThis.__emit("view", next);
+    }
+  };
+
   const echo = (shown) => {
     const next = data.ipc === true ? structuredClone(shown) : shown;
 
-    if (data.echo === "later") {
+    if (data.echo === "held") {
+      held.push(next);
+    } else if (data.echo === "later") {
       setTimeout(() => {
         globalThis.__emit("view", next);
       }, 250);
@@ -528,6 +538,17 @@ if (page === "screenshot") {
       saveToDownloads: logged("saveToDownloads", nothing),
       startDrag: logged("startDrag", nothing),
       tutorial: logged("tutorial", nothing),
+    },
+    nothing
+  );
+}
+
+if (page === "settings") {
+  globalThis.insetSettings = withFallback(
+    {
+      close: logged("close", nothing),
+      getView: resolved(data.view),
+      on,
     },
     nothing
   );

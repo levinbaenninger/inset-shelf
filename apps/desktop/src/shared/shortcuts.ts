@@ -65,6 +65,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k("Right")], label: "Show details" },
         { keys: [k("Left"), "Esc"], label: "Back to the list" },
         { keys: [k("CommandOrControl+F")], label: "Search (try due:today)" },
+        { keys: [k("Down")], label: "From search, select the first result" },
         { keys: [click, rangeClick], label: "Pick several items" },
         { keys: [k("CommandOrControl+A")], label: "Pick every item shown" },
         {
@@ -100,6 +101,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k("Shift+CommandOrControl+S")], label: "Next steps" },
         { keys: [k("Shift+CommandOrControl+D")], label: "Due" },
         { keys: [k("Enter")], label: "Add a step, in a step" },
+        { keys: ["Esc"], label: "Leave a field; Return types in it again" },
         { keys: [k("Backspace")], label: "Remove an empty step" },
         {
           keys: [k("CommandOrControl+Z")],
@@ -157,6 +159,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
         { keys: [k(TOGGLE_ACCELERATOR)], label: "Show or hide the shelf" },
         { keys: ["Esc"], label: "Close a menu, then details, then the shelf" },
         { keys: [k("CommandOrControl+,")], label: "Settings" },
+        { keys: ["Esc"], label: "Close Settings" },
         { keys: [k("CommandOrControl+/")], label: "Keyboard Shortcuts" },
       ],
       title: "Window",

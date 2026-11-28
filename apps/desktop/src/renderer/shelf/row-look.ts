@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 
 import type { MenuAnchor } from "./menus";
+import { leavesRowAlone } from "./use-shelf-keys";
 
 // How a row's parts read and answer alike: the row (item-row.tsx) and the note under its picture or file (note.tsx).
 
@@ -25,3 +26,126 @@ export const contextMenuAt =
       y: event.clientY,
     });
   };
+
+const focusSearch = (): void => {
+  document
+    .querySelector<HTMLElement>("[data-search-field]")
+    ?.focus({ preventScroll: true });
+};
+
+/** Keys that only move the keyboard or change the next key: they don't act on the row. */
+const PASSING_KEYS = new Set(["Tab", "Shift", "Control", "Alt", "Meta"]);
+
+/** The row whose removal would drop the keyboard; a newer one takes its place. */
+let watching: AbortController | null = null;
+
+/**
+ * Gives the keyboard to the search if `row` leaves the page while focus is
+ * still in it: main's view of an edit can arrive after the row took the
+ * keyboard, and take the row out of the search's results. Watching ends
+ * when focus or a press moves outside the row, or at a key that acts, such
+ * as Delete on the row, which then looks after the keyboard itself. Delete
+ * on Show details leaves the row alone, so the watch goes on.
+ */
+const searchIfRowLeaves = (row: Element): void => {
+  watching?.abort();
+
+  const current = new AbortController();
+
+  watching = current;
+
+  const stop = (): void => {
+    current.abort();
+  };
+
+  const observer = new MutationObserver(() => {
+    if (row.isConnected) {
+      return;
+    }
+
+    stop();
+
+    if (
+      document.activeElement === null ||
+      document.activeElement === document.body
+    ) {
+      focusSearch();
+    }
+  });
+
+  current.signal.addEventListener("abort", () => {
+    observer.disconnect();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  for (const type of ["focusin", "pointerdown"]) {
+    document.addEventListener(
+      type,
+      (event) => {
+        if (!(event.target instanceof Node && row.contains(event.target))) {
+          stop();
+        }
+      },
+      { capture: true, signal: current.signal }
+    );
+  }
+
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!(PASSING_KEYS.has(event.key) || leavesRowAlone(event))) {
+        stop();
+      }
+    },
+    { capture: true, signal: current.signal }
+  );
+};
+
+/**
+ * Focus on an item's row itself, where Return edits, Space checks off and ⌫
+ * deletes. False when the row is gone or hidden. The row can leave the
+ * search's results after it took the keyboard (`searchIfRowLeaves`).
+ */
+export const focusRow = (row: Element | null): boolean => {
+  const target =
+    row?.querySelector<HTMLElement>("[data-row-keys]") ??
+    row?.querySelector<HTMLElement>("[data-details-button]") ??
+    null;
+
+  target?.focus({ preventScroll: true });
+
+  const focused = target !== null && document.activeElement === target;
+
+  if (focused && row !== null) {
+    searchIfRowLeaves(row);
+  }
+
+  return focused;
+};
+
+/**
+ * Focus on the row, else on the search field: an edit can take away the
+ * row's match, and the search is where the keyboard was before the results.
+ */
+export const focusRowOrSearch = (row: Element | null): void => {
+  if (!focusRow(row)) {
+    focusSearch();
+  }
+};
+
+/**
+ * `focusRowOrSearch` a frame on, once the field that had the keyboard is
+ * gone, and only if nothing took the keyboard meanwhile: a Tab or click
+ * before that frame keeps it where it went.
+ */
+export const focusRowOrSearchLater = (row: Element | null): void => {
+  const from = document.activeElement;
+
+  requestAnimationFrame(() => {
+    const now = document.activeElement;
+
+    if (now === null || now === document.body || now === from) {
+      focusRowOrSearch(row);
+    }
+  });
+};

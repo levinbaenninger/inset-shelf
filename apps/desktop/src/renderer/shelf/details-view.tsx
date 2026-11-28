@@ -158,9 +158,72 @@ const isUndoKey = (event: KeyboardEvent): boolean =>
 /** The card surface the list's items sit on, so details read as the same material. */
 const SURFACE = "border-foreground/10 bg-background/60 rounded-lg border";
 
+/** The ring of a part of details that has the keyboard without typing in it. */
+const RING =
+  "focus-visible:ring-ring/50 rounded-lg outline-none focus-visible:ring-3";
+
+/**
+ * A field's place, its card or its row: where the keyboard waits once Return
+ * or Esc leaves the field's text, on the place's stop. Return there types in
+ * the field again, and a second Esc goes back to the list.
+ */
+const place = {
+  className:
+    "has-[[data-place-stop]:focus-visible]:ring-ring/50 rounded-lg has-[[data-place-stop]:focus-visible]:ring-3",
+  "data-field-place": "",
+  onKeyDown: (event: KeyboardEvent<HTMLElement>): void => {
+    if (
+      event.key === "Enter" &&
+      event.target instanceof Element &&
+      event.target.matches("[data-place-stop]")
+    ) {
+      event.preventDefault();
+      event.currentTarget.querySelector("textarea")?.focus();
+    }
+  },
+} as const;
+
+/**
+ * The place's last stop, after its field and buttons, so Tab goes on past
+ * them; the place draws its ring. A screen reader names it for its field, and
+ * pressing it types in the field again.
+ */
+const PlaceStop = ({ field }: { readonly field: string }) => (
+  <button
+    aria-label={`Edit ${field}`}
+    className="sr-only"
+    data-place-stop
+    onClick={(event) => {
+      event.currentTarget
+        .closest("[data-field-place]")
+        ?.querySelector("textarea")
+        ?.focus();
+    }}
+    tabIndex={-1}
+    type="button"
+  />
+);
+
+const leaveField = (field: HTMLElement): void => {
+  field
+    .closest("[data-field-place]")
+    ?.querySelector<HTMLElement>("[data-place-stop]")
+    // The field was just on screen; its stop at the place's end mustn't scroll a long one away.
+    ?.focus({ preventScroll: true });
+};
+
 /** One typed-in field on its card, its words in line with the item's own at the top of details. */
-const FieldBox = ({ children }: { readonly children: ReactNode }) => (
-  <div className={cn(SURFACE, "p-1.5")}>{children}</div>
+const FieldBox = ({
+  children,
+  field,
+}: {
+  readonly children: ReactNode;
+  readonly field: string;
+}) => (
+  <div {...place} className={cn(SURFACE, place.className, "p-1.5")}>
+    {children}
+    <PlaceStop field={field} />
+  </div>
 );
 
 /** A labelled part of details; the label is small and quiet, like a section name in the list. */
@@ -275,7 +338,7 @@ const AutoText = ({
     }
   }, [autoFocus]);
 
-  // Return ends a one-line field; Escape leaves any field, so the next Escape goes back.
+  // Return ends a one-line field; Escape leaves any field for its place, so the next Escape goes back.
   const onKeyDown = (
     event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>
   ): void => {
@@ -285,7 +348,7 @@ const AutoText = ({
     ) {
       event.preventDefault();
       event.stopPropagation();
-      event.currentTarget.blur();
+      leaveField(event.currentTarget);
     }
   };
 
@@ -329,9 +392,9 @@ const AutoText = ({
  */
 const StepsEditor = ({
   focusSeq,
+  goesWhenLeft,
   newStep,
   onChange,
-  onLeave,
   onRemoved,
   onUndo,
   steps,
@@ -339,20 +402,25 @@ const StepsEditor = ({
   readonly steps: readonly Step[];
   /** Changes when the last step should take focus. */
   readonly focusSeq: number;
+  /** The step goes once focus leaves its row for good: not to its own checkbox or ×, nor only out of the window. */
+  readonly goesWhenLeft: (step: Step) => boolean;
   readonly newStep: () => Step;
   readonly onChange: (steps: readonly Step[]) => void;
-  /** Focus has left the step's row, for good: not to its own checkbox or ×, nor only out of the window. */
-  readonly onLeave: (step: Step) => void;
   readonly onRemoved: (step: Step, index: number) => void;
   readonly onUndo: () => boolean;
 }) => {
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
   // Rows a press took focus from: they go once the press is done, so what was pressed is still under the pointer when it is released.
   const pressing = useRef(false);
-  const leftDuringPress = useRef<{ step: Step; row: Element }[]>([]);
+  const leftDuringPress = useRef<{ id: string; row: Element }[]>([]);
 
-  const leave = useEffectEvent((step: Step) => {
-    onLeave(step);
+  // The step as it is now: words typed in during the press keep it.
+  const leave = useEffectEvent((id: string) => {
+    const step = steps.find((other) => other.id === id);
+
+    if (step !== undefined && goesWhenLeft(step)) {
+      onChange(steps.filter((other) => other.id !== id));
+    }
   });
 
   useEffect(() => {
@@ -370,9 +438,9 @@ const StepsEditor = ({
         // The click comes after the release, so the rows go after it.
         setTimeout(() => {
           // A row the keyboard went back to during the press stays.
-          for (const { row, step } of left) {
+          for (const { id, row } of left) {
             if (!row.contains(document.activeElement)) {
-              leave(step);
+              leave(id);
             }
           }
         }, 0);
@@ -493,7 +561,16 @@ const StepsEditor = ({
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      event.currentTarget.blur();
+
+      // A step that goes as it is left hands the keyboard to Add step, which made it; any other waits on its row.
+      if (goesWhenLeft(step)) {
+        event.currentTarget
+          .closest("section")
+          ?.querySelector<HTMLElement>("[data-add-step]")
+          ?.focus();
+      } else {
+        leaveField(event.currentTarget);
+      }
     }
   };
 
@@ -504,12 +581,14 @@ const StepsEditor = ({
       ref={listRef}
     >
       {steps.map((step, index) => (
-        // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the row only hears focus leave it; its checkbox, words and × take the keys.
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the row only hears focus leave it, and Return on it types in its step again; its checkbox, words and × take the other keys.
         <li
-          className="group/step flex items-start gap-2"
+          {...place}
+          className={cn(place.className, "group/step flex items-start gap-2")}
           key={step.id}
           onBlur={(event) => {
             if (
+              goesWhenLeft(step) &&
               document.hasFocus() &&
               !(
                 event.relatedTarget instanceof Node &&
@@ -518,11 +597,11 @@ const StepsEditor = ({
             ) {
               if (pressing.current) {
                 leftDuringPress.current.push({
+                  id: step.id,
                   row: event.currentTarget,
-                  step,
                 });
               } else {
-                onLeave(step);
+                onChange(steps.filter((other) => other.id !== step.id));
               }
             }
           }}
@@ -588,6 +667,7 @@ const StepsEditor = ({
               <HugeiconsIcon icon={Cancel01Icon} />
             </Button>
           </span>
+          <PlaceStop field={`Step ${index + 1}`} />
         </li>
       ))}
     </ul>
@@ -901,7 +981,8 @@ const PinLabels = ({
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
         // The pin sits beside a label's first line (h-7, a one-line field's height), however many lines it wraps to.
         <li
-          className="flex items-start gap-2"
+          {...place}
+          className={cn(place.className, "flex items-start gap-2")}
           key={`${index}:${pin.x}:${pin.y}`}
         >
           <span className="flex h-7 shrink-0 items-center">
@@ -920,6 +1001,7 @@ const PinLabels = ({
             placeholder={`What pin ${index + 1} marks`}
             value={pin.label ?? ""}
           />
+          <PlaceStop field={`label for pin ${index + 1}`} />
         </li>
       ))}
     </ol>
@@ -1063,10 +1145,12 @@ const TextContent = ({
       />
     </div>
   ) : (
-    // A click on the words edits them there, as in the open row; a link still opens.
+    // A click on the words edits them there, as in the open row; a link still opens. Return and Esc in the editor hand the keyboard back here, where Return edits again (use-shelf-keys.ts).
     // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Edit in the item menu (Return) edits from the keyboard; the click only says where the caret goes.
     <div
-      className={cn(SURFACE, "cursor-text px-3 py-2.5")}
+      className={cn(SURFACE, RING, "cursor-text px-3 py-2.5")}
+      data-row-keys
+      tabIndex={-1}
       onClick={(event) => {
         const point = editPoint(wordsClick(event));
 
@@ -1111,7 +1195,7 @@ const Content = (props: ContentProps) => {
         <FileLine item={item} />
       )}
       <Field icon={TextIcon} label="Title">
-        <FieldBox>
+        <FieldBox field="Title">
           <AutoText
             label="Title"
             max={TITLE_MAX}
@@ -1135,7 +1219,7 @@ const Content = (props: ContentProps) => {
         icon={StickyNote01Icon}
         label="Caption"
       >
-        <FieldBox>
+        <FieldBox field="Caption">
           <AutoText
             autoFocus={editing}
             key={editing ? "editing" : "note"}
@@ -1679,7 +1763,7 @@ export const DetailsView = (props: DetailsProps) => {
         />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
-            <FieldBox>
+            <FieldBox field="Description">
               <AutoText
                 autoFocus={descriptionFocus > 0}
                 key={descriptionFocus}
@@ -1713,11 +1797,9 @@ export const DetailsView = (props: DetailsProps) => {
               focusSeq={stepsFocus}
               newStep={newStep}
               onChange={saveSteps}
-              onLeave={(step) => {
-                if (step.text.trim() === "" && untyped.current.has(step.id)) {
-                  saveSteps(steps.filter((other) => other.id !== step.id));
-                }
-              }}
+              goesWhenLeft={(step) =>
+                step.text.trim() === "" && untyped.current.has(step.id)
+              }
               onRemoved={(step, index) => {
                 props.onUndoable({ index, kind: "step", step });
               }}
@@ -1726,6 +1808,7 @@ export const DetailsView = (props: DetailsProps) => {
             />
             <div>
               <Button
+                data-add-step
                 onClick={() => {
                   saveSteps([...steps, newStep()]);
                   setStepsFocus((seq) => seq + 1);

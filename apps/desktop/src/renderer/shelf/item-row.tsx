@@ -76,32 +76,23 @@ import { KnownEditors } from "./known-editors";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
-import type { ScreenPoint } from "./markdown-field";
+import type { MarkdownFieldHandle, ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 import { Note } from "./note";
 import { bindRow } from "./row-actions";
 import type { RowActions } from "./row-actions";
-import { contextMenuAt, DONE, EDITING, WORDS } from "./row-look";
+import {
+  contextMenuAt,
+  DONE,
+  EDITING,
+  focusRowOrSearchLater,
+  WORDS,
+} from "./row-look";
 import { checkedSteps, linksOf, ROW_CAPS, rowParts } from "./row-parts";
 import type { RowLinks, RowOpen } from "./row-parts";
 import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
-
-/**
- * Focus on an item's row itself, where Return edits, Space checks off and ⌫
- * deletes. False when the row is gone or hidden.
- */
-export const focusRow = (row: Element | null): boolean => {
-  const target =
-    row?.querySelector<HTMLElement>("[data-row-keys]") ??
-    row?.querySelector<HTMLElement>("[data-details-button]") ??
-    null;
-
-  target?.focus({ preventScroll: true });
-
-  return target !== null && document.activeElement === target;
-};
 
 const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
   chatgpt: ChatGptIcon,
@@ -708,6 +699,17 @@ export const TextEditor = ({
     onDone();
   };
 
+  const field = useRef<MarkdownFieldHandle>(null);
+
+  // Return and Esc hand the keyboard back to the words, in the row or in details, where Return edits again; a row the edit took out of the search's results hands it to the search.
+  const backToWords = (): void => {
+    const words =
+      field.current?.element()?.closest("[data-item-id], [data-details]") ??
+      null;
+
+    focusRowOrSearchLater(words);
+  };
+
   return (
     <MarkdownField
       ariaLabel="Edit item"
@@ -720,14 +722,19 @@ export const TextEditor = ({
           cancelled.current = true;
           live.current?.cancel();
           onDone();
+          backToWords();
         },
-        onSubmit: finish,
+        onSubmit: (markdown) => {
+          finish(markdown);
+          backToWords();
+        },
       }}
       onBlur={(markdown) => {
         // An untouched note keeps its own Markdown, not the field's rewrite of it.
         finish(markdown === text ? markdown : text);
       }}
       followValue={false}
+      ref={field}
       onChange={(markdown) => {
         setText(markdown);
         edit().change(markdown);

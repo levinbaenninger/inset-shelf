@@ -1,6 +1,6 @@
 /**
  * Screenshots the shelf, the window-link picker, the drawing window, the
- * first-run onboarding, the capture notice and the screenshot card of the
+ * first-run onboarding, the capture notice, the screenshot card and Settings of the
  * built renderer in their main states, light and dark, without Electron. Each
  * page runs in Playwright's Chromium with a fake preload bridge
  * (scripts/fixtures/screens-bridge.js) that answers from the sample data
@@ -909,7 +909,8 @@ type PageName =
   | "drawing"
   | "onboarding"
   | "toast"
-  | "screenshot";
+  | "screenshot"
+  | "settings";
 
 interface Scene {
   readonly name: string;
@@ -8797,6 +8798,966 @@ const CODE_SCENES: readonly Scene[] = (
   ] satisfies readonly StressScene[]
 ).map(stress);
 
+const PlaceSchema = z.object({
+  body: z.boolean(),
+  field: z.boolean(),
+  inDetails: z.boolean(),
+  label: z.string(),
+  row: z.string(),
+  within: z.string(),
+});
+
+/** Holds every animation frame the page asks for until `releaseFrames`, so a key can land before a frame's handoff runs. */
+const holdFrames = async (page: Page): Promise<void> => {
+  await page.evaluate(`(() => {
+    const held = [];
+    const real = globalThis.requestAnimationFrame;
+
+    globalThis.__releaseFrames = () => {
+      globalThis.requestAnimationFrame = real;
+      for (const run of held.splice(0)) run(performance.now());
+    };
+    globalThis.requestAnimationFrame = (run) => held.push(run);
+  })()`);
+};
+
+/** Runs the frames `holdFrames` held, then waits for two more. */
+const releaseFrames = async (page: Page): Promise<void> => {
+  await page.evaluate(`new Promise((resolve) => {
+    globalThis.__releaseFrames();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  })`);
+};
+
+/** Marks what has the keyboard, so a later look can tell whether it kept it, and names it. */
+const markKeyboard = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(`(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.dataset.tabbedTo = "";
+      return active?.getAttribute("aria-label") || active?.tagName || "";
+    })()`)
+  );
+
+const keptMark = async (page: Page): Promise<boolean> =>
+  (await page.evaluate(
+    "document.activeElement instanceof HTMLElement && document.activeElement.dataset.tabbedTo !== undefined"
+  )) === true;
+
+/** Where the keyboard is: a text field or not, the named part of details it sits in, and the list row. */
+const keyboardPlace = async (page: Page) =>
+  PlaceSchema.parse(
+    await page.evaluate(() => {
+      const active = document.activeElement;
+
+      return {
+        body: active === null || active === document.body,
+        field:
+          active instanceof HTMLTextAreaElement ||
+          active instanceof HTMLInputElement ||
+          (active instanceof HTMLElement && active.isContentEditable),
+        inDetails: active?.closest("[data-details]") !== null,
+        label: active?.getAttribute("aria-label") ?? "",
+        row:
+          active?.closest<HTMLElement>("[data-item-id]")?.dataset.itemId ?? "",
+        within:
+          active?.closest("section[aria-label]")?.getAttribute("aria-label") ??
+          "",
+      };
+    })
+  );
+
+const placeText = (focus: z.infer<typeof PlaceSchema>): string =>
+  focus.body
+    ? "the page body"
+    : `${focus.field ? "the text field " : ""}“${focus.label}” in “${focus.within}”`;
+
+/**
+ * Left with `key`, a field in details keeps the keyboard on its own place
+ * (`within`), off the text so the details' keys work: Tab goes on from there
+ * to `next`, past the field and its place, Return types in it again, and a
+ * second Esc goes back to the item's row.
+ */
+const keepsPlace = async (
+  page: Page,
+  key: string,
+  within: string,
+  next: string,
+  field: () => Promise<void>
+): Promise<string | null> => {
+  const left = await keyboardPlace(page);
+
+  if (left.body || left.field || !left.inDetails || left.within !== within) {
+    return `${key} in ${within} left focus on ${placeText(left)}, not on ${within}'s place in details`;
+  }
+
+  await page.keyboard.press("Tab");
+
+  const tabbed = await keyboardPlace(page);
+
+  if (tabbed.label !== next) {
+    return `Tab after ${key} in ${within} went to ${placeText(tabbed)}, not on to “${next}”`;
+  }
+
+  await field();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Enter");
+
+  const again = await keyboardPlace(page);
+
+  if (!again.field || again.within !== within) {
+    return `Return on ${within}'s place went to ${placeText(again)}, not back into ${within}`;
+  }
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Back to the list" }).waitFor({
+    state: "hidden",
+  });
+  // Details put the keyboard back on the row a frame after they close.
+  await page
+    .waitForFunction(
+      () => document.activeElement?.closest("[data-item-id]") !== null,
+      null,
+      { timeout: 1000 }
+    )
+    .catch(() => null);
+
+  const back = await keyboardPlace(page);
+
+  return back.row === ""
+    ? `a second Esc from ${within} left focus on ${placeText(back)}, not on the item's row`
+    : null;
+};
+
+const titleBox = (page: Page) =>
+  page.getByRole("textbox", { exact: true, name: "Title" });
+
+const stepBox = (page: Page) =>
+  page.getByRole("textbox", { exact: true, name: "Step 3" });
+
+const descriptionBox = (page: Page) =>
+  page.getByRole("textbox", { exact: true, name: "Description" });
+
+/** ⌘F and words typed in the search field. */
+const searchFor = async (page: Page, words: string): Promise<void> => {
+  await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Search the shelf'"
+  );
+  await page.keyboard.type(words);
+};
+
+/** Return on the selected words edits them, “Monday” becomes “Tuesday”, and Return ends the edit. */
+const unmatchWords = async (page: Page): Promise<void> => {
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+  );
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("Book the movers for Tuesday");
+  await page.keyboard.press("Enter");
+};
+
+/** A row has the keyboard after `key`, a frame after it is selected; else what went wrong. */
+const rowFocus = async (
+  page: Page,
+  key: string,
+  row: string | undefined
+): Promise<string | null> => {
+  await page.waitForTimeout(50);
+
+  const place = await keyboardPlace(page);
+
+  return place.row === row
+    ? null
+    : `${key} left focus on ${placeText(place)}${place.row === "" ? "" : ` in row ${place.row}`}, not on row ${String(row)}`;
+};
+
+/** A keyboard user never loses their place: a field left in details or in a row keeps the keyboard there, and ↓ goes from the search field to its results. */
+const KEEPS_PLACE_SCENES: readonly Scene[] = [
+  {
+    // Return in a picture's Title keeps the keyboard on the Title, which shows where it is.
+    act: async (page) => {
+      await details(page, 11);
+      await titleBox(page).focus();
+      await page.keyboard.type("Today: ");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) =>
+      await keepsPlace(
+        page,
+        "Return",
+        "Title",
+        "Caption, copied with the image",
+        async () => {
+          await titleBox(page).focus();
+        }
+      ),
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-title",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // The stop a field leaves the keyboard on is a button named for its field, so a screen reader says where the keyboard is, and pressing it types in the field again.
+    act: async (page) => {
+      await details(page, 11);
+      await titleBox(page).focus();
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const stop = await page.evaluate(() => {
+        const active = document.activeElement;
+
+        return {
+          button: active instanceof HTMLButtonElement,
+          name: active?.getAttribute("aria-label") ?? "",
+        };
+      });
+
+      if (!stop.button || stop.name !== "Edit Title") {
+        return `Return in Title left focus on ${stop.button ? "a button" : "an element"} named “${stop.name}”, not on a button named “Edit Title”`;
+      }
+
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.click();
+        }
+      });
+
+      const again = await keyboardPlace(page);
+
+      return again.field && again.label === "Title"
+        ? null
+        : `pressing “Edit Title” left focus on ${placeText(again)}, not in Title`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-named-stop",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await stepBox(page).focus();
+      await page.keyboard.press("Escape");
+    },
+    check: async (page) =>
+      await keepsPlace(
+        page,
+        "Esc",
+        "Next steps",
+        "Book the lift for the delivery day",
+        async () => {
+          await stepBox(page).focus();
+        }
+      ),
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-step",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await descriptionBox(page).focus();
+      await page.keyboard.press("Escape");
+    },
+    check: async (page) =>
+      await keepsPlace(
+        page,
+        "Esc",
+        "Description",
+        "Ask Rieder whether 21 November is possible",
+        async () => {
+          await descriptionBox(page).focus();
+        }
+      ),
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-description",
+    page: "shelf",
+  },
+  {
+    // A step not typed yet goes as Esc leaves it; the keyboard waits on Add step, which made it.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Escape");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      const onAdd = await page
+        .getByRole("button", { name: "Add step" })
+        .evaluate((button) => button === document.activeElement);
+
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      return onAdd && steps === 5
+        ? null
+        : `Esc in a step not typed yet left focus on ${placeText(left)} with ${steps} steps, not on Add step with the blank step gone`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-blank-step",
+    page: "shelf",
+  },
+  {
+    // A step that held words and was cleared stays as Esc leaves it, so the keyboard waits on its row, where Return types in it again and ⌘Z brings its words back.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { name: "Step 1" }).focus();
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const left = await page.evaluate(() => ({
+        row:
+          (document.activeElement?.matches("[data-place-stop]") ?? false) &&
+          document.activeElement?.closest("li[data-field-place]") !== null,
+        within:
+          document.activeElement
+            ?.closest("section[aria-label]")
+            ?.getAttribute("aria-label") ?? "",
+      }));
+
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      if (!left.row || left.within !== "Next steps" || steps !== 5) {
+        return `Esc in a cleared step left focus ${left.row ? "on a step's row" : "off its row"} in “${left.within}” with ${steps} steps, not on its row with the step kept`;
+      }
+
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("ControlOrMeta+Z");
+      await page.waitForTimeout(150);
+
+      const words = await page.evaluate(() =>
+        document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.value
+          : null
+      );
+
+      return words === null || words === ""
+        ? `Return then ⌘Z on a cleared step's row left ${words === null ? "the keyboard out of the step" : "the step blank"}, not its words back`
+        : null;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-cleared-step",
+    page: "shelf",
+  },
+  {
+    // A text item's words in details, edited with Return and left with Return.
+    act: async (page) => {
+      await details(page, 12);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+      );
+      await page.keyboard.press("End");
+      await page.keyboard.type(" today");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      if (left.body || left.field || !left.inDetails) {
+        return `Return in a text item's words left focus on ${placeText(left)}, not on its words in details`;
+      }
+
+      await page.keyboard.press("Tab");
+
+      const tabbed = await keyboardPlace(page);
+
+      if (!tabbed.inDetails || tabbed.label === "Back to the list") {
+        return `Tab after editing the words went to ${placeText(tabbed)}, not on from them`;
+      }
+
+      return null;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-words",
+    page: "shelf",
+  },
+  {
+    // The words edited in the list's row and left with Return: the row keeps the keyboard.
+    act: async (page) => {
+      await select(page, 12);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Edit item'"
+      );
+      await page.keyboard.press("End");
+      await page.keyboard.type(" today");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      return left.row === uuid(12) && !left.field
+        ? null
+        : `Return in a row's words left focus on ${placeText(left)}, not on the row`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-row-words",
+    page: "shelf",
+  },
+  {
+    // A picture's note edited in its row and left with Return: the row keeps the keyboard.
+    act: async (page) => {
+      await select(page, 11);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Note for this image'"
+      );
+      await page.keyboard.type(" today");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const left = await keyboardPlace(page);
+
+      return left.row === uuid(11) && !left.field
+        ? null
+        : `Return in a row's note left focus on ${placeText(left)}, not on the row`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-row-note",
+    page: "shelf",
+  },
+  ...(
+    [
+      { label: "Edit item", n: 12, what: "words" },
+      { label: "Note for this image", n: 11, what: "note" },
+    ] as const
+  ).map(({ label, n, what }) => ({
+    // Return in a row's ${what}, then Tab before the next frame: the keyboard stays where Tab took it, and the row's handoff doesn't take it back.
+    act: async (page: Page) => {
+      await select(page, n);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        `document.activeElement?.getAttribute('aria-label') === '${label}'`
+      );
+      await page.keyboard.type(" today");
+      await holdFrames(page);
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Tab");
+    },
+    check: async (page: Page) => {
+      const tabbed = await markKeyboard(page);
+
+      await releaseFrames(page);
+
+      if (await keptMark(page)) {
+        return null;
+      }
+
+      const left = await keyboardPlace(page);
+
+      return `Tab after Return in a row's ${what} went to “${tabbed}”, then the row's handoff moved it to ${placeText(left)}`;
+    },
+    data: { view: shelfView() },
+    name: `shelf-keeps-place-row-${what}-tab`,
+    page: "shelf" as const,
+  })),
+  {
+    // ⌘F, a word, ↓ selects the first result and → opens it, as the list's own keys do.
+    act: async (page) => {
+      await page.evaluate(`globalThis.__emit("command", { kind: "find" })`);
+      await page.getByRole("textbox", { name: "Search the shelf" }).waitFor();
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Search the shelf'"
+      );
+      await page.keyboard.type("the");
+      await page.keyboard.press("ArrowDown");
+    },
+    check: async (page) => {
+      const first = await page
+        .locator("[data-item-id]")
+        .first()
+        .getAttribute("data-item-id");
+
+      const current = await page
+        .locator('[data-item-id][aria-current="true"]')
+        .getAttribute("data-item-id", { timeout: 1000 })
+        .catch(() => null);
+
+      if (first === null || current !== first) {
+        return `↓ from the search selected ${String(current)}, not the first result ${String(first)}`;
+      }
+
+      await page.keyboard.press("ArrowRight");
+
+      const opened = await page
+        .getByRole("button", { name: "Back to the list" })
+        .isVisible();
+
+      const shown = z
+        .array(z.string().nullable())
+        .parse(await page.evaluate("globalThis.__selection"))
+        .at(-1);
+
+      return opened && shown === first
+        ? null
+        : `→ after ↓ from the search opened ${opened ? String(shown) : "nothing"}, not ${first}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-to-results",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // Items picked before a search let go once ↓ selects the first result, so Delete then removes only that one.
+    act: async (page) => {
+      await select(page, 12);
+      await page.evaluate(
+        `globalThis.__emit("command", { kind: "selectAll" })`
+      );
+      await searchFor(page, "the");
+      await page.keyboard.press("ArrowDown");
+    },
+    check: async (page) => {
+      const shown = await page.locator("[data-item-id]").count();
+
+      await page.keyboard.press("Delete");
+
+      const removed = await removes(page);
+
+      return shown > 1 && removed === 1
+        ? null
+        : `Delete after ↓ from the search removed ${removed} of the ${shown} results, not only the first`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-drops-picks",
+    page: "shelf",
+  },
+  {
+    // ↓ from the search gives the keyboard to the first result's row, and the list's own ↓ and ↑ carry it on, so Tab goes on from the result, not from the search.
+    act: async (page) => {
+      await searchFor(page, "the");
+      await page.keyboard.press("ArrowDown");
+    },
+    check: async (page) => {
+      const results = await page
+        .locator("[data-item-id]")
+        .evaluateAll((rows) => rows.map((row) => row.dataset.itemId ?? ""));
+
+      const fromSearch = await rowFocus(page, "↓ from the search", results[0]);
+
+      if (fromSearch !== null) {
+        return fromSearch;
+      }
+
+      await page.keyboard.press("ArrowDown");
+
+      const down = await rowFocus(page, "↓", results[1]);
+
+      if (down !== null) {
+        return down;
+      }
+
+      await page.keyboard.press("ArrowUp");
+
+      const up = await rowFocus(page, "↑", results[0]);
+
+      if (up !== null) {
+        return up;
+      }
+
+      await page.keyboard.press("Tab");
+
+      const tabbed = await page.evaluate(() => ({
+        header: document.activeElement?.closest("header") !== null,
+        row:
+          document.activeElement?.closest<HTMLElement>("[data-item-id]")
+            ?.dataset.itemId ?? "",
+      }));
+
+      return tabbed.row === results[0] && !tabbed.header
+        ? null
+        : `Tab after ↓ from the search went to ${tabbed.header ? "the search bar" : `row “${tabbed.row}”`}, not on from the first result`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-focuses-result",
+    page: "shelf",
+  },
+  {
+    // Tab or a click right after ↓ from the search, before the result's row is drawn, keeps the keyboard where it went: the row doesn't take it back a frame on.
+    act: async (page) => {
+      await searchFor(page, "the");
+    },
+    check: async (page) => {
+      // ↓ and the Tab after it in one task, so no frame comes between them.
+      await page.evaluate(() => {
+        document
+          .querySelector('[aria-label="Search the shelf"]')
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key: "ArrowDown",
+            })
+          );
+        document
+          .querySelector<HTMLElement>('[aria-label="Clear Search"]')
+          ?.focus();
+      });
+      await page.waitForTimeout(100);
+
+      const kept = await page.evaluate(() => {
+        const active = document.activeElement;
+
+        return {
+          clear: active?.getAttribute("aria-label") === "Clear Search",
+          row:
+            active?.closest<HTMLElement>("[data-item-id]")?.dataset.itemId ??
+            "",
+          selected:
+            document.querySelector<HTMLElement>(
+              '[data-item-id][aria-current="true"]'
+            )?.dataset.itemId ?? "",
+        };
+      });
+
+      const first = await page
+        .locator("[data-item-id]")
+        .first()
+        .getAttribute("data-item-id");
+
+      if (kept.selected !== first) {
+        return `↓ from the search selected “${kept.selected}”, not the first result “${String(first)}”`;
+      }
+
+      return kept.clear
+        ? null
+        : `Tab right after ↓ from the search went to Clear Search, then a frame on to row “${kept.row}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-search-down-yields-to-tab",
+    page: "shelf",
+  },
+  {
+    // An edit in the row that takes away the search's match: the row leaves the results, and the keyboard goes back to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+    },
+    check: async (page) => {
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after an edit that left the search's results put focus on ${placeText(left)}, not on the search`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row",
+    page: "shelf",
+  },
+  {
+    // The same edit in details: Return edits the words again, and Esc back to the list gives the keyboard to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowRight");
+      await page.getByRole("button", { name: "Back to the list" }).waitFor();
+      await unmatchWords(page);
+    },
+    check: async (page) => {
+      await page.waitForTimeout(100);
+      await page.keyboard.press("Enter");
+      // The editor takes the keyboard once it is drawn.
+      await page
+        .waitForFunction(
+          "document.activeElement?.getAttribute('aria-label') === 'Edit item'",
+          null,
+          { timeout: 1000 }
+        )
+        .catch(() => null);
+
+      const again = await keyboardPlace(page);
+
+      if (again.label !== "Edit item") {
+        return `Return on the words in details after an edit that left the search's results went to ${placeText(again)}, not into the words`;
+      }
+
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(100);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(100);
+
+      const back = await keyboardPlace(page);
+
+      return back.label === "Search the shelf"
+        ? null
+        : `Esc from details on an item that left the search's results put focus on ${placeText(back)}, not on the search`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-keeps-place-unmatched-details",
+    page: "shelf",
+  },
+  {
+    // A file's note edited in its row so it no longer matches: the row leaves the results, and the keyboard goes back to the search.
+    act: async (page) => {
+      await searchFor(page, "pallets");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Note for this file'"
+      );
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.type("Crates for the move");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after a note edit that left the search's results put focus on ${placeText(left)}, not on the search`;
+    },
+    data: {
+      view: shelfView({
+        ...DOC,
+        items: ITEMS.map((each) =>
+          each.id === uuid(13)
+            ? { ...each, note: "Pallets for the move" }
+            : each
+        ),
+      }),
+    },
+    name: "shelf-keeps-place-unmatched-note",
+    page: "shelf",
+  },
+  {
+    // The row's edit with main's view arriving after Return gave the row the keyboard: the row leaves the results then, and the keyboard still goes back to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+    },
+    check: async (page) => {
+      // Main's view arrives 250 ms after the edit (`echo: "later"`).
+      await page.waitForTimeout(500);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after an edit whose view left the search's results late put focus on ${placeText(left)}, not on the search`;
+    },
+    data: { echo: "later", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-late",
+    page: "shelf",
+  },
+  {
+    // The note's edit with main's view arriving after Return gave the row the keyboard.
+    act: async (page) => {
+      await searchFor(page, "pallets");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Note for this file'"
+      );
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.type("Crates for the move");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      await page.waitForTimeout(500);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after a note edit whose view left the search's results late put focus on ${placeText(left)}, not on the search`;
+    },
+    data: {
+      echo: "later",
+      view: shelfView({
+        ...DOC,
+        items: ITEMS.map((each) =>
+          each.id === uuid(13)
+            ? { ...each, note: "Pallets for the move" }
+            : each
+        ),
+      }),
+    },
+    name: "shelf-keeps-place-unmatched-note-late",
+    page: "shelf",
+  },
+  {
+    // Tab on to Show details in the same row while main's view is held: when it arrives, past two seconds, and takes the row out of the results, the keyboard goes to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+      // Return hands the keyboard to the row a frame on.
+      await page.waitForFunction(
+        "document.activeElement?.closest('[data-row-keys]') !== null"
+      );
+      await page.keyboard.press("Tab");
+    },
+    check: async (page) => {
+      const tabbed = await keyboardPlace(page);
+
+      await page.waitForTimeout(2300);
+      await page.evaluate("globalThis.__releaseViews()");
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+
+      return tabbed.label === "Show details" &&
+        left.label === "Search the shelf"
+        ? null
+        : `Tab went to ${placeText(tabbed)}, and when the view left the search's results focus was on ${placeText(left)}, not on the search`;
+    },
+    data: { echo: "held", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-tabbed",
+    page: "shelf",
+  },
+  {
+    // Delete on Show details acts on nothing, so the row keeps watching: when main's held view takes the row out of the results, the keyboard goes to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+      await page.waitForFunction(
+        "document.activeElement?.closest('[data-row-keys]') !== null"
+      );
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Delete");
+    },
+    check: async (page) => {
+      const pressed = await keyboardPlace(page);
+
+      await page.evaluate("globalThis.__releaseViews()");
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+      const removed = await removes(page);
+
+      return pressed.label === "Show details" &&
+        removed === 0 &&
+        left.label === "Search the shelf"
+        ? null
+        : `Delete on ${placeText(pressed)} removed ${removed} rows, and when the view left the search's results focus was on ${placeText(left)}, not on the search`;
+    },
+    data: { echo: "held", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-tabbed-delete",
+    page: "shelf",
+  },
+  {
+    // Focus moved out of the row before main's view takes the row away stays where it went.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+      await page.getByRole("button", { name: "Clear Search" }).focus();
+    },
+    check: async (page) => {
+      await page.evaluate("globalThis.__releaseViews()");
+      await page.waitForTimeout(100);
+
+      const kept = await keyboardPlace(page);
+
+      return kept.label === "Clear Search"
+        ? null
+        : `focus moved to Clear Search, and the view that left the search's results put it on ${placeText(kept)}`;
+    },
+    data: { echo: "held", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-left",
+    page: "shelf",
+  },
+  {
+    // ↓ to a row and Delete twice, with main's view arriving late as over IPC: each Delete removes a row, and the keyboard stays in the list, not in the search.
+    act: async (page) => {
+      await select(page, 10);
+      await page.keyboard.press("ArrowDown");
+      // ↓ hands the keyboard to the row a frame on.
+      await page.waitForFunction(
+        "document.activeElement?.closest('[data-row-keys]') !== null"
+      );
+      await page.keyboard.press("Delete");
+      await page.waitForTimeout(400);
+    },
+    check: async (page) => {
+      const after = await keyboardPlace(page);
+
+      await page.keyboard.press("Delete");
+      await page.waitForTimeout(400);
+
+      const removed = await removes(page);
+
+      return removed === 2 && after.label !== "Search the shelf"
+        ? null
+        : `after the first Delete focus was on ${placeText(after)}, and two Deletes removed ${removed} rows`;
+    },
+    data: { echo: "later", view: shelfView() },
+    name: "shelf-keeps-place-delete-twice",
+    page: "shelf",
+  },
+];
+
+const SETTINGS_VIEW = {
+  openAtLogin: false,
+  settings: {
+    iconIn: "dockAndMenuBar",
+    markDoneOnCopy: false,
+    recall: true,
+    screenshotCards: true,
+  },
+  tips: true,
+  version: "0.1.0",
+};
+
+/** The settings window's calls to main, by name. */
+const settingsCalls = async (page: Page): Promise<string[]> => {
+  const sent = await calls(page);
+
+  return sent.map((entry) => entry.call);
+};
+
+const SETTINGS_SCENES: readonly Scene[] = [
+  {
+    // Esc closes Settings, as its × does; an open menu in it closes first.
+    act: async (page) => {
+      await page.getByRole("combobox").click();
+      await page.getByRole("listbox").waitFor();
+      await page.keyboard.press("Escape");
+      await page.getByRole("listbox").waitFor({ state: "hidden" });
+    },
+    check: async (page) => {
+      const menuEsc = await settingsCalls(page);
+
+      if (menuEsc.includes("close")) {
+        return `Esc in the open icon menu closed Settings (${JSON.stringify(menuEsc)})`;
+      }
+
+      await page.keyboard.press("Escape");
+
+      const closed = await settingsCalls(page);
+
+      return closed.includes("close")
+        ? null
+        : `Esc in Settings sent ${JSON.stringify(closed)}, not close`;
+    },
+    data: { view: SETTINGS_VIEW },
+    name: "settings-escape-closes",
+    page: "settings",
+    platforms: ["macos"],
+  },
+];
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -9256,6 +10217,46 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-details-add-step-press-back",
+    page: "shelf",
+  },
+  {
+    // A press on Add step, then Shift+Tab back into the blank step, typing in it, and Tab away before the release elsewhere: the typed step stays.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.move((add.left + add.right) / 2, middle(add));
+      await page.mouse.down();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.type("Call the venue");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await page.mouse.move(add.right + 40, add.bottom + 60);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step /u })
+        .evaluateAll((fields) =>
+          fields.map((field) =>
+            field instanceof HTMLTextAreaElement ? field.value : ""
+          )
+        );
+
+      return isDeepStrictEqual(steps, ["Call the venue"])
+        ? null
+        : `after the release the steps are ${JSON.stringify(steps)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-press-back-typed",
     page: "shelf",
   },
   {
@@ -12293,6 +13294,8 @@ const SCENES: readonly Scene[] = [
   ...PILL_SCENES,
   ...CODE_SCENES,
   ...ATTACHMENT_SCENES,
+  ...KEEPS_PLACE_SCENES,
+  ...SETTINGS_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
@@ -12301,6 +13304,8 @@ const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   picker: { height: 520, width: 600 },
   // src/main/screenshot-window.ts: 280 wide, as tall as the picture's shape allows within 180–260.
   screenshot: { height: 180, width: 280 },
+  // src/main/settings-window.ts: 420 wide, as tall as its content.
+  settings: { height: 560, width: 420 },
   // What users get by default: the width the shelf opens at, and its height beside a window at least that tall.
   shelf: { height: SHELF_MAX_HEIGHT_DIP, width: SHELF_WIDTH_DIP },
   // src/main/toast-window.ts: a done notice's window; a failed one is 360×72.

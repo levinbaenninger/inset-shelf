@@ -535,6 +535,8 @@ export const settingsContract = defineContract({
   events: { view: event<SettingsView>() },
   global: "insetSettings",
   methods: {
+    /** Esc: the window closes, as its × does. */
+    close: send(z.void()),
     getView: invoke(z.void(), out<SettingsView>()),
     /** The page's height, so the window fits it without empty space. */
     fitHeight: send(z.number().int().min(120).max(1200)),

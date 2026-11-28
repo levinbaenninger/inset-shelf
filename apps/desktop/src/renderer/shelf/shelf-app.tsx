@@ -66,7 +66,7 @@ import type { DetailsUndo } from "./details-view";
 import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
-import { focusRow, HomeFolder, ItemRow } from "./item-row";
+import { HomeFolder, ItemRow } from "./item-row";
 import { keptItems } from "./kept-items";
 import { KnownEditors } from "./known-editors";
 import { lookAt } from "./made-items";
@@ -76,6 +76,7 @@ import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
 import { QuitPromptDialog } from "./quit-prompt";
 import { useRowActions } from "./row-actions";
+import { focusRow } from "./row-look";
 import {
   DueSuggestions,
   NoMatches,
@@ -735,6 +736,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
   const [namingSection, setNamingSection] = useState(false);
   const composerRef = useRef<MarkdownFieldHandle>(null);
+  /** The frame that gives the selected row the keyboard, after a key selects it. */
+  const rowHandoff = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   // Level 2: the item whose details are pushed over the list.
   const details = useDetails({ apply, doc, listRef });
@@ -1121,14 +1124,24 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     composerRef.current?.focus();
   };
 
-  // Moving into the list leaves the note field, so plain keys act on the selection.
+  // The keys' way into the list and through it: one item selected and no picks, so plain keys act on it alone, and its row has the keyboard, so Tab goes on from it.
   const selectItem = (id: ItemId): void => {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
 
+    unpick();
     setSelectedId(id);
     reveal(id);
+    // The open row draws its own keyboard target, so it is there a frame on; a Tab or click before then keeps the keyboard where it went, and only the last key's row takes it.
+    const from = document.activeElement;
+
+    cancelAnimationFrame(rowHandoff.current);
+    rowHandoff.current = requestAnimationFrame(() => {
+      if (document.activeElement === from) {
+        focusRow(document.querySelector(`[data-item-id="${id}"]`));
+      }
+    });
   };
 
   const onSelected = (run: (id: ItemId) => void): (() => void) | null =>
@@ -1165,11 +1178,10 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       }
     },
     move: (offset: 1 | -1) => {
-      unpick();
-
       const next = stepSelection(ids, selectedId, offset);
 
       if (next === null) {
+        unpick();
         focusComposer();
       } else {
         selectItem(next);
@@ -1184,7 +1196,20 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     }, toggleMany),
   };
 
-  useShelfKeys({ ...listKeys, back: closeDetails }, inDetails);
+  useShelfKeys(
+    {
+      ...listKeys,
+      back: closeDetails,
+      // Return in details edits the item they show, which an edit may have taken out of the search's results.
+      edit:
+        detailsItem === undefined
+          ? listKeys.edit
+          : () => {
+              setEditingId(detailsItem.id);
+            },
+    },
+    inDetails
+  );
 
   /**
    * A press anywhere in the list view outside the items (search, the note
@@ -1852,6 +1877,13 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             onChange={setQuery}
             onHide={() => {
               hideShelf();
+            }}
+            onLeaveDown={() => {
+              const [first] = ids;
+
+              if (first !== undefined) {
+                selectItem(first);
+              }
             }}
             query={query}
           />

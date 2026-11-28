@@ -138,6 +138,7 @@ import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
 import type { SelectionResult } from "./selection";
 import { openSettingsStore } from "./settings-store";
+import { updateSettings } from "./settings-update";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
 import {
@@ -3066,6 +3067,7 @@ const start = async (): Promise<void> => {
   const settingsServer = serveContract(
     settingsContract,
     {
+      close: settingsWindow.close,
       fitHeight: settingsWindow.fitHeight,
       getView: settingsView,
       resetTutorial: () => {
@@ -3082,32 +3084,31 @@ const start = async (): Promise<void> => {
         settingsServer.emit("view", settingsView());
       },
       update: (change) => {
-        const before = settings.current().iconIn;
+        void updateSettings(change, {
+          current: settings.current,
+          follow: () => {
+            if (settings.current().screenshotCards) {
+              startScreenshots();
+            } else {
+              screenshots.stop();
+              screenshotCard.hide();
+            }
 
-        void (async () => {
-          try {
-            await settings.update(change);
-          } catch (error) {
-            console.warn(`Settings not saved: ${errorMessage(error)}`);
-          }
-
-          if (settings.current().screenshotCards) {
-            startScreenshots();
-          } else {
-            screenshots.stop();
-            screenshotCard.hide();
-          }
-
-          recall.sync();
-
-          if (settings.current().iconIn !== before) {
-            placeIcon(settings.current().iconIn);
-            // Turning into an accessory can send the app's windows away.
-            settingsWindow.open();
-          }
-
-          settingsServer.emit("view", settingsView());
-        })();
+            recall.sync();
+          },
+          placeIcon,
+          save: async (next) => {
+            try {
+              await settings.update(next);
+            } catch (error) {
+              console.warn(`Settings not saved: ${errorMessage(error)}`);
+            }
+          },
+          showView: () => {
+            settingsServer.emit("view", settingsView());
+          },
+          window: settingsWindow,
+        });
       },
     },
     {

@@ -9,7 +9,12 @@ import { Clamp } from "@/shared/clamp";
 
 import { useCaretStart } from "./edit-start";
 import type { RowHandlers } from "./item-row";
-import { contextMenuAt, DONE, EDITING } from "./row-look";
+import {
+  contextMenuAt,
+  DONE,
+  EDITING,
+  focusRowOrSearchLater,
+} from "./row-look";
 import { ROW_CAPS } from "./row-parts";
 
 /** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
@@ -85,11 +90,16 @@ const NoteField = ({
           ) {
             event.preventDefault();
             event.stopPropagation();
-            // Leaving the field ends the edit (onBlur).
+
+            const row = event.currentTarget.closest("[data-item-id]");
+
+            // Leaving the field ends the edit (onBlur); Return hands the keyboard back to the row, or to the search when the edit took the row out of its results.
             event.currentTarget.blur();
 
             if (escape) {
               onHide();
+            } else {
+              focusRowOrSearchLater(row);
             }
           }
         }}
