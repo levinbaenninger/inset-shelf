@@ -432,6 +432,22 @@ describe("a read the capture can't judge", () => {
     ]);
   });
 
+  it("leaves a file copied during a hold alone, though its name is the text the capture copied", async () => {
+    const clip = clipboard({
+      before: { 3: [FINDER] },
+      copied: [{ "text/plain": "a.pdf" }],
+      held: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "text",
+      restored: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([FINDER]);
+  });
+
   it("leaves the clipboard as it is, and says it wasn't put back, when every read stays unclear until time runs out", async () => {
     const clip = clipboard({
       copied: [FINDER],

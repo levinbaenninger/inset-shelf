@@ -253,8 +253,9 @@ const verdictOn = async <S>(
     }
   }
 
+  // A text capture copies no files: a list seen after a hold is a newer copy, as Finder copies a file beside its name.
   if (copied.files.length === 0) {
-    return "ours";
+    return afterHold && files.length > 0 ? "newer" : "ours";
   }
 
   if (files.length > 0) {
