@@ -218,6 +218,26 @@ describe(appMenuTemplate, () => {
     });
   });
 
+  // On macOS every key a page leaves unhandled goes to the menu bar, and registerAccelerator is ignored there: a plain key would act instead of typing.
+  it("claims no key on macOS that a field types or edits with", () => {
+    const accelerators = (
+      items: ReturnType<typeof appMenuTemplate>
+    ): string[] =>
+      items.flatMap((item) => [
+        ...(item.accelerator === undefined ? [] : [item.accelerator]),
+        ...(Array.isArray(item.submenu) ? accelerators(item.submenu) : []),
+      ]);
+
+    expect(
+      accelerators(appMenuTemplate(state, actions)).filter(
+        (accelerator) =>
+          !/\b(?:Command|Cmd|Control|Ctrl|CommandOrControl|CmdOrCtrl)\+/u.test(
+            accelerator
+          )
+      )
+    ).toStrictEqual([]);
+  });
+
   it("shows Float on Top as a checkbox in the Window menu", () => {
     expect(
       submenu(
