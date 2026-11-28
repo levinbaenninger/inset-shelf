@@ -608,6 +608,10 @@ describe(isCodeCapture, () => {
     expect(isCodeCapture(windows("recall.ts - inset-shelf"))).toBeTruthy();
   });
 
+  it("counts code from a Windows project named for its site, whose name reads as no prose file", () => {
+    expect(isCodeCapture(windows("index.ts - example.org"))).toBeTruthy();
+  });
+
   it("counts a file Code on Windows opened on its own, whose title names only the file, and keeps prose, unnamed tabs and a workspace out", () => {
     expect([
       isCodeCapture(windows("sample.ts")),

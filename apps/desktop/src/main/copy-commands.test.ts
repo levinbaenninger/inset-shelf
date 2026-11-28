@@ -1532,11 +1532,306 @@ describe(createCopyCommands, () => {
     }).toStrictEqual({
       copied: {
         "text/html":
-          "<pre><code>def __init__(self):\n    return *a*</code></pre>",
+          '<pre><code class="language-py">def __init__(self):\n    return *a*</code></pre>',
         "text/plain": "def __init__(self):\n    return *a*",
       },
       dragged: "def __init__(self):\n    return *a*",
     });
+  });
+
+  /** A selection of code, as macOS reads it (the file it came from) and as Windows does (the editor's title alone). */
+  const CODE_SOURCES = [
+    {
+      context: {
+        app: "Code",
+        appLink: null,
+        code: {
+          file: "/Users/anna/inset-shelf/src/recall.ts",
+          line: null,
+          root: "/Users/anna/inset-shelf",
+        },
+        title: "recall.ts — inset-shelf",
+        url: null,
+      },
+      platform: "macOS",
+      source: "src/recall.ts · inset-shelf",
+    },
+    {
+      context: {
+        app: "Visual Studio Code",
+        appLink: null,
+        code: null,
+        title: "recall.ts - inset-shelf - Visual Studio Code",
+        url: null,
+      },
+      platform: "Windows",
+      source: "recall.ts · inset-shelf",
+    },
+  ] as const;
+
+  const CODE = "const total = sum(items);\n  return total;";
+
+  it.each(
+    CODE_SOURCES.flatMap((source) => [
+      { ...source, captured: CODE, edited: "untouched" },
+      { ...source, captured: "const total = 0;", edited: "edited" },
+    ])
+  )(
+    "copies a code capture from $platform, $edited, as a code block of its language, and with details under its file and project",
+    async ({ captured, context, source }) => {
+      const { commands, controller, written } = await setup();
+
+      const id = added(
+        controller.apply({
+          context,
+          html: '<div style="color: #569cd6;"><span>const</span> total</div>',
+          text: captured,
+          type: "addText",
+          via: "selection",
+        })
+      );
+
+      controller.apply({ id, text: CODE, type: "editText" });
+
+      await commands.copy(id);
+      await commands.copyDetails(id);
+
+      const [copy, details] = await Promise.all(
+        written.map(async (contents) => await formats(contents[0]))
+      );
+
+      const block = `<pre><code class="language-ts">${CODE}</code></pre>`;
+
+      expect({ copy, details }).toStrictEqual({
+        copy: { "text/html": block, "text/plain": CODE },
+        details: {
+          "text/html": `<p>${source}</p>${block}`,
+          "text/plain": `${source}\n\n\`\`\`ts\n${CODE}\n\`\`\``,
+        },
+      });
+    }
+  );
+
+  it("fences code that holds a fence with one more backtick, and puts its details after the block", async () => {
+    const { commands, controller, written } = await setup();
+    const code = "const fence = `\n```\n`;";
+
+    const id = added(
+      controller.apply({
+        context: CODE_SOURCES[0].context,
+        html: null,
+        text: code,
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    controller.apply({
+      description: "Why is it here?",
+      id,
+      type: "setDescription",
+    });
+
+    await commands.copyDetails(id);
+
+    await expect(formats(written[0]?.[0])).resolves.toMatchObject({
+      "text/plain": `src/recall.ts · inset-shelf\n\n\`\`\`\`ts\n${code}\n\`\`\`\`\n\nWhy is it here?`,
+    });
+  });
+
+  it.each([
+    {
+      // "worker.v2 - copy.ts" in demo, or "worker.v2" in "copy.ts - demo": the title alone can't say.
+      language: null,
+      title: "worker.v2 - copy.ts - demo - Visual Studio Code",
+    },
+    // "worker.ts - copy.py" opened on its own, or "worker.ts" in copy.py.
+    {
+      language: null,
+      title: "worker.ts - copy.py - Visual Studio Code",
+    },
+    // "worker.ts - copy.c++" in demo: an extension that names no tag still names another file.
+    {
+      language: null,
+      title: "worker.ts - copy.c++ - demo - Visual Studio Code",
+    },
+    // A profile after the project leaves the file sure.
+    {
+      language: "ts",
+      title: "recall.ts - inset-shelf - Work - Visual Studio Code",
+    },
+    {
+      language: "ts",
+      title: "recall.ts - inset-shelf - Visual Studio Code",
+    },
+  ])(
+    "copies code under the Windows title $title as a block of the language its file surely has",
+    async ({ language, title }) => {
+      const { commands, controller, written } = await setup();
+
+      const id = added(
+        controller.apply({
+          context: { ...CODE_SOURCES[1].context, title },
+          html: null,
+          text: CODE,
+          type: "addText",
+          via: "selection",
+        })
+      );
+
+      await commands.copy(id);
+      await commands.copyDetails(id);
+
+      const [copy, details] = await Promise.all(
+        written.map(async (contents) => await formats(contents[0]))
+      );
+
+      const tag = language ?? "";
+
+      expect({
+        block: copy?.["text/html"],
+        fence: details?.["text/plain"]?.includes(
+          `\n\`\`\`${tag}\n${CODE}\n\`\`\``
+        ),
+      }).toStrictEqual({
+        block:
+          language === null
+            ? `<pre><code>${CODE}</code></pre>`
+            : `<pre><code class="language-${language}">${CODE}</code></pre>`,
+        fence: true,
+      });
+    }
+  );
+
+  it("copies a Markdown file's selection as prose: its words and HTML as they were copied, and no fence with details", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: {
+          ...CODE_SOURCES[0].context,
+          code: {
+            file: "/Users/anna/inset-shelf/README.md",
+            line: null,
+            root: "/Users/anna/inset-shelf",
+          },
+          title: "README.md — inset-shelf",
+        },
+        html: "<span>Run <b>pnpm dev</b></span>",
+        text: "Run **pnpm dev**",
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await commands.copy(id);
+    await commands.copyDetails(id);
+
+    const [copy, details] = await Promise.all(
+      written.map(async (contents) => await formats(contents[0]))
+    );
+
+    expect({ copy, details }).toStrictEqual({
+      copy: {
+        "text/html": "<span>Run <b>pnpm dev</b></span>",
+        "text/plain": "Run **pnpm dev**",
+      },
+      details: { "text/plain": "Run **pnpm dev**\n\nFrom: Code · README.md" },
+    });
+  });
+
+  it.each([
+    {
+      context: {
+        ...CODE_SOURCES[0].context,
+        code: {
+          file: "/Users/anna/inset-shelf/docs/guide.rst",
+          line: null,
+          root: "/Users/anna/inset-shelf",
+        },
+        title: "guide.rst — inset-shelf",
+      },
+      file: "a reStructuredText file on macOS",
+    },
+    {
+      context: {
+        ...CODE_SOURCES[0].context,
+        code: {
+          file: "/Users/anna/inset-shelf/docs/guide.adoc",
+          line: null,
+          root: "/Users/anna/inset-shelf",
+        },
+        title: "guide.adoc — inset-shelf",
+      },
+      file: "an AsciiDoc file on macOS",
+    },
+    ...[
+      "README.v2 - draft.md - inset-shelf",
+      "v1.2 - Notes.md - inset-shelf",
+      "v1.2 - Notes.md",
+    ].map((title) => ({
+      context: {
+        ...CODE_SOURCES[1].context,
+        title: `${title} - Visual Studio Code`,
+      },
+      file: `"${title}" on Windows`,
+    })),
+  ])(
+    "copies an untouched selection from $file as prose, with the HTML it was copied with",
+    async ({ context }) => {
+      const { commands, controller, written } = await setup();
+
+      const id = added(
+        controller.apply({
+          context,
+          html: "<strong>Build notes</strong>",
+          text: "Build notes",
+          type: "addText",
+          via: "selection",
+        })
+      );
+
+      await commands.copy(id);
+
+      await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+        "text/html": "<strong>Build notes</strong>",
+        "text/plain": "Build notes",
+      });
+    }
+  );
+
+  it("copies a code capture with a web page with details under its file in the project, and the page after the block", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: {
+          ...CODE_SOURCES[0].context,
+          url: "https://example.com/docs",
+        },
+        html: null,
+        text: CODE,
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await commands.copyDetails(id);
+
+    const details = await formats(written[0]?.[0]);
+    const block = `src/recall.ts · inset-shelf\n\n\`\`\`ts\n${CODE}\n\`\`\``;
+
+    expect({
+      html: details["text/html"]?.startsWith(
+        "<p>src/recall.ts · inset-shelf</p><pre>"
+      ),
+      text: details["text/plain"]?.startsWith(block),
+      urlAfterBlock: [details["text/html"], details["text/plain"]].map(
+        (format) =>
+          (format?.indexOf("https://example.com/docs") ?? -1) >
+          (format?.indexOf(CODE) ?? 0)
+      ),
+    }).toStrictEqual({ html: true, text: true, urlAfterBlock: [true, true] });
   });
 
   it("copies a note the shelf shows as nothing as it was typed, with no empty format", async () => {

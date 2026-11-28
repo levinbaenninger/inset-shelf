@@ -109,12 +109,12 @@ const dashesOf = (
   return own === undefined ? TITLE_DASHES : [own, ...TITLE_DASHES];
 };
 
-/** The cleaned title's parts, split on the dash the app's titles use; none without that dash. */
-const partsOf = (
+/** The cleaned title split on the dash the app's titles use, with that dash; no parts without one. */
+const splitTitle = (
   editor: CodeEditor,
   title: string | null,
   app: string | null
-): readonly string[] => {
+): { readonly dash: TitleDash; readonly parts: readonly string[] } | null => {
   const clean = cleanTitle(title, app);
 
   const dash = dashesOf(editor, app).find(
@@ -122,9 +122,16 @@ const partsOf = (
   );
 
   return clean === null || dash === undefined
-    ? []
-    : clean.split(dash).map((each) => each.trim());
+    ? null
+    : { dash, parts: clean.split(dash).map((each) => each.trim()) };
 };
+
+/** The cleaned title's parts, split on the dash the app's titles use; none without that dash. */
+const partsOf = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): readonly string[] => splitTitle(editor, title, app)?.parts ?? [];
 
 /**
  * The file's and the project's name in a window title, by the editor's row.
@@ -436,8 +443,24 @@ export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
   return mac ? "Show in Finder" : "Show in Folder";
 };
 
-/** Files whose words are prose, which read as Markdown even from a code editor. */
-const PROSE_FILES = new Set([".md", ".mdx", ".markdown", ".txt"]);
+/**
+ * Files whose words are prose, plain text and markup written to be read,
+ * which read as Markdown even from a code editor. None ends as a site's
+ * domain does (.org): a Windows title's project can be named for its site.
+ */
+const PROSE_FILES = new Set([
+  ".adoc",
+  ".asciidoc",
+  ".markdown",
+  ".md",
+  ".mdown",
+  ".mdx",
+  ".mkd",
+  ".rst",
+  ".text",
+  ".textile",
+  ".txt",
+]);
 
 /** A file name's extension, lower case, or "" for none (a dot file such as .env has none). */
 const extensionOf = (name: string): string => {
@@ -446,61 +469,134 @@ const extensionOf = (name: string): string => {
   return dot > 0 ? name.slice(dot).toLowerCase() : "";
 };
 
-/**
- * The file a code editor's title names, for telling code from prose: by the
- * row's parts, else the whole title when it holds no dash, as Code titles a
- * file opened on its own, unless what follows its last dot has a space, as
- * a workspace's label does. Whether that lone part is a file or a folder
- * only its extension says, which is all this is read for.
- */
-const titledFile = (
-  editor: CodeEditor,
-  title: string | null,
-  app: string | null
-): string | null => {
-  const named = titleParts(editor, title, app).file;
+/** An extension that can name a language in a class name and after a fence. */
+const LANGUAGE = /^[a-z0-9]+$/u;
 
-  if (named !== null || partsOf(editor, title, app).length > 0) {
-    return named;
-  }
+/** The language a file's extension names: "ts" for recall.ts, or null. */
+const languageOf = (name: string): string | null => {
+  const language = extensionOf(name).slice(1);
 
-  const lone = cleanTitle(title, app);
-
-  // A file's name has no space in its extension; a label such as "release.v2 (Workspace)" does.
-  return lone === null || /\s/u.test(extensionOf(lone)) ? null : lone;
+  return LANGUAGE.test(language) ? language : null;
 };
 
 /**
- * Whether a text item is code: a selection from a file a code editor
- * showed, that is not Markdown or plain text. The file is the code place's
- * (macOS), else the one the title names by the editor's row among `editors`
- * (Windows), where a name without an extension (Welcome, Untitled-1) is not
- * taken for a file. A selection from an editor with no file named, such as
- * a panel, is prose. Code reads and edits with every line's whitespace kept.
+ * A code capture's file, and whether its language is sure. It is not when
+ * the title may name a longer file of another extension, a dash inside its
+ * name: "worker.v2 - copy.ts - demo" names worker.v2 by the row, but may
+ * name "worker.v2 - copy.ts" in demo.
  */
-export const isCodeCapture = (
+interface CodeFile {
+  readonly name: string;
+  readonly sure: boolean;
+}
+
+/**
+ * The file a code editor's title names, for telling code from prose: by the
+ * row's parts, else the whole title when it holds no dash, as Code titles a
+ * file opened on its own, unless what follows its last dot has a space, as a
+ * workspace's label does. Null when a dash may sit inside the name of a
+ * prose file: "v1.2 - Notes.md - inset-shelf" names v1.2 by the row, but may
+ * name "v1.2 - Notes.md", and the title alone can't say which. Prose wins, so
+ * its selection keeps what it was copied with.
+ */
+const titleFile = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): CodeFile | null => {
+  const split = splitTitle(editor, title, app);
+
+  if (split === null) {
+    const lone = cleanTitle(title, app);
+
+    // A file's name has no space in its extension; a label such as "release.v2 (Workspace)" does.
+    return lone === null ||
+      /\s/u.test(extensionOf(lone)) ||
+      PROSE_FILES.has(extensionOf(lone))
+      ? null
+      : { name: lone, sure: true };
+  }
+
+  const prose = split.parts.some((_, index) =>
+    PROSE_FILES.has(
+      extensionOf(split.parts.slice(0, index + 1).join(split.dash))
+    )
+  );
+
+  const name = prose ? null : titleParts(editor, title, app).file;
+
+  if (name === null) {
+    return null;
+  }
+
+  // Each longer file the title could name, the whole title opened on its own among them.
+  const longer = split.parts
+    .slice(1)
+    .map((_, index) => split.parts.slice(0, index + 2).join(split.dash));
+
+  // A longer file of another extension, one with no tag (.c++) too, leaves it unsure; a profile ("Work") or a project with no dot names none.
+  const own = extensionOf(name);
+
+  return {
+    name,
+    sure: longer.every((file) => {
+      const extension = extensionOf(file);
+
+      return extension === "" || /\s/u.test(extension) || extension === own;
+    }),
+  };
+};
+
+/**
+ * The file a code capture came from, or null for a text item that is not
+ * code: a selection from a file a code editor showed, that is not prose
+ * (`PROSE_FILES`). The file is the code place's (macOS), else the one the
+ * title names (`titleFile`) by the editor's row among `editors` (Windows),
+ * where a name without an extension (Welcome, Untitled-1) is not taken for
+ * a file. A selection from an editor with no file named, such as a panel, is
+ * prose.
+ */
+const codeFile = (
   { context, via }: Pick<TextItem, "context" | "via">,
-  editors: readonly CodeEditor[] = CODE_EDITORS
-): boolean => {
+  editors: readonly CodeEditor[]
+): CodeFile | null => {
   if (via !== "selection" || context === null) {
-    return false;
+    return null;
   }
 
   // Read as the source line reads it (web-source.ts): a context may hold no code field at all.
   const place = context.code ?? null;
 
   if (place !== null) {
-    return !PROSE_FILES.has(extensionOf(fileName(place)));
+    const name = fileName(place);
+
+    return PROSE_FILES.has(extensionOf(name)) ? null : { name, sure: true };
   }
 
   const editor = codeEditor(context.app, editors);
 
   const file =
-    editor === undefined
-      ? null
-      : titledFile(editor, context.title, context.app);
+    editor === undefined ? null : titleFile(editor, context.title, context.app);
 
-  const extension = file === null ? "" : extensionOf(file);
+  return file === null || extensionOf(file.name) === "" ? null : file;
+};
 
-  return extension !== "" && !PROSE_FILES.has(extension);
+/** Whether a text item is code (`codeFile`), which reads and edits with every line's whitespace kept. */
+export const isCodeCapture = (
+  item: Pick<TextItem, "context" | "via">,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): boolean => codeFile(item, editors) !== null;
+
+/**
+ * The language a code capture copies as, from its file's extension: "ts"
+ * for recall.ts. Null for an item that is not code, whose language is not
+ * sure (`CodeFile`), or whose extension names no language.
+ */
+export const codeLanguage = (
+  item: Pick<TextItem, "context" | "via">,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): string | null => {
+  const file = codeFile(item, editors);
+
+  return file?.sure === true ? languageOf(file.name) : null;
 };

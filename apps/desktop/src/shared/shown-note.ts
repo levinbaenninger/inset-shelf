@@ -34,10 +34,21 @@ export const noteTree = (markdown: string): Root => {
 };
 
 /** Words the shelf shows as one block of code, which is the words themselves: every space and line kept, nothing read as Markdown. */
-export const codeTree = (code: string): Root => ({
-  children: [{ type: "code", value: code }],
+const codeTree = (code: string, language: string | null): Root => ({
+  children: [{ lang: language, type: "code", value: code }],
   type: "root",
 });
+
+/** Code as a Markdown fence that names its language, longer than any run of backticks inside it. */
+export const fencedCode = (code: string, language: string | null): string => {
+  let fence = "```";
+
+  while (code.includes(fence)) {
+    fence += "`";
+  }
+
+  return `${fence}${language ?? ""}\n${code.replace(/\n$/u, "")}\n${fence}`;
+};
 
 /** The words of inline content as they read. HTML, which the shelf hides, reads as nothing, as does a footnote's mark; a picture reads as its words. */
 const inlineText = (node: Nodes): string => {
@@ -247,3 +258,13 @@ export const copiedWords = (tree: Root): Copied => {
     text: blocksText(tree.children, blockText),
   };
 };
+
+/**
+ * Code as Copy puts it on the clipboard: the code itself as plain text, so
+ * it runs where it is pasted, and one `<pre><code class="language-ts">`
+ * block as HTML, so an app that pastes formatting shows it as code.
+ */
+export const copiedCode = (code: string, language: string | null): Copied => ({
+  html: copiedWords(codeTree(code, language)).html,
+  text: code,
+});
