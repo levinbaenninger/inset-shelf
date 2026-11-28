@@ -73,7 +73,7 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
-import { createSelectionGuard, itemsConcealed } from "./clipboard-privacy";
+import { ConcealedClipboardError, itemsConcealed } from "./clipboard-privacy";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -217,19 +217,12 @@ const trayIconPath = (): string => {
   );
 };
 
-/** Follows the Double Shift capture under way: did it meet a private clipboard (a password manager's copy)? */
-const selectionGuard = createSelectionGuard();
-
 /** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
 const selectionProblem = (result: SelectionResult): string | null => {
-  const marked = selectionGuard.hit();
-
-  if (marked === "original") {
-    return "The clipboard holds something marked private, such as a password, so Inset left it alone and copied nothing. Try again once it has cleared.";
-  }
-
-  if (marked === "selection") {
-    return "That selection is marked private, such as a password, so it wasn’t captured.";
+  if (result.kind === "concealed") {
+    return result.which === "original"
+      ? "The clipboard holds something marked private, such as a password, so Inset left it alone and copied nothing. Try again once it has cleared."
+      : "That selection is marked private, such as a password, so it wasn’t captured.";
   }
 
   if (result.unchecked) {
@@ -270,9 +263,7 @@ const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
   const items = withFormats(await clipboard.read());
 
   if (await itemsConcealed(items)) {
-    selectionGuard.note();
-
-    throw new Error("The clipboard is marked private.");
+    throw new ConcealedClipboardError();
   }
 
   return await Promise.all(
@@ -288,12 +279,10 @@ const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
   );
 };
 
-/** The text of the copied selection; "" (nothing captured) when the app copied it marked private, as a password field does. */
+/** The text of the copied selection; throws when the app copied it marked private, as a password field does, which ends the capture. */
 const readSelectionText = async (): Promise<string> => {
   if (await itemsConcealed(await clipboard.read())) {
-    selectionGuard.note();
-
-    return "";
+    throw new ConcealedClipboardError();
   }
 
   return await clipboard.readText();
@@ -789,6 +778,14 @@ const start = async (): Promise<void> => {
     toItem: (data) => new ClipboardItem(data),
   });
 
+  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
+  let notify: (message: string, tone?: NoticeTone) => void = (
+    message,
+    tone = "done"
+  ) => {
+    toast.show(message, tone);
+  };
+
   const keyMonitor = createKeyMonitor();
 
   let capturingSelection = false;
@@ -808,12 +805,10 @@ const start = async (): Promise<void> => {
     }
 
     capturingSelection = true;
-    selectionGuard.begin();
 
     try {
       const capture = captureSelection({
         clear: () => {
-          selectionGuard.cleared();
           gate.clearForSelection();
         },
         copy: keyMonitor.copy,
@@ -858,12 +853,22 @@ const start = async (): Promise<void> => {
 
       const problem = selectionProblem(result);
 
+      if (result.kind === "concealed") {
+        // A toast or notice, as the shelf is usually hidden; no banner to go stale in it.
+        controller.setStatus({ problem: null });
+
+        if (problem !== null) {
+          notify(problem, "failed");
+        }
+
+        return;
+      }
+
       if (problem !== null) {
         controller.setStatus({ problem });
       }
 
-      // A private clipboard or selection ends the capture here: no shelf, no item.
-      if (result.kind === "busy" || selectionGuard.hit() !== null) {
+      if (result.kind === "busy") {
         return;
       }
 
@@ -1040,14 +1045,6 @@ const start = async (): Promise<void> => {
         icon: exported.image.resize({ width: 128 }),
       });
     }
-  };
-
-  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
-  let notify: (message: string, tone?: NoticeTone) => void = (
-    message,
-    tone = "done"
-  ) => {
-    toast.show(message, tone);
   };
 
   const pickFiles = async (): Promise<void> => {

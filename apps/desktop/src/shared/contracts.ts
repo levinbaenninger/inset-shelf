@@ -413,7 +413,7 @@ export const settingsContract = defineContract({
   methods: {
     getView: invoke(z.void(), out<SettingsView>()),
     /** The page's height, so the window fits it without empty space. */
-    fitHeight: send(z.number().int().min(120).max(1200)),
+    fitHeight: send(z.number().int().min(120).max(4000)),
     /** Opens one of the privacy panes in System Settings (macOS). */
     openPane: send(z.enum(PRIVACY_PANES)),
     /** Reset Tutorial: the checklist and hints start over. */
