@@ -5,6 +5,7 @@ import {
   AttachmentIdSchema,
   emptyShelf,
   ItemIdSchema,
+  parseShelfDocument,
   SectionIdSchema,
 } from "@shared/shelf";
 import type { Attachment } from "@shared/shelf";
@@ -413,6 +414,26 @@ describe(createAttachments, () => {
         itemDragsOutAs: dragged,
         itemReads: name.slice(0, name.lastIndexOf(".")),
       });
+    }
+  );
+
+  it.each(["png", "PNG"])(
+    "keeps the shelf saveable after a picture whose 255-letter name ends in .%s, as an item and attached",
+    async (suffix) => {
+      const { attachments, controller, id } = setup(0);
+      const file = `/Volumes/Long/${"a".repeat(255)}.${suffix}`;
+      const op = await attachments.prepareItem(file);
+
+      if ("problem" in op) {
+        throw new Error(op.problem);
+      }
+
+      controller.apply(op);
+      await attachments.attachFilesTo(id, [file]);
+
+      const { doc } = controller.snapshot();
+
+      expect(parseShelfDocument(JSON.stringify(doc))).not.toBeNull();
     }
   );
 
