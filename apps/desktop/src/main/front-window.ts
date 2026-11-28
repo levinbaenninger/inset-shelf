@@ -11,7 +11,6 @@ import {
 } from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
 import { desktopLink, t3Thread, webUrl } from "@shared/web-source";
-import { withoutAppName } from "@shared/window-title";
 import { app, screen, systemPreferences } from "electron";
 import type { Rectangle } from "electron";
 import { activeWindow } from "get-windows";
@@ -104,7 +103,7 @@ const sourceContext = async (
     thread?.link ??
     desktopLink(window.app, url) ??
     (window.app === "ChatGPT" && areas !== null
-      ? await chatGptThreadLink(title)
+      ? await chatGptThreadLink(title, process.platform === "win32")
       : null);
 
   // On Windows a link opens only in an app that registered its scheme (T3 Code, ChatGPT, Claude); without one it is no link.
@@ -194,9 +193,8 @@ export const frontWindow = async (
           )
         : null;
 
-    const title = orNull(
-      isMac ? front.title : withoutAppName(front.title, owner)
-    );
+    // As the window has it: the shelf cleans a title where it shows or compares it, src/shared/window-title.ts.
+    const title = orNull(front.title);
 
     const document =
       shown === null || shown.document === null

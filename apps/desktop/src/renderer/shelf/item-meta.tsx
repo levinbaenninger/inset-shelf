@@ -23,6 +23,7 @@ import type { DueBucket } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import type { Pin, Step, WindowRef } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
+import { windowName } from "@shared/window-title";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
@@ -255,9 +256,6 @@ export const reopenLabel = (window: WindowRef): string => {
 
   return isMac ? "Bring app forward" : "Open app";
 };
-
-export const windowName = (window: WindowRef): string =>
-  window.title ?? window.app ?? "Window";
 
 /** A linked window's picture, or its app's initial where there is none. */
 export const WindowThumb = ({

@@ -13,7 +13,7 @@ import type {
   ShelfOp,
 } from "./shelf";
 import { serviceOfHost, sourceLabel } from "./web-source";
-import { cleanTitle } from "./window-title";
+import { appName, cleanTitle, titleKeys } from "./window-title";
 
 /**
  * Context recall: which open items came from the window in front. All of it
@@ -141,7 +141,8 @@ export const samePlace = (
     return link === linkOf(front) ? "link" : null;
   }
 
-  if (item.app === null || item.app !== front.app) {
+  // The same app, however the system named it when each was read.
+  if (item.app === null || appName(item.app) !== appName(front.app)) {
     return null;
   }
 
@@ -151,9 +152,9 @@ export const samePlace = (
     return project === projectOf(front) ? "project" : null;
   }
 
-  const title = cleanTitle(item.title, item.app);
+  const theirs = titleKeys(front.title, front.app);
 
-  return title !== null && title === cleanTitle(front.title, front.app)
+  return titleKeys(item.title, item.app).some((key) => theirs.includes(key))
     ? "title"
     : null;
 };
@@ -173,14 +174,15 @@ export const placeOf = (front: PlaceSource): PlaceKey | null => {
   }
 
   const project = projectOf(front);
+  const app = appName(front.app) ?? "";
 
   if (project !== null) {
-    return asKey(`project:${front.app ?? ""}\n${project}`);
+    return asKey(`project:${app}\n${project}`);
   }
 
   const title = cleanTitle(front.title, front.app);
 
-  return title === null ? null : asKey(`title:${front.app ?? ""}\n${title}`);
+  return title === null ? null : asKey(`title:${app}\n${title}`);
 };
 
 const fromHere = (item: ShelfItem, front: PlaceSource): boolean =>

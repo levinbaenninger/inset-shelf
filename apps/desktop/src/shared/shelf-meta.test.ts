@@ -639,6 +639,66 @@ describe("copying", () => {
       "Chairs are over budget\nhttps://example.com/quote\n\nWindows:\n- Window 36\n  the total row\nFrom: Chrome · Quote"
     );
   });
+
+  // As a build before this kept them on Windows: the app by its program file, the title with Notepad's name and unsaved mark.
+  it("names a Windows window and source the way the shelf shows them", () => {
+    const { doc } = applyOp(
+      emptyShelf(INBOX),
+      {
+        context: {
+          app: "Notepad.exe",
+          appLink: null,
+          code: null,
+          title: "explore-notes.txt - Notepad",
+          url: null,
+        },
+        html: null,
+        text: "ship the recall fix",
+        type: "addText",
+        via: "selection",
+      },
+      env(),
+      []
+    );
+
+    const [note] = doc.items;
+
+    if (note === undefined) {
+      throw new Error("missing item");
+    }
+
+    const { doc: linked } = applyOp(
+      doc,
+      {
+        id: note.id,
+        type: "attachWindows",
+        windows: [
+          {
+            ...windowRef(37),
+            app: "Visual Studio Code",
+            title: "app.ts - demo-proj - Visual Studio Code",
+          },
+          {
+            ...windowRef(38),
+            app: "Notepad.exe",
+            title: "*explore-notes.txt - Notepad",
+          },
+        ],
+      },
+      env(),
+      []
+    );
+
+    const [item] = linked.items;
+
+    if (item === undefined) {
+      throw new Error("missing item");
+    }
+
+    expect(itemDetailsText(item)).toBe(
+      "ship the recall fix\n\nWindows:\n- app.ts - demo-proj\n- explore-notes.txt\nFrom: Notepad · explore-notes.txt"
+    );
+  });
 });
 
 describe("the # section composer", () => {

@@ -34,7 +34,7 @@ import type {
   WindowRef,
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
-import { openingApp, sourceLabel } from "@shared/web-source";
+import { sourceApp, sourceLabel } from "@shared/web-source";
 import type { SourceLabel, Service } from "@shared/web-source";
 import {
   createContext,
@@ -253,9 +253,9 @@ export const SourceLine = ({
   const { code, label, service } = sourceLabel(context, use(HomeFolder));
   const serviceIcon = service === null ? Link01Icon : SERVICE_ICON[service];
   const icon = code === undefined ? serviceIcon : CodeIcon;
-  // A code editor opens its file again; a desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
+  // A code editor opens its file again; a desktop app it came from opens again (elsewhere than macOS, only at a link, or ChatGPT at the thread its title names); else the page does.
   const editors = use(KnownEditors);
-  const app = openingApp(context, isMac, editors);
+  const app = sourceApp(context, isMac, editors);
   const shown = label === "" ? (context.url ?? "") : label;
   const plain = useRef<HTMLParagraphElement>(null);
   const link = useRef<HTMLButtonElement>(null);

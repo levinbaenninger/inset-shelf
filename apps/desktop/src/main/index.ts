@@ -49,11 +49,13 @@ import type {
 } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
+  chatGptTitleToFind,
   desktopLink,
   isAppLink,
   isPageAddress,
   openingApp,
 } from "@shared/web-source";
+import { windowName } from "@shared/window-title";
 import {
   app,
   BrowserWindow,
@@ -113,6 +115,7 @@ import {
 import { createOnboardingWindow } from "./onboarding-window";
 import { openApp, openAppAt } from "./open-app";
 import { fileIsThere, openCode } from "./open-code";
+import { openThreadByTitle } from "./open-thread";
 import { createPageSettle, followPage } from "./page-settle";
 import { appBundlePath, createAppTile } from "./permissions/bundle";
 import { createOnboarding } from "./permissions/onboarding";
@@ -354,11 +357,12 @@ const openInApp = async (
 ): Promise<void> => {
   const stored = context?.appLink ?? null;
 
+  // The title is a saved one, not a caption: an older build's names the thread as it is.
   const link =
     (stored !== null && isAppLink(stored) ? stored : null) ??
     desktopLink(name, context?.url ?? null) ??
     (name === "ChatGPT"
-      ? await chatGptThreadLink(context?.title ?? null)
+      ? await chatGptThreadLink(context?.title ?? null, false)
       : null);
 
   if (link !== null) {
@@ -368,9 +372,9 @@ const openInApp = async (
   }
 };
 
-/** The note a new window link starts as: the windows' titles, which the user can then edit. */
+/** The note a new window link starts as: the windows' names, as details shows them, which the user can then edit. */
 const linkText = (windows: readonly WindowRef[]): string =>
-  windows.map((window) => window.title ?? window.app ?? "Window").join(" · ");
+  windows.map(windowName).join(" · ");
 
 /** Pages with a menu open, which then take every key themselves (src/renderer/lib/menu-keys.ts). */
 const menus = createMenuOpenTracker<WebContents>();
@@ -904,6 +908,23 @@ const start = async (): Promise<void> => {
     }
 
     const fromApp = openingApp(context, isMac, EDITORS);
+
+    const threadTitle =
+      url === undefined ? chatGptTitleToFind(context, isMac, EDITORS) : null;
+
+    if (threadTitle !== null) {
+      await openThreadByTitle(threadTitle, context?.url ?? null, {
+        // Strict, as for a caption: a title that names two threads opens neither.
+        find: async (title) => await chatGptThreadLink(title, true),
+        open: async (address) => {
+          await shell.openExternal(address);
+        },
+        registered: (address) =>
+          app.getApplicationNameForProtocol(address) !== "",
+      });
+
+      return;
+    }
 
     // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
     if (url === undefined && fromApp !== null) {

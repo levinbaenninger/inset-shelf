@@ -7,7 +7,7 @@ import {
 } from "./code-editors";
 import type { CodeEditor } from "./code-editors";
 import type { CodePlace } from "./code-place";
-import { withoutAppName } from "./window-title";
+import { appName, shownTitle } from "./window-title";
 
 /** A link inside copied text: the words it was on and where it points. */
 export interface PageLink {
@@ -271,6 +271,34 @@ export const openingApp = (
     : null;
 };
 
+/**
+ * The title to find a ChatGPT thread by when the item opens in no app
+ * otherwise: on Windows an item kept without a link to its thread, as an
+ * older build kept them. Null for every other item.
+ */
+export const chatGptTitleToFind = (
+  source: (AppSource & { readonly title: string | null }) | null,
+  anyApp: boolean,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): string | null =>
+  source !== null &&
+  desktopApp(source.app) === "ChatGPT" &&
+  openingApp(source, anyApp, editors) === null
+    ? source.title
+    : null;
+
+/**
+ * The app the shelf offers to open an item in: where `openingApp` opens it,
+ * or ChatGPT for an item whose thread main finds by its title.
+ */
+export const sourceApp = (
+  source: (AppSource & { readonly title: string | null }) | null,
+  anyApp: boolean,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): string | null =>
+  openingApp(source, anyApp, editors) ??
+  (chatGptTitleToFind(source, anyApp, editors) === null ? null : "ChatGPT");
+
 export interface SourceLabel {
   /** A site the shelf knows, shown with its mark. */
   readonly service: Service | null;
@@ -508,18 +536,17 @@ const fromCode = (
 /**
  * Where an item came from, in a few words: the site and what on it for pages
  * the shelf knows (GitHub, ChatGPT, Claude, X, YouTube), the file and project
- * for a code editor, else the site or app and the window's title, without the
- * app's name Windows adds to it. A path is shown from `home` as "~/…".
+ * for a code editor, else the site or app and the window's title, cleaned as
+ * src/shared/window-title.ts cleans them. A path is shown from `home` as "~/…".
  */
 export const sourceLabel = (
   source: SourceParts,
   home: string | null = null
 ): SourceLabel => {
-  const title =
-    source.title === null ? null : withoutAppName(source.title, source.app);
+  const title = shownTitle(source.title, source.app);
 
   if (source.url === null || webUrl(source.url) === null) {
-    return fromCode(source, home) ?? fromTitle(source.app, title);
+    return fromCode(source, home) ?? fromTitle(appName(source.app), title);
   }
 
   return fromUrl(source.url, title);
