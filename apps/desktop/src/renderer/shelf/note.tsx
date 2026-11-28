@@ -9,7 +9,12 @@ import { Clamp } from "@/shared/clamp";
 
 import { useCaretStart } from "./edit-start";
 import type { RowHandlers } from "./item-row";
-import { contextMenuAt, DONE, EDITING, focusRowOrSearch } from "./row-look";
+import {
+  contextMenuAt,
+  DONE,
+  EDITING,
+  focusRowOrSearchLater,
+} from "./row-look";
 import { ROW_CAPS } from "./row-parts";
 
 /** The note's type, read or typed in: the same either way, so starting an edit moves nothing. */
@@ -94,9 +99,7 @@ const NoteField = ({
             if (escape) {
               onHide();
             } else {
-              requestAnimationFrame(() => {
-                focusRowOrSearch(row);
-              });
+              focusRowOrSearchLater(row);
             }
           }
         }}

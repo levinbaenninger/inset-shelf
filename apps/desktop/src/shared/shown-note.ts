@@ -1,7 +1,13 @@
-import type { ElementContent, Root as HtmlRoot, RootContent } from "hast";
+import type {
+  Element,
+  ElementContent,
+  Root as HtmlRoot,
+  RootContent,
+} from "hast";
 import { toHtml } from "hast-util-to-html";
-import type { List, Nodes, Root, RootContent as Block } from "mdast";
+import type { Code, List, Nodes, Root, RootContent as Block } from "mdast";
 import { toHast } from "mdast-util-to-hast";
+import type { State } from "mdast-util-to-hast";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -187,6 +193,33 @@ const standalone = <Content extends RootContent>(
     };
   });
 
+/**
+ * A code block as `<pre><code>` whose text is its code exactly, as the plain
+ * text gives it: mdast-util-to-hast's own adds a newline after it.
+ */
+const codeBlock = (state: State, node: Code): Element => {
+  const [language = ""] = (node.lang ?? "").split(/\s+/u);
+
+  const block: Element = {
+    children: [
+      {
+        children: [{ type: "text", value: node.value }],
+        properties:
+          language === "" ? {} : { className: [`language-${language}`] },
+        tagName: "code",
+        type: "element",
+      },
+    ],
+    properties: {},
+    tagName: "pre",
+    type: "element",
+  };
+
+  state.patch(node, block);
+
+  return block;
+};
+
 /** What Copy puts on the clipboard for words. */
 export interface Copied {
   /** The words as the shelf shows them, line breaks kept, nothing escaped. */
@@ -202,7 +235,7 @@ export interface Copied {
  */
 export const copiedWords = (tree: Root): Copied => {
   // Raw HTML is left out, as the shelf's skipHtml leaves it out.
-  const rendered = toHast(tree);
+  const rendered = toHast(tree, { handlers: { code: codeBlock } });
 
   const html: HtmlRoot = {
     children: standalone(rendered.type === "root" ? rendered.children : []),
