@@ -11,6 +11,8 @@ files:
   - out/**
   - package.json
 extraResources:
+  - from: ../../LICENSE
+    to: LICENSE-inset-shelf.txt
   - from: resources
     to: resources
     filter:

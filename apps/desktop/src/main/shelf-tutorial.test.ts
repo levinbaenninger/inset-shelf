@@ -153,7 +153,7 @@ describe("Inset Shelf's tutorial", () => {
   it("names the docs on the source line that opens them", () => {
     expect(
       shelfExamples(true).find((example) => example.context !== null)?.context
-    ).toMatchObject({ title: "Inset Shelf docs", url: HELP_URL });
+    ).toMatchObject({ title: "Inset Shelf user guide", url: HELP_URL });
   });
 });
 

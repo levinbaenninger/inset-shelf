@@ -5,6 +5,7 @@ import {
   AttachmentIdSchema,
   emptyShelf,
   ItemIdSchema,
+  parseShelfDocument,
   SectionIdSchema,
 } from "@shared/shelf";
 import type { Attachment } from "@shared/shelf";
@@ -12,7 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachmentDeps, DecodedImage } from "./attachments";
-import { imageFileName, ownFileName } from "./export-name";
+import { attachedFileName, imageFileName } from "./export-name";
 import { createShelfController } from "./shelf-controller";
 
 const uuid = (n: number) =>
@@ -105,7 +106,7 @@ const setup = (
     item: controller.item,
     newAttachmentId: () => AttachmentIdSchema.parse(uuid((next += 1))),
     now: () => new Date("2026-11-21T09:00:00.000Z"),
-    readImage: (file) => (file.endsWith(".png") ? PICTURE : null),
+    readImage: (file) => (/\.(?:png|jpg)$/iu.test(file) ? PICTURE : null),
     stat: async (file) =>
       await Promise.resolve({
         isFile: !file.endsWith("/"),
@@ -367,7 +368,7 @@ describe(createAttachments, () => {
 
       expect({
         attachedDragsOutAs:
-          attached?.kind === "image" ? ownFileName(attached.name) : null,
+          attached?.kind === "image" ? attachedFileName(attached) : null,
         itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
         itemReads: added?.kind === "image" ? added.title : null,
       }).toStrictEqual({
@@ -375,6 +376,64 @@ describe(createAttachments, () => {
         itemDragsOutAs: `${name}.png`,
         itemReads: name,
       });
+    }
+  );
+
+  it.each([
+    ["Screen Shot.PNG", "Screen Shot.PNG"],
+    ["Screen Shot.Png", "Screen Shot.Png"],
+    ["photo.JPG", "photo.png"],
+    ["chart.png.png", "chart.png.png"],
+    ["chart.PNG.jpg", "chart.PNG.png"],
+  ])(
+    "drags a picture added from %j out as %j: a PNG's own spelling, a picture made PNG with .png",
+    async (name, dragged) => {
+      const { attachments, controller, id } = setup(0);
+      const file = `/Users/someone/Desktop/${name}`;
+      const op = await attachments.prepareItem(file);
+
+      if ("problem" in op) {
+        throw new Error(op.problem);
+      }
+
+      const added = controller.item(controller.apply(op) ?? id);
+
+      await attachments.attachFilesTo(id, [file]);
+
+      const [attached] = controller.item(id)?.attachments ?? [];
+
+      expect({
+        attachedDragsOutAs:
+          attached?.kind === "image" ? attachedFileName(attached) : null,
+        attachedReads: attached?.kind === "image" ? attached.name : null,
+        itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
+        itemReads: added?.kind === "image" ? added.title : null,
+      }).toStrictEqual({
+        attachedDragsOutAs: dragged,
+        attachedReads: name.slice(0, name.lastIndexOf(".")),
+        itemDragsOutAs: dragged,
+        itemReads: name.slice(0, name.lastIndexOf(".")),
+      });
+    }
+  );
+
+  it.each(["png", "PNG"])(
+    "keeps the shelf saveable after a picture whose 255-letter name ends in .%s, as an item and attached",
+    async (suffix) => {
+      const { attachments, controller, id } = setup(0);
+      const file = `/Volumes/Long/${"a".repeat(255)}.${suffix}`;
+      const op = await attachments.prepareItem(file);
+
+      if ("problem" in op) {
+        throw new Error(op.problem);
+      }
+
+      controller.apply(op);
+      await attachments.attachFilesTo(id, [file]);
+
+      const { doc } = controller.snapshot();
+
+      expect(parseShelfDocument(JSON.stringify(doc))).not.toBeNull();
     }
   );
 

@@ -142,7 +142,7 @@ const sourceContext = async (
     thread?.link ??
     desktopLink(window.app, url) ??
     (window.app === "ChatGPT" && areas !== null
-      ? await chatGptThreadLink(title)
+      ? await chatGptThreadLink(title, process.platform === "win32")
       : null);
 
   // On Windows a link opens only in an app that registered its scheme (T3 Code, ChatGPT, Claude); without one it is no link.
