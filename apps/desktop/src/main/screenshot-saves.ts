@@ -80,7 +80,7 @@ export interface ShotDrop {
   readonly onItem: (id: ItemId, png: Uint8Array) => Promise<ItemId | null>;
   /** Dropped on the shelf off any item: Add to Shelf. */
   readonly onShelf: (png: Uint8Array) => Promise<ItemId | null>;
-  /** The shelf shows the screenshot in a place an add made. */
+  /** The shelf shows the screenshot in a place an add made, and the disk holds it there. */
   readonly placed: () => boolean;
 }
 
@@ -680,7 +680,11 @@ export const createShotSaves = <S extends Shot>(deps: ShotSavesDeps<S>) => {
     return {
       onItem: async (id, png) => await toItem(dropped(), id, true, png),
       onShelf: async (png) => await toShelf(dropped(), png),
-      placed: () => shown(now) !== null,
+      placed: () => {
+        const on = shown(now);
+
+        return on !== null && landed(on.at);
+      },
     };
   };
 

@@ -2448,6 +2448,74 @@ describe("a drag's copy of the card's screenshot on disk", () => {
     });
   });
 
+  it("keeps a replaced screenshot's copy at quit after its drop failed on a note that filled meanwhile, and the note's own changes saved", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { drop, quit } = dropping(card);
+    const file = drop.drag(1)?.file ?? "";
+
+    // Clipboard screenshot B replaces A on the card before main handles A's drop on the note.
+    card.saves.show(shot(2));
+
+    const pictureWritten = card.holdPicture();
+
+    await drop.onItem(card.note, [file]);
+    // The note fills while A's picture file is written.
+    card.fill(card.note);
+    pictureWritten();
+    await vi.waitFor(() => {
+      expect(card.notices).toStrictEqual([ITEM_FULL]);
+    });
+    // The note's filling saves: the shelf has nothing unsaved, and the user quits.
+    await settled(card);
+    quit();
+    expect({
+      copy: onDisk(file),
+      unsaved: card.controller.view().notSaved,
+    }).toStrictEqual({ copy: shot(1).png, unsaved: [] });
+  });
+
+  it.each(["item", "shelf"] as const)(
+    "keeps a replaced screenshot's copy when the shelf shows its drop on the %s and the disk refuses to save it",
+    async (to) => {
+      const card = setup();
+
+      await card.controller.flush();
+      card.saves.show(shot(1));
+
+      const { drop } = dropping(card);
+      const file = drop.drag(1)?.file ?? "";
+
+      // Clipboard screenshot B replaces A on the card before main handles A's drop; A's picture file is written, and the shelf's write is refused.
+      card.saves.show(shot(2));
+      card.failWrites(DISK_REFUSES);
+
+      if (to === "item") {
+        await drop.onItem(card.note, [file]);
+      } else {
+        drop.onShelf([file]);
+      }
+
+      await vi.waitFor(() => {
+        expect(card.notices).toStrictEqual([DISK_REFUSES.message]);
+      });
+      await settled(card);
+      expect({
+        copy: onDisk(file),
+        shown: card.shown(),
+        written: card.disk().at(-1),
+      }).toStrictEqual({
+        copy: shot(1).png,
+        shown:
+          to === "item" ? { attached: 1, items: 0 } : { attached: 0, items: 1 },
+        written: { attached: 0, items: 0 },
+      });
+    }
+  );
+
   it("gives the card's copy its own add when it comes in a drop of several files, and attaches the rest as files", async () => {
     const card = setup();
 
@@ -2505,7 +2573,7 @@ describe("a drag's copy of the card's screenshot on disk", () => {
     });
   });
 
-  it("keeps a copy another app saved an edit into at quit, and removes a canceled drag's copy, still as it was staged", () => {
+  it("keeps at quit a copy another app saved an edit into, and a canceled drag's copy of a screenshot the shelf doesn't hold", () => {
     const card = setup();
 
     card.saves.show(shot(1));
@@ -2519,7 +2587,25 @@ describe("a drag's copy of the card's screenshot on disk", () => {
     expect({
       canceled: onDisk(canceled),
       edited: onDisk(edited),
-    }).toStrictEqual({ canceled: null, edited: marked });
+    }).toStrictEqual({ canceled: shot(1).png, edited: marked });
+  });
+
+  it("removes a canceled drag's copy at quit, still as it was staged, once the disk holds its screenshot where another drag's drop put it", async () => {
+    const card = setup();
+
+    await card.controller.flush();
+    card.saves.show(shot(1));
+
+    const { added, drop, quit } = dropping(card);
+    const canceled = drop.drag(1)?.file ?? "";
+    const back = drop.drag(1)?.file ?? "";
+
+    await drop.onItem(card.note, [back]);
+    await vi.waitFor(() => {
+      expect(added).toHaveLength(1);
+    });
+    quit();
+    expect({ canceled: onDisk(canceled) }).toStrictEqual({ canceled: null });
   });
 
   it("imports no second copy when a placed screenshot's copy that couldn't be removed comes back again", async () => {
