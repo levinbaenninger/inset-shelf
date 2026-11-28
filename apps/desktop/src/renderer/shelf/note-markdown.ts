@@ -597,38 +597,47 @@ Object.assign(writer, {
 /** Written as a link and nothing else: `[words](address)` or `<address>`, not a bare address. */
 const EXPLICIT_LINK = /^[<[]/u;
 
-/** The Markdown of every explicit link in a note's Markdown, however deep. */
-const linkSources = (markdown: string): ReadonlySet<string> => {
-  const sources = new Set<string>();
+/** The Markdown of every explicit link in a note's Markdown, however deep, in order: one per link, repeats included. */
+const linkSources = (markdown: string): readonly string[] => {
+  const sources: string[] = [];
 
   // Each callback returns nothing, so the walk has nothing to wait for.
   void writer.instance.walkTokens(writer.instance.lexer(markdown), (token) => {
     if (token.type === "link" && EXPLICIT_LINK.test(token.raw)) {
-      sources.add(token.raw);
+      sources.push(token.raw);
     }
   });
 
   return sources;
 };
 
+/** A link's key when its Markdown reads back on its own as one link whose words carry no other formatting, else null. */
+const keptKey = (source: string): string | null => {
+  const [block, ...blocks] = writer.parse(source).content ?? [];
+  const [node, ...nodes] = joined(block?.content ?? []);
+
+  return block?.type === "paragraph" &&
+    blocks.length === 0 &&
+    nodes.length === 0
+    ? linkKey(node)
+    : null;
+};
+
 /**
  * The explicit links of a note's Markdown, each kept only when it reads back
- * on its own as one link whose words carry no other formatting.
+ * on its own as one link whose words carry no other formatting. A spelling
+ * written more than once is read once.
  */
 const keptLinks = (markdown: string): KeptLinks => {
   const kept = new Map<string, string[]>();
+  const keys = new Map<string, string | null>();
 
   for (const source of linkSources(markdown)) {
-    const [block, ...blocks] = writer.parse(source).content ?? [];
-    const [node, ...nodes] = joined(block?.content ?? []);
-    const key = linkKey(node);
+    const key = keys.has(source) ? (keys.get(source) ?? null) : keptKey(source);
 
-    if (
-      block?.type === "paragraph" &&
-      blocks.length === 0 &&
-      nodes.length === 0 &&
-      key !== null
-    ) {
+    keys.set(source, key);
+
+    if (key !== null) {
       kept.set(key, [...(kept.get(key) ?? []), source]);
     }
   }
