@@ -215,8 +215,10 @@ describe(quietDisk, () => {
     await expect(
       quietDisk({ home }, fs).find("/Volumes/Disk/proj/a.ts")
     ).resolves.toStrictEqual({ kind: "unsure" });
-    // The home folder itself is looked at, to know where it is.
-    expect(touched.filter((at) => !at.startsWith(base))).toStrictEqual([]);
+    // The home folder and the folders above it are looked at, to know where it is.
+    expect(
+      touched.filter((at) => !at.startsWith(base) && !base.startsWith(`${at}/`))
+    ).toStrictEqual([]);
   });
 
   it("stops at a folder on another disk, a volume mounted in the home folder", async () => {
@@ -299,6 +301,54 @@ describe(quietDisk, () => {
         ).find(path.join(mounted, "dev", "a.ts"))
       ).resolves.toStrictEqual({ kind: "unsure" });
       expect(touched).toStrictEqual([]);
+    }
+  );
+
+  it.each(["/Users/me", "/Users"])(
+    "touches nothing on a volume, not even to find it, for a home folder at /Users/me when %s links to /Volumes",
+    async (link) => {
+      const touched: string[] = [];
+
+      const onVolume = (at: string): string =>
+        at.startsWith(link) ? `/Volumes/Disk${at}` : at;
+
+      const fs: QuietFs = {
+        lstat: async (at) => {
+          touched.push(at);
+
+          return await Promise.resolve({
+            dev: 1,
+            ino: 1,
+            isDirectory: () => true,
+            isFile: () => false,
+            isSymbolicLink: () => at === link,
+            size: 0,
+          });
+        },
+        open: async (at) => {
+          touched.push(onVolume(at));
+
+          return await Promise.reject(new Error(`opened ${at}`));
+        },
+        readlink: async (at) => {
+          touched.push(at);
+
+          return await Promise.resolve(onVolume(at));
+        },
+        // As the system's own: it reaches every place the path's links lead to.
+        realpath: async (at) => {
+          touched.push(onVolume(at));
+
+          return await Promise.resolve(onVolume(at));
+        },
+      };
+
+      await expect(
+        quietDisk({ home: "/Users/me" }, fs).find("/Users/me/dev/a.ts")
+      ).resolves.toStrictEqual({ kind: "unsure" });
+      expect(touched.filter((at) => at.startsWith("/Volumes"))).toStrictEqual(
+        []
+      );
     }
   );
 
