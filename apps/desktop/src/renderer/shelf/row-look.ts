@@ -52,3 +52,20 @@ export const focusRowOrSearch = (row: Element | null): void => {
       ?.focus({ preventScroll: true });
   }
 };
+
+/**
+ * `focusRowOrSearch` a frame on, once the field that had the keyboard is
+ * gone, and only if nothing took the keyboard meanwhile: a Tab or click
+ * before that frame keeps it where it went.
+ */
+export const focusRowOrSearchLater = (row: Element | null): void => {
+  const from = document.activeElement;
+
+  requestAnimationFrame(() => {
+    const now = document.activeElement;
+
+    if (now === null || now === document.body || now === from) {
+      focusRowOrSearch(row);
+    }
+  });
+};

@@ -80,6 +80,7 @@ import type {
 } from "electron";
 
 import { addedNotice } from "./added-file";
+import type { AddedNotice } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachOutcome, DecodedImage } from "./attachments";
@@ -1097,7 +1098,7 @@ const start = async (): Promise<void> => {
     tried: number,
     problems: readonly string[],
     noun: "file" | "picture" = "file"
-  ): Promise<void> => {
+  ): Promise<AddedNotice> => {
     if (added > 0) {
       const written = await withinWait(
         controller.persisted(controller.snapshot().rev),
@@ -1107,17 +1108,24 @@ const start = async (): Promise<void> => {
       if (!written.ok) {
         notify(written.message, "failed");
 
-        return;
+        return { message: written.message, tone: "failed" };
       }
     }
 
-    const { message, tone } = addedNotice(added, tried, problems, noun);
+    const notice = addedNotice(added, tried, problems, noun);
 
-    notify(message, tone);
+    notify(notice.message, notice.tone);
+
+    return notice;
   };
 
-  /** Adds files in the order given; the last one added is shown, and a notice says how it went. Resolves to how many were added. */
-  const addFiles = async (paths: readonly string[]): Promise<number> => {
+  /** Adds files in the order given; the last one added is shown, and a notice says how it went. Resolves to how many were added, and the notice. */
+  const addFiles = async (
+    paths: readonly string[]
+  ): Promise<{
+    readonly added: number;
+    readonly notice: AddedNotice | null;
+  }> => {
     // A file dragged out of the shelf and dropped back in is already there.
     const outside = paths.filter((filePath) => !staging.contains(filePath));
     const prepared = await Promise.all(outside.map(attachments.prepareItem));
@@ -1140,15 +1148,16 @@ const start = async (): Promise<void> => {
       controller.focus(lastId);
     }
 
-    if (outside.length > 0) {
-      await noticeAdded(
-        added,
-        outside.length,
-        prepared.flatMap((op) => ("problem" in op ? [op.problem] : []))
-      );
-    }
+    const notice =
+      outside.length > 0
+        ? await noticeAdded(
+            added,
+            outside.length,
+            prepared.flatMap((op) => ("problem" in op ? [op.problem] : []))
+          )
+        : null;
 
-    return added;
+    return { added, notice };
   };
 
   const keyMonitor = createKeyMonitor();
@@ -1228,8 +1237,8 @@ const start = async (): Promise<void> => {
       }
 
       /** With the shelf hidden its banner is out of sight, so the warning goes to the user as a notice, sent last so it stays showing. */
-      const warn = (): void => {
-        const warning = warningToUser(result, shelf.isVisible());
+      const warn = (shown: AddedNotice | null): void => {
+        const warning = warningToUser(result, shelf.isVisible(), shown);
 
         if (warning !== null) {
           notify(warning.message, warning.tone);
@@ -1261,11 +1270,13 @@ const start = async (): Promise<void> => {
 
       // Files selected in Explorer or Finder are saved as dropping them on the shelf would.
       if (result.kind === "files") {
-        if ((await addFiles(result.paths)) > 0) {
+        const { added, notice } = await addFiles(result.paths);
+
+        if (added > 0) {
           tutorial.complete(SHELF_TASK_IDS.doubleShift);
         }
 
-        warn();
+        warn(notice);
 
         return;
       }
@@ -1315,7 +1326,9 @@ const start = async (): Promise<void> => {
               : { title: written.message, tone: "failed", type: "notified" }
           );
 
-          warn();
+          warn(
+            written.ok ? null : { message: written.message, tone: "failed" }
+          );
         })();
       }
     } finally {

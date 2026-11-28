@@ -139,24 +139,31 @@ const textIn = async (
   return value instanceof Blob ? await value.text() : "";
 };
 
+/** How Electron names a raw format, one the platform lists beside the standard ones. */
+const RAW = "electron application/osclipboard;";
+
 /** Where Windows notes a copy or a cut of files, beside their list: a 32-bit set of flags, with 2 to move. */
-const DROP_EFFECT =
-  'electron application/osclipboard;format="Preferred DropEffect"';
+const DROP_EFFECT = `${RAW}format="Preferred DropEffect"`;
 
 /** The move flag is the second bit of the lowest byte: set when that byte, read as a number, is 2, 3, 6, 7 and so on. */
 const isMove = (low: number): boolean => Math.floor(low / 2) % 2 === 1;
 
 /**
  * Whether the files in a read were cut (true), copied (false), or the read
- * can't say (null). The read's formats are the clipboard's own list: an effect
- * missing from it was never set, and an app has to set one to cut, so the
- * files are a copy. An effect listed but read back empty was cut short by
- * another app's hold, and is not known.
+ * can't say (null). An app has to set an effect to cut, so files listed with
+ * none are a copy, once the read's raw formats were listed (`rawListed`). An
+ * effect listed but read back empty was cut short by another app's hold, and
+ * is not known.
  */
 const filesCut = async (
-  read: readonly ClipboardContents[]
+  read: readonly ClipboardContents[],
+  rawListed = true
 ): Promise<boolean | null> => {
   const effect = read.find((item) => DROP_EFFECT in item)?.[DROP_EFFECT];
+
+  if (effect === undefined) {
+    return rawListed ? false : null;
+  }
 
   if (!(effect instanceof Blob)) {
     return false;
@@ -186,10 +193,14 @@ const filesIn = async (
  * What one read of the clipboard holds: its plain text and HTML ("" for either
  * it hasn't), the files it lists, and whether they were cut, null when the
  * read can't say. Judging a read by itself matters: a read made again could
- * fall under another app's hold, and come back empty.
+ * fall under another app's hold, and come back empty. On Windows, Electron
+ * lists the raw formats in a second look that a hold leaves empty, and
+ * Explorer always lists some beside files: files with no raw format beside
+ * them may have hidden a cut.
  */
 export const clipboardContent = async (
-  read: readonly ClipboardContents[]
+  read: readonly ClipboardContents[],
+  windows = process.platform === "win32"
 ): Promise<{
   readonly cut: boolean | null;
   readonly files: readonly string[];
@@ -199,7 +210,13 @@ export const clipboardContent = async (
   const files = await filesIn(read);
 
   return {
-    cut: await filesCut(read),
+    cut: await filesCut(
+      read,
+      !windows ||
+        read.some((item) =>
+          Object.keys(item).some((type) => type.startsWith(RAW))
+        )
+    ),
     files,
     html: await textIn(read, "text/html"),
     text: await textIn(read, "text/plain"),

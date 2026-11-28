@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { z } from "zod";
+import { z } from "zod";
 
 import { CodePlaceSchema, isCapturedText } from "./code-place";
 import v3 from "./fixtures/shelf-v3.json";
@@ -32,6 +32,7 @@ import type {
   ImageItem,
   OpEnv,
   ShelfDoc,
+  ShelfItem,
   ShelfOp,
   MainOp,
   Removed,
@@ -55,6 +56,10 @@ const INBOX = SectionIdSchema.parse(uuid(1));
 const never = (): never => {
   throw new Error("missing");
 };
+
+/** What Copy gives for a text item, null for any other. */
+const copiedText = (item: ShelfItem | undefined) =>
+  item?.kind === "text" ? copiedNote(item) : null;
 
 /** The ids in fixtures/shelf-v3.json. */
 const uuid8 = (n: number) => `8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d${n}`;
@@ -603,6 +608,58 @@ describe("selections with links", () => {
     ).toStrictEqual(["__init__", "init", "init runs"]);
   });
 
+  it("saves an edited selection with no HTML beside its words, so a build that knows only `html` never pairs the copied HTML with new words, and going back to the captured words copies that HTML again", () => {
+    const added = apply(emptyShelf(INBOX), [
+      {
+        context: null,
+        html: "<b>bold</b> text",
+        text: "bold text",
+        type: "addText",
+        via: "selection",
+      },
+    ]).doc;
+
+    const id = added.items[0]?.id ?? never();
+
+    const edited = apply(added, [
+      { id, text: "bold words", type: "editText" },
+    ]).doc;
+
+    // As the shelf is written to disk.
+    const file = JSON.stringify(edited);
+
+    const saved = z
+      .object({ items: z.array(z.looseObject({ html: z.unknown() })) })
+      .parse(JSON.parse(file));
+
+    // An older build keeps only the fields it knows, and saves the shelf so.
+    const older = parseShelfDocument(
+      JSON.stringify({
+        ...edited,
+        items: edited.items.map((item) =>
+          Object.fromEntries(
+            Object.entries(item).filter(
+              ([key]) => key !== "captured" && key !== "capturedHtml"
+            )
+          )
+        ),
+      })
+    );
+
+    const [back] = apply(edited, [{ id, text: "bold text", type: "editText" }])
+      .doc.items;
+
+    expect({
+      back: copiedText(back),
+      older: copiedText(older?.items[0]),
+      saved: saved.items[0]?.html,
+    }).toStrictEqual({
+      back: { html: "<b>bold</b> text", text: "bold text" },
+      older: { html: null, text: "bold words" },
+      saved: null,
+    });
+  });
+
   it("copies an edited selection without the HTML it was copied with", () => {
     const added = apply(emptyShelf(INBOX), [
       {
@@ -688,13 +745,20 @@ describe("a code capture's copy", () => {
     });
   });
 
-  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> of its language in HTML", () => {
-    expect(
-      copiedAfter("recall.py", "def __init__(self):\n    return *a*  # <1>")
-    ).toStrictEqual({
-      html: '<pre><code class="language-py">def __init__(self):\n    return *a*  # &lt;1>\n</code></pre>',
-      text: "def __init__(self):\n    return *a*  # <1>",
-    });
+  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> of its language in HTML, the same text in both", () => {
+    expect([
+      copiedAfter("recall.py", "def __init__(self):\n    return *a*  # <1>"),
+      copiedAfter("recall.py", "call()\n"),
+    ]).toStrictEqual([
+      {
+        html: '<pre><code class="language-py">def __init__(self):\n    return *a*  # &lt;1></code></pre>',
+        text: "def __init__(self):\n    return *a*  # <1>",
+      },
+      {
+        html: '<pre><code class="language-py">call()\n</code></pre>',
+        text: "call()\n",
+      },
+    ]);
   });
 
   it("copies an edited Markdown file's selection as the Markdown the shelf shows", () => {

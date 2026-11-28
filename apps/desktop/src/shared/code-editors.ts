@@ -470,10 +470,13 @@ const extensionOf = (name: string): string => {
 };
 
 /**
- * The file a title names by the editor's row, or null when a dash may sit
- * inside the name of a prose file: "v1.2 - Notes.md - inset-shelf" names
- * v1.2 by the row, but may name "v1.2 - Notes.md", and the title alone
- * can't say which. Prose wins, so its selection keeps what it was copied with.
+ * The file a code editor's title names, for telling code from prose: by the
+ * row's parts, else the whole title when it holds no dash, as Code titles a
+ * file opened on its own, unless what follows its last dot has a space, as a
+ * workspace's label does. Null when a dash may sit inside the name of a
+ * prose file: "v1.2 - Notes.md - inset-shelf" names v1.2 by the row, but may
+ * name "v1.2 - Notes.md", and the title alone can't say which. Prose wins, so
+ * its selection keeps what it was copied with.
  */
 const titleFile = (
   editor: CodeEditor,
@@ -482,13 +485,24 @@ const titleFile = (
 ): string | null => {
   const split = splitTitle(editor, title, app);
 
-  const prose = split?.parts.some((_, index) =>
+  if (split === null) {
+    const lone = cleanTitle(title, app);
+
+    // A file's name has no space in its extension; a label such as "release.v2 (Workspace)" does.
+    return lone === null ||
+      /\s/u.test(extensionOf(lone)) ||
+      PROSE_FILES.has(extensionOf(lone))
+      ? null
+      : lone;
+  }
+
+  const prose = split.parts.some((_, index) =>
     PROSE_FILES.has(
       extensionOf(split.parts.slice(0, index + 1).join(split.dash))
     )
   );
 
-  return prose === true ? null : titleParts(editor, title, app).file;
+  return prose ? null : titleParts(editor, title, app).file;
 };
 
 /**

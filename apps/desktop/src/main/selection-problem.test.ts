@@ -31,6 +31,27 @@ describe("the clipboard warning of a capture", () => {
     expect(warningToUser(PUT_BACK, false)).toBeNull();
   });
 
+  it("keeps a failed save's reason, saying the clipboard after it in the same notice", () => {
+    const failed = {
+      message: "Inset couldn't save the shelf.",
+      tone: "failed",
+    } as const;
+
+    expect(warningToUser(NOT_PUT_BACK, false, failed)).toStrictEqual({
+      message: `${failed.message} ${selectionProblem(NOT_PUT_BACK)}`,
+      tone: "failed",
+    });
+  });
+
+  it("replaces a success notice, which the shelf's items already show", () => {
+    expect(
+      warningToUser(NOT_PUT_BACK, false, {
+        message: "Added 1 file",
+        tone: "done",
+      })?.message
+    ).toBe(selectionProblem(NOT_PUT_BACK));
+  });
+
   it("says a check that ran out of time as well", () => {
     const unchecked: SelectionResult = { ...PUT_BACK, unchecked: true };
 

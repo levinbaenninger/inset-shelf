@@ -105,6 +105,11 @@ const TYPED: readonly { readonly doc: JSONContent; readonly text: string }[] = [
     text: "a_b_c and snake_case_name",
   },
   { doc: typed(plain("__init__")), text: String.raw`\_\_init\_\_` },
+  // A line or paragraph separator is whitespace to both parsers, so the underscores after it could open emphasis.
+  {
+    doc: typed(plain("x\u2028__init__\u2029_y_")),
+    text: String.raw`x${"\u2028"}\_\_init\_\_${"\u2029"}\_y\_`,
+  },
   { doc: typed(plain("_private and b_")), text: String.raw`\_private and b\_` },
   { doc: typed(plain("*not bold*")), text: String.raw`\*not bold\*` },
   {
@@ -308,6 +313,22 @@ describe(noteMarkdown, () => {
     expect(reopened(text)).toBe(text);
   });
 
+  it('escapes a ">" that closes a bare address, which would run on into it, so the shelf links the address alone', () => {
+    const text = stored(
+      typed(plain("Angle: <https://example.com>, or www.example.com> ok"))
+    );
+
+    expect({
+      hrefs: [...shown(text).matchAll(/href="(?<href>[^"]*)"/gu)].map(
+        (match) => match.groups?.href
+      ),
+      text,
+    }).toStrictEqual({
+      hrefs: ["https://example.com", "http://www.example.com"],
+      text: "Angle: &lt;https://example.com&gt;, or www.example.com&gt; ok",
+    });
+  });
+
   it.each(TYPED)(
     "stores $text, which reads back as the same note, shows on the shelf as typed and is stored the same again",
     ({ doc, text }) => {
@@ -423,6 +444,14 @@ describe(storedNote, () => {
       "[docs](<https://example.com/a b> 'API') and y",
     ],
     ["<https://example.com> and x", "<https://example.com> and y"],
+    [
+      "[docs](https://example.com) and [docs](<https://example.com>) x",
+      "[docs](https://example.com) and [docs](<https://example.com>) y",
+    ],
+    [
+      "[docs](https://example.com) and [docs](https://example.com) and [docs](<https://example.com>) x",
+      "[docs](https://example.com) and [docs](https://example.com) and [docs](<https://example.com>) y",
+    ],
   ])(
     "keeps each link of %j the edit did not change byte for byte",
     (was, now) => {

@@ -1136,12 +1136,12 @@ describe(createCopyCommands, () => {
       text: "run a_b*c\\ <b> now",
     },
     {
-      html: "<pre><code>const total = sum(items);\n  return total;\n</code></pre>",
+      html: "<pre><code>const total = sum(items);\n  return total;</code></pre>",
       stored: "```\nconst total = sum(items);\n  return total;\n```",
       text: "const total = sum(items);\n  return total;",
     },
     {
-      html: '<pre><code class="language-ts">let a_b = 1;\n</code></pre>',
+      html: '<pre><code class="language-ts">let a_b = 1;</code></pre>',
       stored: "```ts\nlet a_b = 1;\n```",
       text: "let a_b = 1;",
     },
@@ -1532,7 +1532,7 @@ describe(createCopyCommands, () => {
     }).toStrictEqual({
       copied: {
         "text/html":
-          '<pre><code class="language-py">def __init__(self):\n    return *a*\n</code></pre>',
+          '<pre><code class="language-py">def __init__(self):\n    return *a*</code></pre>',
         "text/plain": "def __init__(self):\n    return *a*",
       },
       dragged: "def __init__(self):\n    return *a*",
@@ -1600,7 +1600,7 @@ describe(createCopyCommands, () => {
         written.map(async (contents) => await formats(contents[0]))
       );
 
-      const block = `<pre><code class="language-ts">${CODE}\n</code></pre>`;
+      const block = `<pre><code class="language-ts">${CODE}</code></pre>`;
 
       expect({ copy, details }).toStrictEqual({
         copy: { "text/html": block, "text/plain": CODE },
