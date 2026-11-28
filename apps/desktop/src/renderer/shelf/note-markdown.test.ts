@@ -110,11 +110,6 @@ const TYPED: readonly { readonly doc: JSONContent; readonly text: string }[] = [
     doc: typed(plain("x\u2028__init__\u2029_y_")),
     text: String.raw`x${"\u2028"}\_\_init\_\_${"\u2029"}\_y\_`,
   },
-  // A bare address runs up to the next space, so a ">" right after it is part of it unless escaped.
-  {
-    doc: typed(plain("Angle: <https://example.com>, or www.example.com> ok")),
-    text: "Angle: &lt;https://example.com&gt;, or www.example.com&gt; ok",
-  },
   { doc: typed(plain("_private and b_")), text: String.raw`\_private and b\_` },
   { doc: typed(plain("*not bold*")), text: String.raw`\*not bold\*` },
   {
@@ -316,6 +311,22 @@ describe(noteMarkdown, () => {
     "one\ntwo",
   ])("leaves %s as it was when the note is edited and closed", (text) => {
     expect(reopened(text)).toBe(text);
+  });
+
+  it('escapes a ">" that closes a bare address, which would run on into it, so the shelf links the address alone', () => {
+    const text = stored(
+      typed(plain("Angle: <https://example.com>, or www.example.com> ok"))
+    );
+
+    expect({
+      hrefs: [...shown(text).matchAll(/href="(?<href>[^"]*)"/gu)].map(
+        (match) => match.groups?.href
+      ),
+      text,
+    }).toStrictEqual({
+      hrefs: ["https://example.com", "http://www.example.com"],
+      text: "Angle: &lt;https://example.com&gt;, or www.example.com&gt; ok",
+    });
   });
 
   it.each(TYPED)(
