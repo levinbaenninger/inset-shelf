@@ -205,7 +205,7 @@ describe(appMenuTemplate, () => {
   });
 
   it("lists the item shortcuts, leaving plain keys to the page", () => {
-    const items = submenu(appMenuTemplate(state, actions), "Item");
+    const items = submenu(appMenuTemplate(state, actions, false), "Item");
 
     expect(items[0]).toMatchObject({
       accelerator: "CommandOrControl+O",
@@ -216,6 +216,15 @@ describe(appMenuTemplate, () => {
       accelerator: "Space",
       registerAccelerator: false,
     });
+  });
+
+  it("keeps Check Off in the macOS Item menu, without Space", () => {
+    const items = submenu(appMenuTemplate(state, actions), "Item");
+    const checkOff = items.find((item) => item.label === "Check Off");
+
+    expect(checkOff).toBeDefined();
+    expect(checkOff?.accelerator).toBeUndefined();
+    expect(items[0]).toMatchObject({ accelerator: "CommandOrControl+O" });
   });
 
   // On macOS every key a page leaves unhandled goes to the menu bar, and registerAccelerator is ignored there: a plain key would act instead of typing.

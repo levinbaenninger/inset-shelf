@@ -105,23 +105,38 @@ const sectionItems = (
 
 /**
  * The selected item's actions with their keys, so the shortcuts can be found.
- * Return, Space and Backspace are shown but left to the page, where they
- * also type into fields.
+ * Return, →, Space and Backspace belong to the page, where they also type
+ * into fields: Windows and Linux show them without taking them. macOS can't,
+ * and hands its menu bar every key a page leaves unhandled, so a space typed
+ * in a field would check the item off; there they go unshown.
  */
-const itemSubmenu = (actions: AppMenuActions): MenuItemConstructorOptions[] => {
+const itemSubmenu = (
+  actions: AppMenuActions,
+  mac: boolean
+): MenuItemConstructorOptions[] => {
+  const run = (action: ItemAction) => () => {
+    actions.item(action);
+  };
+
   const entry = (
     action: ItemAction,
     label: string,
-    accelerator: string,
-    registerAccelerator = true
+    accelerator: string
   ): MenuItemConstructorOptions => ({
     accelerator,
-    click: () => {
-      actions.item(action);
-    },
+    click: run(action),
     label,
-    registerAccelerator,
+    registerAccelerator: true,
   });
+
+  const pageKey = (
+    action: ItemAction,
+    label: string,
+    accelerator: string
+  ): MenuItemConstructorOptions =>
+    mac
+      ? { click: run(action), label }
+      : { accelerator, click: run(action), label, registerAccelerator: false };
 
   const field = (
     which: DetailField,
@@ -137,19 +152,14 @@ const itemSubmenu = (actions: AppMenuActions): MenuItemConstructorOptions[] => {
 
   return [
     entry("open", "Open", "CommandOrControl+O"),
-    entry("edit", "Edit", "Enter", false),
-    entry("details", "Show Details", "Right", false),
-    entry("toggleDone", "Check Off", "Space", false),
+    pageKey("edit", "Edit", "Enter"),
+    pageKey("details", "Show Details", "Right"),
+    pageKey("toggleDone", "Check Off", "Space"),
     SEPARATOR,
     field("description", "Add Description", "CommandOrControl+D"),
     field("steps", "Add Next Steps", "Shift+CommandOrControl+S"),
     field("due", "Set Due…", "Shift+CommandOrControl+D"),
-    {
-      click: () => {
-        actions.item("linkWindow");
-      },
-      label: "Link Window…",
-    },
+    { click: run("linkWindow"), label: "Link Window…" },
     SEPARATOR,
     entry(
       "previousSection",
@@ -158,7 +168,7 @@ const itemSubmenu = (actions: AppMenuActions): MenuItemConstructorOptions[] => {
     ),
     entry("nextSection", "Move to Next Section", "Alt+CommandOrControl+Down"),
     SEPARATOR,
-    entry("remove", "Delete", "Backspace", false),
+    pageKey("remove", "Delete", "Backspace"),
   ];
 };
 
@@ -269,7 +279,7 @@ export const appMenuTemplate = (
       },
     ],
   },
-  { label: "Item", submenu: itemSubmenu(actions) },
+  { label: "Item", submenu: itemSubmenu(actions, mac) },
   { label: "View", submenu: sectionItems(state, actions) },
   {
     label: "Window",
