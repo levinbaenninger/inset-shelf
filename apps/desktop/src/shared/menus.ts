@@ -493,7 +493,11 @@ const pressesKey = (press: MenuKeyPress, key: string, mac: boolean): boolean =>
     (press.key.toLowerCase() === key.toLowerCase() ||
       (mac && press.code === `Key${key.toUpperCase()}`)));
 
-/** Whether a key press is an accelerator, such as "Alt+CommandOrControl+C", on this system. */
+/**
+ * Whether a key press is an accelerator, such as "Alt+CommandOrControl+C", on
+ * this system. Punctuation that needs Shift on some layouts (/ is Shift+7 on a
+ * German one) matches with or without it, as in the app menu.
+ */
 export const pressesAccelerator = (
   press: MenuKeyPress,
   accelerator: string,
@@ -503,12 +507,13 @@ export const pressesAccelerator = (
   const key = parts.at(-1) ?? "";
   const command = mac ? press.metaKey : press.ctrlKey;
   const other = mac ? press.ctrlKey : press.metaKey;
+  const punctuation = key.length === 1 && !/^[a-z0-9]$/iu.test(key);
 
   return (
     !other &&
     command === parts.includes("CommandOrControl") &&
     press.altKey === parts.includes("Alt") &&
-    press.shiftKey === parts.includes("Shift") &&
+    (punctuation || press.shiftKey === parts.includes("Shift")) &&
     pressesKey(press, key, mac)
   );
 };

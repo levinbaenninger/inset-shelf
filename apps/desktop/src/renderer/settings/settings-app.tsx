@@ -245,8 +245,7 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
         {/* macOS has the app menu's About panel; elsewhere it is here. */}
         {isMac ? null : (
           <p className="text-muted-foreground px-1 text-xs">
-            Inset Shelf {view.version}. A prototype for the Inset capture
-            experiments.
+            Inset Shelf {view.version}
           </p>
         )}
       </div>
