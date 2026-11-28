@@ -246,7 +246,12 @@ export const reopenLabel = (window: WindowRef): string => {
     return isMac ? "Show in Finder" : "Show in Explorer";
   }
 
-  return isMac ? "Bring app forward" : "Open app";
+  if (isMac) {
+    return "Bring app forward";
+  }
+
+  // On Windows the app's file is shown, never run (reopenWindow in src/main/index.ts).
+  return window.appPath === null ? "Open app" : "Show in Explorer";
 };
 
 export const windowName = (window: WindowRef): string =>

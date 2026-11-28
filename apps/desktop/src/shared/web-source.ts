@@ -156,7 +156,7 @@ export const desktopApp = (app: string | null): string | null =>
 
 const UUID = "[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}";
 const NOTION_PATH = "[\\w.~%-]+(?:/[\\w.~%-]+)*/?";
-const NOTION_TAIL = "(?:\\?[\\w.~%=&/-]*)?(?:#[\\w.~%=&/-]*)?";
+const NOTION_TAIL = "(?:\\?[\\w.~%=&/+-]*)?(?:#[\\w.~%=&/-]*)?";
 
 /**
  * The exact shapes of the links the shelf makes (desktopLink, t3Thread,
@@ -207,7 +207,10 @@ export const t3Thread = (
 const CLAUDE_PAGE =
   /^https:\/\/claude\.ai\/(?<kind>chat|project)\/(?<id>[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})$/u;
 
-const NOTION_PAGE = /^https:\/\/(?:www\.)?notion\.so\/(?<rest>.*)$/u;
+const NOTION_PAGE = new RegExp(
+  `^https://(?:www\\.)?notion\\.so/(?<rest>${NOTION_PATH}${NOTION_TAIL})$`,
+  "u"
+);
 
 /**
  * The link that opens an item's page inside the desktop app it came from:
@@ -231,7 +234,11 @@ export const desktopLink = (
 
   const notion = app === "Notion" ? NOTION_PAGE.exec(url)?.groups : undefined;
 
-  return notion === undefined ? null : `notion://www.notion.so/${notion.rest}`;
+  const link =
+    notion === undefined ? null : `notion://www.notion.so/${notion.rest}`;
+
+  // Only a link the shelf would open again; the same rules as isAppLink.
+  return link !== null && isAppLink(link) ? link : null;
 };
 
 interface AppSource {

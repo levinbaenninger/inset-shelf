@@ -9,7 +9,7 @@ import {
   WINDOW_TITLE_MAX,
 } from "@shared/shelf";
 import type { ItemContext } from "@shared/shelf";
-import { desktopLink, t3Thread, webUrl } from "@shared/web-source";
+import { desktopLink, isAppLink, t3Thread, webUrl } from "@shared/web-source";
 import { withoutAppName } from "@shared/window-title";
 import { app, screen, systemPreferences } from "electron";
 import type { Rectangle } from "electron";
@@ -73,6 +73,18 @@ const fitted = (context: ItemContext): ItemContext => ({
 });
 
 /**
+ * The link to store: one the shelf would open again (never a t3code-dev://
+ * link in a packaged build). On Windows it opens only in an app that
+ * registered its scheme (T3 Code, ChatGPT, Claude); without one it is no link.
+ */
+const openable = (found: string | null): string | null =>
+  found !== null &&
+  isAppLink(found) &&
+  (isMac || app.getApplicationNameForProtocol(found) !== "")
+    ? found
+    : null;
+
+/**
  * Where an item comes from, filled in from the pages the window shows, when
  * they are asked for: the page address get-windows couldn't read, a better
  * title where the window only names its app (Claude, T3 Code), and the link
@@ -100,21 +112,14 @@ const sourceContext = async (
     threadTitle ??
     (named ? (orNull(page?.title) ?? window.title) : window.title);
 
-  const appLink =
+  const found =
     thread?.link ??
     desktopLink(window.app, url) ??
     (window.app === "ChatGPT" && areas !== null
       ? await lookups.chatGptLink(title)
       : null);
 
-  // On Windows a link opens only in an app that registered its scheme (T3 Code, ChatGPT, Claude); without one it is no link.
-  const openable =
-    appLink !== null &&
-    (isMac || app.getApplicationNameForProtocol(appLink) !== "")
-      ? appLink
-      : null;
-
-  return fitted({ app: window.app, appLink: openable, title, url });
+  return fitted({ app: window.app, appLink: openable(found), title, url });
 };
 
 /** The pages a window shows: its web areas, read with `pid`, and the page the copied text came from. */

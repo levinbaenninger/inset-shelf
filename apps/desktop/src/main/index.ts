@@ -316,12 +316,15 @@ const openInApp = async (
     t3Title: t3ThreadTitle,
   });
 
-  const link =
+  const found =
     (stored !== null && isAppLink(stored) ? stored : null) ??
     desktopLink(name, context?.url ?? null) ??
     (name === "ChatGPT"
       ? await lookups.chatGptLink(context?.title ?? null)
       : null);
+
+  // Whatever its source, only a link of a shape the shelf makes is handed to the system.
+  const link = found !== null && isAppLink(found) ? found : null;
 
   if (link !== null) {
     await shell.openExternal(link);
@@ -1022,12 +1025,16 @@ const start = async (): Promise<void> => {
       const stored = store.attachmentPath(item.file.stored);
 
       if (stored !== null) {
-        const file = staging.copy(id, item.file.name, stored);
+        try {
+          const file = staging.copy(id, item.file.name, stored);
 
-        shelf.webContents.startDrag({
-          file,
-          icon: await app.getFileIcon(file, { size: "normal" }),
-        });
+          shelf.webContents.startDrag({
+            file,
+            icon: await app.getFileIcon(file, { size: "normal" }),
+          });
+        } catch (error) {
+          console.warn("Could not stage the dragged file.", error);
+        }
       }
 
       return;
@@ -1106,9 +1113,17 @@ const start = async (): Promise<void> => {
     stageFile: (item) => {
       const stored = store.attachmentPath(item.file.stored);
 
-      return stored === null
-        ? null
-        : staging.copy(item.id, item.file.name, stored);
+      if (stored === null) {
+        return null;
+      }
+
+      try {
+        return staging.copy(item.id, item.file.name, stored);
+      } catch (error) {
+        console.warn("Could not stage the file to copy.", error);
+
+        return null;
+      }
     },
   });
 

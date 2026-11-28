@@ -1,5 +1,6 @@
 import "@/shared/zod-jitless";
 import "@/styles.css";
+import { allowDevAppLinks } from "@shared/web-source";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -8,6 +9,8 @@ import { markPlatform } from "@/shared/platform";
 import { followSystemTheme } from "@/shared/theme";
 
 import { ShelfApp } from "./shelf-app";
+
+allowDevAppLinks(window.insetDev === true);
 
 followSystemTheme();
 

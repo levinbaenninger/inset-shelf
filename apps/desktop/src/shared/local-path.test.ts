@@ -67,6 +67,9 @@ describe(isAppBundlePath, () => {
         "//host/share/x.app",
         "/.app",
         "-a",
+        "C:/Apps/Foo.app",
+        String.raw`C:\Apps\Foo.app`,
+        "/Applications/Foo\0.app",
       ])
     ).toStrictEqual([]);
   });
@@ -104,6 +107,43 @@ describe(isSafeFileName, () => {
     expect(
       accepted(isSafeFileName, ["", ".", "..", "a/b", String.raw`a\b`, "a\0b"])
     ).toStrictEqual([]);
+  });
+});
+
+describe("Windows file names", () => {
+  it("rejects what Windows reads as a drive, a stream or nothing", () => {
+    expect(
+      accepted(isSafeFileName, [
+        "C:notes.txt",
+        "foo:bar.txt",
+        'a"b',
+        "a<b>",
+        "a|b",
+        "a?b",
+        "a*b",
+        "a\u0001b",
+        "name.",
+        "name ",
+      ])
+    ).toStrictEqual([]);
+  });
+
+  it("makes them safe", () => {
+    expect([
+      safeFileName("C:notes.txt"),
+      safeFileName("foo:bar.txt"),
+      safeFileName('a<b>c|d?e*f"g'),
+      safeFileName("tab\there"),
+      safeFileName("name. . "),
+      safeFileName("..."),
+    ]).toStrictEqual([
+      "C_notes.txt",
+      "foo_bar.txt",
+      "a_b_c_d_e_f_g",
+      "tab_here",
+      "name",
+      "File",
+    ]);
   });
 });
 

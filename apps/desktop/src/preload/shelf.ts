@@ -2,11 +2,8 @@ import { shelfContract } from "@shared/contracts";
 import { methodChannel } from "@shared/ipc";
 import { isLocalAbsolutePath } from "@shared/local-path";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { z } from "zod";
 
 import { exposeContract } from "./expose";
-
-const ResultSchema = z.object({ ok: z.boolean() });
 
 /** Methods main serves that the page must not be able to call by name. */
 const HIDDEN_METHODS = ["addFiles"] as const;
@@ -51,7 +48,16 @@ contextBridge.exposeInMainWorld("insetFiles", {
 
     return {
       count: paths.length,
-      ok: ResultSchema.safeParse(result).data?.ok === true,
+      ok: result instanceof Object && "ok" in result && result.ok === true,
     };
   },
 });
+
+/**
+ * Whether this is a development run, so the page treats T3 Code's dev links
+ * (t3code-dev://) as app links like main does (allowDevAppLinks).
+ */
+contextBridge.exposeInMainWorld(
+  "insetDev",
+  process.argv.includes("--inset-dev")
+);

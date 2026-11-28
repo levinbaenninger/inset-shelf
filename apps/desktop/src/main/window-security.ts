@@ -56,7 +56,11 @@ export const preloadPath = (name: PageName): string =>
 export const rendererRoot = (): string =>
   path.join(import.meta.dirname, "../renderer");
 
+/** Marks a development run for the preload, which tells its page (see src/preload/shelf.ts). */
+export const DEV_FLAG = "--inset-dev";
+
 export const secureWebPreferences = (preload: string): WebPreferences => ({
+  additionalArguments: app.isPackaged ? [] : [DEV_FLAG],
   contextIsolation: true,
   devTools: !app.isPackaged,
   nodeIntegration: false,
