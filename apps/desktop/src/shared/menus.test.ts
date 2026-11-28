@@ -569,6 +569,22 @@ describe("the keys the shelf's menu answers unseen", () => {
       ).toStrictEqual({ kind: "shortcuts" });
     }
   });
+
+  it("shows Keyboard Shortcuts for a / that needs Shift, as Ctrl+Shift+7 types it on a German layout", () => {
+    for (const [mac, modifier, entries] of [
+      [true, { metaKey: true }, shelfMenu()],
+      [false, { ctrlKey: true }, shelfMenu({ floatOnTop: false })],
+    ] as const) {
+      expect(
+        menuChoiceForKey(
+          entries,
+          { ...press("/", { ...modifier, shiftKey: true }), code: "Digit7" },
+          mac,
+          SHELF_MENU_KEYS
+        )
+      ).toStrictEqual({ kind: "shortcuts" });
+    }
+  });
 });
 
 describe(isAppChord, () => {

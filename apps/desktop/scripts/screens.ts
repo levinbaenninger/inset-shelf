@@ -726,7 +726,7 @@ const EXAMPLE_DOC = {
       {
         app: null,
         appLink: null,
-        title: "Inset Shelf docs",
+        title: "Inset Shelf user guide",
         url: "https://inset-shelf.levexis.workers.dev/docs",
       }
     ),
@@ -10153,6 +10153,204 @@ const SCENES: readonly Scene[] = [
     data: { view: shelfView() },
     name: "shelf-details-step-editing",
     page: "shelf",
+  },
+  {
+    // A click on Add step while a new step is still blank: the blank one goes once the click is done, not under the pointer, so the click adds a step.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.click((add.left + add.right) / 2, middle(add));
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page.getByRole("textbox", { name: /^Step /u }).all();
+
+      const focus = await page.evaluate(
+        "document.activeElement?.getAttribute('aria-label') ?? ''"
+      );
+
+      return steps.length === 1 && focus === "Step 1"
+        ? null
+        : `after the click there are ${steps.length} steps and focus is on “${String(focus)}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-from-blank",
+    page: "shelf",
+  },
+  {
+    // A press on Add step, then Shift+Tab back into the blank step before the release elsewhere: the step the keyboard is in stays.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.move((add.left + add.right) / 2, middle(add));
+      await page.mouse.down();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Shift+Tab");
+      await page.mouse.move(add.right + 40, add.bottom + 60);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page.getByRole("textbox", { name: /^Step /u }).all();
+
+      const focus = await page.evaluate(
+        "document.activeElement?.getAttribute('aria-label') ?? ''"
+      );
+
+      return steps.length === 1 && focus === "Step 1"
+        ? null
+        : `after the release there are ${steps.length} steps and focus is on “${String(focus)}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-press-back",
+    page: "shelf",
+  },
+  {
+    // Two lines pasted into the middle of a window's description: one line, the caret after what was pasted, and one Undo takes the paste back.
+    act: async (page) => {
+      await page
+        .context()
+        .grantPermissions(["clipboard-read", "clipboard-write"]);
+      await details(page, 10);
+      await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .click();
+      await page.evaluate(async () => {
+        await navigator.clipboard.writeText("first\nsecond");
+      });
+
+      const field = page.getByRole("textbox", {
+        name: "Description of Office move budget",
+      });
+
+      await field.evaluate((element) => {
+        if (element instanceof HTMLTextAreaElement) {
+          element.setSelectionRange(4, 4);
+        }
+      });
+      await page.keyboard.press("ControlOrMeta+V");
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", {
+        name: "Description of Office move budget",
+      });
+
+      const read = async () =>
+        await field.evaluate((element) =>
+          element instanceof HTMLTextAreaElement
+            ? { caret: element.selectionStart, value: element.value }
+            : null
+        );
+
+      const pasted = await read();
+
+      await page.keyboard.press("ControlOrMeta+Z");
+
+      const undone = await read();
+
+      return pasted?.value ===
+        "The first secondtotal is CHF 260 over the cap" &&
+        pasted.caret === 16 &&
+        undone?.value === "The total is CHF 260 over the cap"
+        ? null
+        : `pasted ${JSON.stringify(pasted)}, then Undo ${JSON.stringify(undone)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-window-description-paste",
+    page: "shelf",
+  },
+  {
+    // In forced colors no tint shows, so a window's description the keyboard is on has an outline.
+    act: async (page) => {
+      await page.emulateMedia({ forcedColors: "active" });
+      await details(page, 10);
+      await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .focus();
+    },
+    check: async (page) => {
+      const outline = await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
+
+          return {
+            color: style.outlineColor,
+            style: style.outlineStyle,
+            width: style.outlineWidth,
+          };
+        });
+
+      return outline.style !== "none" &&
+        outline.width !== "0px" &&
+        outline.color !== "rgba(0, 0, 0, 0)"
+        ? null
+        : `the focused description's outline is ${JSON.stringify(outline)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-window-description-forced-focus",
+    page: "shelf",
+  },
+  {
+    // Words with runs of spaces between them wrap the same as words and as the field, so a click on them moves nothing.
+    act: async (page) => {
+      await details(page, 10);
+      await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .click();
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.insertText(
+        "The     total     is     CHF     260     over     the     cap"
+      );
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const words = page.getByRole("button", {
+        name: /Edit the description of Office move budget$/u,
+      });
+
+      const read = tall(await boxOf(words));
+
+      await words.click();
+
+      const typing = tall(
+        await boxOf(
+          page.getByRole("textbox", {
+            name: "Description of Office move budget",
+          })
+        )
+      );
+
+      return Math.abs(read - typing) < 1
+        ? null
+        : `the description is ${read}px tall as words and ${typing}px as a field`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-window-description-spaces",
+    page: "shelf",
+    width: 360,
   },
   {
     // Every field of a text item's details typed in where it is read: one tint on hover and while typing, no ring, the words where they were; Description on the same filled box as the steps, its words in line with the item's.

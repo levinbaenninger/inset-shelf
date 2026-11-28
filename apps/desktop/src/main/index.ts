@@ -503,7 +503,6 @@ const start = async (): Promise<void> => {
   app.setAboutPanelOptions({
     applicationName: PRODUCT_NAME,
     applicationVersion: app.getVersion(),
-    credits: "A prototype for the Inset capture experiments.",
   });
   secureSession();
 
