@@ -392,9 +392,35 @@ const isOwnAddress = (
 /**
  * The Markdown each explicit link of an opened note was written with, by
  * its words, where it goes and its title: `[words](address)` or
- * `<address>`, whose words are the link's only formatting.
+ * `<address>`, whose words are the link's only formatting. Equal links
+ * written more than once keep each spelling, in the note's order.
  */
-type KeptLinks = ReadonlyMap<string, string>;
+type KeptLinks = ReadonlyMap<string, readonly string[]>;
+
+/** The spelling for each equal link a write meets, in order: the nth such link is written as the opened note's nth was. */
+interface Spelling {
+  readonly next: (key: string | null) => string | null;
+}
+
+const spellingOf = (kept: KeptLinks): Spelling => {
+  const met = new Map<string, number>();
+
+  return {
+    next: (key) => {
+      const spellings = key === null ? [] : (kept.get(key) ?? []);
+
+      if (key === null || spellings.length === 0) {
+        return null;
+      }
+
+      const at = met.get(key) ?? 0;
+
+      met.set(key, at + 1);
+
+      return spellings[Math.min(at, spellings.length - 1)] ?? null;
+    },
+  };
+};
 
 const linkKey = (node: JSONContent | undefined): string | null => {
   const link = onlyLink(node);
@@ -464,13 +490,13 @@ const beside = (node: JSONContent | undefined): string => {
 const writtenInline = (
   content: readonly JSONContent[],
   startsListItem: boolean,
-  kept: KeptLinks
+  spelling: Spelling
 ): JSONContent[] => {
   const inline = joined(
     joined(content).map((node, index, nodes) => {
-      const was = kept.get(linkKey(node) ?? "");
+      const was = spelling.next(linkKey(node));
 
-      if (was !== undefined) {
+      if (was !== null) {
         return verbatim(was);
       }
 
@@ -529,7 +555,7 @@ const writtenInline = (
 /** `node` with every block's words written as Markdown; code blocks keep theirs. */
 const withWrittenText = (
   node: JSONContent,
-  kept: KeptLinks,
+  spelling: Spelling,
   startsListItem = false
 ): JSONContent => {
   if (node.type === "codeBlock" || node.content === undefined) {
@@ -539,14 +565,14 @@ const withWrittenText = (
   if (node.type === "paragraph" || node.type === "heading") {
     return {
       ...node,
-      content: writtenInline(node.content, startsListItem, kept),
+      content: writtenInline(node.content, startsListItem, spelling),
     };
   }
 
   return {
     ...node,
     content: node.content.map((child, index) =>
-      withWrittenText(child, kept, node.type === "listItem" && index === 0)
+      withWrittenText(child, spelling, node.type === "listItem" && index === 0)
     ),
   };
 };
@@ -590,7 +616,7 @@ const linkSources = (markdown: string): ReadonlySet<string> => {
  * on its own as one link whose words carry no other formatting.
  */
 const keptLinks = (markdown: string): KeptLinks => {
-  const kept = new Map<string, string>();
+  const kept = new Map<string, string[]>();
 
   for (const source of linkSources(markdown)) {
     const [block, ...blocks] = writer.parse(source).content ?? [];
@@ -601,10 +627,9 @@ const keptLinks = (markdown: string): KeptLinks => {
       block?.type === "paragraph" &&
       blocks.length === 0 &&
       nodes.length === 0 &&
-      key !== null &&
-      !kept.has(key)
+      key !== null
     ) {
-      kept.set(key, source);
+      kept.set(key, [...(kept.get(key) ?? []), source]);
     }
   }
 
@@ -625,7 +650,9 @@ export const noteMarkdown = (
   doc: JSONContent,
   kept: KeptLinks = NO_LINKS
 ): string =>
-  writer.serialize(withWrittenText(doc, kept)).replaceAll("  \n", "\n");
+  writer
+    .serialize(withWrittenText(doc, spellingOf(kept)))
+    .replaceAll("  \n", "\n");
 
 /** A note as a field opened it: the Markdown it was given, and the document it shows for that. */
 export interface OpenedNote {
