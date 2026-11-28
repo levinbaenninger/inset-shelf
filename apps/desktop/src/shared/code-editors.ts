@@ -109,12 +109,12 @@ const dashesOf = (
   return own === undefined ? TITLE_DASHES : [own, ...TITLE_DASHES];
 };
 
-/** The cleaned title's parts, split on the dash the app's titles use; none without that dash. */
-const partsOf = (
+/** The cleaned title split on the dash the app's titles use, with that dash; no parts without one. */
+const splitTitle = (
   editor: CodeEditor,
   title: string | null,
   app: string | null
-): readonly string[] => {
+): { readonly dash: TitleDash; readonly parts: readonly string[] } | null => {
   const clean = cleanTitle(title, app);
 
   const dash = dashesOf(editor, app).find(
@@ -122,9 +122,16 @@ const partsOf = (
   );
 
   return clean === null || dash === undefined
-    ? []
-    : clean.split(dash).map((each) => each.trim());
+    ? null
+    : { dash, parts: clean.split(dash).map((each) => each.trim()) };
 };
+
+/** The cleaned title's parts, split on the dash the app's titles use; none without that dash. */
+const partsOf = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): readonly string[] => splitTitle(editor, title, app)?.parts ?? [];
 
 /**
  * The file's and the project's name in a window title, by the editor's row.
@@ -436,8 +443,21 @@ export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
   return mac ? "Show in Finder" : "Show in Folder";
 };
 
-/** Files whose words are prose, which read as Markdown even from a code editor. */
-const PROSE_FILES = new Set([".md", ".mdx", ".markdown", ".txt"]);
+/** Files whose words are prose, plain text and markup written to be read, which read as Markdown even from a code editor. */
+const PROSE_FILES = new Set([
+  ".adoc",
+  ".asciidoc",
+  ".markdown",
+  ".md",
+  ".mdown",
+  ".mdx",
+  ".mkd",
+  ".org",
+  ".rst",
+  ".text",
+  ".textile",
+  ".txt",
+]);
 
 /** A file name's extension, lower case, or "" for none (a dot file such as .env has none). */
 const extensionOf = (name: string): string => {
@@ -447,12 +467,35 @@ const extensionOf = (name: string): string => {
 };
 
 /**
+ * The file a title names by the editor's row, or null when a dash may sit
+ * inside the name of a prose file: "v1.2 - Notes.md - inset-shelf" names
+ * v1.2 by the row, but may name "v1.2 - Notes.md", and the title alone
+ * can't say which. Prose wins, so its selection keeps what it was copied with.
+ */
+const titleFile = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): string | null => {
+  const split = splitTitle(editor, title, app);
+
+  const prose = split?.parts.some((_, index) =>
+    PROSE_FILES.has(
+      extensionOf(split.parts.slice(0, index + 1).join(split.dash))
+    )
+  );
+
+  return prose === true ? null : titleParts(editor, title, app).file;
+};
+
+/**
  * The file a code capture came from, or null for a text item that is not
- * code: a selection from a file a code editor showed, that is not Markdown
- * or plain text. The file is the code place's (macOS), else the one the
- * title names by the editor's row among `editors` (Windows), where a name
- * without an extension (Welcome, Untitled-1) is not taken for a file. A
- * selection from an editor with no file named, such as a panel, is prose.
+ * code: a selection from a file a code editor showed, that is not prose
+ * (`PROSE_FILES`). The file is the code place's (macOS), else the one the
+ * title names (`titleFile`) by the editor's row among `editors` (Windows),
+ * where a name without an extension (Welcome, Untitled-1) is not taken for
+ * a file. A selection from an editor with no file named, such as a panel, is
+ * prose.
  */
 const codeFile = (
   { context, via }: Pick<TextItem, "context" | "via">,
@@ -474,13 +517,9 @@ const codeFile = (
   const editor = codeEditor(context.app, editors);
 
   const file =
-    editor === undefined
-      ? null
-      : titleParts(editor, context.title, context.app).file;
+    editor === undefined ? null : titleFile(editor, context.title, context.app);
 
-  const extension = file === null ? "" : extensionOf(file);
-
-  return extension === "" || PROSE_FILES.has(extension) ? null : file;
+  return file === null || extensionOf(file) === "" ? null : file;
 };
 
 /** Whether a text item is code (`codeFile`), which reads and edits with every line's whitespace kept. */

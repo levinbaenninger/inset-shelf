@@ -1676,6 +1676,66 @@ describe(createCopyCommands, () => {
     });
   });
 
+  it.each([
+    {
+      context: {
+        ...CODE_SOURCES[0].context,
+        code: {
+          file: "/Users/anna/inset-shelf/docs/guide.rst",
+          line: null,
+          root: "/Users/anna/inset-shelf",
+        },
+        title: "guide.rst — inset-shelf",
+      },
+      file: "a reStructuredText file on macOS",
+    },
+    {
+      context: {
+        ...CODE_SOURCES[0].context,
+        code: {
+          file: "/Users/anna/inset-shelf/docs/guide.adoc",
+          line: null,
+          root: "/Users/anna/inset-shelf",
+        },
+        title: "guide.adoc — inset-shelf",
+      },
+      file: "an AsciiDoc file on macOS",
+    },
+    ...[
+      "README.v2 - draft.md - inset-shelf",
+      "v1.2 - Notes.md - inset-shelf",
+      "v1.2 - Notes.md",
+    ].map((title) => ({
+      context: {
+        ...CODE_SOURCES[1].context,
+        title: `${title} - Visual Studio Code`,
+      },
+      file: `"${title}" on Windows`,
+    })),
+  ])(
+    "copies an untouched selection from $file as prose, with the HTML it was copied with",
+    async ({ context }) => {
+      const { commands, controller, written } = await setup();
+
+      const id = added(
+        controller.apply({
+          context,
+          html: "<strong>Build notes</strong>",
+          text: "Build notes",
+          type: "addText",
+          via: "selection",
+        })
+      );
+
+      await commands.copy(id);
+
+      await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+        "text/html": "<strong>Build notes</strong>",
+        "text/plain": "Build notes",
+      });
+    }
+  );
+
   it("copies a note the shelf shows as nothing as it was typed, with no empty format", async () => {
     const { commands, controller, items, written } = await setup();
 
