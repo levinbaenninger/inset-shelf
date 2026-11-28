@@ -32,24 +32,28 @@ const focusSearch = (): void => {
     ?.focus({ preventScroll: true });
 };
 
-/** How long main's view of an edit may take to arrive after the row took the keyboard back. */
-const LATE_VIEW_MS = 2000;
+/** The row whose removal would drop the keyboard; a newer one takes its place. */
+let watching: AbortController | null = null;
 
 /**
- * Gives the keyboard to the search if the row's `target` leaves the page
- * still holding it, before the user presses a key or the pointer: main's
- * view of an edit can arrive after the row took the keyboard, and take the
- * row out of the search's results.
+ * Gives the keyboard to the search if `row` leaves the page while focus is
+ * still in it: main's view of an edit can arrive after the row took the
+ * keyboard, and take the row out of the search's results. Watching ends
+ * when focus or a press moves outside the row.
  */
-const searchIfRowLeaves = (target: Element): void => {
-  const watching = new AbortController();
+const searchIfRowLeaves = (row: Element): void => {
+  watching?.abort();
+
+  const current = new AbortController();
+
+  watching = current;
 
   const stop = (): void => {
-    watching.abort();
+    current.abort();
   };
 
   const observer = new MutationObserver(() => {
-    if (target.isConnected) {
+    if (row.isConnected) {
       return;
     }
 
@@ -63,19 +67,21 @@ const searchIfRowLeaves = (target: Element): void => {
     }
   });
 
-  const timer = setTimeout(stop, LATE_VIEW_MS);
-
-  watching.signal.addEventListener("abort", () => {
+  current.signal.addEventListener("abort", () => {
     observer.disconnect();
-    clearTimeout(timer);
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  for (const type of ["keydown", "pointerdown"]) {
-    document.addEventListener(type, stop, {
-      capture: true,
-      signal: watching.signal,
-    });
+  for (const type of ["focusin", "pointerdown"]) {
+    document.addEventListener(
+      type,
+      (event) => {
+        if (!(event.target instanceof Node && row.contains(event.target))) {
+          stop();
+        }
+      },
+      { capture: true, signal: current.signal }
+    );
   }
 };
 
@@ -94,8 +100,8 @@ export const focusRow = (row: Element | null): boolean => {
 
   const focused = target !== null && document.activeElement === target;
 
-  if (focused) {
-    searchIfRowLeaves(target);
+  if (focused && row !== null) {
+    searchIfRowLeaves(row);
   }
 
   return focused;
