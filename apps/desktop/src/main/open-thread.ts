@@ -12,7 +12,8 @@ export interface ThreadSystem {
 /**
  * Opens the ChatGPT thread an item kept without a link to it is found by:
  * its saved `title`. When no single thread has the title, or no app takes
- * its link, the item's own `page` opens instead.
+ * its link, the item's own `page` opens instead. With neither it rejects,
+ * so the shelf says it couldn't open where the item came from.
  */
 export const openThreadByTitle = async (
   title: string,
@@ -25,5 +26,7 @@ export const openThreadByTitle = async (
     await system.open(thread);
   } else if (page !== null && isPageAddress(page)) {
     await system.open(page);
+  } else {
+    throw new Error(`ChatGPT has no thread or page to open for “${title}”`);
   }
 };
