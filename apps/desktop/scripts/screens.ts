@@ -10220,6 +10220,46 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A press on Add step, then Shift+Tab back into the blank step, typing in it, and Tab away before the release elsewhere: the typed step stays.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.move((add.left + add.right) / 2, middle(add));
+      await page.mouse.down();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.type("Call the venue");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await page.mouse.move(add.right + 40, add.bottom + 60);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step /u })
+        .evaluateAll((fields) =>
+          fields.map((field) =>
+            field instanceof HTMLTextAreaElement ? field.value : ""
+          )
+        );
+
+      return isDeepStrictEqual(steps, ["Call the venue"])
+        ? null
+        : `after the release the steps are ${JSON.stringify(steps)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-press-back-typed",
+    page: "shelf",
+  },
+  {
     // Two lines pasted into the middle of a window's description: one line, the caret after what was pasted, and one Undo takes the paste back.
     act: async (page) => {
       await page
