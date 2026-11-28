@@ -675,7 +675,7 @@ const copiedAfter = (file: string, edit: string) => {
 };
 
 describe("a code capture's copy", () => {
-  it("copies as captured, HTML beside it, while its text is the captured words", () => {
+  it("copies as the code block it shows, never the editor's HTML, while its text is the captured words", () => {
     const { item } = capture(
       "recall.py",
       "def __init__(self):\n    pass\n",
@@ -683,16 +683,16 @@ describe("a code capture's copy", () => {
     );
 
     expect(item.kind === "text" ? copiedNote(item) : null).toStrictEqual({
-      html: "<span>def __init__</span>",
+      html: '<pre><code class="language-py">def __init__(self):\n    pass\n</code></pre>',
       text: "def __init__(self):\n    pass\n",
     });
   });
 
-  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> in HTML", () => {
+  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> of its language in HTML", () => {
     expect(
       copiedAfter("recall.py", "def __init__(self):\n    return *a*  # <1>")
     ).toStrictEqual({
-      html: "<pre><code>def __init__(self):\n    return *a*  # &lt;1>\n</code></pre>",
+      html: '<pre><code class="language-py">def __init__(self):\n    return *a*  # &lt;1>\n</code></pre>',
       text: "def __init__(self):\n    return *a*  # <1>",
     });
   });

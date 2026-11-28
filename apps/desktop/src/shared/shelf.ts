@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { isCodeCapture } from "./code-editors";
+import { codeLanguage, isCodeCapture } from "./code-editors";
 import {
   atLine,
   CodePlaceSchema,
@@ -9,7 +9,7 @@ import {
   textMark,
 } from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
-import { codeTree, copiedWords, noteTree } from "./shown-note";
+import { copiedCode, copiedWords, fencedCode, noteTree } from "./shown-note";
 import type { Copied } from "./shown-note";
 import {
   isAppLink,
@@ -18,6 +18,7 @@ import {
   LINK_URL_MAX,
   LINKS_MAX,
   linksInHtml,
+  sourceLabel,
 } from "./web-source";
 import { appName, shownTitle, windowName } from "./window-title";
 
@@ -1885,32 +1886,47 @@ export const PICTURE_KIND: Readonly<Record<ImageItem["via"], string>> = {
 
 /**
  * The shelf's rendering of a note typed or edited in it, which Copy gives as
- * the shelf shows it. Null for a selection still holding the words it was
- * captured with, which Copy gives back unread, and for a note the shelf
- * shows as nothing. What the shelf shows as one code block is a tree of one
- * `code` node, which copies as code.
+ * the shelf shows it, and of a code capture, which always copies as the one
+ * block of code the shelf shows, named by its language, the editor's own
+ * HTML left behind. Null for any other selection still holding the words it
+ * was captured with, which Copy gives back unread, and for words the shelf
+ * shows as nothing.
  */
 const shownNote = (item: ShelfItem): Copied | null => {
-  if (item.kind !== "text" || item.text === item.captured) {
+  if (item.kind !== "text") {
     return null;
   }
 
-  // The shelf shows a code capture as one block of code, so it copies as code.
-  const shown = copiedWords(
-    isCodeCapture(item) ? codeTree(item.text) : noteTree(item.text)
-  );
+  if (isCodeCapture(item)) {
+    return item.text.trim() === ""
+      ? null
+      : copiedCode(item.text, codeLanguage(item));
+  }
+
+  if (item.text === item.captured) {
+    return null;
+  }
+
+  const shown = copiedWords(noteTree(item.text));
 
   return shown.text.trim() === "" ? null : shown;
 };
+
+/** The file and project a code capture came from, as its row says them; null for any other item. */
+const codeSource = (item: ShelfItem): string | null =>
+  item.kind !== "text" || item.context === null || !isCodeCapture(item)
+    ? null
+    : sourceLabel(item.context).label;
 
 /** Whether Copy gives an item's words as the shelf renders them. */
 export const copiesAsShown = (item: ShelfItem): boolean =>
   shownNote(item) !== null;
 
 /**
- * A text item's words as Copy and drag-out give them: a note as the shelf
- * shows it, else the text as it stands, with the HTML the app copied beside
- * it while the text is still the captured words and that HTML holds any.
+ * A text item's words as Copy and drag-out give them: a note or code as the
+ * shelf shows it, else the text as it stands, with the HTML the app copied
+ * beside it while the text is still the captured words and that HTML holds
+ * any.
  */
 export const copiedNote = (
   item: TextItem
@@ -1993,7 +2009,11 @@ export const detailLines = (
         ? [`  ${window.description.trim()}`]
         : []),
     ]),
-    ...(full && source !== null && (source.app ?? source.title) !== null
+    // A code capture's details open with where it came from (codeSource).
+    ...(full &&
+    source !== null &&
+    (source.app ?? source.title) !== null &&
+    codeSource(item) === null
       ? [
           `From: ${[
             appName(source.app),
@@ -2040,9 +2060,18 @@ export const itemTextWithLink = (item: ShelfItem): string =>
     ? withDetails(withUrl(titled(item), item), detailLines(item))
     : withUrl(itemText(item), item);
 
+/** The words Copy with Details opens with: code under the file and project it came from, fenced with its language, else as titled. */
+const detailsWords = (item: ShelfItem): string => {
+  const source = codeSource(item);
+
+  return source === null || item.kind !== "text"
+    ? titled(item)
+    : `${source}\n\n${fencedCode(item.text, codeLanguage(item))}`;
+};
+
 /** Copy with Details: the title, the words, the page, every piece of metadata, and the attachments by name. */
 export const itemDetailsText = (item: ShelfItem): string =>
-  withDetails(withUrl(titled(item), item), [
+  withDetails(withUrl(detailsWords(item), item), [
     ...detailLines(item, true),
     ...(hasAttachments(item) ? ["Attachments:"] : []),
     ...attachmentNames(item).map((name) => `- ${name}`),
@@ -2119,10 +2148,11 @@ const namedPictureHtml = (
     : `<p>${escapeHtml(name)}<br>${pictureHtml(picture)}</p>`;
 };
 
-/** Copy with Details' words and metadata as HTML: a note's words as the shelf renders them, then its page and metadata. */
+/** Copy with Details' words and metadata as HTML: a note's words as the shelf renders them, code under where it came from, then its page and metadata. */
 const detailsHeadHtml = (item: ShelfItem): string => {
   const details = detailLines(item, true);
   const shown = shownNote(item);
+  const source = codeSource(item);
 
   if (shown === null) {
     return `<p>${linesHtml(withDetails(withUrl(titled(item), item), details))}</p>`;
@@ -2135,7 +2165,7 @@ const detailsHeadHtml = (item: ShelfItem): string => {
     .filter((part) => part !== null)
     .join("\n\n");
 
-  return `${shown.html}${rest === "" ? "" : `<p>${linesHtml(rest)}</p>`}`;
+  return `${source === null ? "" : `<p>${linesHtml(source)}</p>`}${shown.html}${rest === "" ? "" : `<p>${linesHtml(rest)}</p>`}`;
 };
 
 /**

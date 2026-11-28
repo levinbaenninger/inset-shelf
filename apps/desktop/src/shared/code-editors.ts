@@ -447,26 +447,28 @@ const extensionOf = (name: string): string => {
 };
 
 /**
- * Whether a text item is code: a selection from a file a code editor
- * showed, that is not Markdown or plain text. The file is the code place's
- * (macOS), else the one the title names by the editor's row among `editors`
- * (Windows), where a name without an extension (Welcome, Untitled-1) is not
- * taken for a file. A selection from an editor with no file named, such as
- * a panel, is prose. Code reads and edits with every line's whitespace kept.
+ * The file a code capture came from, or null for a text item that is not
+ * code: a selection from a file a code editor showed, that is not Markdown
+ * or plain text. The file is the code place's (macOS), else the one the
+ * title names by the editor's row among `editors` (Windows), where a name
+ * without an extension (Welcome, Untitled-1) is not taken for a file. A
+ * selection from an editor with no file named, such as a panel, is prose.
  */
-export const isCodeCapture = (
+const codeFile = (
   { context, via }: Pick<TextItem, "context" | "via">,
-  editors: readonly CodeEditor[] = CODE_EDITORS
-): boolean => {
+  editors: readonly CodeEditor[]
+): string | null => {
   if (via !== "selection" || context === null) {
-    return false;
+    return null;
   }
 
   // Read as the source line reads it (web-source.ts): a context may hold no code field at all.
   const place = context.code ?? null;
 
   if (place !== null) {
-    return !PROSE_FILES.has(extensionOf(fileName(place)));
+    const name = fileName(place);
+
+    return PROSE_FILES.has(extensionOf(name)) ? null : name;
   }
 
   const editor = codeEditor(context.app, editors);
@@ -478,5 +480,28 @@ export const isCodeCapture = (
 
   const extension = file === null ? "" : extensionOf(file);
 
-  return extension !== "" && !PROSE_FILES.has(extension);
+  return extension === "" || PROSE_FILES.has(extension) ? null : file;
+};
+
+/** Whether a text item is code (`codeFile`), which reads and edits with every line's whitespace kept. */
+export const isCodeCapture = (
+  item: Pick<TextItem, "context" | "via">,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): boolean => codeFile(item, editors) !== null;
+
+/** An extension that can name a language in a class name and after a fence. */
+const LANGUAGE = /^[a-z0-9]+$/u;
+
+/**
+ * The language a code capture copies as, from its file's extension: "ts"
+ * for recall.ts. Null for an item that is not code, or whose file's
+ * extension names no language.
+ */
+export const codeLanguage = (
+  item: Pick<TextItem, "context" | "via">,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): string | null => {
+  const language = extensionOf(codeFile(item, editors) ?? "").slice(1);
+
+  return LANGUAGE.test(language) ? language : null;
 };

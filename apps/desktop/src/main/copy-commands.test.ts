@@ -1532,7 +1532,7 @@ describe(createCopyCommands, () => {
     }).toStrictEqual({
       copied: {
         "text/html":
-          "<pre><code>def __init__(self):\n    return *a*\n</code></pre>",
+          '<pre><code class="language-py">def __init__(self):\n    return *a*\n</code></pre>',
         "text/plain": "def __init__(self):\n    return *a*",
       },
       dragged: "def __init__(self):\n    return *a*",
