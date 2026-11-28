@@ -1,21 +1,22 @@
 name: Release
 
+# Signing and publishing happen only for pushed v* tags. Pushes to main and pull
+# requests are built and tested by ci.yml, which never sees the signing key.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   package:
     name: Package (${{ matrix.name }})
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: true
       matrix:
@@ -42,21 +43,19 @@ jobs:
       # An ad-hoc build in the feed could never install over a signed one.
       INSET_REQUIRE_SIGNING: "1"
     steps:
-      - uses: actions/checkout@v7
-      - uses: voidzero-dev/setup-vp@v1.22.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
         with:
           node-version: 24
           cache: true
       - name: Check tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: test "v$(node -p 'require("./apps/desktop/package.json").version')" = "$GITHUB_REF_NAME"
-      - name: Stamp the build version
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        shell: bash
-        run: |
-          base="$(node -p 'require("./apps/desktop/package.json").version')"
-          echo "VERSION_ARGS=-c.extraMetadata.version=${base%.*}.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+      # The signing key is given only to this step, only on macOS, only for a v* tag.
+      # The job still runs third-party setup actions before it, so the key lands in a
+      # temporary keychain that is deleted right after the build.
       - name: Import the signing identity
         if: runner.os == 'macOS'
         env:
@@ -67,8 +66,12 @@ jobs:
           echo "INSET_SIGN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
       - shell: bash
         working-directory: apps/desktop
-        run: vp run ${{ matrix.script }} ${VERSION_ARGS:+"$VERSION_ARGS"}
-      - uses: actions/upload-artifact@v7
+        run: vp run ${{ matrix.script }}
+      # The signing key is gone before any later action runs in this job.
+      - name: Delete the signing keychain
+        if: always() && runner.os == 'macOS' && env.INSET_SIGN_KEYCHAIN != ''
+        run: security delete-keychain "$INSET_SIGN_KEYCHAIN"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.name }}
           path: ${{ matrix.files }}
@@ -78,14 +81,18 @@ jobs:
   publish:
     name: Publish
     needs: package
-    # A manual run from another branch only packages; releases come from main and v* tags.
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # The only job that can write to the repository. It never sees the signing key.
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -95,9 +102,7 @@ jobs:
           version="$(sed -n 's/^version: //p' dist/latest-mac.yml)"
           test "$(sed -n 's/^version: //p' dist/latest.yml)" = "$version"
           tag="v$version"
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            test "$tag" = "$GITHUB_REF_NAME"
-          fi
+          test "$tag" = "$GITHUB_REF_NAME"
           echo "TAG=$tag" >> "$GITHUB_ENV"
 
           .github/scripts/pin-feed-urls.sh \
@@ -107,33 +112,33 @@ jobs:
           for target in mac-arm64.dmg mac-x64.dmg win-x64.exe; do
             cp "dist/inset-shelf-$version-$target" "dist/Inset-Shelf-$target"
           done
+      # Covers every asset as uploaded, after the feed files were rewritten.
+      - name: Write SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt | sed 's#^\./##' | LC_ALL=C sort \
+            | xargs sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       # Installed apps read latest*.yml from /releases/latest/download, so the
-      # release stays a draft until every file is up. A tag build is never Latest:
-      # main already built that commit under a higher <major>.<minor>.<run number>.
-      # A retried main run older than the current Latest still publishes its own
-      # release, but moves neither Latest nor the preview feed back.
+      # release stays a draft until every file is up. It becomes Latest only if its
+      # version is newer than the current Latest, so re-running an old tag never
+      # moves Latest backwards.
       - name: Publish the versioned release
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            create=(--verify-tag)
-            latest=false
-          else
-            create=(--target "$GITHUB_SHA")
-            # Only "no release yet" counts as no Latest; any other error stops here.
-            if ! current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
-              grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
-              current=""
-            fi
-            newest="$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sort -V | tail -n 1)"
-            if [ "$newest" = "${TAG#v}" ]; then
-              latest=true
-            else
-              echo "$current is newer than $TAG, so $TAG is not marked Latest."
-              latest=false
-            fi
+          # Only "no release yet" counts as no Latest; any other error stops here.
+          if ! current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
+            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+            current=""
           fi
-          echo "PROMOTE=$latest" >> "$GITHUB_ENV"
+          newest="$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sort -V | tail -n 1)"
+          if [ "$newest" = "${TAG#v}" ]; then
+            latest=true
+          else
+            echo "$current is newer than $TAG, so $TAG is not marked Latest."
+            latest=false
+          fi
 
           draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null || echo missing)"
           case "$draft" in
@@ -142,7 +147,7 @@ jobs:
               exit 0
               ;;
             missing)
-              gh release create "$TAG" "${create[@]}" \
+              gh release create "$TAG" --verify-tag \
                 --draft \
                 --title "Inset Shelf $TAG" \
                 --notes-file .github/release-notes.md
@@ -150,40 +155,3 @@ jobs:
           esac
           gh release upload "$TAG" dist/* --clobber
           gh release edit "$TAG" --draft=false --latest="$latest"
-      # Apps installed from a preview build read latest*.yml from this release.
-      # It now carries only those files, copied from the versioned release, so a
-      # re-run that rebuilt the packages still mirrors the checksums that release
-      # serves. The files the previous feed named by bare name stay one more
-      # build, for apps that read it just before the switch.
-      - name: Point the legacy preview feed at the release
-        if: github.ref_type != 'tag' && env.PROMOTE == 'true'
-        run: |
-          set -euo pipefail
-          if ! gh release view preview > /dev/null 2>&1; then
-            echo "No preview release, so no app reads the legacy feed."
-            exit 0
-          fi
-
-          previous="$(mktemp)"
-          for feed in latest-mac.yml latest.yml; do
-            gh release download preview --pattern "$feed" --output - 2> /dev/null || true
-          done | sed -n -e 's/^ *- url: //p' > "$previous"
-
-          feeds="$(mktemp -d)"
-          gh release download "$TAG" --pattern 'latest*.yml' --dir "$feeds"
-
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/preview" \
-            -f sha="$GITHUB_SHA" -F force=true > /dev/null
-          gh release upload preview "$feeds"/latest*.yml --clobber
-          gh release view preview --json assets --jq '.assets[].name' \
-            | while read -r name; do
-                case "$name" in
-                  latest*.yml) continue ;;
-                esac
-                grep -qxF "${name%.blockmap}" "$previous" \
-                  || gh release delete-asset preview "$name" --yes
-              done
-          gh release edit preview \
-            --title "Legacy update feed (main, ${GITHUB_SHA::7})" \
-            --notes-file .github/preview-notes.md \
-            --prerelease

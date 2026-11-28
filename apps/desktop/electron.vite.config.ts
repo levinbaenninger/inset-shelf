@@ -8,8 +8,12 @@ const renderer = path.resolve(import.meta.dirname, "src/renderer");
 const shared = path.resolve(import.meta.dirname, "src/shared");
 const preload = path.resolve(import.meta.dirname, "src/preload");
 
+// Only the build packaged for scripts/e2e/verify-macos.ts keeps its test hooks.
+const e2eBuild = process.env.INSET_E2E_BUILD === "1";
+
 export default defineConfig({
   main: {
+    define: { __INSET_E2E__: JSON.stringify(e2eBuild) },
     resolve: { alias: { "@shared": shared } },
   },
   preload: {

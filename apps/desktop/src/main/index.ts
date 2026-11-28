@@ -22,6 +22,7 @@ import type {
 import { openedMarks } from "@shared/drawing-scene";
 import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
+import { isLocalAbsolutePath } from "@shared/local-path";
 import type { OnboardingView } from "@shared/onboarding";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import { ItemIdSchema, SectionIdSchema, itemText } from "@shared/shelf";
@@ -34,6 +35,7 @@ import type {
 } from "@shared/shelf";
 import { TOGGLE_ACCELERATOR } from "@shared/shortcut";
 import {
+  allowDevAppLinks,
   desktopLink,
   isAppLink,
   isPageAddress,
@@ -64,12 +66,14 @@ import type {
 
 import { ADDED_FILE_MAX_BYTES, classifyAddedFile } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
+import { gatedLookups } from "./chat-lookups";
 import {
   clipboardContent,
   holdsAgainIn,
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
+import { ConcealedClipboardError, itemsConcealed } from "./clipboard-privacy";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -77,7 +81,7 @@ import type { ClipboardContents } from "./copy-gate";
 import { copySource } from "./copy-source";
 import { createDrawingSaves } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
-import { e2eLog } from "./e2e-log";
+import { e2eEnv, e2eLog } from "./e2e-log";
 import { exportFileName } from "./export-name";
 import { createDragStaging, exportImage } from "./exports";
 import { frontWindow } from "./front-window";
@@ -95,7 +99,10 @@ import { appBundlePath, createAppTile } from "./permissions/bundle";
 import { createOnboarding } from "./permissions/onboarding";
 import { createPoller } from "./permissions/poller";
 import { createOnboardingStore } from "./permissions/store";
-import { createPermissionChecks } from "./permissions/system";
+import {
+  createPermissionChecks,
+  PRIVACY_PANE_URLS,
+} from "./permissions/system";
 import { createPickerWindow } from "./picker-window";
 import { handleInsetProtocol, registerInsetScheme } from "./protocol";
 import {
@@ -133,6 +140,7 @@ import {
   shelfTasks,
 } from "./shelf-tutorial";
 import { createShelfWindow } from "./shelf-window";
+import { t3ThreadTitle } from "./t3-threads";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
@@ -147,6 +155,7 @@ import {
   pageUrl,
   preloadPath,
   rendererRoot,
+  hardenEveryWebContents,
   secureSession,
 } from "./window-security";
 
@@ -210,6 +219,12 @@ const trayIconPath = (): string => {
 
 /** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
 const selectionProblem = (result: SelectionResult): string | null => {
+  if (result.kind === "concealed") {
+    return result.which === "original"
+      ? "The clipboard holds something marked private, such as a password, so Inset left it alone and copied nothing. Try again once it has cleared."
+      : "That selection is marked private, such as a password, so it wasn’t captured.";
+  }
+
   if (result.unchecked) {
     return "Another app kept the clipboard busy, so Inset couldn't check it was put back after copying your selection.";
   }
@@ -238,8 +253,18 @@ const withFormats = (
   items: readonly ClipboardItem[]
 ): readonly ClipboardItem[] => items.filter((item) => item.types.length > 0);
 
+/**
+ * The clipboard as it is, to be put back. A clipboard a password manager marked private (concealed or
+ * transient) is not read at all and not copied: the capture ends here, and the clipboard is left untouched.
+ * Rewriting it would be the only way to keep it, and a rewrite without the marks would let clipboard
+ * managers record the password.
+ */
 const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
   const items = withFormats(await clipboard.read());
+
+  if (await itemsConcealed(items)) {
+    throw new ConcealedClipboardError();
+  }
 
   return await Promise.all(
     items.map(async (item) =>
@@ -252,6 +277,15 @@ const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
       )
     )
   );
+};
+
+/** The text of the copied selection; throws when the app copied it marked private, as a password field does, which ends the capture. */
+const readSelectionText = async (): Promise<string> => {
+  if (await itemsConcealed(await clipboard.read())) {
+    throw new ConcealedClipboardError();
+  }
+
+  return await clipboard.readText();
 };
 
 /** The HTML on the clipboard, or "" without any. */
@@ -271,16 +305,26 @@ const readClipboardHtml = async (): Promise<string> => {
 /** Opens the chat or page an item came from in its desktop app, else (macOS only) just brings the app forward. */
 const openInApp = async (
   name: string,
-  context: ItemContext | null
+  context: ItemContext | null,
+  chatLookups: boolean
 ): Promise<void> => {
   const stored = context?.appLink ?? null;
 
-  const link =
+  // Reads ChatGPT's session index in ~/.codex only when the user allowed chat lookups.
+  const lookups = gatedLookups(chatLookups, {
+    chatGptLink: chatGptThreadLink,
+    t3Title: t3ThreadTitle,
+  });
+
+  const found =
     (stored !== null && isAppLink(stored) ? stored : null) ??
     desktopLink(name, context?.url ?? null) ??
     (name === "ChatGPT"
-      ? await chatGptThreadLink(context?.title ?? null)
+      ? await lookups.chatGptLink(context?.title ?? null)
       : null);
+
+  // Whatever its source, only a link of a shape the shelf makes is handed to the system.
+  const link = found !== null && isAppLink(found) ? found : null;
 
   if (link !== null) {
     await shell.openExternal(link);
@@ -305,22 +349,39 @@ const heldMenuTemplate = (
   );
 
 /**
- * Reopens a linked window: its page in the browser, its file in its app,
+ * Reopens a linked window: its page in the browser, its file revealed in
+ * Finder or Explorer (never opened, so a script or app document cannot run),
  * else its app brought forward. Every target was read by main when the
- * window was linked, never sent by a page.
+ * window was linked, never sent by a page, and is checked again here.
  */
 const reopenWindow = (window: WindowRef): void => {
   if (window.url !== null && /^https?:\/\//u.test(window.url)) {
     void shell.openExternal(window.url);
-  } else if (window.document !== null) {
-    void shell.openPath(window.document);
-  } else if (window.appPath !== null) {
+
+    return;
+  }
+
+  if (window.document !== null && isLocalAbsolutePath(window.document)) {
+    shell.showItemInFolder(window.document);
+
+    return;
+  }
+
+  if (window.appPath !== null) {
     if (isMac) {
-      openAppAt(window.appPath);
-    } else {
-      void shell.openPath(window.appPath);
+      // Only an absolute *.app bundle is opened; anything else falls back to the app's name.
+      if (openAppAt(window.appPath)) {
+        return;
+      }
+    } else if (isLocalAbsolutePath(window.appPath)) {
+      // Never executed: the app's file is only shown.
+      shell.showItemInFolder(window.appPath);
+
+      return;
     }
-  } else if (window.app !== null && isMac) {
+  }
+
+  if (window.app !== null && isMac) {
     openApp(window.app);
   }
 };
@@ -414,6 +475,9 @@ const start = async (): Promise<void> => {
     credits: "A prototype for the Inset capture experiments.",
   });
   secureSession();
+  hardenEveryWebContents();
+  // T3 Code's development scheme is an app link only in a development run.
+  allowDevAppLinks(!app.isPackaged);
 
   // Item 8: Windows has no menu bar for the frameless shelf to take the menu's
   // keys from, so every window reads them itself and runs the entry.
@@ -444,7 +508,7 @@ const start = async (): Promise<void> => {
 
   const store = await openShelfStore(dataDir, {
     fs:
-      process.env.INSET_FAIL_NEXT_WRITE === "1"
+      e2eEnv("INSET_FAIL_NEXT_WRITE") === "1"
         ? failNextWrite(nodeStoreFs)
         : nodeStoreFs,
     newSectionId: () => SectionIdSchema.parse(randomUUID()),
@@ -717,6 +781,14 @@ const start = async (): Promise<void> => {
     toItem: (data) => new ClipboardItem(data),
   });
 
+  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
+  let notify: (message: string, tone?: NoticeTone) => void = (
+    message,
+    tone = "done"
+  ) => {
+    toast.show(message, tone);
+  };
+
   const keyMonitor = createKeyMonitor();
 
   let capturingSelection = false;
@@ -739,13 +811,15 @@ const start = async (): Promise<void> => {
 
     try {
       const capture = captureSelection({
-        clear: gate.clearForSelection,
+        clear: () => {
+          gate.clearForSelection();
+        },
         copy: keyMonitor.copy,
         content: clipboardContent,
         holds: holdsAgainIn,
         readHtml: readClipboardHtml,
         readSource: async () => await copySource(await clipboard.read()),
-        readText: async () => await clipboard.readText(),
+        readText: readSelectionText,
         restore: gate.restore,
         snapshot: snapshotClipboard,
         now: () => performance.now(),
@@ -765,7 +839,11 @@ const start = async (): Promise<void> => {
       };
 
       // Sampled alongside the copy, while the app with the selection is in front.
-      const front = frontWindow({ copiedFrom: copiedFrom(), page: true });
+      const front = frontWindow({
+        chatLookups: settings.current().chatLookups,
+        copiedFrom: copiedFrom(),
+        page: true,
+      });
 
       const result = await capture;
 
@@ -777,6 +855,17 @@ const start = async (): Promise<void> => {
       });
 
       const problem = selectionProblem(result);
+
+      if (result.kind === "concealed") {
+        // A toast or notice, as the shelf is usually hidden; no banner to go stale in it.
+        controller.setStatus({ problem: null });
+
+        if (problem !== null) {
+          notify(problem, "failed");
+        }
+
+        return;
+      }
 
       if (problem !== null) {
         controller.setStatus({ problem });
@@ -901,7 +990,10 @@ const start = async (): Promise<void> => {
   /** Adds files in the order given; the last one added is shown. */
   const addFiles = async (paths: readonly string[]): Promise<ActionResult> => {
     // A file dragged out of the shelf and dropped back in is already there.
-    const outside = paths.filter((filePath) => !staging.contains(filePath));
+    const outside = paths.filter(
+      (filePath) => isLocalAbsolutePath(filePath) && !staging.contains(filePath)
+    );
+
     const prepared = await Promise.all(outside.map(prepareFile));
     let lastId: ItemId | null = null;
 
@@ -933,12 +1025,16 @@ const start = async (): Promise<void> => {
       const stored = store.attachmentPath(item.file.stored);
 
       if (stored !== null) {
-        const file = staging.copy(id, item.file.name, stored);
+        try {
+          const file = staging.copy(id, item.file.name, stored);
 
-        shelf.webContents.startDrag({
-          file,
-          icon: await app.getFileIcon(file, { size: "normal" }),
-        });
+          shelf.webContents.startDrag({
+            file,
+            icon: await app.getFileIcon(file, { size: "normal" }),
+          });
+        } catch (error) {
+          console.warn("Could not stage the dragged file.", error);
+        }
       }
 
       return;
@@ -956,14 +1052,6 @@ const start = async (): Promise<void> => {
         icon: exported.image.resize({ width: 128 }),
       });
     }
-  };
-
-  // Set once the shelf's IPC server exists; a toast in the shelf, or the native one while it is hidden.
-  let notify: (message: string, tone?: NoticeTone) => void = (
-    message,
-    tone = "done"
-  ) => {
-    toast.show(message, tone);
   };
 
   const pickFiles = async (): Promise<void> => {
@@ -1025,9 +1113,17 @@ const start = async (): Promise<void> => {
     stageFile: (item) => {
       const stored = store.attachmentPath(item.file.stored);
 
-      return stored === null
-        ? null
-        : staging.copy(item.id, item.file.name, stored);
+      if (stored === null) {
+        return null;
+      }
+
+      try {
+        return staging.copy(item.id, item.file.name, stored);
+      } catch (error) {
+        console.warn("Could not stage the file to copy.", error);
+
+        return null;
+      }
     },
   });
 
@@ -1697,12 +1793,16 @@ const start = async (): Promise<void> => {
 
         // An item from a desktop app (ChatGPT, Claude…) opens there again, at its chat or page when the app has a link for it.
         if (url === undefined && fromApp !== null) {
-          void openInApp(fromApp, item?.context ?? null);
+          void openInApp(
+            fromApp,
+            item?.context ?? null,
+            settings.current().chatLookups
+          );
 
           return;
         }
 
-        // Only the item's own page or a link in it opens: a web page, or a page from a file.
+        // Only the item's own page or a link in it opens, and only as a web page (http or https).
         const target =
           url === undefined
             ? (item?.context?.url ?? null)
@@ -2122,6 +2222,7 @@ const start = async (): Promise<void> => {
           },
           {
             checkForUpdates: updater.check,
+            downloadUpdate: updater.download,
             clearDone: () => {
               void commandShelf({ kind: "clearDone" });
             },
@@ -2331,6 +2432,11 @@ const start = async (): Promise<void> => {
         break;
       }
 
+      case "downloadUpdate": {
+        updater.download();
+        break;
+      }
+
       case "restartToUpdate": {
         restartToUpdate();
         break;
@@ -2386,10 +2492,20 @@ const start = async (): Promise<void> => {
     {
       fitHeight: settingsWindow.fitHeight,
       getView: settingsView,
+      openPane: (pane) => {
+        // System Settings' panes exist on macOS only; the page shows no buttons elsewhere.
+        if (isMac) {
+          shell.openExternal(PRIVACY_PANE_URLS[pane]).catch(ignore);
+        }
+      },
       resetTutorial: () => {
         tutorial.reset();
         settingsServer.emit("view", settingsView());
         notify("Tutorial reset");
+      },
+      showDataFolder: () => {
+        // The folder itself, never a file in it: opening a file would hand it to another app.
+        shell.openPath(dataDir).catch(ignore);
       },
       setOpenAtLogin: (on) => {
         app.setLoginItemSettings({ openAtLogin: on });
@@ -2496,7 +2612,7 @@ const startOrExit = async (): Promise<void> => {
 // The instance lock is keyed by userData, so the path must be final before it is taken.
 app.setPath(
   "userData",
-  process.env.INSET_USER_DATA_DIR ??
+  e2eEnv("INSET_USER_DATA_DIR") ??
     path.join(app.getPath("appData"), PRODUCT_NAME)
 );
 

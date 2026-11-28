@@ -14,6 +14,7 @@ import {
   parseComposer,
   SectionIdSchema,
   ShelfDocSchema,
+  StoredFileSchema,
   UNDO_MAX,
   fitText,
   withPinLabel,
@@ -494,7 +495,7 @@ describe("selections with links", () => {
     );
   });
 
-  it("keeps a page opened from a file as the selection's source", () => {
+  it("loads an item saved with a file: page address, without the address", () => {
     const url =
       "file:///Users/levin/Design-Expo/03_Standmaterial/Anforderung.html";
 
@@ -508,9 +509,23 @@ describe("selections with links", () => {
       },
     ]);
 
+    const item = parseShelfDocument(JSON.stringify(doc))?.items[0];
+
+    expect(item?.context?.url).toBeNull();
+    expect(item?.context?.app).toBe("Zen");
+  });
+
+  it("turns stored file names into one plain name on load", () => {
+    const stored = `${uuid(60)}.txt`;
+
+    const name = (raw: string): string | undefined =>
+      StoredFileSchema.safeParse({ bytes: 1, name: raw, stored }).data?.name;
+
+    expect(name("")).toBeUndefined();
     expect(
-      parseShelfDocument(JSON.stringify(doc))?.items[0]?.context?.url
-    ).toBe(url);
+      [".", "..", "../../etc/passwd", String.raw`a\b`, "a\0b"].map(name)
+    ).toStrictEqual(["File", "File", ".._.._etc_passwd", "a_b", "a_b"]);
+    expect(name("Report.txt")).toBe("Report.txt");
   });
 
   it("drops the copied HTML once the text is edited", () => {

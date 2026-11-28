@@ -5,6 +5,7 @@ import type { ImageItem } from "@shared/shelf";
 import { nativeImage } from "electron";
 import type { NativeImage } from "electron";
 
+import { containedPath } from "./contained-path";
 import { drawPinMarks } from "./pin-mark";
 
 export interface ExportedImage {
@@ -47,19 +48,31 @@ export const exportImage = (
 export const createDragStaging = (tempDir: string) => {
   const root = path.join(tempDir, "Inset Shelf");
 
+  /** The folder for an item and the file in it; both must stay inside the staging folder. */
+  const target = (id: string, name: string) => {
+    const folder = containedPath(root, id);
+    const file = folder === null ? null : containedPath(folder, name);
+
+    if (folder === null || file === null) {
+      throw new Error("A dragged file's name leaves the staging folder.");
+    }
+
+    return { file, folder };
+  };
+
   return {
     /** True for a file this staging wrote, so a drag back onto the shelf is not added twice. */
     contains: (file: string): boolean =>
       path.resolve(file).startsWith(`${root}${path.sep}`),
     clear: (id?: string): void => {
-      rmSync(id === undefined ? root : path.join(root, id), {
-        force: true,
-        recursive: true,
-      });
+      const folder = id === undefined ? root : containedPath(root, id);
+
+      if (folder !== null) {
+        rmSync(folder, { force: true, recursive: true });
+      }
     },
     copy: (id: string, name: string, from: string): string => {
-      const folder = path.join(root, id);
-      const file = path.join(folder, name);
+      const { file, folder } = target(id, name);
 
       mkdirSync(folder, { recursive: true });
       copyFileSync(from, file);
@@ -67,8 +80,7 @@ export const createDragStaging = (tempDir: string) => {
       return file;
     },
     write: (id: string, name: string, png: Uint8Array): string => {
-      const folder = path.join(root, id);
-      const file = path.join(folder, name);
+      const { file, folder } = target(id, name);
 
       mkdirSync(folder, { recursive: true });
       writeFileSync(file, png);

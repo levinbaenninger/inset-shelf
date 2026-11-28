@@ -9,17 +9,25 @@ import type {
 } from "@shared/contracts";
 import type { Client } from "@shared/ipc";
 
+/** The shelf's methods as the page sees them: addFiles is only reachable through insetFiles (src/preload/shelf.ts). */
+type ShelfClient = Omit<Client<ShelfContract>, "addFiles">;
+
 declare global {
   // Each window's preload exposes exactly one of these (see src/preload/expose.ts).
   interface Window {
-    readonly insetShelf?: Client<ShelfContract>;
+    readonly insetShelf?: ShelfClient;
     readonly insetToast?: Client<ToastContract>;
     readonly insetScreenshot?: Client<ScreenshotContract>;
     readonly insetDrawing?: Client<DrawingContract>;
     readonly insetSettings?: Client<SettingsContract>;
     readonly insetPicker?: Client<PickerContract>;
     readonly insetOnboarding?: Client<OnboardingContract>;
-    readonly insetFiles?: { readonly pathFor: (file: File) => string };
+    readonly insetDev?: boolean;
+    readonly insetFiles?: {
+      readonly add: (
+        files: readonly File[]
+      ) => Promise<{ readonly count: number; readonly ok: boolean } | null>;
+    };
   }
 }
 
@@ -31,7 +39,7 @@ const require = <T>(api: T | undefined, where: string): T => {
   return api;
 };
 
-export const shelfBridge = (): Client<ShelfContract> =>
+export const shelfBridge = (): ShelfClient =>
   require(window.insetShelf, "shelf window");
 
 export const screenshotBridge = (): Client<ScreenshotContract> =>
@@ -43,9 +51,14 @@ export const toastBridge = (): Client<ToastContract> =>
 export const drawingBridge = (): Client<DrawingContract> =>
   require(window.insetDrawing, "drawing window");
 
-/** The path of a dropped or pasted file; empty when it has none, such as an image copied from a page. */
-export const filePath = (file: File): string =>
-  window.insetFiles?.pathFor(file) ?? "";
+/**
+ * Adds dropped or pasted files; null when none has a path on disk, such as an
+ * image copied from a page. The page never sees or sends the paths.
+ */
+export const addFiles = async (
+  files: readonly File[]
+): Promise<{ readonly count: number; readonly ok: boolean } | null> =>
+  (await window.insetFiles?.add(files)) ?? null;
 
 export const settingsBridge = (): Client<SettingsContract> =>
   require(window.insetSettings, "settings window");

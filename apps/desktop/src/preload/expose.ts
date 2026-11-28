@@ -3,18 +3,23 @@ import type { Contract } from "@shared/ipc";
 import { contextBridge, ipcRenderer } from "electron";
 
 /** The page can call only declared methods and events; it can never name a channel. */
-export const exposeContract = (contract: Contract): void => {
+export const exposeContract = (
+  contract: Contract,
+  hidden: readonly string[] = []
+): void => {
   const methods = Object.fromEntries(
-    Object.entries(contract.methods).map(([name, spec]) => {
-      const channel = methodChannel(contract, name);
+    Object.entries(contract.methods)
+      .filter(([name]) => !hidden.includes(name))
+      .map(([name, spec]) => {
+        const channel = methodChannel(contract, name);
 
-      return [
-        name,
-        spec.kind === "invoke"
-          ? ipcRenderer.invoke.bind(ipcRenderer, channel)
-          : ipcRenderer.send.bind(ipcRenderer, channel),
-      ];
-    })
+        return [
+          name,
+          spec.kind === "invoke"
+            ? ipcRenderer.invoke.bind(ipcRenderer, channel)
+            : ipcRenderer.send.bind(ipcRenderer, channel),
+        ];
+      })
   );
 
   const events = new Set(Object.keys(contract.events));

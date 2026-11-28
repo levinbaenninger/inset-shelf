@@ -3,9 +3,10 @@ import { z } from "zod";
 import { StrokeMarksSchema } from "./drawing-scene";
 import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
+import { isLocalAbsolutePath } from "./local-path";
 import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
 import type { OnboardingView } from "./onboarding";
-import { SettingsSchema } from "./settings";
+import { PRIVACY_PANES, SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import {
   ItemIdSchema,
@@ -168,9 +169,26 @@ export const shelfContract = defineContract({
      * the menu takes every key, so main holds back the menu bar's keys.
      */
     menuOpen: send(z.boolean()),
-    /** Files dropped or pasted into the shelf, by path; main reads them. */
+    /**
+     * Files dropped or pasted into the shelf, by path. NOT reachable from the
+     * page: the shelf preload hides this method (HIDDEN_METHODS in
+     * src/preload/shelf.ts) and exposes insetFiles.add(files: File[]) instead,
+     * which turns each File into its path with webUtils.getPathForFile (only
+     * a file the user dropped or picked has one). The path strings exist only
+     * between the preload and main; main re-checks each is an absolute local
+     * path and a regular file.
+     */
     addFiles: invoke(
-      z.array(z.string().min(1).max(4096)).min(1).max(50),
+      z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(4096)
+            .refine(isLocalAbsolutePath, "Not an absolute local path")
+        )
+        .min(1)
+        .max(50),
       out<ActionResult>()
     ),
     apply: send(ShelfOpSchema),
@@ -395,9 +413,13 @@ export const settingsContract = defineContract({
   methods: {
     getView: invoke(z.void(), out<SettingsView>()),
     /** The page's height, so the window fits it without empty space. */
-    fitHeight: send(z.number().int().min(120).max(1200)),
+    fitHeight: send(z.number().int().min(120).max(4000)),
+    /** Opens one of the privacy panes in System Settings (macOS). */
+    openPane: send(z.enum(PRIVACY_PANES)),
     /** Reset Tutorial: the checklist and hints start over. */
     resetTutorial: send(z.void()),
+    /** Shows the folder holding the shelf, its attachments and the settings. */
+    showDataFolder: send(z.void()),
     setOpenAtLogin: send(z.boolean()),
     /** Show tips: the tutorial's one-time hints. */
     setTips: send(z.boolean()),

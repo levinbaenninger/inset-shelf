@@ -26,6 +26,7 @@ const doc: ShelfDoc = {
 
 const actions: AppMenuActions = {
   checkForUpdates: vi.fn<() => void>(),
+  downloadUpdate: vi.fn<() => void>(),
   clearDone: vi.fn<() => void>(),
   closeWindow: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),
@@ -133,7 +134,7 @@ describe(appMenuTemplate, () => {
     ]);
   });
 
-  it("puts the update after About, as a restart once it is ready", () => {
+  it("puts the update after About: check, then download, then restart", () => {
     const appMenu = (update: AppMenuState["update"]) =>
       submenu(appMenuTemplate({ ...state, update }, actions), "Inset Shelf");
 
@@ -141,9 +142,21 @@ describe(appMenuTemplate, () => {
       click: actions.checkForUpdates,
       label: "Check for Updates…",
     });
-    expect(appMenu({ kind: "checking", manual: true })[1]).toStrictEqual({
+    expect(appMenu({ kind: "checking" })[1]).toStrictEqual({
       enabled: false,
       label: "Checking for Updates…",
+    });
+    expect(appMenu({ kind: "available", version: "0.1.901" })[1]).toStrictEqual(
+      {
+        click: actions.downloadUpdate,
+        label: "Download Update to v0.1.901…",
+      }
+    );
+    expect(
+      appMenu({ kind: "downloading", percent: 42, version: "0.1.901" })[1]
+    ).toStrictEqual({
+      enabled: false,
+      label: "Downloading v0.1.901… 42%",
     });
     expect(appMenu({ kind: "ready", version: "0.1.901" })[1]).toStrictEqual({
       click: actions.restartToUpdate,

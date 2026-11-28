@@ -233,7 +233,7 @@ export const PinLegend = ({ pins }: { readonly pins: readonly Pin[] }) => (
 );
 
 /**
- * Says what reopening a window does: it opens its page or file when it
+ * Says what reopening a window does: it opens its page, or shows its file in Finder or Explorer, when it
  * knows one. Elsewhere than macOS starting the app opens a new window of
  * it, so it says so.
  */
@@ -243,10 +243,15 @@ export const reopenLabel = (window: WindowRef): string => {
   }
 
   if (window.document !== null) {
-    return "Open file";
+    return isMac ? "Show in Finder" : "Show in Explorer";
   }
 
-  return isMac ? "Bring app forward" : "Open app";
+  if (isMac) {
+    return "Bring app forward";
+  }
+
+  // On Windows the app's file is shown, never run (reopenWindow in src/main/index.ts).
+  return window.appPath === null ? "Open app" : "Show in Explorer";
 };
 
 export const windowName = (window: WindowRef): string =>

@@ -21,6 +21,10 @@ import type { ShelfDoc } from "../../src/shared/shelf.ts";
 // Drives Inset Shelf on the real macOS desktop: real Shift taps, real clicks
 // and drags, the real clipboard. Keys are only sent while the test's own
 // source app is in front.
+//
+// Packaged mode needs the build from `pnpm package:e2e`. A release build
+// (package:dir / package:mac) ignores INSET_E2E_LOG, INSET_USER_DATA_DIR and
+// INSET_FAIL_NEXT_WRITE on purpose.
 
 const root = path.resolve(import.meta.dirname, "../..");
 const mode = process.argv[2] === "packaged" ? "packaged" : "dev";
@@ -420,6 +424,13 @@ const items = (): ShelfDoc["items"] => shelfDoc()?.items ?? [];
 
 const checkLaunch = async (): Promise<void> => {
   const launched = await waitFor("launch", 0, Date.now() + 15_000);
+
+  if (launched === undefined && mode === "packaged") {
+    throw new Error(
+      "The packaged app wrote no E2E log: it ignores the test hooks. Build it with `pnpm package:e2e`, not a release build."
+    );
+  }
+
   const shown = await waitFor("shelfShown", 0);
   const keys = events().some((event) => event.event === "keysReady");
 

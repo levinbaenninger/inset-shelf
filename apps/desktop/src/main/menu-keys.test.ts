@@ -99,6 +99,7 @@ describe(matchesAccelerator, () => {
 
 const actions: AppMenuActions = {
   checkForUpdates: vi.fn<() => void>(),
+  downloadUpdate: vi.fn<() => void>(),
   clearDone: vi.fn<() => void>(),
   closeWindow: vi.fn<() => void>(),
   copy: vi.fn<() => void>(),

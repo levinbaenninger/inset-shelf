@@ -1,17 +1,17 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { app, autoUpdater as squirrel, BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
 
+import { appendCappedLog } from "./update-log";
 import {
   INITIAL_UPDATE_STATE,
-  settleCheck,
+  settleRequest,
   updateTransition,
 } from "./update-state";
 import type { UpdateEvent, UpdateState } from "./update-state";
 
-const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
 const PRODUCT_NAME = "Inset Shelf";
 
 type Listener = (next: UpdateState, previous: UpdateState) => void;
@@ -20,11 +20,13 @@ const ignore = (): void => undefined;
 
 export interface Updater {
   readonly subscribe: (next: Listener) => void;
-  /** Checks now and every few hours, downloading what it finds. */
+  /** Listens to the updater. Contacts nothing: every request below is a user's click. */
   readonly start: () => void;
   readonly state: () => UpdateState;
   /** A check the user asked for, answered with a notice. */
   readonly check: () => void;
+  /** Downloads the update a check found, once the user chooses to. */
+  readonly download: () => void;
   readonly restart: () => void;
 }
 
@@ -46,6 +48,13 @@ const cannotUpdate = (): string | null => {
   return null;
 };
 
+/** The installer waits for every window to close, and the app's windows only hide when asked to. */
+const closeWindows = (): void => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.destroy();
+  }
+};
+
 /** Squirrel's errors run to many lines; the menu and notices show the first. */
 const firstLine = (error: Error): string =>
   error.message.split("\n")[0] ?? "unknown error";
@@ -56,7 +65,7 @@ export const createUpdater = (): Updater => {
 
   const log = (level: string, message: string): void => {
     try {
-      appendFileSync(
+      appendCappedLog(
         logFile,
         `${new Date().toISOString()} ${level} ${message}\n`
       );
@@ -67,6 +76,7 @@ export const createUpdater = (): Updater => {
 
   let state = INITIAL_UPDATE_STATE;
   let listener: Listener = ignore;
+  let installing = false;
 
   const dispatch = (event: UpdateEvent): void => {
     const previous = state;
@@ -88,10 +98,10 @@ export const createUpdater = (): Updater => {
 
   const blocked = cannotUpdate();
 
-  const check = (manual: boolean): void => {
+  const check = (): void => {
     const before = state;
 
-    dispatch({ manual, type: "check" });
+    dispatch({ type: "check" });
 
     if (state === before) {
       return;
@@ -103,7 +113,19 @@ export const createUpdater = (): Updater => {
       return;
     }
 
-    void settleCheck(async () => await autoUpdater.checkForUpdates());
+    void settleRequest(async () => await autoUpdater.checkForUpdates());
+  };
+
+  const download = (): void => {
+    const before = state;
+
+    dispatch({ type: "download" });
+
+    if (state === before) {
+      return;
+    }
+
+    void settleRequest(async () => await autoUpdater.downloadUpdate());
   };
 
   const start = (): void => {
@@ -126,11 +148,9 @@ export const createUpdater = (): Updater => {
       },
     };
 
-    const feed = process.env.INSET_UPDATE_FEED_URL;
-
-    if (feed !== undefined && feed !== "") {
-      autoUpdater.setFeedURL({ provider: "generic", url: feed });
-    }
+    // Nothing is fetched or installed unless the user asks.
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
 
     autoUpdater.on("update-available", (info) => {
       dispatch({ type: "found", version: info.version });
@@ -145,37 +165,34 @@ export const createUpdater = (): Updater => {
       dispatch({ message: firstLine(error), type: "failed" });
     });
 
-    // On macOS the download is only installable once Squirrel has fetched and checked its signature.
-    if (process.platform === "darwin") {
-      squirrel.on("update-downloaded", () => {
-        dispatch({ type: "downloaded" });
-      });
-    } else {
-      autoUpdater.on("update-downloaded", () => {
-        dispatch({ type: "downloaded" });
-      });
-    }
-
-    check(false);
-    setInterval(() => {
-      check(false);
-    }, CHECK_EVERY_MS).unref();
+    // Both platforms report a finished download here. With autoInstallOnAppQuit off, macOS's
+    // Squirrel only fetches and verifies the update when the user chooses Restart (see restart).
+    autoUpdater.on("update-downloaded", () => {
+      dispatch({ type: "downloaded" });
+    });
   };
 
   return {
-    check: () => {
-      check(true);
-    },
+    check,
+    download,
     restart: () => {
-      if (state.kind !== "ready") {
+      if (state.kind !== "ready" || installing) {
         return;
       }
 
+      installing = true;
       log("info", `restarting to install ${state.version}`);
 
-      // The installer waits for every window to close, and the app's windows only hide when asked to.
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.destroy();
+      // On macOS, Squirrel first fetches the update and checks its signature, so the windows
+      // stay until it has: a rejected update then shows its error in the menu and a notice.
+      if (process.platform === "darwin") {
+        squirrel.once("update-downloaded", closeWindows);
+        squirrel.once("error", () => {
+          squirrel.removeListener("update-downloaded", closeWindows);
+          installing = false;
+        });
+      } else {
+        closeWindows();
       }
 
       autoUpdater.quitAndInstall(true, true);

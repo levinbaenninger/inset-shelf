@@ -1,3 +1,5 @@
+import { ConcealedClipboardError } from "./clipboard-privacy";
+
 /** S is whatever the clipboard returns as a full copy of its content; it only goes back in. */
 export interface SelectionDeps<S> {
   readonly snapshot: () => Promise<S>;
@@ -67,7 +69,24 @@ export type SelectionResult =
     })
   | (PutBackResult & { readonly kind: "none" })
   /** Another app held the clipboard, so the selection couldn't be copied. Left alone if it held it from the start. */
-  | (PutBackResult & { readonly kind: "busy" });
+  | (PutBackResult & { readonly kind: "busy" })
+  /**
+   * A password manager's private copy was met, so the capture stopped at once. `original`: the clipboard
+   * it started with (left alone); `selection`: the copied selection (not captured).
+   */
+  | (PutBackResult & {
+      readonly kind: "concealed";
+      readonly which: "original" | "selection";
+    });
+
+/** A failed read is no snapshot, except for a private clipboard, which ends the capture. */
+const orNull = (error: Error): null => {
+  if (error instanceof ConcealedClipboardError) {
+    throw error;
+  }
+
+  return null;
+};
 
 /** A snapshot that could be read, waiting for another app to let go of the clipboard; null if it doesn't by `until`. */
 const readSnapshot = async <S>(
@@ -75,7 +94,7 @@ const readSnapshot = async <S>(
   until: number,
   retryMs: number
 ): Promise<S | null> => {
-  const snapshot = await deps.snapshot().catch(() => null);
+  const snapshot = await deps.snapshot().catch(orNull);
 
   if (snapshot !== null && deps.readable(snapshot)) {
     return snapshot;
@@ -100,6 +119,7 @@ const pollText = async <S>(
   quietUntil: number,
   until: number
 ): Promise<{ readonly held: boolean; readonly text: string }> => {
+  // A readText that meets a private selection throws ConcealedClipboardError out of here.
   await deps.wait(POLL_MS);
 
   const text = await deps.readText();
@@ -108,7 +128,7 @@ const pollText = async <S>(
     return { held: false, text };
   }
 
-  const snapshot = await deps.snapshot().catch(() => null);
+  const snapshot = await deps.snapshot().catch(orNull);
   const held = snapshot !== null && !deps.readable(snapshot);
 
   // The text read may have run into a hold that has ended since: read once more.
@@ -147,7 +167,7 @@ const baseline = async <S>(
   copied: { readonly html: string; readonly text: string },
   until: number
 ): Promise<Baseline<S>> => {
-  const first = await deps.snapshot().catch(() => null);
+  const first = await deps.snapshot().catch(orNull);
 
   if (first === null) {
     return { kind: "unread" };
@@ -244,6 +264,38 @@ const putBack = async <S>(
   return await putBack(deps, saved, copied, until);
 };
 
+/** Puts the clipboard back after the capture: judged from what it holds right after the copy. */
+const restoreAfter = async <S>(
+  deps: SelectionDeps<S>,
+  saved: S,
+  copied: { readonly html: string; readonly text: string },
+  until: number
+): Promise<PutBackResult> => {
+  const left = await baseline(deps, copied, until);
+
+  switch (left.kind) {
+    case "read": {
+      return await putBack(deps, saved, left.snapshot, until);
+    }
+
+    case "unread": {
+      return await putBack(deps, saved, null, until);
+    }
+
+    case "newer": {
+      return ENDED.changed;
+    }
+
+    case "held": {
+      return NOT_TRIED;
+    }
+
+    default: {
+      return NOT_TRIED;
+    }
+  }
+};
+
 /**
  * Copies the selection of the app in front and puts the clipboard back as it was.
  * The clipboard is cleared first, so "nothing copied" is told apart from
@@ -253,11 +305,26 @@ export const captureSelection = async <S>(
   deps: SelectionDeps<S>
 ): Promise<SelectionResult> => {
   // A clipboard that can't be read can't be put back: it is left alone rather than emptied.
-  const saved = await readSnapshot(
-    deps,
-    deps.now() + SNAPSHOT_WAIT_MS,
-    SNAPSHOT_RETRY_MS
-  );
+  let saved: S | null;
+
+  try {
+    saved = await readSnapshot(
+      deps,
+      deps.now() + SNAPSHOT_WAIT_MS,
+      SNAPSHOT_RETRY_MS
+    );
+  } catch (error) {
+    if (error instanceof ConcealedClipboardError) {
+      return {
+        kind: "concealed",
+        restored: true,
+        unchecked: false,
+        which: "original",
+      };
+    }
+
+    throw error;
+  }
 
   if (saved === null) {
     return { kind: "busy", restored: true, unchecked: false };
@@ -269,11 +336,32 @@ export const captureSelection = async <S>(
   const copiedAt = deps.now();
   const until = copiedAt + RESTORE_DEADLINE_MS;
 
-  const { held, text } = await pollText(
-    deps,
-    copiedAt + POLL_MS * POLL_LIMIT,
-    until
-  );
+  let polled: { readonly held: boolean; readonly text: string };
+
+  try {
+    polled = await pollText(deps, copiedAt + POLL_MS * POLL_LIMIT, until);
+  } catch (error) {
+    if (!(error instanceof ConcealedClipboardError)) {
+      throw error;
+    }
+
+    // The clipboard was cleared for the copy and now holds a private selection: it goes back to what
+    // it held, as one write, without waiting on it.
+    try {
+      await deps.restore(saved);
+    } catch {
+      // A write that failed leaves the private copy as it is; the capture is over either way.
+    }
+
+    return {
+      kind: "concealed",
+      restored: true,
+      unchecked: false,
+      which: "selection",
+    };
+  }
+
+  const { held, text } = polled;
 
   // Without a readable selection, a later snapshot could be a newer copy: never put back over it.
   if (held) {
@@ -284,35 +372,18 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const left = await baseline(deps, { html, text }, until);
-
   let ended: PutBackResult;
 
-  switch (left.kind) {
-    case "read": {
-      ended = await putBack(deps, saved, left.snapshot, until);
-      break;
+  try {
+    ended = await restoreAfter(deps, saved, { html, text }, until);
+  } catch (error) {
+    if (!(error instanceof ConcealedClipboardError)) {
+      throw error;
     }
 
-    case "unread": {
-      ended = await putBack(deps, saved, null, until);
-      break;
-    }
-
-    case "newer": {
-      ended = ENDED.changed;
-      break;
-    }
-
-    case "held": {
-      ended = NOT_TRIED;
-      break;
-    }
-
-    default: {
-      ended = NOT_TRIED;
-      break;
-    }
+    // A password manager wrote a private item meanwhile: it is the user's newer copy, so the restore
+    // stops and leaves it, and the capture, which was copied before it, is kept.
+    ended = { restored: true, unchecked: false };
   }
 
   if (text.trim() === "") {
