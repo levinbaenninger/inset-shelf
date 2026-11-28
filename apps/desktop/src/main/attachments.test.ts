@@ -12,7 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { attachResult, createAttachments } from "./attachments";
 import type { AttachmentDeps, DecodedImage } from "./attachments";
-import { imageFileName, ownFileName } from "./export-name";
+import { attachedFileName, imageFileName } from "./export-name";
 import { createShelfController } from "./shelf-controller";
 
 const uuid = (n: number) =>
@@ -105,7 +105,7 @@ const setup = (
     item: controller.item,
     newAttachmentId: () => AttachmentIdSchema.parse(uuid((next += 1))),
     now: () => new Date("2026-11-21T09:00:00.000Z"),
-    readImage: (file) => (file.endsWith(".png") ? PICTURE : null),
+    readImage: (file) => (/\.(?:png|jpg)$/iu.test(file) ? PICTURE : null),
     stat: async (file) =>
       await Promise.resolve({
         isFile: !file.endsWith("/"),
@@ -367,13 +367,49 @@ describe(createAttachments, () => {
 
       expect({
         attachedDragsOutAs:
-          attached?.kind === "image" ? ownFileName(attached.name) : null,
+          attached?.kind === "image" ? attachedFileName(attached) : null,
         itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
         itemReads: added?.kind === "image" ? added.title : null,
       }).toStrictEqual({
         attachedDragsOutAs: `${name}.png`,
         itemDragsOutAs: `${name}.png`,
         itemReads: name,
+      });
+    }
+  );
+
+  it.each([
+    ["Screen Shot.PNG", "Screen Shot.PNG"],
+    ["Screen Shot.Png", "Screen Shot.Png"],
+    ["photo.JPG", "photo.png"],
+  ])(
+    "drags a picture added from %j out as %j: a PNG's own spelling, a picture made PNG with .png",
+    async (name, dragged) => {
+      const { attachments, controller, id } = setup(0);
+      const file = `/Users/someone/Desktop/${name}`;
+      const op = await attachments.prepareItem(file);
+
+      if ("problem" in op) {
+        throw new Error(op.problem);
+      }
+
+      const added = controller.item(controller.apply(op) ?? id);
+
+      await attachments.attachFilesTo(id, [file]);
+
+      const [attached] = controller.item(id)?.attachments ?? [];
+
+      expect({
+        attachedDragsOutAs:
+          attached?.kind === "image" ? attachedFileName(attached) : null,
+        attachedReads: attached?.kind === "image" ? attached.name : null,
+        itemDragsOutAs: added?.kind === "image" ? imageFileName(added) : null,
+        itemReads: added?.kind === "image" ? added.title : null,
+      }).toStrictEqual({
+        attachedDragsOutAs: dragged,
+        attachedReads: name.slice(0, name.lastIndexOf(".")),
+        itemDragsOutAs: dragged,
+        itemReads: name.slice(0, name.lastIndexOf(".")),
       });
     }
   );

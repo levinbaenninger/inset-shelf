@@ -1,4 +1,4 @@
-import type { ImageItem } from "@shared/shelf";
+import type { AttachedImage, ImageItem } from "@shared/shelf";
 
 const NAME_MAX = 60;
 const FIRST_PRINTABLE = 0x20;
@@ -38,6 +38,10 @@ export const exportFileName = (note: string): string => {
  * end stays, since ".png" comes after it.
  */
 export const ownFileName = (name: string): string => pngNamed(fileSafe(name));
+
+/** The file a picture attached to an item drags out as. */
+export const attachedFileName = (attachment: AttachedImage): string =>
+  ownFileName(attachment.name);
 
 /** The file an image item drags out as: the name of the file it was added from, else named after its note. */
 export const imageFileName = (item: ImageItem): string =>
