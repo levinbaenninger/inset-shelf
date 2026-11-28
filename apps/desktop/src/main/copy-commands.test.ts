@@ -1736,6 +1736,40 @@ describe(createCopyCommands, () => {
     }
   );
 
+  it("copies a code capture with a web page with details under its file in the project, and the page after the block", async () => {
+    const { commands, controller, written } = await setup();
+
+    const id = added(
+      controller.apply({
+        context: {
+          ...CODE_SOURCES[0].context,
+          url: "https://example.com/docs",
+        },
+        html: null,
+        text: CODE,
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await commands.copyDetails(id);
+
+    const details = await formats(written[0]?.[0]);
+    const block = `src/recall.ts · inset-shelf\n\n\`\`\`ts\n${CODE}\n\`\`\``;
+
+    expect({
+      html: details["text/html"]?.startsWith(
+        "<p>src/recall.ts · inset-shelf</p><pre>"
+      ),
+      text: details["text/plain"]?.startsWith(block),
+      urlAfterBlock: [details["text/html"], details["text/plain"]].map(
+        (format) =>
+          (format?.indexOf("https://example.com/docs") ?? -1) >
+          (format?.indexOf(CODE) ?? 0)
+      ),
+    }).toStrictEqual({ html: true, text: true, urlAfterBlock: [true, true] });
+  });
+
   it("copies a note the shelf shows as nothing as it was typed, with no empty format", async () => {
     const { commands, controller, items, written } = await setup();
 

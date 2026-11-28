@@ -1923,7 +1923,8 @@ const codeSource = (item: ShelfItem): string | null => {
     return null;
   }
 
-  const { label } = sourceLabel(item.context);
+  // The file and project, not a page the window also showed, which follows the block.
+  const { label } = sourceLabel({ ...item.context, url: null });
   const { code } = item.context;
 
   if (code === null) {
