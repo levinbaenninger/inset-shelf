@@ -9595,6 +9595,53 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-unmatched-note-late",
     page: "shelf",
   },
+  {
+    // Tab on to Show details in the same row while main's view is held: when it arrives, past two seconds, and takes the row out of the results, the keyboard goes to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+      await page.keyboard.press("Tab");
+    },
+    check: async (page) => {
+      const tabbed = await keyboardPlace(page);
+
+      await page.waitForTimeout(2300);
+      await page.evaluate("globalThis.__releaseViews()");
+      await page.waitForTimeout(100);
+
+      const left = await keyboardPlace(page);
+
+      return tabbed.label === "Show details" && left.label === "Search the shelf"
+        ? null
+        : `Tab went to ${placeText(tabbed)}, and when the view left the search's results focus was on ${placeText(left)}, not on the search`;
+    },
+    data: { echo: "held", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-tabbed",
+    page: "shelf",
+  },
+  {
+    // Focus moved out of the row before main's view takes the row away stays where it went.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+      await page.getByRole("button", { name: "Clear Search" }).focus();
+    },
+    check: async (page) => {
+      await page.evaluate("globalThis.__releaseViews()");
+      await page.waitForTimeout(100);
+
+      const kept = await keyboardPlace(page);
+
+      return kept.label === "Clear Search"
+        ? null
+        : `focus moved to Clear Search, and the view that left the search's results put it on ${placeText(kept)}`;
+    },
+    data: { echo: "held", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-left",
+    page: "shelf",
+  },
 ];
 
 const SETTINGS_VIEW = {
