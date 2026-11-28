@@ -32,6 +32,9 @@ const focusSearch = (): void => {
     ?.focus({ preventScroll: true });
 };
 
+/** Keys that only move the keyboard or change the next key: they don't act on the row. */
+const PASSING_KEYS = new Set(["Tab", "Shift", "Control", "Alt", "Meta"]);
+
 /** The row whose removal would drop the keyboard; a newer one takes its place. */
 let watching: AbortController | null = null;
 
@@ -39,7 +42,8 @@ let watching: AbortController | null = null;
  * Gives the keyboard to the search if `row` leaves the page while focus is
  * still in it: main's view of an edit can arrive after the row took the
  * keyboard, and take the row out of the search's results. Watching ends
- * when focus or a press moves outside the row.
+ * when focus or a press moves outside the row, or at a key that acts, such
+ * as Delete, which then looks after the keyboard itself.
  */
 const searchIfRowLeaves = (row: Element): void => {
   watching?.abort();
@@ -83,6 +87,16 @@ const searchIfRowLeaves = (row: Element): void => {
       { capture: true, signal: current.signal }
     );
   }
+
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!PASSING_KEYS.has(event.key)) {
+        stop();
+      }
+    },
+    { capture: true, signal: current.signal }
+  );
 };
 
 /**
