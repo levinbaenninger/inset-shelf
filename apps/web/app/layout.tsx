@@ -22,13 +22,13 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: TITLE,
   description:
-    "A small side window that docks beside the window you work in and keeps selected text, screenshots and notes with the page they came from. Free test build.",
+    "Keep selected text, screenshots, and notes beside your active window on macOS and Windows. Jump back to the app or page where you found them.",
   icons: { icon: { url: "/favicon.svg", type: "image/svg+xml" } },
   openGraph: {
     type: "website",
     title: TITLE,
     description:
-      "Tap Shift twice to keep selected text with the app and page it came from. A free test build for macOS and Windows 11.",
+      "Tap Shift twice to keep selected text with the app and page it came from. Available for macOS and Windows 11.",
     images: ["/share.jpg"],
   },
   twitter: { card: "summary_large_image" },
