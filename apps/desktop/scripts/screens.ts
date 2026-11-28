@@ -8093,6 +8093,19 @@ const SCENES: readonly Scene[] = [
       await page.locator("[data-sonner-toast]").first().waitFor();
       await page.waitForTimeout(500);
     },
+    check: async (page) => {
+      const reported = JSON.stringify(
+        await page.evaluate("globalThis.__noticesShown")
+      );
+
+      const expected = JSON.stringify([
+        { message: "Inset Shelf is up to date.", tone: "done" },
+      ]);
+
+      return reported === expected
+        ? null
+        : `the page must report the notice it showed once: ${reported}`;
+    },
     data: { view: shelfView() },
     name: "shelf-notice-done",
     page: "shelf",

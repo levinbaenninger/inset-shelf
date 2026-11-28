@@ -6,6 +6,7 @@ import type {
   ActionResult,
   DetailField,
   ItemAction,
+  NoticeTone,
   NotSavedItem,
   ShelfCommand,
   ShelfStatus,
@@ -280,6 +281,42 @@ const HeaderButton = ({
 
 const noticeToast = (message: string): void => {
   toast.success(message, { duration: NOTICE_MS });
+};
+
+/** About a second of frames for a notice to render before the page stops looking. */
+const NOTICE_RENDER_FRAMES = 60;
+
+let noticeRows = 0;
+
+/** A class of its own for the next notice's row, so that row and no other is found again. */
+const nextNoticeRow = (): string => {
+  noticeRows += 1;
+
+  return `notice-row-${noticeRows}`;
+};
+
+/**
+ * Tells main, for the trial log, once the notice's own row is on the page
+ * and visible. A row still hidden, one leaving, or another toast with the
+ * same words doesn't count, and a notice that never renders is never
+ * reported, so the log tells it apart from one the page showed.
+ */
+const reportNoticeShown = (
+  notice: { readonly message: string; readonly tone: NoticeTone },
+  row: string,
+  frames = NOTICE_RENDER_FRAMES
+): void => {
+  requestAnimationFrame(() => {
+    const shown = document.querySelector(
+      `.${row}[data-sonner-toast][data-mounted="true"][data-visible="true"]:not([data-removed="true"])`
+    );
+
+    if (shown !== null) {
+      api.noticeShown(notice);
+    } else if (frames > 1) {
+      reportNoticeShown(notice, row, frames - 1);
+    }
+  });
 };
 
 /**
@@ -1539,11 +1576,15 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   useEffect(
     () =>
       api.on("notice", ({ message, tone }) => {
+        const row = nextNoticeRow();
+
         if (tone === "failed") {
-          toast.error(message, { duration: NOTICE_MS });
+          toast.error(message, { className: row, duration: NOTICE_MS });
         } else {
-          noticeToast(message);
+          toast.success(message, { className: row, duration: NOTICE_MS });
         }
+
+        reportNoticeShown({ message, tone }, row);
       }),
     []
   );
