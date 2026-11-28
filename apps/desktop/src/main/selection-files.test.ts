@@ -21,6 +21,20 @@ const A = "file:///Users/me/a.pdf";
 const B = "file:///Users/me/b.pdf";
 const list = (url: string) => ({ "text/uri-list": url });
 
+/** How Windows notes a copy or a cut of files beside their list: a 32-bit flag set, 1 to copy and 2 to move. */
+const DROP_EFFECT =
+  'electron application/osclipboard;format="Preferred DropEffect"';
+
+const copyOf = (url: string) => ({
+  ...list(url),
+  [DROP_EFFECT]: "\u0001\0\0\0",
+});
+
+const cutOf = (url: string) => ({
+  ...list(url),
+  [DROP_EFFECT]: "\u0002\0\0\0",
+});
+
 const toSnapshot = (items: readonly Item[]): Snapshot =>
   items.map((item) =>
     Object.fromEntries(
@@ -44,20 +58,27 @@ const toItems = async (snapshot: Snapshot): Promise<Item[]> =>
 /**
  * A clipboard with Explorer's and Finder's formats, read as the app reads it:
  * `held` lists the numbers of the snapshot reads that run into another app's
- * hold, `rejected` those that fail outright, `before` what the user does just
- * before a numbered read, and `swallow` how many writes back a hold swallows
- * without an error.
+ * hold, `before` what the user does just before a numbered read, `swallow`
+ * how many writes back a hold swallows without an error, `rejected` the
+ * snapshot reads that fail, `filesHeld` the file-list reads that come back
+ * empty (as Chromium does when it can't open the clipboard), and `halfRead`
+ * the snapshot reads a hold cuts short: the files' list comes back empty.
+ * `windows` reads it as Windows lists it.
  */
 const clipboard = (options: {
   readonly initial: readonly Item[];
   readonly copied: readonly Item[];
   readonly held?: readonly number[];
-  readonly rejected?: readonly number[];
   readonly before?: Readonly<Record<number, readonly Item[]>>;
   readonly swallow?: number;
+  readonly rejected?: readonly number[];
+  readonly filesHeld?: readonly number[];
+  readonly halfRead?: readonly number[];
+  readonly windows?: boolean;
 }) => {
   let items = options.initial;
   let reads = 0;
+  let fileReads = 0;
   let time = 0;
   let swallow = options.swallow ?? 0;
   const restored: Snapshot[] = [];
@@ -66,21 +87,29 @@ const clipboard = (options: {
     clear: () => {
       items = [];
     },
-    content: clipboardContent,
+    content: async (snapshot) =>
+      await clipboardContent(snapshot, options.windows ?? false),
     copy: () => {
       items = options.copied;
     },
     holds: holdsAgainIn,
     now: () => time,
     readable: readableClipboard,
-    readFiles: async () =>
-      await copiedFilePaths(
+    readFiles: async () => {
+      fileReads += 1;
+
+      if (options.filesHeld?.includes(fileReads) === true) {
+        return [];
+      }
+
+      return await copiedFilePaths(
         toSnapshot(items).map((item) => ({
           getType: async (type: string) =>
             await Promise.resolve(item[type] ?? new Blob([])),
           types: Object.keys(item),
         }))
-      ),
+      );
+    },
     readHtml: async () =>
       await Promise.resolve(
         items.find((item) => "text/html" in item)?.["text/html"] ?? ""
@@ -112,7 +141,16 @@ const clipboard = (options: {
       items = options.before?.[reads] ?? items;
 
       if (options.rejected?.includes(reads) === true) {
-        throw new Error("The clipboard couldn't be read");
+        throw new Error("clipboard unavailable");
+      }
+
+      if (options.halfRead?.includes(reads) === true) {
+        return toSnapshot(
+          items.map((item) => ({
+            ...item,
+            "text/uri-list": "",
+          }))
+        );
       }
 
       return await Promise.resolve(
@@ -278,6 +316,291 @@ describe("restoring a clipboard that held files", () => {
       restored: true,
     });
     expect(clip.restored).toHaveLength(2);
+    expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
+
+describe("a hold that starts while the capture checks the files it copied", () => {
+  // A clipboard manager opens the clipboard after the capture's snapshot is read: Chromium then lists no files.
+  it("puts the clipboard back when the file-list read after the snapshot comes back empty", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      filesHeld: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      paths: ["/Users/me/a.pdf"],
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("puts the clipboard back when the hold came back for the file-list read that follows a held snapshot", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      filesHeld: [2],
+      held: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+});
+
+describe("a clipboard that can't be read after the capture", () => {
+  it("leaves the next file copy alone when the read after the capture fails", async () => {
+    // The user copied B before the failing read: a write from the old clipboard would replace it.
+    const clip = clipboard({
+      before: { 2: [list(B)] },
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: [2],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([list(B)]);
+  });
+
+  it("writes nothing and says it wasn't put back when the clipboard can't be read before time runs out", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: Array.from({ length: 200 }, (_, at) => at + 2),
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+      unchecked: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([list(A)]);
+  });
+});
+
+describe("a read the capture can't judge", () => {
+  const FINDER = {
+    "text/plain": "a.pdf",
+    "text/uri-list": A,
+  };
+
+  it("reads again, not a newer copy, when a hold cut the snapshot's file list short", async () => {
+    // Finder's text came back and the list behind it came back with nothing in it.
+    const clip = clipboard({
+      copied: [FINDER],
+      halfRead: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("calls a read with another file list, or with text beside no files, a newer copy", async () => {
+    const copiedB = clipboard({
+      before: { 2: [list(B)] },
+      copied: [list(A)],
+      initial: [EARLIER],
+    });
+
+    const copiedText = clipboard({
+      before: { 2: [{ "text/plain": "another copy" }] },
+      copied: [list(A)],
+      initial: [EARLIER],
+    });
+
+    await captureSelection(copiedB.deps);
+    await captureSelection(copiedText.deps);
+
+    expect(copiedB.restored).toStrictEqual([]);
+    expect(copiedText.restored).toStrictEqual([]);
+    expect(copiedText.items()).toStrictEqual([
+      { "text/plain": "another copy" },
+    ]);
+  });
+
+  it("leaves a file copied during a hold alone, though its name is the text the capture copied", async () => {
+    const clip = clipboard({
+      before: { 3: [FINDER] },
+      copied: [{ "text/plain": "a.pdf" }],
+      held: [2],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "text",
+      restored: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([FINDER]);
+  });
+
+  it("leaves the clipboard as it is, and says it wasn't put back, when every read stays unclear until time runs out", async () => {
+    const clip = clipboard({
+      copied: [FINDER],
+      halfRead: Array.from({ length: 200 }, (_, at) => at + 2),
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+      unchecked: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([FINDER]);
+  });
+});
+
+describe("a cut and a copy of the same file", () => {
+  it("leaves a cut made after the capture alone, though its list is the capture's", async () => {
+    const clip = clipboard({
+      before: { 2: [cutOf(A)] },
+      copied: [copyOf(A)],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("puts the clipboard back at once when files are listed with no effect, as an app that never notes one copies them", async () => {
+    const clip = clipboard({
+      copied: [list(A)],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("reads again on Windows when files are listed with no other format, as when the raw formats couldn't be listed, until the cut shows", async () => {
+    const clip = clipboard({
+      before: { 2: [list(A)], 3: [cutOf(A)] },
+      copied: [copyOf(A)],
+      initial: [EARLIER],
+      windows: true,
+    });
+
+    await captureSelection(clip.deps);
+
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("puts the clipboard back at once on Windows when files are listed beside other raw formats but no effect", async () => {
+    const clip = clipboard({
+      copied: [
+        {
+          ...list(A),
+          'electron application/osclipboard;format="FileNameW"': "a.pdf",
+        },
+      ],
+      initial: [EARLIER],
+      windows: true,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("reads again when the effect is listed but came back with no bytes, until the cut shows", async () => {
+    const clip = clipboard({
+      before: { 2: [{ ...list(A), [DROP_EFFECT]: "" }], 3: [cutOf(A)] },
+      copied: [copyOf(A)],
+      initial: [EARLIER],
+    });
+
+    await captureSelection(clip.deps);
+
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("writes nothing and says it wasn't put back when the effect stays hidden until time runs out", async () => {
+    const clip = clipboard({
+      before: { 2: [{ ...list(A), [DROP_EFFECT]: "" }] },
+      copied: [copyOf(A)],
+      initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+      unchecked: false,
+    });
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([{ ...list(A), [DROP_EFFECT]: "" }]);
+  });
+
+  it("tries again when a swallowed write left a copy of the file where the clipboard held it cut", async () => {
+    const clip = clipboard({
+      copied: [copyOf(A)],
+      initial: [cutOf(A)],
+      swallow: 1,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.restored).toHaveLength(2);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("tries again when a swallowed write left file URLs beside the text the clipboard held alone", async () => {
+    const draft = { "text/plain": "draft" };
+
+    const clip = clipboard({
+      copied: [{ ...draft, ...list(A) }],
+      initial: [draft],
+      swallow: 1,
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "text",
+      restored: true,
+    });
+    expect(clip.restored).toHaveLength(2);
+    expect(clip.items()).toStrictEqual([draft]);
+  });
+});
+
+describe("a read the capture can't open", () => {
+  it("leaves the clipboard as it is, and says it wasn't put back, when what a read holds can't be listed", async () => {
+    const clip = clipboard({ copied: [list(A)], initial: [EARLIER] });
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        content: async () =>
+          await Promise.reject(new Error("clipboard unavailable")),
+      })
+    ).resolves.toMatchObject({ kind: "files", restored: false });
+    expect(clip.restored).toStrictEqual([]);
     expect(clip.items()).toStrictEqual([list(A)]);
   });
 });

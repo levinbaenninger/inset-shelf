@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 
+import { copiedFilePaths } from "./copied-files";
 import type { ClipboardContents } from "./copy-gate";
 
 /**
@@ -138,13 +139,89 @@ const textIn = async (
   return value instanceof Blob ? await value.text() : "";
 };
 
-/** The plain text and HTML in a read of the clipboard, "" for either it hasn't. */
-export const clipboardContent = async (
+/** How Electron names a raw format, one the platform lists beside the standard ones. */
+const RAW = "electron application/osclipboard;";
+
+/** Where Windows notes a copy or a cut of files, beside their list: a 32-bit set of flags, with 2 to move. */
+const DROP_EFFECT = `${RAW}format="Preferred DropEffect"`;
+
+/** The move flag is the second bit of the lowest byte: set when that byte, read as a number, is 2, 3, 6, 7 and so on. */
+const isMove = (low: number): boolean => Math.floor(low / 2) % 2 === 1;
+
+/**
+ * Whether the files in a read were cut (true), copied (false), or the read
+ * can't say (null). An app has to set an effect to cut, so files listed with
+ * none are a copy, once the read's raw formats were listed (`rawListed`). An
+ * effect listed but read back empty was cut short by another app's hold, and
+ * is not known.
+ */
+const filesCut = async (
+  read: readonly ClipboardContents[],
+  rawListed = true
+): Promise<boolean | null> => {
+  const effect = read.find((item) => DROP_EFFECT in item)?.[DROP_EFFECT];
+
+  if (effect === undefined) {
+    return rawListed ? false : null;
+  }
+
+  if (!(effect instanceof Blob)) {
+    return false;
+  }
+
+  const [low] = new Uint8Array(await effect.arrayBuffer());
+
+  return low === undefined ? null : isMove(low);
+};
+
+/** The paths of the copied files in one read of the clipboard, as the live clipboard lists them. */
+const filesIn = async (
   read: readonly ClipboardContents[]
-): Promise<{ readonly html: string; readonly text: string }> => ({
-  html: await textIn(read, "text/html"),
-  text: await textIn(read, "text/plain"),
-});
+): Promise<readonly string[]> =>
+  await copiedFilePaths(
+    read.map((item) => ({
+      getType: async (type: string) => {
+        const value = await item[type];
+
+        return value instanceof Blob ? value : new Blob([]);
+      },
+      types: Object.keys(item),
+    }))
+  );
+
+/**
+ * What one read of the clipboard holds: its plain text and HTML ("" for either
+ * it hasn't), the files it lists, and whether they were cut, null when the
+ * read can't say. Judging a read by itself matters: a read made again could
+ * fall under another app's hold, and come back empty. On Windows, Electron
+ * lists the raw formats in a second look that a hold leaves empty, and
+ * Explorer always lists some beside files: files with no raw format beside
+ * them may have hidden a cut.
+ */
+export const clipboardContent = async (
+  read: readonly ClipboardContents[],
+  windows = process.platform === "win32"
+): Promise<{
+  readonly cut: boolean | null;
+  readonly files: readonly string[];
+  readonly html: string;
+  readonly text: string;
+}> => {
+  const files = await filesIn(read);
+
+  return {
+    cut: await filesCut(
+      read,
+      !windows ||
+        read.some((item) =>
+          Object.keys(item).some((type) => type.startsWith(RAW))
+        )
+    ),
+    files,
+    html: await textIn(read, "text/html"),
+    text: await textIn(read, "text/plain"),
+  };
+};
 
 /** Every file list on the clipboard (a URI list per item that has one), as one text. */
 const fileListsIn = async (
@@ -161,16 +238,19 @@ const fileListsIn = async (
 
 /**
  * holdsAgain, judged from one read of the clipboard rather than reading it
- * again. Copied files are what a clipboard of files holds, so they must be the
- * same files: another list of files isn't the clipboard put back.
+ * again. Files are part of what a clipboard holds, so they must be the same
+ * files, cut or copied alike, and none beside text that had none: another
+ * list of files isn't the clipboard put back.
  */
 export const holdsAgainIn = async (
   saved: readonly ClipboardContents[],
   current: readonly ClipboardContents[]
 ): Promise<boolean> => {
-  const files = await fileListsIn(saved);
+  if ((await fileListsIn(saved)) !== (await fileListsIn(current))) {
+    return false;
+  }
 
-  if (files !== "" && files !== (await fileListsIn(current))) {
+  if ((await filesCut(saved)) !== (await filesCut(current))) {
     return false;
   }
 

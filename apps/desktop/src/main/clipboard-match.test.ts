@@ -232,7 +232,82 @@ describe("holdsAgainIn with copied files", () => {
   });
 });
 
+const DROP_EFFECT =
+  'electron application/osclipboard;format="Preferred DropEffect"';
+
+const withEffect = (url: string, effect: number) => [
+  {
+    [DROP_EFFECT]: new Blob([new Uint8Array([effect, 0, 0, 0])]),
+    "text/uri-list": new Blob([url]),
+  },
+];
+
+describe("holdsAgainIn with a cut and a copy of files", () => {
+  it("doesn't hold when the files are cut now and were copied, or the other way round", async () => {
+    expect({
+      cutToCopy: await holdsAgainIn(
+        withEffect("file:///a.pdf", 2),
+        withEffect("file:///a.pdf", 1)
+      ),
+      copyToCut: await holdsAgainIn(
+        withEffect("file:///a.pdf", 1),
+        withEffect("file:///a.pdf", 2)
+      ),
+      same: await holdsAgainIn(
+        withEffect("file:///a.pdf", 2),
+        withEffect("file:///a.pdf", 2)
+      ),
+    }).toStrictEqual({ copyToCut: false, cutToCopy: false, same: true });
+  });
+
+  it("doesn't hold when files are listed beside text that was alone", async () => {
+    await expect(
+      holdsAgainIn(
+        [{ "text/plain": new Blob(["draft"]) }],
+        [
+          {
+            "text/plain": new Blob(["draft"]),
+            "text/uri-list": new Blob(["file:///a.pdf"]),
+          },
+        ]
+      )
+    ).resolves.toBeFalsy();
+  });
+});
+
+const cutIn = async (read: Parameters<typeof clipboardContent>[0]) => {
+  const { cut } = await clipboardContent(read);
+
+  return cut;
+};
+
 describe(clipboardContent, () => {
+  it("lists the files of the read itself, as the live clipboard would", async () => {
+    await expect(
+      clipboardContent([
+        {
+          "text/plain": new Blob(["a.pdf"]),
+          "text/uri-list": new Blob(["file:///Users/me/a.pdf"]),
+        },
+      ])
+    ).resolves.toStrictEqual({
+      cut: false,
+      files: ["/Users/me/a.pdf"],
+      html: "",
+      text: "a.pdf",
+    });
+  });
+
+  it("tells files cut from files copied by the drop effect beside their list", async () => {
+    expect({
+      copied: await cutIn(withEffect("file:///a.pdf", 1)),
+      cut: await cutIn(withEffect("file:///a.pdf", 2)),
+      none: await cutIn([{ "text/uri-list": new Blob(["file:///a.pdf"]) }]),
+      // Explorer notes a plain copy as copy and link together.
+      noted: await cutIn(withEffect("file:///a.pdf", 5)),
+    }).toStrictEqual({ copied: false, cut: true, none: false, noted: false });
+  });
+
   it("reads the plain text and HTML of one read, empty for what it hasn't", async () => {
     expect({
       both: await clipboardContent([
@@ -240,8 +315,8 @@ describe(clipboardContent, () => {
       ]),
       none: await clipboardContent([]),
     }).toStrictEqual({
-      both: { html: "<b>x</b>", text: "x" },
-      none: { html: "", text: "" },
+      both: { cut: false, files: [], html: "<b>x</b>", text: "x" },
+      none: { cut: false, files: [], html: "", text: "" },
     });
   });
 });

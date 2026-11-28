@@ -17,8 +17,10 @@ export interface SelectionDeps<S> {
    * empty one. It judges that read and makes none of its own, which a hold starting meanwhile would spoil.
    */
   readonly holds: (saved: S, current: S) => Promise<boolean>;
-  /** The plain text and HTML in a snapshot, "" for either it hasn't. */
+  /** The plain text and HTML in a snapshot, "" for either it hasn't, the files it lists, and whether they were cut (null when the read can't say). */
   readonly content: (snapshot: S) => Promise<{
+    readonly cut: boolean | null;
+    readonly files: readonly string[];
     readonly html: string;
     readonly text: string;
   }>;
@@ -151,22 +153,6 @@ const pollText = async <S>(
   return await pollText(deps, quietUntil, until);
 };
 
-/** Whether the clipboard still lists the files the capture read; trivially so for a capture of text. */
-const stillCopied = async <S>(
-  deps: SelectionDeps<S>,
-  files: readonly string[]
-): Promise<boolean> => {
-  if (files.length === 0) {
-    return true;
-  }
-
-  const now = await readFiles(deps);
-
-  return (
-    now.length === files.length && now.every((file, at) => file === files[at])
-  );
-};
-
 /** The last name in a path, whichever way it is separated. */
 const nameOf = (file: string): string =>
   file.split(/[\\/]+/u).findLast((part) => part !== "") ?? "";
@@ -202,19 +188,94 @@ const namesTheFiles = (text: string, files: readonly string[]): boolean => {
 type Baseline<S> =
   /** The clipboard as the capture left it, to tell a newer copy apart later. */
   | { readonly kind: "read"; readonly snapshot: S }
-  /** It couldn't be read at all, though it still lists any files the capture read: one try to put back, without retries. */
-  | { readonly kind: "unread" }
   /** Another app copied something newer meanwhile: it is left alone. */
   | { readonly kind: "newer" }
-  /** Another app held the clipboard until time ran out. */
+  /** The clipboard couldn't be told from a hold until time ran out. */
   | { readonly kind: "held" };
 
+/** What one read shows of the capture: the capture itself, a newer copy, or too little to say. */
+type Verdict = "ours" | "newer" | "unsure";
+
+const sameFiles = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((file, at) => file === b[at]);
+
+/** Line breaks and edges as an app may hand text back, to compare it with the text read. */
+const words = (text: string): string => text.replaceAll("\r\n", "\n").trim();
+
+/** After a hold, a field holds what the capture copied, or another copy; one that came back empty may be a read cut short. */
+const against = (seen: string, had: string): Verdict => {
+  if (seen === had) {
+    return "ours";
+  }
+
+  return seen === "" ? "unsure" : "newer";
+};
+
 /**
- * The clipboard right after the capture. A read under a hold says nothing:
- * what comes back after the hold is the capture only if it is exactly what
- * was copied, text and HTML, or the same files; anything else is a newer
- * copy to leave alone. Files carry no text or HTML to tell a newer copy by,
- * so their list is read again, whether the first read held or not.
+ * What one read of the clipboard says, judged by itself: a hold turns a read
+ * empty or half-read without an error, so a read shows a newer copy only by
+ * showing something else, never by lacking something the capture had. After a
+ * hold the text and HTML are what was copied, or another one is a newer copy.
+ * Files cut are one too: the capture copies; the same files with no effect
+ * to read are unsure, since the read may have hidden a cut. Files carry no text or HTML to tell a newer copy by, so the read's own list
+ * of files is compared: another list, or text where the capture had none,
+ * is a newer copy; no list at all, with nothing else shown, is unsure.
+ */
+const verdictOn = async <S>(
+  deps: SelectionDeps<S>,
+  snapshot: S,
+  copied: {
+    readonly files: readonly string[];
+    readonly html: string;
+    readonly text: string;
+  },
+  afterHold: boolean
+): Promise<Verdict> => {
+  const { cut, files, html, text } = await deps.content(snapshot);
+
+  // The capture only copies: files cut since were cut by the user.
+  if (cut === true) {
+    return "newer";
+  }
+
+  if (afterHold) {
+    const fields = new Set([
+      against(text, copied.text),
+      against(html, copied.html),
+    ]);
+
+    if (fields.has("newer")) {
+      return "newer";
+    }
+
+    if (fields.has("unsure")) {
+      return "unsure";
+    }
+  }
+
+  // A text capture copies no files: a list seen after a hold is a newer copy, as Finder copies a file beside its name.
+  if (copied.files.length === 0) {
+    return afterHold && files.length > 0 ? "newer" : "ours";
+  }
+
+  if (files.length > 0) {
+    if (!sameFiles(files, copied.files)) {
+      return "newer";
+    }
+
+    // The list may be the capture's while the read hid a cut of it.
+    return cut === null ? "unsure" : "ours";
+  }
+
+  return words(text) !== "" && words(text) !== words(copied.text)
+    ? "newer"
+    : "unsure";
+};
+
+/**
+ * The clipboard right after the capture, read until one read says what is
+ * there: a read under a hold, one that fails, and one too empty to judge are
+ * read again after a pause, until time runs out.
  */
 const baseline = async <S>(
   deps: SelectionDeps<S>,
@@ -223,37 +284,31 @@ const baseline = async <S>(
     readonly html: string;
     readonly text: string;
   },
-  until: number
+  until: number,
+  afterHold = false
 ): Promise<Baseline<S>> => {
-  const first = await deps.snapshot().catch(() => null);
+  const snapshot = await deps.snapshot().catch(() => null);
 
-  // Unread, a newer copy of files is still told apart by their list, and left alone when the list differs or can't be read.
-  if (first === null) {
-    return (await stillCopied(deps, copied.files))
-      ? { kind: "unread" }
-      : { kind: "newer" };
+  if (snapshot !== null && deps.readable(snapshot)) {
+    // A read that can't be listed says nothing either.
+    const verdict = await verdictOn(deps, snapshot, copied, afterHold).catch(
+      (): Verdict => "unsure"
+    );
+
+    if (verdict !== "unsure") {
+      return verdict === "ours"
+        ? { kind: "read", snapshot }
+        : { kind: "newer" };
+    }
   }
 
-  if (deps.readable(first)) {
-    return (await stillCopied(deps, copied.files))
-      ? { kind: "read", snapshot: first }
-      : { kind: "newer" };
-  }
-
-  const later = await readSnapshot(deps, until, RESTORE_RETRY_MS);
-
-  if (later === null) {
+  if (deps.now() >= until) {
     return { kind: "held" };
   }
 
-  // Judged from that one read: a second read could fall under a hold that starts meanwhile.
-  const { html, text } = await deps.content(later);
+  await deps.wait(RESTORE_RETRY_MS);
 
-  return text === copied.text &&
-    html === copied.html &&
-    (await stillCopied(deps, copied.files))
-    ? { kind: "read", snapshot: later }
-    : { kind: "newer" };
+  return await baseline(deps, copied, until, true);
 };
 
 /** What the clipboard holds now: put back, still the capture, something newer, or unreadable until time ran out. */
@@ -262,7 +317,7 @@ type Look = "restored" | "unchanged" | "changed" | "held";
 const look = async <S>(
   deps: SelectionDeps<S>,
   saved: S,
-  copied: S | null,
+  copied: S,
   until: number
 ): Promise<Look> => {
   const current = await readSnapshot(deps, until, RESTORE_RETRY_MS);
@@ -273,11 +328,6 @@ const look = async <S>(
 
   if (await deps.holds(saved, current)) {
     return "restored";
-  }
-
-  // Without the clipboard as the capture left it, a newer copy can't be told apart: treated as one.
-  if (copied === null) {
-    return "changed";
   }
 
   return (await deps.same(copied, current).catch(() => false))
@@ -303,7 +353,7 @@ const ENDED: Readonly<Record<Look, PutBackResult>> = {
 const putBack = async <S>(
   deps: SelectionDeps<S>,
   saved: S,
-  copied: S | null,
+  copied: S,
   until: number
 ): Promise<PutBackResult> => {
   try {
@@ -376,11 +426,6 @@ export const captureSelection = async <S>(
   switch (left.kind) {
     case "read": {
       ended = await putBack(deps, saved, left.snapshot, until);
-      break;
-    }
-
-    case "unread": {
-      ended = await putBack(deps, saved, null, until);
       break;
     }
 

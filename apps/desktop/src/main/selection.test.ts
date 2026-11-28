@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { readableClipboard, sameClipboard } from "./clipboard-match";
 import { captureSelection } from "./selection";
@@ -72,6 +73,8 @@ const fakeClipboard = (
       }
     },
     content: async (read) => ({
+      cut: false,
+      files: [],
       html: (await read[0]?.["text/html"]?.text()) ?? "",
       text: (await read[0]?.["text/plain"]?.text()) ?? "",
     }),
@@ -126,6 +129,9 @@ const fakeClipboard = (
   };
 };
 
+/** The files the clipboard lists, as the fake's snapshots carry them. */
+const FILES = "x-test/files";
+
 /** The app copies these files, and Finder their names as text too; the clipboard holds "earlier" again once put back. */
 const withFiles = (paths: readonly string[], names: string | null) => {
   const clip = fakeClipboard("earlier", names);
@@ -137,6 +143,12 @@ const withFiles = (paths: readonly string[], names: string | null) => {
       clip.deps.clear();
       files = [];
     },
+    content: async (read) => ({
+      ...(await clip.deps.content(read)),
+      files: z
+        .array(z.string())
+        .parse(JSON.parse((await read[0]?.[FILES]?.text()) ?? "[]")),
+    }),
     copy: () => {
       clip.deps.copy();
       files = paths;
@@ -145,6 +157,13 @@ const withFiles = (paths: readonly string[], names: string | null) => {
     restore: async (saved) => {
       await clip.deps.restore(saved);
       files = [];
+    },
+    snapshot: async () => {
+      const read = await clip.deps.snapshot();
+
+      return files.length === 0
+        ? read
+        : [{ ...read[0], [FILES]: new Blob([JSON.stringify(files)]) }];
     },
   };
 
@@ -338,6 +357,34 @@ otes.txt`,
     }
   );
 
+  it.each(["text/html", "text/plain"])(
+    "reads again, not a newer copy, when a hold cut the read after a held one short: %s empty",
+    async (emptied) => {
+      const clip = fakeClipboard("earlier", "x", "<b>x</b>");
+      let snapshots = 0;
+
+      await expect(
+        captureSelection({
+          ...clip.deps,
+          snapshot: async () => {
+            snapshots += 1;
+
+            const read = await clip.deps.snapshot();
+
+            if (snapshots === 2) {
+              return HELD_READ;
+            }
+
+            return snapshots === 3
+              ? read.map((item) => ({ ...item, [emptied]: new Blob([]) }))
+              : read;
+          },
+        })
+      ).resolves.toMatchObject({ restored: true, text: "x" });
+      expect(clip.content()).toBe("earlier");
+    }
+  );
+
   it("preserves a newer copy with the same text but different HTML", async () => {
     const clip = fakeClipboard("earlier", "x", "<b>x</b>", "", 1);
 
@@ -393,7 +440,7 @@ otes.txt`,
     expect(clip.content()).toBe("new user copy");
   });
 
-  it("still attempts restoration if the captured clipboard cannot be snapshotted", async () => {
+  it("leaves the clipboard alone when the captured clipboard can't be read again, rather than writing over what it may hold", async () => {
     const clip = fakeClipboard("earlier", "x", "", "", 1);
     let snapshots = 0;
 
@@ -408,8 +455,9 @@ otes.txt`,
             : await Promise.reject(new Error("clipboard unavailable"));
         },
       })
-    ).resolves.toMatchObject({ restored: false });
-    expect(clip.restoredWith).toHaveLength(1);
+    ).resolves.toMatchObject({ restored: false, unchecked: false });
+    expect(clip.restoredWith).toHaveLength(0);
+    expect(clip.content()).toBe("x");
   });
 
   it("waits out another app's hold during the put back, instead of taking its empty read for a newer copy", async () => {
