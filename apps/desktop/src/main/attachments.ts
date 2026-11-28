@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AttachResult } from "@shared/contracts";
 import { ATTACHMENTS_MAX } from "@shared/shelf";
 import type {
+  AttachedImage,
   Attachment,
   AttachmentId,
   ItemId,
@@ -28,6 +29,8 @@ export type StoredUpload =
       readonly image: ShelfImage;
       /** The picture's own name, without its extension. */
       readonly name: string;
+      /** A PNG's extension as its file spelled it, where that isn't .png. */
+      readonly extension?: string;
     }
   | { readonly kind: "file"; readonly file: StoredFile };
 
@@ -75,17 +78,24 @@ const toAttachment = (
   upload: StoredUpload,
   id: AttachmentId,
   addedAt: string
-): Attachment =>
-  upload.kind === "image"
-    ? {
-        addedAt,
-        id,
-        image: upload.image,
-        kind: "image",
-        name: upload.name,
-        pins: [],
-      }
-    : { addedAt, file: upload.file, id, kind: "file" };
+): Attachment => {
+  if (upload.kind === "file") {
+    return { addedAt, file: upload.file, id, kind: "file" };
+  }
+
+  const picture: AttachedImage = {
+    addedAt,
+    id,
+    image: upload.image,
+    kind: "image",
+    name: upload.name,
+    pins: [],
+  };
+
+  return upload.extension === undefined
+    ? picture
+    : { ...picture, extension: upload.extension };
+};
 
 const storedFiles = (upload: StoredUpload): readonly string[] =>
   upload.kind === "image" ? [upload.image.file] : [upload.file.stored];
@@ -97,7 +107,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
   const storePicture = async (
     image: DecodedImage,
     name: string
-  ): Promise<StoredUpload> => ({
+  ): Promise<Extract<StoredUpload, { kind: "image" }>> => ({
     image: {
       file: await deps.writeAttachment(image.png),
       heightPx: image.heightPx,
@@ -126,7 +136,15 @@ export const createAttachments = (deps: AttachmentDeps) => {
       const image = added.kind === "image" ? deps.readImage(filePath) : null;
 
       if (image !== null) {
-        return await storePicture(image, pictureName(added.name));
+        const stored = await storePicture(image, pictureName(added.name));
+
+        // From the name on disk: `added.name` is capped, and can lose it.
+        const extension = path.extname(path.basename(filePath));
+
+        // A PNG that spells its extension another way (.PNG) drags out with it.
+        return added.extension === "png" && extension !== ".png"
+          ? { ...stored, extension }
+          : stored;
       }
 
       return {
@@ -235,7 +253,35 @@ export const createAttachments = (deps: AttachmentDeps) => {
       : attachTo(id, [await storePicture(copied.image, PASTED_NAME)]);
   };
 
-  return { attachFilesTo, attachTo, pasteImageTo, prepare };
+  /** One added file as the operation that adds it as a new item, or why it can't be added. */
+  const prepareItem = async (filePath: string): Promise<MainOp | Problem> => {
+    const upload = await prepare(filePath);
+
+    if ("problem" in upload) {
+      return upload;
+    }
+
+    if (upload.kind === "file") {
+      return { context: null, file: upload.file, type: "addFile" };
+    }
+
+    const add: MainOp = {
+      context: null,
+      fileName: upload.name,
+      image: upload.image,
+      pins: [],
+      source: null,
+      title: upload.name,
+      type: "addImage",
+      via: "paste",
+    };
+
+    return upload.extension === undefined
+      ? add
+      : { ...add, extension: upload.extension };
+  };
+
+  return { attachFilesTo, attachTo, pasteImageTo, prepare, prepareItem };
 };
 
 /**

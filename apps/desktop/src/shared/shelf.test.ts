@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { z } from "zod";
+import { z } from "zod";
 
 import { CodePlaceSchema, isCapturedText } from "./code-place";
 import v3 from "./fixtures/shelf-v3.json";
 import {
   applyOp,
+  copiedNote,
   storedFilesOf,
   groupItems,
   itemsAsList,
@@ -31,6 +32,7 @@ import type {
   ImageItem,
   OpEnv,
   ShelfDoc,
+  ShelfItem,
   ShelfOp,
   MainOp,
   Removed,
@@ -54,6 +56,10 @@ const INBOX = SectionIdSchema.parse(uuid(1));
 const never = (): never => {
   throw new Error("missing");
 };
+
+/** What Copy gives for a text item, null for any other. */
+const copiedText = (item: ShelfItem | undefined) =>
+  item?.kind === "text" ? copiedNote(item) : null;
 
 /** The ids in fixtures/shelf-v3.json. */
 const uuid8 = (n: number) => `8c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d${n}`;
@@ -534,7 +540,127 @@ describe("selections with links", () => {
     ).toBe(url);
   });
 
-  it("drops the copied HTML once the text is edited", () => {
+  it.each(["__init__", "  return value\n", "[endpoint]: https://example.com"])(
+    "drags the selection %j out exactly as it was copied, and as the shelf shows it once edited",
+    (text) => {
+      const { doc } = apply(emptyShelf(INBOX), [
+        { context: null, html: null, text, type: "addText", via: "selection" },
+      ]);
+
+      const [item] = doc.items;
+
+      if (item === undefined) {
+        throw new Error("missing item");
+      }
+
+      const [edited] = apply(doc, [
+        { id: item.id, text: "**init** runs", type: "editText" },
+      ]).doc.items;
+
+      expect([itemText(item), itemText(edited ?? item)]).toStrictEqual([
+        text,
+        "init runs",
+      ]);
+    }
+  );
+
+  it("reads a selection a shelf kept before it knew the captured words as captured as it stands, and a typed note as typed", () => {
+    const stored = (id: number, via: string) => ({
+      attachments: [],
+      color: null,
+      context: null,
+      createdAt: "2026-11-20T09:00:00.000Z",
+      description: "",
+      done: false,
+      due: null,
+      html: null,
+      id: uuid(id),
+      kind: "text",
+      links: [],
+      sectionId: INBOX,
+      steps: [],
+      text: "__init__",
+      via,
+      windows: [],
+    });
+
+    const doc = parseShelfDocument(
+      JSON.stringify({
+        activeSectionId: INBOX,
+        items: [stored(20, "selection"), stored(21, "typed")],
+        schemaVersion: 4,
+        sections: [{ id: INBOX, name: "Inbox" }],
+      })
+    );
+
+    const [selection, typed] = doc?.items ?? [];
+
+    if (doc === null || selection === undefined || typed === undefined) {
+      throw new Error("not read");
+    }
+
+    const [edited] = apply(doc, [
+      { id: selection.id, text: "__init__ runs", type: "editText" },
+    ]).doc.items;
+
+    expect(
+      [selection, typed, edited ?? selection].map((item) => itemText(item))
+    ).toStrictEqual(["__init__", "init", "init runs"]);
+  });
+
+  it("saves an edited selection with no HTML beside its words, so a build that knows only `html` never pairs the copied HTML with new words, and going back to the captured words copies that HTML again", () => {
+    const added = apply(emptyShelf(INBOX), [
+      {
+        context: null,
+        html: "<b>bold</b> text",
+        text: "bold text",
+        type: "addText",
+        via: "selection",
+      },
+    ]).doc;
+
+    const id = added.items[0]?.id ?? never();
+
+    const edited = apply(added, [
+      { id, text: "bold words", type: "editText" },
+    ]).doc;
+
+    // As the shelf is written to disk.
+    const file = JSON.stringify(edited);
+
+    const saved = z
+      .object({ items: z.array(z.looseObject({ html: z.unknown() })) })
+      .parse(JSON.parse(file));
+
+    // An older build keeps only the fields it knows, and saves the shelf so.
+    const older = parseShelfDocument(
+      JSON.stringify({
+        ...edited,
+        items: edited.items.map((item) =>
+          Object.fromEntries(
+            Object.entries(item).filter(
+              ([key]) => key !== "captured" && key !== "capturedHtml"
+            )
+          )
+        ),
+      })
+    );
+
+    const [back] = apply(edited, [{ id, text: "bold text", type: "editText" }])
+      .doc.items;
+
+    expect({
+      back: copiedText(back),
+      older: copiedText(older?.items[0]),
+      saved: saved.items[0]?.html,
+    }).toStrictEqual({
+      back: { html: "<b>bold</b> text", text: "bold text" },
+      older: { html: null, text: "bold words" },
+      saved: null,
+    });
+  });
+
+  it("copies an edited selection without the HTML it was copied with", () => {
     const added = apply(emptyShelf(INBOX), [
       {
         context: null,
@@ -555,7 +681,10 @@ describe("selections with links", () => {
       { id: item.id, text: "plain", type: "editText" },
     ]).doc.items;
 
-    expect(edited).toMatchObject({ html: null, text: "plain" });
+    expect(edited?.kind === "text" ? copiedNote(edited) : null).toStrictEqual({
+      html: "<p>plain</p>",
+      text: "plain",
+    });
   });
 });
 
@@ -1056,6 +1185,7 @@ const shelfWithAttachments = (attachments: readonly unknown[]) =>
         description: "",
         done: false,
         due: null,
+        captured: null,
         html: null,
         id: uuid(20),
         kind: "text",
@@ -1080,11 +1210,22 @@ describe("attachments on an item (format 4)", () => {
 
     expect(doc).toStrictEqual({
       ...v3,
-      items: v3.items.map((item) => ({
-        ...item,
-        attachments: [],
-        context: item.context === null ? null : { ...item.context, code: null },
-      })),
+      items: v3.items.map((item) => {
+        const read = {
+          ...item,
+          attachments: [],
+          context:
+            item.context === null ? null : { ...item.context, code: null },
+        };
+
+        // A selection a version 3 build kept reads as captured as it stands.
+        return item.kind === "text"
+          ? {
+              ...read,
+              captured: item.via === "selection" ? item.text : null,
+            }
+          : read;
+      }),
       schemaVersion: 4,
     });
     expect(doc === null ? [] : doc.items.map(storedFilesOf)).toStrictEqual([

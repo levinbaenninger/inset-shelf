@@ -8,6 +8,8 @@ import {
   textMark,
 } from "./code-place";
 import { isValidDay, matchesDue, parseSearch } from "./due";
+import { copiedWords, noteTree } from "./shown-note";
+import type { Copied } from "./shown-note";
 import {
   isAppLink,
   isPageAddress,
@@ -246,9 +248,8 @@ export const LinkSchema = z.object({
 
 const TextFields = {
   /**
-   * The selection as the app copied it, put back next to the text when the
-   * item is copied so links and formatting paste too. Never shown; dropped
-   * once the text is edited.
+   * The HTML the app copied beside a selection's words, put back next to
+   * them on Copy while the text is still those words. Never shown.
    */
   html: z.string().max(HTML_MAX).nullable().default(null),
   kind: z.literal("text"),
@@ -281,8 +282,16 @@ const PictureFields = {
 
 export type Picture = z.output<z.ZodObject<typeof PictureFields>>;
 
+export const ATTACHMENT_NAME_MAX = 255;
+
+const PNG_EXTENSION = z.string().regex(/^\.png$/iu);
+
 const ImageFields = {
   ...PictureFields,
+  /** The name of the file the picture was added from, without its extension: it drags out under it. Captured and pasted pictures have none. */
+  fileName: z.string().min(1).max(ATTACHMENT_NAME_MAX).optional(),
+  /** How the PNG it was added from spelled its extension (.PNG), where that isn't .png: it drags out with it. */
+  extension: PNG_EXTENSION.optional(),
   kind: z.literal("image"),
   note: z.string().max(TEXT_MAX),
   /** The display an area or pin was captured on. */
@@ -291,8 +300,6 @@ const ImageFields = {
   title: z.string().max(TITLE_MAX).nullable(),
   via: z.enum(["area", "pin", "paste", "drawing", "screenshot"]),
 };
-
-export const ATTACHMENT_NAME_MAX = 255;
 
 export const StoredFileSchema = z.object({
   bytes: z.number().int().min(0),
@@ -321,6 +328,8 @@ export const AttachedImageSchema = z.object({
   kind: z.literal("image"),
   /** Shown in tooltips, used as the file name when dragged out and in plain-text copies. No extension. */
   name: z.string().min(1).max(ATTACHMENT_NAME_MAX),
+  /** How the PNG it was added from spelled its extension (.PNG), where that isn't .png: it drags out with it. */
+  extension: PNG_EXTENSION.optional(),
 });
 
 export type AttachedImage = z.output<typeof AttachedImageSchema>;
@@ -378,11 +387,34 @@ const FileFieldsV2 = {
   note: z.string().max(TEXT_MAX),
 };
 
-export const TextItemSchema = z.object({
-  ...ItemBase,
-  ...MetaFields,
-  ...TextFields,
-});
+/** The words a selection was captured with; a typed note has none. */
+const capturedOf = (item: {
+  readonly text: string;
+  readonly via: "typed" | "selection";
+}): string | null => (item.via === "selection" ? item.text : null);
+
+export const TextItemSchema = z
+  .object({
+    ...ItemBase,
+    ...MetaFields,
+    ...TextFields,
+    /**
+     * A selection's words as they were captured, never changed after. It
+     * copies as it was copied while its text is these words. A shelf saved
+     * before this field reads a selection as captured as it stands.
+     */
+    captured: z.string().max(TEXT_MAX).nullable().optional(),
+    /**
+     * The HTML a selection was copied with, set aside while its words differ
+     * from `captured`. `html` is then null, so a build that knows only
+     * `html` never copies the captured HTML beside other words.
+     */
+    capturedHtml: z.string().max(HTML_MAX).optional(),
+  })
+  .transform((item) => ({
+    ...item,
+    captured: item.captured === undefined ? capturedOf(item) : item.captured,
+  }));
 
 export const ImageItemSchema = z.object({
   ...ItemBase,
@@ -551,10 +583,14 @@ const upgradeV2 = (doc: z.output<typeof ShelfDocV2Schema>): ShelfDocV3 => ({
   schemaVersion: 3,
 });
 
-/** Every version 3 item as it was, with no attachments. */
+/** Every version 3 item as it was, with no attachments; a selection as captured as it stands. */
 const upgradeV3 = (doc: ShelfDocV3): ShelfDoc => ({
   ...doc,
-  items: doc.items.map((item) => ({ ...item, attachments: [] })),
+  items: doc.items.map((item) =>
+    item.kind === "text"
+      ? { ...item, attachments: [], captured: capturedOf(item) }
+      : { ...item, attachments: [] }
+  ),
   schemaVersion: 4,
 });
 
@@ -804,6 +840,10 @@ export type MainOp =
   | {
       readonly type: "addImage";
       readonly image: ShelfImage;
+      /** A picture added from a file is titled with the file's name, and keeps it to drag out under. */
+      readonly fileName?: string;
+      readonly extension?: string;
+      readonly title?: string;
       readonly scene?: DrawingScene;
       readonly pins: readonly Pin[];
       readonly source: string | null;
@@ -889,6 +929,24 @@ const unchanged = (doc: ShelfDoc): OpResult => ({
 });
 
 const changed = (doc: ShelfDoc): OpResult => ({ ...unchanged(doc) });
+
+/**
+ * A text item with new words. The HTML it was copied with sits beside them
+ * only while they are the captured words, and is set aside otherwise, so
+ * going back to them copies it again.
+ */
+const withWords = (item: TextItem, text: string): TextItem => {
+  const { capturedHtml, ...rest } = item;
+  const copiedHtml = capturedHtml ?? item.html;
+
+  if (text === item.captured) {
+    return { ...rest, html: copiedHtml, text };
+  }
+
+  return copiedHtml === null
+    ? { ...rest, html: null, text }
+    : { ...rest, capturedHtml: copiedHtml, html: null, text };
+};
 
 const mapItem = (
   doc: ShelfDoc,
@@ -990,6 +1048,7 @@ const compose = (doc: ShelfDoc, raw: string, env: OpEnv): OpResult => {
       ...NO_META,
       color: null,
       context: null,
+      captured: null,
       createdAt: env.now().toISOString(),
       done: false,
       html: null,
@@ -1115,6 +1174,7 @@ const addText = (
 
   return addItem(doc, {
     ...NO_META,
+    captured: capturedOf({ text, via: op.via }),
     color: null,
     context: withTextMark(op.context, text, op.text.length > TEXT_MAX),
     createdAt: env.now().toISOString(),
@@ -1620,6 +1680,17 @@ const applyAttachmentOp = (doc: ShelfDoc, op: AttachmentOp): OpResult => {
   }
 };
 
+/** A picture added from a file keeps the file's name, and a PNG its spelling of .png, to drag out under. */
+const fromFile = (
+  item: ImageItem,
+  fileName: string | undefined,
+  extension: string | undefined
+): ImageItem => {
+  const named = fileName === undefined ? item : { ...item, fileName };
+
+  return extension === undefined ? named : { ...named, extension };
+};
+
 /**
  * Applies one operation. `pending` holds the deleted items that can still be
  * put back, oldest first; a delete past UNDO_MAX discards the oldest for good.
@@ -1669,14 +1740,16 @@ export const applyOp = (
         pins: clampPins(op.pins, op.image),
         sectionId: doc.activeSectionId,
         source: op.source,
-        title: null,
+        title: op.title ?? null,
         via: op.via,
       };
+
+      const spelled = fromFile(item, op.fileName, op.extension);
 
       // An image with no marks kept has no scene at all, as on shelves from before them.
       return addItem(
         doc,
-        op.scene === undefined ? item : { ...item, scene: op.scene }
+        op.scene === undefined ? spelled : { ...spelled, scene: op.scene }
       );
     }
 
@@ -1699,7 +1772,7 @@ export const applyOp = (
     case "editText": {
       return changed(
         mapItem(doc, op.id, (item) =>
-          item.kind === "text" ? { ...item, html: null, text: op.text } : null
+          item.kind === "text" ? withWords(item, op.text) : null
         )
       );
     }
@@ -1849,9 +1922,48 @@ export const PICTURE_KIND: Readonly<Record<ImageItem["via"], string>> = {
   screenshot: "Screenshot",
 };
 
+/**
+ * The shelf's rendering of a note typed or edited in it, which Copy gives as
+ * the shelf shows it. Null for a selection still holding the words it was
+ * captured with, which Copy gives back unread, and for a note the shelf
+ * shows as nothing. What the shelf shows as one code block is a tree of one
+ * `code` node, which copies as code.
+ */
+const shownNote = (item: ShelfItem): Copied | null => {
+  if (item.kind !== "text" || item.text === item.captured) {
+    return null;
+  }
+
+  const shown = copiedWords(noteTree(item.text));
+
+  return shown.text.trim() === "" ? null : shown;
+};
+
+/** Whether Copy gives an item's words as the shelf renders them. */
+export const copiesAsShown = (item: ShelfItem): boolean =>
+  shownNote(item) !== null;
+
+/**
+ * A text item's words as Copy and drag-out give them: a note as the shelf
+ * shows it, else the text as it stands, with the HTML the app copied beside
+ * it while the text is still the captured words and that HTML holds any.
+ */
+export const copiedNote = (
+  item: TextItem
+): { readonly text: string; readonly html: string | null } =>
+  shownNote(item) ?? {
+    html:
+      item.text !== item.captured ||
+      item.html === null ||
+      item.html.trim() === ""
+        ? null
+        : item.html,
+    text: item.text,
+  };
+
 export const itemText = (item: ShelfItem): string => {
   if (item.kind === "text") {
-    return item.text;
+    return copiedNote(item).text;
   }
 
   if (item.kind === "file") {
@@ -2043,10 +2155,30 @@ const namedPictureHtml = (
     : `<p>${escapeHtml(name)}<br>${pictureHtml(picture)}</p>`;
 };
 
+/** Copy with Details' words and metadata as HTML: a note's words as the shelf renders them, then its page and metadata. */
+const detailsHeadHtml = (item: ShelfItem): string => {
+  const details = detailLines(item, true);
+  const shown = shownNote(item);
+
+  if (shown === null) {
+    return `<p>${linesHtml(withDetails(withUrl(titled(item), item), details))}</p>`;
+  }
+
+  const rest = [
+    item.context?.url ?? null,
+    details.length === 0 ? null : details.join("\n"),
+  ]
+    .filter((part) => part !== null)
+    .join("\n\n");
+
+  return `${shown.html}${rest === "" ? "" : `<p>${linesHtml(rest)}</p>`}`;
+};
+
 /**
- * Copy with Details as HTML, for an item with attachments: the same words,
- * the image item's own picture, then each attachment by name, its picture
- * inline under it when there is one.
+ * Copy with Details as HTML, for a note or an item with attachments: the
+ * same words, a note's as the shelf renders them, the image item's own
+ * picture, then each attachment by name, its picture inline under it when
+ * there is one.
  */
 export const itemDetailsHtml = (
   item: ShelfItem,
@@ -2054,7 +2186,7 @@ export const itemDetailsHtml = (
   attached: InlinePictures
 ): string =>
   [
-    `<p>${linesHtml(withDetails(withUrl(titled(item), item), detailLines(item, true)))}</p>`,
+    detailsHeadHtml(item),
     ...(own === null || item.kind !== "image"
       ? []
       : [
@@ -2062,7 +2194,7 @@ export const itemDetailsHtml = (
             ? `<p>${escapeHtml(itemText(item))}${MISSING_PICTURE}</p>`
             : `<p>${pictureHtml(own)}</p>`,
         ]),
-    "<p>Attachments:</p>",
+    ...(hasAttachments(item) ? ["<p>Attachments:</p>"] : []),
     ...item.attachments.map((attachment) =>
       namedPictureHtml(attachmentName(attachment), attached.get(attachment.id))
     ),

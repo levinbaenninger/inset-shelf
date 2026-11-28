@@ -1,30 +1,17 @@
 import { cn } from "@inset/ui/lib/utils";
-import { Strike } from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
-import { Markdown } from "@tiptap/markdown";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
-import { StarterKit } from "@tiptap/starter-kit";
 import { useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
+
+import { NOTE_EXTENSIONS, noteMarkdown, storedNote } from "./note-markdown";
+import type { OpenedNote } from "./note-markdown";
 
 /** The editor that has the keyboard, so the menu bar's Undo and Redo reach its own history. */
 let focusedEditor: Editor | null = null;
 
 export const editorWithFocus = (): Editor | null => focusedEditor;
-
-/**
- * A hard break is written as two spaces and a newline; the shelf shows a plain
- * newline as a break anyway (remark-breaks), so notes keep plain newlines.
- */
-const toMarkdown = (editor: Editor): string =>
-  editor.getMarkdown().replaceAll("  \n", "\n");
-
-/**
- * ~~text~~ still strikes through, but ⇧⌘S is Next steps in every Inset app,
- * so the editor leaves that chord to the menu.
- */
-const StrikeWithoutKey = Strike.extend({ addKeyboardShortcuts: () => ({}) });
 
 /** What a note field does with the keys a plain field would not. */
 export interface MarkdownFieldKeys {
@@ -128,6 +115,13 @@ export const MarkdownField = ({
   const latest = useRef({ keys, onBlur, onChange });
   const emitted = useRef(value);
   const editorRef = useRef<Editor | null>(null);
+  // The note as the field opened it, or as it was last set from outside.
+  const opened = useRef<OpenedNote | null>(null);
+
+  const toMarkdown = (current: Editor): string =>
+    opened.current === null
+      ? noteMarkdown(current.getJSON())
+      : storedNote(opened.current, current.state.doc, current.getJSON());
 
   useEffect(() => {
     latest.current = { keys, onBlur, onChange };
@@ -195,19 +189,12 @@ export const MarkdownField = ({
       },
     },
     extensions: [
-      StarterKit.configure({
-        dropcursor: false,
-        heading: { levels: [1, 2, 3] },
-        // Links open from the list, through the app, never inside the field.
-        link: { autolink: true, openOnClick: false },
-        strike: false,
-        trailingNode: false,
-        underline: false,
-      }),
-      StrikeWithoutKey,
-      Markdown.configure({ markedOptions: { breaks: true, gfm: true } }),
+      ...NOTE_EXTENSIONS,
       Placeholder.configure({ placeholder: placeholder ?? "" }),
     ],
+    onCreate: ({ editor: current }) => {
+      opened.current = { doc: current.state.doc, markdown: value };
+    },
     onBlur: ({ editor: current }) => {
       if (focusedEditor === current) {
         focusedEditor = null;
@@ -255,6 +242,7 @@ export const MarkdownField = ({
     if (followValue && editor !== null && value !== emitted.current) {
       emitted.current = value;
       editor.commands.setContent(value, { contentType: "markdown" });
+      opened.current = { doc: editor.state.doc, markdown: value };
     }
   }, [editor, followValue, value]);
 

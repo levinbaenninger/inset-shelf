@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 
 import type { ActionResult } from "@shared/contracts";
 import {
+  copiedNote,
+  copiesAsShown,
   hasAttachments,
   itemDetailsHtml,
   itemDetailsText,
@@ -146,11 +148,11 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
       )
     );
 
-  /** Copy with Details: plain text, and for an item with attachments HTML with their pictures too. */
+  /** Copy with Details: plain text, and HTML for a note the shelf renders or an item with attachments, their pictures inside it. */
   const detailsData = (item: ShelfItem): Payload => {
     const plain = text(itemDetailsText(item));
 
-    if (!hasAttachments(item)) {
+    if (!copiesAsShown(item) && !hasAttachments(item)) {
       return { data: { "text/plain": plain } };
     }
 
@@ -194,14 +196,15 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
 
   const itemData = (item: ShelfItem): Payload => {
     if (item.kind === "text") {
-      // The copied HTML goes back next to the text, so links and formatting paste too.
+      const words = copiedNote(item);
+
       return {
         data:
-          item.html === null
-            ? { "text/plain": text(item.text) }
+          words.html === null
+            ? { "text/plain": text(words.text) }
             : {
-                "text/html": new Blob([item.html], { type: "text/html" }),
-                "text/plain": text(item.text),
+                "text/html": htmlBlob(words.html),
+                "text/plain": text(words.text),
               },
       };
     }

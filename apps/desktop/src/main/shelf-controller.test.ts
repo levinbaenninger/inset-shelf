@@ -1040,40 +1040,6 @@ describe("Discard changes and each item's saved version", () => {
       typed: [],
     });
   });
-
-  it("gives a captured selection its formatting back when Escape puts its words back after they were sent", () => {
-    const { controller } = onDisk();
-
-    const id = controller.apply({
-      context: null,
-      html: "<p>Quote <b>CHF 280</b> over</p>",
-      text: "Quote **CHF 280** over",
-      type: "addText",
-      via: "selection",
-    });
-
-    if (id === null) {
-      throw new Error("not added");
-    }
-
-    controller.apply({
-      id,
-      text: "Quote **CHF 280** over, ask Marco",
-      type: "editText",
-    });
-    const typed = controller.item(id);
-
-    controller.apply({ id, text: "Quote **CHF 280** over", type: "editText" });
-    const back = controller.item(id);
-
-    expect({
-      back: back?.kind === "text" ? back.html : undefined,
-      typed: typed?.kind === "text" ? typed.html : undefined,
-    }).toStrictEqual({
-      back: "<p>Quote <b>CHF 280</b> over</p>",
-      typed: null,
-    });
-  });
 });
 
 describe("attachments", () => {

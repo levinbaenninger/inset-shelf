@@ -9230,6 +9230,90 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-row-note",
     page: "shelf",
   },
+  {
+    // A selection dragged out of the shelf carries the HTML it was copied with while its words are the captured ones, and the words as shown once they changed.
+    check: async (page) => {
+      const dragged = z
+        .array(z.object({ html: z.string(), text: z.string() }))
+        .parse(
+          await page.evaluate(
+            (ids) =>
+              ids.map((id) => {
+                const row = document.querySelector(`[data-item-id="${id}"]`);
+
+                const source =
+                  row?.closest("[draggable=true]") ??
+                  row?.querySelector("[draggable=true]");
+
+                const carried = new DataTransfer();
+
+                source?.dispatchEvent(
+                  new DragEvent("dragstart", {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer: carried,
+                  })
+                );
+                source?.dispatchEvent(
+                  new DragEvent("dragend", { bubbles: true })
+                );
+
+                return {
+                  html: carried.getData("text/html"),
+                  text: carried.getData("text/plain"),
+                };
+              }),
+            [uuid(60), uuid(61)]
+          )
+        );
+
+      const [captured, edited] = dragged;
+
+      if (
+        captured?.html !== "<b>Bold</b> plan" ||
+        captured.text !== "Bold plan"
+      ) {
+        return `A captured selection dragged out as ${JSON.stringify(captured)}, not with the HTML it was copied with`;
+      }
+
+      return edited?.text === "Bold plan, edited" &&
+        edited.html !== "" &&
+        !edited.html.includes("<b>")
+        ? null
+        : `An edited selection dragged out as ${JSON.stringify(edited)}, not as its words now read`;
+    },
+    data: {
+      view: {
+        ...shelfView(),
+        doc: {
+          ...DOC,
+          items: [
+            {
+              ...base(60, 20),
+              captured: "Bold plan",
+              html: "<b>Bold</b> plan",
+              kind: "text",
+              links: [],
+              text: "Bold plan",
+              via: "selection",
+            },
+            {
+              ...base(61, 10),
+              captured: "Bold plan",
+              capturedHtml: "<b>Bold</b> plan",
+              html: null,
+              kind: "text",
+              links: [],
+              text: "Bold plan, edited",
+              via: "selection",
+            },
+          ],
+        },
+      },
+    },
+    name: "shelf-drag-out-copied-html",
+    page: "shelf",
+  },
   ...(
     [
       { label: "Edit item", n: 12, what: "words" },
