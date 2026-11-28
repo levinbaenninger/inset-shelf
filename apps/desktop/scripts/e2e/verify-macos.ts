@@ -20,7 +20,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 
 import { saveErrorText } from "../../src/main/save-error.ts";
-import { dockedBeside } from "../../src/shared/dock-check.ts";
+import { dockedBeside } from "../../src/shared/geometry.ts";
 import { noticeFate } from "../../src/shared/notice-fate.ts";
 import type { NoticeFate } from "../../src/shared/notice-fate.ts";
 
