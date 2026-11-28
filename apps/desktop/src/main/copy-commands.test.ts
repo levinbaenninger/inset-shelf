@@ -1639,6 +1639,36 @@ describe(createCopyCommands, () => {
     });
   });
 
+  it("copies code under a Windows title whose dashes leave its file unsure as a block of no language", async () => {
+    const { commands, controller, written } = await setup();
+
+    // "worker.v2 - copy.ts" in demo, or "worker.v2" in "copy.ts - demo": the title alone can't say.
+    const id = added(
+      controller.apply({
+        context: {
+          ...CODE_SOURCES[1].context,
+          title: "worker.v2 - copy.ts - demo - Visual Studio Code",
+        },
+        html: null,
+        text: CODE,
+        type: "addText",
+        via: "selection",
+      })
+    );
+
+    await commands.copy(id);
+    await commands.copyDetails(id);
+
+    const [copy, details] = await Promise.all(
+      written.map(async (contents) => await formats(contents[0]))
+    );
+
+    expect({
+      block: copy?.["text/html"],
+      fence: details?.["text/plain"]?.includes(`\n\`\`\`\n${CODE}\n\`\`\``),
+    }).toStrictEqual({ block: `<pre><code>${CODE}</code></pre>`, fence: true });
+  });
+
   it("copies a Markdown file's selection as prose: its words and HTML as they were copied, and no fence with details", async () => {
     const { commands, controller, written } = await setup();
 
