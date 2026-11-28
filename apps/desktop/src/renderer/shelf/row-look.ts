@@ -26,9 +26,63 @@ export const contextMenuAt =
     });
   };
 
+const focusSearch = (): void => {
+  document
+    .querySelector<HTMLElement>("[data-search-field]")
+    ?.focus({ preventScroll: true });
+};
+
+/** How long main's view of an edit may take to arrive after the row took the keyboard back. */
+const LATE_VIEW_MS = 2000;
+
+/**
+ * Gives the keyboard to the search if the row's `target` leaves the page
+ * still holding it, before the user presses a key or the pointer: main's
+ * view of an edit can arrive after the row took the keyboard, and take the
+ * row out of the search's results.
+ */
+const searchIfRowLeaves = (target: Element): void => {
+  const watching = new AbortController();
+
+  const stop = (): void => {
+    watching.abort();
+  };
+
+  const observer = new MutationObserver(() => {
+    if (target.isConnected) {
+      return;
+    }
+
+    stop();
+
+    if (
+      document.activeElement === null ||
+      document.activeElement === document.body
+    ) {
+      focusSearch();
+    }
+  });
+
+  const timer = setTimeout(stop, LATE_VIEW_MS);
+
+  watching.signal.addEventListener("abort", () => {
+    observer.disconnect();
+    clearTimeout(timer);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  for (const type of ["keydown", "pointerdown"]) {
+    document.addEventListener(type, stop, {
+      capture: true,
+      signal: watching.signal,
+    });
+  }
+};
+
 /**
  * Focus on an item's row itself, where Return edits, Space checks off and ⌫
- * deletes. False when the row is gone or hidden.
+ * deletes. False when the row is gone or hidden. The row can leave the
+ * search's results after it took the keyboard (`searchIfRowLeaves`).
  */
 export const focusRow = (row: Element | null): boolean => {
   const target =
@@ -38,7 +92,13 @@ export const focusRow = (row: Element | null): boolean => {
 
   target?.focus({ preventScroll: true });
 
-  return target !== null && document.activeElement === target;
+  const focused = target !== null && document.activeElement === target;
+
+  if (focused) {
+    searchIfRowLeaves(target);
+  }
+
+  return focused;
 };
 
 /**
@@ -47,9 +107,7 @@ export const focusRow = (row: Element | null): boolean => {
  */
 export const focusRowOrSearch = (row: Element | null): void => {
   if (!focusRow(row)) {
-    document
-      .querySelector<HTMLElement>("[data-search-field]")
-      ?.focus({ preventScroll: true });
+    focusSearch();
   }
 };
 
