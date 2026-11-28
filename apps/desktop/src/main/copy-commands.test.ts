@@ -1645,10 +1645,24 @@ describe(createCopyCommands, () => {
       language: null,
       title: "worker.v2 - copy.ts - demo - Visual Studio Code",
     },
+    // "worker.ts - copy.py" opened on its own, or "worker.ts" in copy.py.
+    {
+      language: null,
+      title: "worker.ts - copy.py - Visual Studio Code",
+    },
+    // "worker.ts - copy.c++" in demo: an extension that names no tag still names another file.
+    {
+      language: null,
+      title: "worker.ts - copy.c++ - demo - Visual Studio Code",
+    },
     // A profile after the project leaves the file sure.
     {
       language: "ts",
       title: "recall.ts - inset-shelf - Work - Visual Studio Code",
+    },
+    {
+      language: "ts",
+      title: "recall.ts - inset-shelf - Visual Studio Code",
     },
   ])(
     "copies code under the Windows title $title as a block of the language its file surely has",
