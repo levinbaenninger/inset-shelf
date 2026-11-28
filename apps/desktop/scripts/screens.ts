@@ -9160,6 +9160,7 @@ const SCENES: readonly Scene[] = [
     },
     check: async (page) => {
       const steps = await page.getByRole("textbox", { name: /^Step /u }).all();
+
       const focus = await page.evaluate(
         "document.activeElement?.getAttribute('aria-label') ?? ''"
       );
@@ -9203,19 +9204,22 @@ const SCENES: readonly Scene[] = [
       const field = page.getByRole("textbox", {
         name: "Description of Office move budget",
       });
-      const read = () =>
-        field.evaluate((element) =>
+
+      const read = async () =>
+        await field.evaluate((element) =>
           element instanceof HTMLTextAreaElement
             ? { caret: element.selectionStart, value: element.value }
             : null
         );
+
       const pasted = await read();
 
       await page.keyboard.press("ControlOrMeta+Z");
 
       const undone = await read();
 
-      return pasted?.value === "The first secondtotal is CHF 260 over the cap" &&
+      return pasted?.value ===
+        "The first secondtotal is CHF 260 over the cap" &&
         pasted.caret === 16 &&
         undone?.value === "The total is CHF 260 over the cap"
         ? null
@@ -9280,6 +9284,7 @@ const SCENES: readonly Scene[] = [
       const words = page.getByRole("button", {
         name: /Edit the description of Office move budget$/u,
       });
+
       const read = tall(await boxOf(words));
 
       await words.click();
