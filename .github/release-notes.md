@@ -1,4 +1,4 @@
-Test build of Inset Shelf, without a developer certificate. See the README section "Install a test build" for the macOS Gatekeeper and Windows SmartScreen steps. Install once. After that the app updates itself from the newest release, except for the portable Windows zips.
+Download Inset Shelf for your platform below. The [installation guide](https://inset-shelf.levexis.workers.dev/docs/install) covers the first-launch warnings on macOS and Windows. The Mac app and Windows installer update automatically. To update a portable Windows copy, download the latest zip.
 
 | Platform | File |
 | --- | --- |
@@ -8,5 +8,3 @@ Test build of Inset Shelf, without a developer certificate. See the README secti
 | Windows, Arm | `inset-shelf-*-win-arm64.zip` (portable) |
 
 The installers are also attached under their versioned names, `inset-shelf-<version>-mac-arm64.dmg`, `-mac-x64.dmg` and `-win-x64.exe`.
-
-Capture behaviour is verified only on the platforms named in IMPLEMENTATION_REPORT.md. A build for another platform is not evidence that capture works there.
