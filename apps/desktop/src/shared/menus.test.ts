@@ -318,6 +318,38 @@ describe(itemMenu, () => {
     expect(from("Zen", null)).toBeUndefined();
   });
 
+  it("offers ChatGPT elsewhere than macOS for an item kept without a link, found by its title", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const entry = (title: string | null) =>
+      itemMenu(
+        {
+          ...item,
+          context: {
+            app: "ChatGPT",
+            appLink: null,
+            code: null,
+            title,
+            url: null,
+          },
+        },
+        doc,
+        false
+      ).find(
+        (each) => each.kind === "choice" && each.choice.kind === "openSource"
+      );
+
+    expect(entry("Chat")).toMatchObject({
+      accelerator: "CommandOrControl+O",
+      label: "Open in ChatGPT",
+    });
+    expect(entry(null)).toBeUndefined();
+  });
+
   it("offers a desktop app elsewhere than macOS only with a link to open at", () => {
     const [item] = doc.items;
 

@@ -14,7 +14,7 @@ import type {
   ShelfDoc,
   ShelfItem,
 } from "./shelf";
-import { openingApp } from "./web-source";
+import { sourceApp } from "./web-source";
 
 export type MenuChoice =
   | { readonly kind: "selectSection"; readonly id: SectionId }
@@ -326,7 +326,7 @@ const open = (
     ];
   }
 
-  const app = openingApp(item.context, mac, editors);
+  const app = sourceApp(item.context, mac, editors);
 
   if (app === null && (item.context?.url ?? null) === null) {
     return [];
