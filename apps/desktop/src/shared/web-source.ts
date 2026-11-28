@@ -287,6 +287,18 @@ export const chatGptTitleToFind = (
     ? source.title
     : null;
 
+/**
+ * The app the shelf offers to open an item in: where `openingApp` opens it,
+ * or ChatGPT for an item whose thread main finds by its title.
+ */
+export const sourceApp = (
+  source: (AppSource & { readonly title: string | null }) | null,
+  anyApp: boolean,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): string | null =>
+  openingApp(source, anyApp, editors) ??
+  (chatGptTitleToFind(source, anyApp, editors) === null ? null : "ChatGPT");
+
 export interface SourceLabel {
   /** A site the shelf knows, shown with its mark. */
   readonly service: Service | null;
