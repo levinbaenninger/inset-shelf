@@ -18,6 +18,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
+import { codeAction, codeWay } from "@shared/code-editors";
+import type { CodeEditor } from "@shared/code-editors";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
@@ -33,7 +35,7 @@ import type {
 } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
-import type { Service } from "@shared/web-source";
+import type { SourceLabel, Service } from "@shared/web-source";
 import {
   createContext,
   isValidElement,
@@ -70,6 +72,7 @@ import { liveEdits } from "./drafts";
 import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import { fileSizeText, whenText } from "./format";
 import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
+import { KnownEditors } from "./known-editors";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
@@ -134,47 +137,109 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
-/** The source line's tooltip: the whole line when it shows cut, then where it leads (the page, the app a click opens, the file), 300 characters in all; null when it would only repeat what shows. */
-const sourceTitle = (
-  shown: string,
-  opens: string | null,
-  cut: boolean
-): string | undefined => {
-  const lines = [
-    ...(cut ? [shown] : []),
-    ...(opens === null || opens === shown ? [] : [opens]),
-  ];
+/** Where a click on the source line leads. */
+interface Leads {
+  /** The page it opens, shown unless the line already says it. */
+  readonly to: string | null;
+  /** The file it is from, from home: it keeps room of its own in the tooltip, and its end. */
+  readonly path: string | null;
+  /** What a click does, which the tooltip never cuts. */
+  readonly action: string | null;
+}
 
-  return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
-};
+/** The room a tooltip keeps for a file's folder when the line beside it is too long to show whole. */
+const FOLDER_KEPT = 60;
 
-/** The least of a file's path a tooltip keeps, however long the line beside it. */
-const PATH_TOOLTIP_MIN = 60;
+/** The least room worth giving a folder beside a whole line: under it, the folder's end says nothing. */
+const FOLDER_LEAST = 12;
 
-/** `text` in `room` characters, losing its start: a path's end names the file. */
+/** `text` in `room` characters, losing its start: a path's end is its nearest part. */
 const endOf = (text: string, room: number): string =>
   text.length > room ? `…${text.slice(1 - room)}` : text;
 
-/** `text` in `room` characters, losing its end. */
-const startOf = (text: string, room: number): string =>
-  text.length > room ? `${text.slice(0, room - 1).trimEnd()}…` : text;
-
 /**
- * A code item's tooltip: the whole line when it shows cut, then where the
- * file is, in a tooltip's characters in all. The path keeps room of its own,
- * so a long line never pushes it out.
+ * The lines that say where a code item's file is, in `room` characters. A
+ * line that shows whole leaves the path to say it all, the file's name at its
+ * end. A line that shows cut is given whole first, name and all, so the path
+ * under it is the folder alone, in the room that is left. Only a line too
+ * long for the tooltip is cut, and the folder then keeps room of its own.
  */
-const codeTitle = (shown: string, path: string, cut: boolean): string => {
-  if (!cut || shown === path) {
-    return endOf(path, TOOLTIP_MAX);
+const fileLines = (
+  shown: string,
+  path: string,
+  cut: boolean,
+  room: number
+): readonly string[] => {
+  if (!cut) {
+    return [endOf(path, room)];
   }
 
-  const where = endOf(
-    path,
-    Math.max(PATH_TOOLTIP_MIN, TOOLTIP_MAX - 1 - shown.length)
-  );
+  const folder = path.slice(0, path.lastIndexOf("/") + 1);
+  const left = room - 1 - shown.length;
 
-  return `${startOf(shown, TOOLTIP_MAX - 1 - where.length)}\n${where}`;
+  if (folder === "" || (left >= 0 && left < FOLDER_LEAST)) {
+    return [tooltipText(shown, room)];
+  }
+
+  const where = endOf(folder, left < 0 ? FOLDER_KEPT : left);
+
+  return [tooltipText(shown, room - 1 - where.length), where];
+};
+
+/**
+ * The source line's tooltip: the whole line when it shows cut, then where it
+ * leads (the page, or the file), then what a click does, 300 characters in
+ * all; undefined when it would only repeat what shows.
+ */
+const sourceTitle = (
+  shown: string,
+  { action, path, to }: Leads,
+  cut: boolean
+): string | undefined => {
+  const last = action === null || action === shown ? [] : [action];
+
+  const room =
+    TOOLTIP_MAX - last.reduce((sum, each) => sum + each.length + 1, 0);
+
+  if (path !== null && path !== shown) {
+    return [...fileLines(shown, path, cut, room), ...last].join("\n");
+  }
+
+  const lines = [
+    ...(cut ? [shown] : []),
+    ...(to === null || to === shown ? [] : [to]),
+  ];
+
+  return lines.length === 0
+    ? last[0]
+    : [tooltipText(lines.join("\n"), room), ...last].join("\n");
+};
+
+/**
+ * Where a click on the source line leads: the page, the app, or the file
+ * (from home), which opens in its editor or, when no address opens it as
+ * itself, is shown in its folder.
+ */
+const leadsTo = (
+  context: ItemContext,
+  app: string | null,
+  code: SourceLabel["code"],
+  editors: readonly CodeEditor[]
+): Leads => {
+  if (app === null) {
+    return { action: null, path: null, to: context.url };
+  }
+
+  const way =
+    context.code === null ? null : codeWay(app, context.code, editors);
+
+  return way === null
+    ? { action: `Open ${app}`, path: null, to: null }
+    : {
+        action: codeAction(app, way, isMac),
+        path: code?.path ?? null,
+        to: null,
+      };
 };
 
 /** The user's home folder, from the shelf's view: a code item's path shows from "~". */
@@ -183,7 +248,8 @@ export const HomeFolder = createContext<string | null>(null);
 /**
  * Where an item came from, in one quiet line: the site and what on it for
  * pages the shelf knows, the file and project for a code editor, else the app
- * and window. A page address opens in the browser.
+ * and window. A page address opens in the browser, a code item's file in its
+ * editor.
  */
 export const SourceLine = ({
   context,
@@ -195,8 +261,9 @@ export const SourceLine = ({
   const { code, label, service } = sourceLabel(context, use(HomeFolder));
   const serviceIcon = service === null ? Link01Icon : SERVICE_ICON[service];
   const icon = code === undefined ? serviceIcon : CodeIcon;
-  // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
-  const app = openingApp(context, isMac);
+  // A code editor opens its file again; a desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
+  const editors = use(KnownEditors);
+  const app = openingApp(context, isMac, editors);
   const shown = label === "" ? (context.url ?? "") : label;
   const plain = useRef<HTMLParagraphElement>(null);
   const link = useRef<HTMLButtonElement>(null);
@@ -208,11 +275,11 @@ export const SourceLine = ({
       <p
         className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
         ref={plain}
-        title={
-          code?.path === null || code?.path === undefined
-            ? sourceTitle(label, null, plainCut)
-            : codeTitle(label, code.path, plainCut)
-        }
+        title={sourceTitle(
+          label,
+          { action: null, path: code?.path ?? null, to: null },
+          plainCut
+        )}
       >
         {service === null && code === undefined ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -228,11 +295,7 @@ export const SourceLine = ({
       {...coach("item-source")}
       onClick={onOpenLink}
       ref={link}
-      title={sourceTitle(
-        shown,
-        app === null ? context.url : `Open ${app}`,
-        linkCut
-      )}
+      title={sourceTitle(shown, leadsTo(context, app, code, editors), linkCut)}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
@@ -276,7 +339,11 @@ const LinkRow = ({
         onOpenLink(link.url);
       }}
       ref={ref}
-      title={sourceTitle(link.text, link.url, cut)}
+      title={sourceTitle(
+        link.text,
+        { action: null, path: null, to: link.url },
+        cut
+      )}
       type="button"
     >
       <HugeiconsIcon

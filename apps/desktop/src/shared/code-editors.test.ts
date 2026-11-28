@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { codeEditor, codeLabel, codePlace, titleParts } from "./code-editors";
+import {
+  CODE_EDITORS,
+  codeEditor,
+  codeLabel,
+  codeAction,
+  codePlace,
+  codeWay,
+  openAddress,
+  titleParts,
+} from "./code-editors";
 import type { CodeEditor } from "./code-editors";
 
 const rowOf = (app: string): CodeEditor => {
@@ -250,5 +259,124 @@ describe(codeLabel, () => {
     expect(codeLabel({ file, line: null, root }, "/Users/an").path).toBe(
       "apps/desktop/src/shared/recall.ts"
     );
+  });
+});
+
+/** The file and line an address names, as the editor reads them back. */
+const opened = (address: string | null): string | null =>
+  address === null ? null : decodeURIComponent(new URL(address).pathname);
+
+describe(openAddress, () => {
+  const code = rowOf("Code");
+
+  it("opens a file in Code at its line", () => {
+    expect(
+      openAddress(code, { file: "/Users/anna/p/a.ts", line: 9, root: null }, 12)
+    ).toBe("vscode://file/Users/anna/p/a.ts:12");
+  });
+
+  it.each([
+    // An editor reads a colon and a number at an address's end as a line, encoded or not.
+    ["a name that ends like a line", "/Users/anna/p/report:12", null],
+    ["a name that ends like a line, at a line", "/Users/anna/p/report:12", 5],
+    ["a name that ends like a line and a column", "/Users/anna/p/a:3:9", null],
+    // Code splits the whole path on colons and takes a number wherever one stands alone.
+    ["a number between colons in a name", "/Users/anna/p/a:12:b.ts", null],
+    ["a folder with a colon", "/Users/anna/p:3/src/a.ts", null],
+    ["a colon and no number", "/Users/anna/p/a:b.ts", 4],
+    // Code opens a workspace file as a workspace, leaving the window's own.
+    ["a workspace file", "/Users/anna/p/all.code-workspace", null],
+    ["a workspace file at a line", "/Users/anna/p/all.code-workspace", 4],
+  ])(
+    "gives no address for %s, which it could not open as itself",
+    (_, file, line) => {
+      expect(openAddress(code, { file, line, root: null }, line)).toBeNull();
+    }
+  );
+
+  it("opens the file alone when no line is known", () => {
+    expect(
+      openAddress(
+        code,
+        { file: "/Users/anna/p/a.ts", line: 9, root: null },
+        null
+      )
+    ).toBe("vscode://file/Users/anna/p/a.ts");
+  });
+
+  it.each([
+    ["a space", "/Users/anna/My Code/a b.ts"],
+    ["a #", "/Users/anna/p/#notes/a#1.ts"],
+    ["a ?", "/Users/anna/p/why?.ts"],
+    ["a %", "/Users/anna/p/100%/a%20.ts"],
+    ["a non-ASCII letter", "/Users/anna/Projekte/Zürich/straße.ts"],
+    ["a $ and an &", "/Users/anna/p/$&a.ts"],
+  ])("keeps a path with %s whole", (_, file) => {
+    const place = { file, line: null, root: null };
+
+    expect(opened(openAddress(code, place, 7))).toBe(`${file}:7`);
+    expect(opened(openAddress(code, place, null))).toBe(file);
+  });
+
+  it("leaves no part of the path to be read as the address's query or fragment", () => {
+    const address = new URL(
+      openAddress(code, { file: "/p/a?b#c.ts", line: null, root: null }, 3) ??
+        ""
+    );
+
+    expect([address.search, address.hash]).toStrictEqual(["", ""]);
+  });
+
+  it("gives no address for an editor not known to open a file", () => {
+    expect(
+      openAddress(rowOf("Cursor"), { file: "/p/a.ts", line: 1, root: null }, 1)
+    ).toBeNull();
+  });
+
+  it("knows how to open every editor whose window names its file", () => {
+    expect(
+      CODE_EDITORS.filter(
+        (editor) => editor.document === "file" && editor.open === null
+      )
+    ).toStrictEqual([]);
+  });
+});
+
+const at = (file: string) => ({ file, line: null, root: null });
+
+describe(codeWay, () => {
+  it("opens a file in the editor it came from", () => {
+    expect(codeWay("Code", at("/Users/anna/p/a.ts"))).toBe("editor");
+  });
+
+  it.each([
+    ["a path with a colon", "/Users/anna/p/a:12.ts"],
+    ["a workspace file", "/Users/anna/p/all.code-workspace"],
+  ])(
+    "shows %s in its folder, since no address opens it as itself",
+    (_, file) => {
+      expect(codeWay("Code", at(file))).toBe("folder");
+    }
+  );
+
+  it.each([
+    ["an app with no row", "Zed"],
+    ["no app", null],
+  ])("has no way to a file for %s", (_, app) => {
+    expect(codeWay(app, at("/Users/anna/p/a.ts"))).toBeNull();
+  });
+
+  it("knows only the editors it is given", () => {
+    expect(codeWay("Code", at("/Users/anna/p/a.ts"), [])).toBeNull();
+  });
+});
+
+describe(codeAction, () => {
+  it.each([
+    ["editor", true, "Open in Code"],
+    ["folder", true, "Show in Finder"],
+    ["folder", false, "Show in Folder"],
+  ] as const)("says what a click does: %s, on a Mac %s", (way, mac, words) => {
+    expect(codeAction("Code", way, mac)).toBe(words);
   });
 });

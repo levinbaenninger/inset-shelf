@@ -1,4 +1,11 @@
-import { codeEditor, codeLabel, shownTitleParts } from "./code-editors";
+import {
+  CODE_EDITORS,
+  codeEditor,
+  codeLabel,
+  codeWay,
+  shownTitleParts,
+} from "./code-editors";
+import type { CodeEditor } from "./code-editors";
 import type { CodePlace } from "./code-place";
 import { withoutAppName } from "./window-title";
 
@@ -227,18 +234,29 @@ interface AppSource {
   readonly app: string | null;
   readonly appLink: string | null;
   readonly url: string | null;
+  /** The file a code editor showed, which opens there again. */
+  readonly code: CodePlace | null;
 }
 
 /**
- * The desktop app an item opens in again, or null when its page opens in the
- * browser instead. macOS brings any of these apps forward by name; elsewhere
- * an app needs a link to open at: a Claude chat, a Notion page, a T3 Code
- * thread.
+ * The app an item opens in again, or null when its page opens in the
+ * browser instead. A code editor among `editors` opens the file it showed,
+ * wherever the shelf read one; a file from any other app opens nothing.
+ * macOS brings any of the desktop apps forward by name;
+ * elsewhere an app needs a link to open at: a Claude chat, a Notion page, a
+ * T3 Code thread.
  */
 export const openingApp = (
   source: AppSource | null,
-  anyApp: boolean
+  anyApp: boolean,
+  editors: readonly CodeEditor[] = CODE_EDITORS
 ): string | null => {
+  if (source !== null && source.code !== null) {
+    return codeWay(source.app, source.code, editors) === null
+      ? null
+      : source.app;
+  }
+
   const app = desktopApp(source?.app ?? null);
 
   if (app === null || anyApp) {

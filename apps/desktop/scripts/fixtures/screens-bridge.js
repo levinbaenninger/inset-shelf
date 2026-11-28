@@ -328,7 +328,12 @@ if (page === "shelf") {
       }),
       on,
       openImage: logged("openImage", nothing),
-      openLink: logged("openLink", nothing),
+      // `openNotice`: main answers the open with this notice, as when a code item's file is gone.
+      openLink: logged("openLink", () => {
+        if (data?.openNotice !== undefined) {
+          globalThis.__emit("notice", data.openNotice);
+        }
+      }),
       // Attachments: each call logged; files dropped on an item land on it, and the answer names them, as main's does when all of it fits.
       addFilesTo: logged("addFilesTo", ({ id, paths }) => {
         const added = paths.map((file) => {

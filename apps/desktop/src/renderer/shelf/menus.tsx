@@ -26,6 +26,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
+import type { CodeEditor } from "@shared/code-editors";
 import { COLOR_HEX } from "@shared/colors";
 import {
   COLOR_NAMES,
@@ -43,7 +44,7 @@ import type {
 } from "@shared/menus";
 import { COLORS } from "@shared/shelf";
 import type { ItemId, SectionId, ShelfDoc } from "@shared/shelf";
-import { useState } from "react";
+import { use, useState } from "react";
 import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
 import {
@@ -57,6 +58,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { isMac } from "@/shared/platform";
+
+import { KnownEditors } from "./known-editors";
 
 type ColorsEntry = Extract<MenuEntry, { readonly kind: "colors" }>;
 
@@ -345,7 +348,8 @@ const windowMenu = (floatOnTop: boolean) => (isMac ? null : { floatOnTop });
 const entriesFor = (
   target: MenuTarget,
   doc: ShelfDoc,
-  floatOnTop: boolean
+  floatOnTop: boolean,
+  editors: readonly CodeEditor[]
 ): readonly MenuEntry[] | null => {
   if (target.kind === "shelf") {
     return shelfMenu(windowMenu(floatOnTop));
@@ -367,7 +371,9 @@ const entriesFor = (
 
   const item = doc.items.find((candidate) => candidate.id === target.id);
 
-  return item === undefined ? null : itemMenu(item, doc, isMac, target.place);
+  return item === undefined
+    ? null
+    : itemMenu(item, doc, isMac, target.place, editors);
 };
 
 /**
@@ -393,8 +399,10 @@ export const PointerMenu = ({
   /** The menu has left the page, by Escape, a click elsewhere or a choice. */
   readonly onClosed: () => void;
 }) => {
+  const editors = use(KnownEditors);
+
   const entries =
-    menu === null ? null : entriesFor(menu.target, doc, floatOnTop);
+    menu === null ? null : entriesFor(menu.target, doc, floatOnTop, editors);
 
   const onKey = (choice: MenuChoice): void => {
     onChoose(choice);

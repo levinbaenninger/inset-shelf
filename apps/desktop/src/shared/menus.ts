@@ -1,3 +1,5 @@
+import { CODE_EDITORS, codeAction, codeWay } from "./code-editors";
+import type { CodeEditor } from "./code-editors";
 import { hasAttachments, hasDetails } from "./shelf";
 import type {
   ItemColor,
@@ -299,8 +301,25 @@ const copyDetails = (item: ShelfItem): readonly MenuEntry[] =>
       ]
     : [];
 
+/** What ⌘O on an item from `app` says it does: a code file opens in its editor or is shown in its folder. */
+const openLabel = (
+  item: ShelfItem,
+  app: string,
+  mac: boolean,
+  editors: readonly CodeEditor[]
+): string => {
+  const place = item.context?.code ?? null;
+  const way = place === null ? null : codeWay(app, place, editors);
+
+  return way === null ? `Open in ${app}` : codeAction(app, way, mac);
+};
+
 /** ⌘O: an image opens to draw on; anything else opens where it came from, if the shelf knows. */
-const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
+const open = (
+  item: ShelfItem,
+  mac: boolean,
+  editors: readonly CodeEditor[]
+): readonly MenuEntry[] => {
   if (item.kind === "image") {
     return [
       {
@@ -314,7 +333,7 @@ const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
     ];
   }
 
-  const app = openingApp(item.context, mac);
+  const app = openingApp(item.context, mac, editors);
 
   if (app === null && (item.context?.url ?? null) === null) {
     return [];
@@ -327,7 +346,7 @@ const open = (item: ShelfItem, mac: boolean): readonly MenuEntry[] => {
       enabled: true,
       icon: "open",
       kind: "choice",
-      label: app === null ? "Open Page" : `Open in ${app}`,
+      label: app === null ? "Open Page" : openLabel(item, app, mac, editors),
     },
   ];
 };
@@ -344,7 +363,8 @@ export const itemMenu = (
   item: ShelfItem,
   doc: ShelfDoc,
   mac = true,
-  place: ItemMenuPlace = "row"
+  place: ItemMenuPlace = "row",
+  editors: readonly CodeEditor[] = CODE_EDITORS
 ): readonly MenuEntry[] => [
   {
     accelerator: "CommandOrControl+C",
@@ -369,7 +389,7 @@ export const itemMenu = (
           label: "Details",
         } satisfies MenuEntry,
       ]),
-  ...open(item, mac),
+  ...open(item, mac, editors),
   {
     choice: { id: item.id, kind: "edit" },
     enabled: true,

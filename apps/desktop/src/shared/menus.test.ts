@@ -315,6 +315,81 @@ describe(itemMenu, () => {
       )
     ).toMatchObject({ label: "Open in T3 Code" });
   });
+
+  it("offers to open a code item's file in its editor, and nothing new for an item from the same editor without one", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const code = {
+      file: "/Users/anna/p/recall.ts",
+      line: null,
+      root: "/Users/anna/p",
+    };
+
+    const from = (place: typeof code | null) =>
+      itemMenu(
+        {
+          ...item,
+          context: {
+            app: "Code",
+            appLink: null,
+            code: place,
+            title: "recall.ts — p",
+            url: null,
+          },
+        },
+        doc
+      );
+
+    expect(
+      from(code).find(
+        (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
+      )
+    ).toMatchObject({
+      accelerator: "CommandOrControl+O",
+      label: "Open in Code",
+    });
+    expect(
+      labels(from(code)).filter((label) => label !== "Open in Code")
+    ).toStrictEqual(labels(from(null)));
+    expect(labels(from(null))).not.toContain("Open in Code");
+  });
+
+  it("says a code file is shown in its folder when no address opens it, and offers nothing for an app it does not know", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const open = (app: string, file: string) =>
+      itemMenu(
+        {
+          ...item,
+          context: {
+            app,
+            appLink: null,
+            code: { file, line: null, root: null },
+            title: "a.ts — p",
+            url: null,
+          },
+        },
+        doc
+      ).find(
+        (entry) => entry.kind === "choice" && entry.choice.kind === "openSource"
+      );
+
+    expect(open("Code", "/Users/anna/p/a:12.ts")).toMatchObject({
+      label: "Show in Finder",
+    });
+    expect(open("Code", "/Users/anna/p/all.code-workspace")).toMatchObject({
+      label: "Show in Finder",
+    });
+    expect(open("Zed", "/Users/anna/p/a.ts")).toBeUndefined();
+  });
 });
 
 describe(pickedMenu, () => {

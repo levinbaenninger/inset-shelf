@@ -32,6 +32,19 @@ export interface CodeEditor {
    * can set another), is split on the longest dash the title holds.
    */
   readonly dash?: Readonly<Record<string, TitleDash>>;
+  /**
+   * The addresses that open a file in the editor, with `{path}` the file's
+   * absolute path and `{line}` its line: `atLine` when a line is known, `file`
+   * when not. Null when how the editor opens a file is not confirmed.
+   */
+  readonly open: {
+    readonly file: string;
+    readonly atLine: string;
+    /** An address that names only the editor's scheme: it finds the app that takes the others, and opens nothing. */
+    readonly scheme: string;
+    /** The ends of file names the address opens as something other than the file itself, a workspace say. */
+    readonly not?: readonly string[];
+  } | null;
 }
 
 /** What a window title names, by an editor's row. */
@@ -53,12 +66,21 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
     // From Code's bundle, which sets the window's document to the active
     // editor's local file; not read from a running window with a file open.
     document: "file",
+    // Code's documented way in from outside (code.visualstudio.com/docs/configure/command-line).
+    // A workspace file opens as a workspace there, in place of the window's own.
+    open: {
+      atLine: "vscode://file{path}:{line}",
+      file: "vscode://file{path}",
+      not: [".code-workspace"],
+      scheme: "vscode://",
+    },
     title: ["file", "project"],
   },
   {
     // Inferred from Code, which it forks; not read from a running Cursor.
     apps: ["Cursor"],
     document: null,
+    open: null,
     title: ["file", "project"],
   },
 ];
@@ -232,4 +254,65 @@ export const codeLabel = (place: CodePlace, home: string | null): CodeLabel => {
       pathInProject(place),
     project: root === "" ? null : root.slice(root.lastIndexOf("/") + 1),
   };
+};
+
+/**
+ * The address that opens a code place in its editor, at `line` when given,
+ * or null when the editor's row knows no way to open a file, or the address
+ * would open something other than this file: a path that holds a colon,
+ * which an editor reads as a line wherever it stands and however the address
+ * encodes it, or a name the row says it opens as something else. Each part of
+ * the path is encoded, so a space, "#", "?", "%" or a letter outside ASCII
+ * stays part of the path. The only place an editor's address is built.
+ */
+export const openAddress = (
+  editor: CodeEditor,
+  place: CodePlace,
+  line: number | null
+): string | null => {
+  if (
+    editor.open === null ||
+    place.file.includes(":") ||
+    editor.open.not?.some((end) => place.file.endsWith(end)) === true
+  ) {
+    return null;
+  }
+
+  const path = place.file.split("/").map(encodeURIComponent).join("/");
+  const template = line === null ? editor.open.file : editor.open.atLine;
+
+  return template
+    .replace("{path}", () => path)
+    .replace("{line}", () => String(line));
+};
+
+/** How a click on a code item reaches its file: opened in its editor, or shown in its folder. */
+export type CodeWay = "editor" | "folder";
+
+/**
+ * What a click on a code item does. Only an item whose app has a row among
+ * `editors` reaches a file at all: null for any other. A file no address
+ * opens as itself is shown in its folder.
+ */
+export const codeWay = (
+  app: string | null,
+  place: CodePlace,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): CodeWay | null => {
+  const editor = codeEditor(app, editors);
+
+  if (editor === undefined) {
+    return null;
+  }
+
+  return openAddress(editor, place, null) === null ? "folder" : "editor";
+};
+
+/** A code item's click in the words its tooltip and its menu entry use. */
+export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
+  if (way === "editor") {
+    return `Open in ${app}`;
+  }
+
+  return mac ? "Show in Finder" : "Show in Folder";
 };

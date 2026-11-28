@@ -132,7 +132,8 @@ const shownBy = async (
     : { ...read, areas: [...read.areas, { title: "", url: copied }] };
 };
 
-const EDITORS = [...CODE_EDITORS, ...E2E_EDITORS];
+/** The editors main knows: the registry, and the desktop test's stand-in under its log. */
+export const EDITORS = [...CODE_EDITORS, ...E2E_EDITORS];
 
 /**
  * The window in front, read before Inset takes focus: its bounds for docking,

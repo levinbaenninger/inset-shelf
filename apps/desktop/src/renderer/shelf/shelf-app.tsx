@@ -2,6 +2,7 @@ import { Cancel01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
+import { CODE_EDITORS } from "@shared/code-editors";
 import type {
   ActionResult,
   DetailField,
@@ -67,6 +68,7 @@ import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
 import { focusRow, HomeFolder, ItemRow } from "./item-row";
 import { keptItems } from "./kept-items";
+import { KnownEditors } from "./known-editors";
 import { lookAt } from "./made-items";
 import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
@@ -2081,7 +2083,9 @@ export const ShelfApp = () => {
 
   return view === null ? null : (
     <HomeFolder value={view.home ?? null}>
-      <Shelf view={view} />
+      <KnownEditors value={view.editors ?? CODE_EDITORS}>
+        <Shelf view={view} />
+      </KnownEditors>
     </HomeFolder>
   );
 };
