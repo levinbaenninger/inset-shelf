@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { INITIAL_PILL, stepPill } from "../shared/pill";
 import type { PillEvent, PillState } from "../shared/pill";
+import { addedNotice } from "./added-file";
 import type { SelectionResult } from "./selection";
 import { selectionProblem, warningToUser } from "./selection-problem";
 
@@ -41,6 +42,21 @@ describe("the clipboard warning of a capture", () => {
       message: `${failed.message} ${selectionProblem(NOT_PUT_BACK)}`,
       tone: "failed",
     });
+  });
+
+  it("says the clipboard right after what failed and before each file's reason, so a failed toast's two lines show both", () => {
+    const reasons = [
+      "a.pdf is larger than 100 MB.",
+      "b.pdf is larger than 100 MB.",
+      "c.pdf is larger than 100 MB.",
+    ];
+
+    expect(
+      warningToUser(NOT_PUT_BACK, false, addedNotice(0, 3, reasons, "file"))
+        ?.message
+    ).toBe(
+      `Nothing was added. ${selectionProblem(NOT_PUT_BACK)} ${reasons.join(" ")}`
+    );
   });
 
   it("replaces a success notice, which the shelf's items already show", () => {
