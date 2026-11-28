@@ -590,7 +590,7 @@ const TUTORIAL_TASKS = [
   },
   {
     anchor: null,
-    how: "Press ⇧⌘4 and drag over an area. Click Add to Shelf on the card that appears beside the shelf.",
+    how: "Press ⇧⌘4 and drag over an area. Click Add to Shelf on the card that appears beside the shelf, or drag the card onto an open item.",
     id: "screenshot",
     keys: "⇧⌘4",
     title: "Capture part of the screen",
@@ -4006,7 +4006,6 @@ const SCREENSHOT_VIEW = {
   imageUrl: `/.fixtures/${LOGIN.file}`,
   save: { state: "idle" },
   seq: 1,
-  target: null,
   widthPx: LOGIN.widthPx,
 };
 
@@ -4016,15 +4015,10 @@ const CARD_REASON = "Datenträger voll";
 /** Main's reason a card's save failed: a sentence of its own, here a long one. It says what went wrong first, as main's own sentences do (save-error.ts), so a long name after it can't push that out of the card's two lines. */
 const CARD_FAILURE = `${CARD_REASON}: „${LONG_WORD}“.`;
 
-/** The card as main shows it once a save failed and the shelf holds the screenshot nowhere: `to` reads Retry. */
-const failedCard = (
-  to: "shelf" | "item" | null,
-  message = CARD_FAILURE,
-  target: { readonly id: string; readonly label: string } | null = null
-) => ({
+/** The card as main shows it once a save failed and the shelf holds the screenshot nowhere: with "shelf", Add to Shelf reads Retry; with null, a drop failed and another drag is its retry. */
+const failedCard = (to: "shelf" | null, message = CARD_FAILURE) => ({
   ...SCREENSHOT_VIEW,
   save: { message, placed: null, state: "failed", to },
-  target,
 });
 
 /** The card as main shows it once a save failed and left the screenshot on the shelf, not saved (`placed`, src/shared/contracts.ts): Retry for that place is the only add. */
@@ -4036,7 +4030,6 @@ const placedCard = (
 ) => ({
   ...SCREENSHOT_VIEW,
   save: { message, placed, state: "failed" },
-  target: null,
 });
 
 const CardButtonSchema = z.object({
@@ -5817,7 +5810,7 @@ const STRESS_SCENES: readonly Scene[] = (
       data: {
         view: {
           ...SCREENSHOT_VIEW,
-          save: { placed: null, state: "saving", to: "shelf" },
+          save: { placed: null, state: "saving" },
         },
       },
       keepPointer: true,
@@ -6981,6 +6974,20 @@ const ringed = async (page: Page, selector: string): Promise<boolean> =>
       )
     );
 
+/** How the shelf window looks while files are over it: ringed for the shelf, tinted too as one item's drop target, or refusing them. */
+const panelLook = async (page: Page) =>
+  z.object({ item: z.boolean(), pin: z.boolean(), refused: z.boolean() }).parse(
+    await page.evaluate(() => {
+      const panel = document.querySelector(".shelf-panel");
+
+      return {
+        item: panel?.classList.contains("bg-pin/10") === true,
+        pin: panel?.classList.contains("ring-pin") === true,
+        refused: panel?.classList.contains("ring-destructive/50") === true,
+      };
+    })
+  );
+
 /** Files dragged from outside over an element, as the system's drag would bring them. */
 const dragFilesOver = async (page: Page, selector: string) =>
   z.string().parse(
@@ -7339,22 +7346,13 @@ const retryRead = (
 
 const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
 
-/** A failed Add to “…” whose Retry is the only add: the screenshot is on its item, not saved. */
+/** A failed drop whose Retry is the only add: the screenshot is on its item, not saved. */
 const CARD_SOLE = placedCard({ ...CARD_ITEM, to: "item" }, "The disk is full.");
 
-/** The same card once the user took the screenshot off its item (Discard changes): both adds are back. */
-const CARD_BOTH = failedCard(
-  "item",
-  "Saving didn’t finish in time.",
-  CARD_ITEM
-);
+/** The same card once the user took the screenshot off its item (Discard changes): Add to Shelf is back, and another drag is the drop's retry. */
+const CARD_OFF = failedCard(null, "Saving didn’t finish in time.");
 
 const CARD_RETRY = `Retry adding to “${CARD_LABEL}”`;
-
-/** What one press of Retry adding to “…” sends, as `cardAddsSent` reads it. */
-const CARD_TO_ITEM = JSON.stringify([
-  { arg: { id: CARD_ITEM.id, seq: 1 }, call: "addToItem" },
-]);
 
 /** Main pushes the card anew, as a write's end does (screenshot-saves.ts, retarget). */
 const pushCard = async (
@@ -7623,40 +7621,6 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       },
       data: { view: ROW_ATTACH_VIEW },
       name: "attach-row-keys",
-    },
-    {
-      check: async (page) => {
-        const last = async () =>
-          z
-            .array(z.string().nullable())
-            .parse(await page.evaluate("globalThis.__selection"))
-            .at(-1);
-
-        const seen: unknown[] = [];
-
-        await select(page, 906);
-        await page.waitForTimeout(100);
-        seen.push(await last());
-        await page.keyboard.press("ArrowRight");
-        await page.getByRole("button", { name: "Back to the list" }).waitFor();
-        seen.push(await last());
-        await page.getByRole("button", { name: "Back to the list" }).click();
-        await item(page, 906).click({ modifiers: ["Meta"] });
-        await item(page, 12).click({ modifiers: ["Meta"] });
-        await page.waitForTimeout(100);
-        seen.push(await last());
-        await page.keyboard.press("Escape");
-        await page.waitForTimeout(100);
-        seen.push(await last());
-
-        const want = [uuid(906), uuid(906), null, null];
-
-        return JSON.stringify(seen) === JSON.stringify(want)
-          ? null
-          : `the selection main hears was ${JSON.stringify(seen)}, not ${JSON.stringify(want)}`;
-      },
-      data: { view: ROW_ATTACH_VIEW },
-      name: "attach-selection-reported",
     },
     {
       act: async (page) => {
@@ -7962,156 +7926,117 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
       name: "attach-details-paste",
     },
     {
+      // Files over details: they attach to the item open there, which lights as an open row does; a drop's own notice offers Undo.
+      act: async (page) => {
+        await details(page, 906);
+        await dragFilesOver(page, "[data-details]");
+      },
       check: async (page) => {
-        const add = page.getByRole("button", { name: /^Add to “/u });
-        const box = await add.boundingBox();
+        const look = await panelLook(page);
 
-        const corners = await page
-          .getByRole("button", {
-            name: /Dismiss|Keep on Screen|Annotate|Save to Downloads/u,
-          })
-          .evaluateAll((buttons) =>
-            buttons.map((button) => {
-              const rect = button.getBoundingClientRect();
+        const refused = await page.getByText(/the most it can/u).count();
 
-              return {
-                bottom: rect.bottom,
-                left: rect.left,
-                right: rect.right,
-                top: rect.top,
-              };
-            })
-          );
+        return look.item && look.pin && !look.refused && refused === 0
+          ? null
+          : `files over details must light it as the item's drop target: ${JSON.stringify(look)}, ${refused} refusals said`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-drop-target",
+    },
+    {
+      // A full item open in details refuses files and says why while they are over it.
+      act: async (page) => {
+        await details(page, 901);
+        await dragFilesOver(page, "[data-details]");
+      },
+      check: async (page) => {
+        const effect = await dragFilesOver(page, "[data-details]");
+        const look = await panelLook(page);
 
-        if (box === null) {
-          return "the card shows no Add to “…” while an item is selected";
+        const said = await page
+          .getByText(/the most it can/u)
+          .waitFor({ timeout: 2000 })
+          .then(() => true)
+          .catch(() => false);
+
+        return effect === "none" && said && look.refused && !look.pin
+          ? null
+          : `a full item in details must refuse files and say why: ${effect}, ${String(said)}, ${JSON.stringify(look)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-drop-full",
+    },
+    {
+      // A real drop in details attaches to that item (addFilesTo), as ⌘V there does; a full item takes nothing.
+      check: async (page) => {
+        await details(page, 906);
+        await dropFilesOn(page, "[data-details]");
+        await page.getByRole("button", { name: "Back to the list" }).click();
+        await details(page, 901);
+        await dropFilesOn(page, "[data-details]");
+        await page.waitForTimeout(100);
+
+        const all = await calls(page);
+
+        const sent = all.filter(
+          (each) => each.call === "addFilesTo" || each.call === "addFiles"
+        );
+
+        const expected = [
+          {
+            arg: { id: uuid(906), paths: ["/Users/anna/Desktop/offer.pdf"] },
+            call: "addFilesTo",
+          },
+        ];
+
+        return isDeepStrictEqual(sent, expected)
+          ? null
+          : `the drops in details sent ${JSON.stringify(sent)}`;
+      },
+      data: { filePaths: true, view: ROW_ATTACH_VIEW },
+      name: "attach-details-drop-real",
+    },
+    {
+      // At rest the card names no item: Add to Shelf is its only add, and dragging the picture is how it goes onto an item.
+      check: async (page) => {
+        const named = await page
+          .getByRole("button", { name: /Add to “|Retry adding to/u })
+          .count();
+
+        if (named > 0) {
+          return "the card names an item to add to";
         }
 
-        const covers = corners.some(
-          (corner) =>
-            box.x < corner.right &&
-            box.x + box.width > corner.left &&
-            box.y < corner.bottom &&
-            box.y + box.height > corner.top
-        );
+        const picture = page.getByRole("button", {
+          exact: true,
+          name: "Drag the screenshot onto an item or into another app",
+        });
+
+        if ((await picture.count()) !== 1) {
+          return "the picture doesn't say it drags onto an item";
+        }
 
         const before = await callCount(page);
 
-        await add.click();
+        await picture.dispatchEvent("dragstart");
 
         const sent = await calls(page, before);
 
-        if (covers) {
-          return "Add to “…” covers a corner button";
-        }
-
-        const shelfBox = await boxOf(
-          page.getByRole("button", { exact: true, name: "Add to Shelf" })
-        );
-
-        const itemBox = await boxOf(add);
-
-        // Add to Shelf leads: Add to “…” is a line of words under it, lower than the pill and with no fill of its own.
-        if (itemBox.top < shelfBox.bottom || tall(itemBox) >= tall(shelfBox)) {
-          return `Add to “…” must sit under Add to Shelf, smaller: ${JSON.stringify({ itemBox, shelfBox })}`;
-        }
-
-        const fill = await add.evaluate(
-          (button) => getComputedStyle(button).backgroundColor
-        );
-
-        if (fill !== "rgba(0, 0, 0, 0)") {
-          return `Add to “…” is a second pill (${fill}), not a line of words`;
-        }
-
-        // The line names the item: about twenty characters of its name, not nine.
-        const named = await add.evaluate(
-          (button) =>
-            ([...button.querySelectorAll("span")]
-              .map((part) => part.firstChild?.nodeValue ?? "")
-              .find((text) => text.endsWith("…") && text.length > 1)?.length ??
-              1) - 1
-        );
-
-        if (named < 18) {
-          return `Add to “…” shows ${named} characters of the item's name, not about 20`;
-        }
-
-        // The name is cut inside the quotes: the closing one shows.
-        const closing = await boxOf(add.getByText("”", { exact: true }));
-
-        if (closing.right > itemBox.right || closing.left < itemBox.left) {
-          return "the closing quote of Add to “…” is cut off";
-        }
-
-        // The quote sits right after the ellipsis: no empty box between them.
-        const gap = z.number().parse(
-          await add.evaluate((button) => {
-            const name = [...button.querySelectorAll("span")].find(
-              (part) => part.firstChild?.nodeValue?.endsWith("…") === true
-            );
-
-            const quote = [...button.querySelectorAll("span")].find(
-              (part) => part.textContent === "”"
-            );
-
-            const range = document.createRange();
-
-            if (name?.firstChild === null || name?.firstChild === undefined) {
-              return -1;
-            }
-
-            range.selectNodeContents(name.firstChild);
-
-            return (
-              (quote?.getBoundingClientRect().left ?? Number.NaN) -
-              range.getBoundingClientRect().right
-            );
-          })
-        );
-
-        if (!(gap >= -0.5 && gap <= 1)) {
-          return `the closing quote of Add to “…” sits ${gap} px after the ellipsis`;
-        }
-
-        // The press carries the item the button named, so main can refuse it once the card names another.
-        return sent.some(
-          (each) =>
-            each.call === "addToItem" &&
-            isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+        return isDeepStrictEqual(
+          sent.map((each) => ({ arg: each.arg, call: each.call })),
+          [{ arg: 1, call: "startDrag" }]
         )
           ? null
-          : `Add to “…” sent ${JSON.stringify(sent)}`;
+          : `a drag of the picture sent ${JSON.stringify(sent)}`;
       },
-      data: {
-        view: {
-          ...SCREENSHOT_VIEW,
-          target: { id: uuid(12), label: CARD_LABEL },
-        },
-      },
-      name: "screenshot-card-attach",
+      data: { view: SCREENSHOT_VIEW },
+      name: "screenshot-card-drag",
       page: "screenshot",
     },
     {
-      // On hover Copy shows in its kept slot; Add to Shelf and Add to “…” stay where they were.
-      act: async (page) => {
-        await page.mouse.move(140, 60);
-        await page.waitForTimeout(300);
-      },
-      data: {
-        view: {
-          ...SCREENSHOT_VIEW,
-          target: { id: uuid(12), label: CARD_LABEL },
-        },
-      },
-      keepPointer: true,
-      name: "screenshot-card-attach-hover",
-      page: "screenshot",
-    },
-    {
+      // A drop whose picture file the disk refused: nothing is on the shelf, the card says why, and Add to Shelf stays; another drag is the drop's retry, so nothing reads Retry.
       check: async (page) => {
         const problem = await failedCardCheck([
-          `Retry adding to “${CARD_LABEL}”`,
           "Add to Shelf",
           "Copy",
           "Save to Downloads",
@@ -8122,36 +8047,30 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
           return problem;
         }
 
-        const retry = page.getByRole("button", { name: /^Retry adding to “/u });
-
-        if ((await retry.count()) !== 1) {
-          return "a failed Add to “…” must read Retry adding to “…”";
+        if (
+          (await page
+            .getByRole("button", { name: /Retry|Add to “/u })
+            .count()) > 0
+        ) {
+          return "a failed drop must offer no Retry and name no item";
         }
 
-        await retry.click();
+        await page
+          .getByRole("button", { exact: true, name: "Add to Shelf" })
+          .click();
 
         const sent = await calls(page);
 
-        return sent.some(
-          (each) =>
-            each.call === "addToItem" &&
-            isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
-        )
+        return sent.some((each) => each.call === "addToShelf" && each.arg === 1)
           ? null
-          : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
+          : `Add to Shelf after a failed drop sent ${JSON.stringify(sent)}`;
       },
-      // The disk refused the screenshot's picture file, so nothing is on the shelf: trying again can work, so the line offers it, and Add to Shelf stays.
-      data: {
-        view: failedCard("item", "The disk is full.", {
-          id: uuid(12),
-          label: CARD_LABEL,
-        }),
-      },
-      name: "screenshot-card-attach-failed",
+      data: { view: failedCard(null, "The disk is full.") },
+      name: "screenshot-card-drop-failed",
       page: "screenshot",
     },
     {
-      // The item filled up: main names it no more and offers no Retry (screenshot-saves.ts), and Add to Shelf is the way left.
+      // The item filled up before the drop reached main: no Retry, and Add to Shelf is the way left.
       check: async (page) => {
         const problem = await failedCardCheck([
           "Add to Shelf",
@@ -8170,15 +8089,15 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
 
         return retries === 0
           ? null
-          : "a full item must offer no Retry and no Add to “…”";
+          : "a full item must offer no Retry and name no item";
       },
       data: {
         view: failedCard(null, "Nothing was attached. An item holds up to 12."),
       },
-      name: "screenshot-card-attach-full",
+      name: "screenshot-card-drop-full",
       page: "screenshot",
     },
-    // A failed Add to “…” left the screenshot on its item, not saved: the shelf owns it there, so Retry is the one add and the one pill.
+    // A failed drop left the screenshot on its item, not saved: the shelf owns it there, so Retry is the one add and the one pill.
     retryOnly("screenshot-card-retry-only", "The disk is full.", CARD_LABEL),
     // The save gave up waiting for the disk: the same card, for the other reason.
     retryOnly(
@@ -8232,70 +8151,12 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
     {
       act: async (page) => {
         await page.keyboard.press("Tab");
-        await page.keyboard.press("Tab");
-        await page.keyboard.press("Tab");
-      },
-      check: async (page) => {
-        const on = await page.evaluate(
-          "document.activeElement?.textContent ?? ''"
-        );
-
-        // Add to Shelf, Copy beside it, then Add to “…”.
-        return String(on).startsWith("Add to “")
-          ? null
-          : `the third Tab stop is “${String(on)}”, not Add to “…”`;
-      },
-      data: {
-        view: {
-          ...SCREENSHOT_VIEW,
-          target: { id: uuid(12), label: CARD_LABEL },
-        },
-      },
-      keepPointer: true,
-      name: "screenshot-card-attach-focus",
-      page: "screenshot",
-    },
-    {
-      // The keyboard is on the only Retry when the user takes the screenshot off its item and both adds come back: the picture shows it on Retry adding to “…”, now the line.
-      act: async (page) => {
-        await page.keyboard.press("Tab");
-        await pushCard(page, CARD_BOTH);
       },
       check: async (page) => {
         const problems: string[] = [];
-        const start = await callCount(page);
-
-        // Retry was the pill and is the line now: the keyboard went with it, and Enter still retries on the item.
-        const afterBoth = await cardFocus(page);
-
-        await page.keyboard.press("Enter");
-
-        const retried = await cardAddsSent(page, start);
-
-        if (afterBoth !== CARD_RETRY || retried !== CARD_TO_ITEM) {
-          problems.push(
-            `both adds came back under a focused Retry pill: the keyboard is on “${afterBoth}” and Enter sent ${retried}`
-          );
-        }
-
-        // The other way: Retry was the line and is the pill now, and Tab goes on from the pill.
-        await page.getByRole("button", { name: CARD_RETRY }).focus();
-        await pushCard(page, CARD_SOLE);
-
-        const afterSole = await cardFocus(page);
-
-        await page.keyboard.press("Tab");
-
-        const next = await cardFocus(page);
-
-        if (afterSole !== CARD_RETRY || next !== "Copy") {
-          problems.push(
-            `Retry became the only add under a focused Retry adding to “…” line: the keyboard is on “${afterSole}” and Tab went to “${next}”, not Copy`
-          );
-        }
 
         // Add to Shelf goes while the keyboard is on it: Enter adds nowhere, and Tab starts at the pill that took its place.
-        await pushCard(page, CARD_BOTH);
+        await pushCard(page, CARD_OFF);
         await page.getByRole("button", { name: "Add to Shelf" }).focus();
         await pushCard(page, CARD_SOLE);
 
@@ -8316,13 +8177,13 @@ const ATTACHMENT_SCENES: readonly Scene[] = (
         }
 
         // Any other control keeps the keyboard through both changes.
-        await pushCard(page, CARD_BOTH);
+        await pushCard(page, CARD_OFF);
         await page.getByRole("button", { name: "Copy" }).focus();
         await pushCard(page, CARD_SOLE);
 
         const kept = [await cardFocus(page)];
 
-        await pushCard(page, CARD_BOTH);
+        await pushCard(page, CARD_OFF);
         kept.push(await cardFocus(page));
 
         if (kept.some((on) => on !== "Copy")) {
@@ -9731,14 +9592,18 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
 
       await page.keyboard.press("ArrowRight");
 
-      const opened = await page
-        .getByRole("button", { name: "Back to the list" })
-        .isVisible();
+      const back = page.getByRole("button", { name: "Back to the list" });
+      const opened = await back.isVisible();
 
-      const shown = z
-        .array(z.string().nullable())
-        .parse(await page.evaluate("globalThis.__selection"))
-        .at(-1);
+      // The shelf no longer reports its selection to main, so the item the details opened on is the one the list selects once they close.
+      if (opened) {
+        await back.click();
+      }
+
+      const shown = await page
+        .locator('[data-item-id][aria-current="true"]')
+        .getAttribute("data-item-id", { timeout: 1000 })
+        .catch(() => null);
 
       return opened && shown === first
         ? null

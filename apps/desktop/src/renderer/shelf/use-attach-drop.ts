@@ -12,6 +12,13 @@ export type AttachTarget = {
 /** A row while files are over the shelf: their target, refusing them because it is full, or neither. */
 export type RowDropLook = "open" | "full" | "none";
 
+/** How an item looks while files are over it: lit as their target, or refusing them; on its row, or filling the window in details. */
+export const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
+  full: "ring-destructive/50 ring-2 ring-inset",
+  none: null,
+  open: "bg-pin/10 ring-pin ring-2 ring-inset",
+};
+
 export interface RowDropProps {
   readonly onDragOver: (event: DragEvent) => void;
   readonly onDragLeave: (event: DragEvent) => void;

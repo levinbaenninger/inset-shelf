@@ -24,10 +24,8 @@ export interface ScreenshotWindow {
   /** Keeps the card while it shows a save (`on`), and gives it its time again after. */
   readonly holdForSave: (on: boolean) => void;
   readonly view: () => ScreenshotView | null;
-  /** The card names another item for Add to “…”, or shows how its save stands, where it is and for as long as it had. */
-  readonly update: (
-    change: Partial<Pick<ScreenshotView, "target" | "save">>
-  ) => void;
+  /** The card shows how its save stands, where it is and for as long as it had. */
+  readonly update: (change: Pick<ScreenshotView, "save">) => void;
   readonly onView: (listener: (view: ScreenshotView | null) => void) => void;
   readonly allowClose: () => void;
 }

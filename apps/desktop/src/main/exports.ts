@@ -1,11 +1,20 @@
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  realpathSync,
+  rmdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import type { Picture } from "@shared/shelf";
 import { nativeImage } from "electron";
 import type { NativeImage } from "electron";
 
+import { onDisk } from "./on-disk";
 import { drawPinMarks } from "./pin-mark";
+import { FsErrorSchema } from "./save-error";
 
 export interface ExportedImage {
   readonly image: NativeImage;
@@ -64,11 +73,16 @@ export const exportImage = (
 /** Dragged copies wait here for the drop, which can finish after startDrag returns. */
 export const createDragStaging = (tempDir: string) => {
   const root = path.join(tempDir, "Inset Shelf");
+  // The same folder as the disk names it: macOS hands the app /var, a link to /private/var, and a drop can name either.
+  const roots = [root, path.join(realpathSync.native(tempDir), "Inset Shelf")];
 
   return {
-    /** True for a file this staging wrote, so a drag back onto the shelf is not added twice. */
-    contains: (file: string): boolean =>
-      path.resolve(file).startsWith(`${root}${path.sep}`),
+    /** True for a file this staging wrote, however the drop spells its path, through any link, so a drag back onto the shelf is not added twice. */
+    contains: (file: string): boolean => {
+      const where = onDisk(file);
+
+      return roots.some((each) => where.startsWith(`${each}${path.sep}`));
+    },
     clear: (id?: string): void => {
       rmSync(id === undefined ? root : path.join(root, id), {
         force: true,
@@ -92,6 +106,40 @@ export const createDragStaging = (tempDir: string) => {
       writeFileSync(file, png);
 
       return file;
+    },
+  };
+};
+
+/**
+ * The screenshot card's drags stage their copies here, apart from the
+ * shelf's own, which are swept as a whole: an app a copy went to can save
+ * the user's edit into it, or a file of theirs beside it, and those stay.
+ */
+export const createShotStaging = (tempDir: string) => {
+  const root = path.join(tempDir, "Inset Shelf Screenshots");
+
+  return {
+    /** Writes `png` as `name` into the drag's own folder, and returns the file. */
+    write: (folder: string, name: string, png: Uint8Array): string => {
+      const file = path.join(root, folder, name);
+
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, png);
+
+      return file;
+    },
+    /** Removes a copy, and its folder once nothing else is in it. */
+    remove: (file: string): void => {
+      rmSync(file, { force: true });
+
+      try {
+        rmdirSync(path.dirname(file));
+      } catch (error) {
+        // A file the user saved beside the copy keeps the folder.
+        if (FsErrorSchema.safeParse(error).data?.code !== "ENOTEMPTY") {
+          throw error;
+        }
+      }
     },
   };
 };

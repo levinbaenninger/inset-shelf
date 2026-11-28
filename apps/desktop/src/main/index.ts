@@ -104,7 +104,7 @@ import type { DrawingTarget } from "./drawing-save";
 import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { attachedFileName, imageFileName } from "./export-name";
-import { createDragStaging, exportImage } from "./exports";
+import { createDragStaging, createShotStaging, exportImage } from "./exports";
 import { EDITORS, frontKind, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
@@ -133,7 +133,7 @@ import {
   nativeDialog,
   withinWait,
 } from "./quit-hold";
-import { causeText, FsErrorSchema, reportSaveError } from "./save-error";
+import { errorMessage, reportSaveError } from "./save-error";
 import { createShotSaves } from "./screenshot-saves";
 import type { Shot } from "./screenshot-saves";
 import { createScreenshotWatcher } from "./screenshot-watcher";
@@ -164,6 +164,7 @@ import {
   shelfTasks,
 } from "./shelf-tutorial";
 import { createShelfWindow } from "./shelf-window";
+import { createShotDrop } from "./shot-drop";
 import { createToastWindow } from "./toast-window";
 import { createTray } from "./tray";
 import type { ShelfTray } from "./tray";
@@ -216,13 +217,6 @@ const keyPermission = (running: boolean, trusted: boolean): Permission => {
 const logRejected = (channel: string, reason: string): void => {
   console.warn(`Rejected IPC on ${channel}: ${reason}`);
 };
-
-/** A common disk problem reads as its sentence (Round 7); anything else in its own words. */
-const errorMessage = (cause: unknown): string =>
-  causeText(
-    FsErrorSchema.safeParse(cause).data?.code ?? null,
-    cause instanceof Error ? cause.message : "Unknown error"
-  );
 
 const trayIconPath = (): string => {
   const base = app.isPackaged
@@ -438,8 +432,8 @@ const pad = (value: number): string => String(value).padStart(2, "0");
 /** Named like the system names its own: "Screenshot 2026-10-23 at 21.03.46.png" on macOS, "Screenshot 2026-10-23 210346.png" on Windows. */
 /** The newest screenshot on its card, with what dragging it out needs. */
 interface CardShot extends Shot {
-  /** The file macOS saved it to, if any. */
-  readonly file: string | null;
+  /** The name macOS saved the screenshot under, else Screenshot.png: the card's drag hands out a PNG named after it. */
+  readonly name: string;
   readonly image: NativeImage;
   /** Names its picture for the card's page, and for no other. */
   readonly token: string;
@@ -652,6 +646,7 @@ const start = async (): Promise<void> => {
   await tutorial.load();
 
   const staging = createDragStaging(app.getPath("temp"));
+  const shotStaging = createShotStaging(app.getPath("temp"));
 
   staging.clear();
 
@@ -1000,9 +995,6 @@ const start = async (): Promise<void> => {
       attachments.attachTo(id, [{ image, kind: "image", name: shotName() }])
     );
 
-  /** The item selected or open in details in the shelf, or null; the page reports it. */
-  let shelfSelection: ItemId | null = null;
-
   /** The section an item is in, as a notice names it. */
   const sectionName = (id: ItemId): string => {
     const { doc } = controller.view();
@@ -1016,7 +1008,7 @@ const start = async (): Promise<void> => {
 
   /**
    * The card's screenshot is saved to `to`: a notice says where it is, by
-   * the section's name or the item's words. Add to “…” also ends the
+   * the section's name or the item's words. A drop on an item also ends the
    * tutorial's screenshot step here; Add to Shelf ended it when its row was
    * made.
    */
@@ -1055,11 +1047,9 @@ const start = async (): Promise<void> => {
     },
     imageUrl: (current) => insetUrl.shot(current.token),
     item: controller.item,
-    items: () => controller.snapshot().doc.items,
     notify: (message, tone) => {
       notify(message, tone);
     },
-    now: () => Date.now(),
     comesBack: controller.comesBack,
     onWrite: controller.onWrite,
     persisted: async () =>
@@ -1072,11 +1062,9 @@ const start = async (): Promise<void> => {
     saved: shotAdded,
     scale: () =>
       screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).scaleFactor,
-    selection: () => shelfSelection,
     setTimer,
-    shelfVisible: () => shelf.isVisible(),
     stored: controller.stored,
-    writePicture: async (current) => await store.writeAttachment(current.png),
+    writePicture: async (png) => await store.writeAttachment(png),
   });
 
   let shotSeq = 0;
@@ -1091,9 +1079,9 @@ const start = async (): Promise<void> => {
     const { height, width } = image.getSize();
 
     shotSaves.show({
-      file,
       heightPx: height,
       image,
+      name: file === null ? "Screenshot.png" : path.basename(file),
       png: image.toPNG(),
       seq: shotSeq,
       token: randomUUID().replaceAll("-", ""),
@@ -1905,6 +1893,8 @@ const start = async (): Promise<void> => {
     keyMonitor.stop();
     screenshots.stop();
     staging.clear();
+    // oxlint-disable-next-line no-use-before-define -- the app quits only after the card's drags are wired.
+    shotDrop.sweep();
     globalShortcut.unregisterAll();
     app.exit(0);
   };
@@ -2272,6 +2262,48 @@ const start = async (): Promise<void> => {
     }
   };
 
+  /** The card's own add saved its screenshot: a new row is shown on the visible shelf, and a notice says where it is. */
+  const shotLanded = (to: ShotSaveTo, id: ItemId): void => {
+    if (to === "shelf" && shelf.isVisible()) {
+      controller.focus(id);
+    }
+
+    shotAdded(to, id);
+  };
+
+  // The card's own file dropped back on the shelf goes through the card's add, so a screenshot keeps one place.
+  const shotDrop = createShotDrop({
+    // The router needs no count; Double Shift's capture is what reads it.
+    addFiles: async (paths) => {
+      await addFiles(paths);
+    },
+    added: shotLanded,
+    attachFiles: async (id, paths) =>
+      await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
+    dragFailed: (why) => {
+      notify(`The screenshot couldn’t be dragged: ${why}`, "failed");
+    },
+    dropFailed: (why) => {
+      console.warn(`A drop on the shelf failed: ${why}`);
+      notify(`The drop couldn’t be finished: ${why}`, "failed");
+    },
+    dropped: (to) => {
+      e2eLog("shotDropped", { to });
+    },
+    saves: shotSaves,
+    stage: (shot, folder, name) => shotStaging.write(folder, name, shot.png),
+    unstage: (file) => {
+      try {
+        shotStaging.remove(file);
+      } catch (error) {
+        // Windows keeps a file another app has open: the router keeps its record, and the sweep at quit tries again.
+        console.warn(
+          `A dragged screenshot's copy couldn't be removed: ${errorMessage(error)}`
+        );
+      }
+    },
+  });
+
   const attachmentHandlers = {
     newDrawingFor: (id: ItemId): void => {
       if (drawing.isDirty()) {
@@ -2302,8 +2334,7 @@ const start = async (): Promise<void> => {
     }: {
       readonly id: ItemId;
       readonly paths: readonly string[];
-    }): Promise<AttachResult> =>
-      await attachedOnDisk(await attachments.attachFilesTo(id, paths)),
+    }): Promise<AttachResult> => await shotDrop.onItem(id, paths),
     pasteImageTo: async ({
       bytes,
       id,
@@ -2327,14 +2358,6 @@ const start = async (): Promise<void> => {
         }
       })();
     },
-    selection: (id: ItemId | null): void => {
-      shelfSelection = id;
-      shotSaves.retarget();
-      e2eLog(
-        "itemSelected",
-        shelfSelection === null ? {} : { itemId: shelfSelection }
-      );
-    },
     startAttachmentDrag: ({
       attachmentId,
       id,
@@ -2350,9 +2373,7 @@ const start = async (): Promise<void> => {
     shelfContract,
     {
       ...attachmentHandlers,
-      addFiles: (paths) => {
-        void addFiles(paths);
-      },
+      addFiles: shotDrop.onShelf,
       apply: (op) => {
         controller.apply(
           op.type === "compose" ? typedNote(op, hereOpening) : op
@@ -2488,26 +2509,18 @@ const start = async (): Promise<void> => {
         void (async () => {
           const id = await shotSaves.addToItem(seq, named);
 
-          if (id === null) {
-            return;
+          if (id !== null) {
+            shotLanded("item", id);
           }
-
-          shotAdded("item", id);
         })();
       },
       addToShelf: (seq) => {
         void (async () => {
           const id = await shotSaves.addToShelf(seq);
 
-          if (id === null) {
-            return;
+          if (id !== null) {
+            shotLanded("shelf", id);
           }
-
-          if (shelf.isVisible()) {
-            controller.focus(id);
-          }
-
-          shotAdded("shelf", id);
         })();
       },
       annotate: (seq) => {
@@ -2595,19 +2608,16 @@ const start = async (): Promise<void> => {
         })();
       },
       startDrag: (seq) => {
-        const current = shotSaves.current(seq);
+        // A copy of the drag's own: dropped back on the shelf, it goes the card's way.
+        const drag = shotDrop.drag(seq);
 
-        if (current === null) {
+        if (drag === null) {
           return;
         }
 
-        const file =
-          current.file ??
-          staging.write(`screenshot-${seq}`, "Screenshot.png", current.png);
-
         screenshotCard.webContents.startDrag({
-          file,
-          icon: current.image.resize({ width: 128 }),
+          file: drag.file,
+          icon: drag.shot.image.resize({ width: 128 }),
         });
       },
     },
@@ -2957,13 +2967,10 @@ const start = async (): Promise<void> => {
       workArea: screen.getDisplayMatching(bounds).workArea,
     });
     refreshTray();
-    shotSaves.retarget();
   });
-  // A hidden shelf's selection is no target the user can know.
   shelf.onHidden(() => {
     e2eLog("shelfHidden");
     refreshTray();
-    shotSaves.retarget();
   });
 
   const shortcutsRegistered = globalShortcut.register(

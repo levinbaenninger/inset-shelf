@@ -12,10 +12,10 @@ export type E2eEvent =
   | "doubleTap"
   | "selection"
   | "itemAdded"
-  /** The item selected or open in details in the shelf changed. */
-  | "itemSelected"
   | "drawingShown"
   | "screenshotShown"
+  /** The screenshot card's own file came back in a drop on the shelf, and went the card's way: `to` an item, or the shelf. */
+  | "shotDropped"
   | "saveFailed"
   | "copied"
   // Say why: the field has the keyboard, the disk holds its words or couldn't take them, or it gave way to the shelf's description field.
@@ -48,6 +48,8 @@ export interface E2eDetails {
   /** Why something couldn't be saved. */
   readonly reason?: string;
   readonly tone?: string;
+  /** Where a drop of the card's own file went: an item, or the shelf. */
+  readonly to?: string;
 }
 
 const logFile = process.env.INSET_E2E_LOG;
@@ -82,8 +84,13 @@ export const e2eLog = (event: E2eEvent, details: E2eDetails = {}): void => {
     window.isVisible()
   ).length;
 
-  appendFileSync(
-    logFile,
-    `${JSON.stringify({ event, t: Date.now(), ...details, windows })}\n`
-  );
+  // A trial's log is for the trial: a disk that refuses it never stops what the app was doing.
+  try {
+    appendFileSync(
+      logFile,
+      `${JSON.stringify({ event, t: Date.now(), ...details, windows })}\n`
+    );
+  } catch (error) {
+    console.warn(`The test log couldn’t be written: ${String(error)}`);
+  }
 };
