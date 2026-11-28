@@ -209,6 +209,30 @@ describe(desktopLink, () => {
     );
   });
 
+  it("only returns links the shelf opens again", () => {
+    expect(desktopLink("Notion", "https://notion.so/Plan-123?pvs=4+x")).toBe(
+      "notion://www.notion.so/Plan-123?pvs=4+x"
+    );
+    expect(
+      [
+        "https://www.notion.so/a b",
+        "https://www.notion.so/",
+        "https://www.notion.so/..%2f@evil",
+        String.raw`https://www.notion.so/a\b`,
+        "https://www.notion.so/a?x=<script>",
+      ].map((url) => desktopLink("Notion", url))
+    ).toStrictEqual([null, null, null, null, null]);
+    expect(
+      ["https://www.notion.so/Plan-123", "https://notion.so/a/b?x=1#h"].every(
+        (url) => {
+          const link = desktopLink("Notion", url);
+
+          return link !== null && isAppLink(link);
+        }
+      )
+    ).toBeTruthy();
+  });
+
   it("leaves pages from a browser, or without an address, to the browser", () => {
     expect(
       desktopLink(

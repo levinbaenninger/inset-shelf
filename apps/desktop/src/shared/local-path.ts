@@ -28,16 +28,15 @@ export const hasParentSegment = (value: string): boolean =>
   value.split(/[\\/]/u).includes("..");
 
 /**
- * The bundle a Mac app is opened from: an absolute local path to a
- * directory named *.app, written without "..".
+ * The bundle a Mac app is opened from: an absolute POSIX path to a directory
+ * named *.app, written without "..". A Windows path is none.
  */
-export const isAppBundlePath = (value: string): boolean => {
-  if (!isLocalAbsolutePath(value) || hasParentSegment(value)) {
-    return false;
-  }
-
-  return /\/[^/]+\.app$/iu.test(value.replace(/\/+$/u, ""));
-};
+export const isAppBundlePath = (value: string): boolean =>
+  value.startsWith("/") &&
+  !value.startsWith("//") &&
+  !NUL.test(value) &&
+  !hasParentSegment(value) &&
+  /\/[^/]+\.app\/?$/iu.test(value);
 
 /** An app's display name, as `open -a` takes it: no separators, no leading dash, no control characters. */
 export const isAppName = (value: string): boolean =>
@@ -48,19 +47,28 @@ export const isAppName = (value: string): boolean =>
   value !== "." &&
   value !== "..";
 
+/** Characters a file name can't hold on Windows (":" also starts an NTFS stream, or a drive on "C:name"), and control characters. */
+// oxlint-disable-next-line no-control-regex -- control characters are the point
+const UNSAFE_NAME_CHARS = /[<>:"|?*\\/\u0000-\u001F\u007F]/u;
+const TRAILING_DOTS_AND_SPACES = /[.\s]+$/u;
+
 /**
  * A name a stored file keeps and is written under when dragged out: one path
- * segment, never "." or "..", no separators or NUL.
+ * segment that is the same on macOS and Windows, never "." or "..", with none
+ * of <>:"/\|?*, control characters, or trailing dots or spaces.
  */
 export const isSafeFileName = (value: string): boolean =>
-  value !== "" && value !== "." && value !== ".." && !/[/\\\0]/u.test(value);
+  value !== "" &&
+  !UNSAFE_NAME_CHARS.test(value) &&
+  !TRAILING_DOTS_AND_SPACES.test(value);
 
-/** The name a dropped file is stored under: separators and NUL replaced; "File" when nothing usable is left. */
+/** The name a dropped file is stored under: unsafe characters replaced with "_", trailing dots and spaces dropped; "File" when nothing usable is left. */
 export const safeFileName = (value: string): string => {
   const cleaned = value
-    .replaceAll(/[/\\\0]/gu, "_")
-    .trim()
-    .slice(0, 255);
+    .replaceAll(new RegExp(UNSAFE_NAME_CHARS, "gu"), "_")
+    .slice(0, 255)
+    .replace(TRAILING_DOTS_AND_SPACES, "")
+    .trimStart();
 
   return isSafeFileName(cleaned) ? cleaned : "File";
 };

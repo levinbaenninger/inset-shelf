@@ -5,7 +5,9 @@ import path from "node:path";
 import { z } from "zod";
 
 const ThreadSchema = z.object({
-  id: z.string().regex(/^[\da-f-]{36}$/u),
+  id: z
+    .string()
+    .regex(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/u),
   thread_name: z.string(),
   updated_at: z.string(),
 });

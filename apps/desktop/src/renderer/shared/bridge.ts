@@ -22,6 +22,7 @@ declare global {
     readonly insetSettings?: Client<SettingsContract>;
     readonly insetPicker?: Client<PickerContract>;
     readonly insetOnboarding?: Client<OnboardingContract>;
+    readonly insetDev?: boolean;
     readonly insetFiles?: {
       readonly add: (
         files: readonly File[]
