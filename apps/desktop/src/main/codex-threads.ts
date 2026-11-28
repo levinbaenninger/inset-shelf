@@ -35,13 +35,22 @@ export const threadNamed = (
     .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.id ??
   null;
 
-/** The thread a ChatGPT window shows: found by its title as read, else without the app's name Windows adds to it, which items kept by an earlier build also lack. */
+/**
+ * The thread a ChatGPT window shows: found by its title as read, or without
+ * the app's name Windows adds to it, which items kept by an earlier build
+ * also lack. Null when both name a thread: `Plan - ChatGPT` is then thread
+ * Plan as Windows shows it, or the thread of that name, and nothing says which.
+ */
 export const threadOfWindow = (
   threads: readonly Thread[],
   title: string
-): string | null =>
-  threadNamed(threads, title) ??
-  threadNamed(threads, withoutAppName(title, "ChatGPT"));
+): string | null => {
+  const asRead = threadNamed(threads, title);
+  const bare = withoutAppName(title, "ChatGPT");
+  const shown = bare === title ? null : threadNamed(threads, bare);
+
+  return asRead !== null && shown !== null ? null : (asRead ?? shown);
+};
 
 /**
  * The ChatGPT desktop app (built on Codex) names its window after the open
