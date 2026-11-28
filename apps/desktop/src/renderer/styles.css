@@ -222,6 +222,16 @@ body:has(.shelf-panel),
 }
 
 /*
+ * TipTap's own sheet sets break-spaces on .ProseMirror, outside any layer, so
+ * it outranks .shelf-editor's pre-wrap: a space at a line's end then takes
+ * room and the line breaks a word earlier than the words read. Typing must
+ * keep the read text's lines.
+ */
+.ProseMirror.shelf-editor {
+  white-space: pre-wrap;
+}
+
+/*
  * The note fields (markdown-field.tsx): Markdown formatted as it is typed,
  * small and tight like the cards it becomes (markdown.tsx).
  */

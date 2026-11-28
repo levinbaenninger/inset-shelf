@@ -2811,6 +2811,179 @@ const stepRowCheck = async (page: Page): Promise<string | null> => {
     : null;
 };
 
+const FieldLookSchema = z.object({
+  background: z.string(),
+  border: z.string(),
+  /** The filled box the field sits on: its background, or "" when it sits on the bare window. */
+  card: z.string(),
+  cursor: z.string(),
+  font: z.string(),
+  height: z.number(),
+  ring: z.string(),
+  textLeft: z.number(),
+  textTop: z.number(),
+});
+
+type FieldLook = z.infer<typeof FieldLookSchema>;
+
+/** How an in-place field looks: its tint, any ring or border, and where its words sit and in what type. */
+const fieldLook = async (locator: Locator): Promise<FieldLook> => {
+  // Lets a tint's fade finish before it is read.
+  await locator.page().waitForTimeout(250);
+
+  return FieldLookSchema.parse(
+    await locator.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      let card = "";
+
+      for (
+        let up = element.parentElement;
+        up !== null && up.tagName !== "SECTION" && card === "";
+        up = up.parentElement
+      ) {
+        const fill = getComputedStyle(up).backgroundColor;
+
+        if (fill !== "rgba(0, 0, 0, 0)") {
+          card = fill;
+        }
+      }
+
+      const borderWidth = Number(style.borderTopWidth.replace("px", ""));
+
+      return {
+        background: style.backgroundColor,
+        border:
+          borderWidth === 0 || style.borderTopColor === "rgba(0, 0, 0, 0)"
+            ? "none"
+            : `${borderWidth}px ${style.borderTopColor}`,
+        card,
+        cursor: style.cursor,
+        font: `${style.fontFamily} ${style.fontSize}/${style.lineHeight} ${style.fontWeight}`,
+        height: box.height,
+        ring:
+          style.boxShadow === "none" &&
+          (style.outlineStyle === "none" ||
+            Number(style.outlineWidth.replace("px", "")) === 0)
+            ? "none"
+            : `${style.boxShadow} ${style.outlineStyle} ${style.outlineWidth}`,
+        textLeft:
+          box.left +
+          Number(style.borderLeftWidth.replace("px", "")) +
+          Number(style.paddingLeft.replace("px", "")),
+        // From the top of its row or field, so a scroll to bring it into view moves nothing.
+        textTop:
+          box.top +
+          Number(style.borderTopWidth.replace("px", "")) +
+          Number(style.paddingTop.replace("px", "")) -
+          (element.closest("li, section")?.getBoundingClientRect().top ?? 0),
+      };
+    })
+  );
+};
+
+/** A field of details that is typed in where it is read: the words at rest, and the field typed in once it has the keyboard. */
+interface InPlaceField {
+  readonly name: string;
+  readonly rest: (page: Page) => Locator;
+  readonly typing: (page: Page) => Locator;
+  /** Starts typing: a click for words that turn into a field, focus for a field that is always one. */
+  readonly start: (page: Page) => Promise<void>;
+}
+
+const alwaysField = (name: string, label: string | RegExp): InPlaceField => ({
+  name,
+  rest: (page) => page.getByRole("textbox", { exact: true, name: label }),
+  start: async (page) => {
+    await page.getByRole("textbox", { exact: true, name: label }).focus();
+  },
+  typing: (page) => page.getByRole("textbox", { exact: true, name: label }),
+});
+
+/** Each field at rest, hovered and typed in. */
+const inPlaceLooks = async (page: Page, fields: readonly InPlaceField[]) => {
+  const looks: {
+    readonly name: string;
+    readonly rest: FieldLook;
+    readonly hover: FieldLook;
+    readonly typing: FieldLook;
+  }[] = [];
+
+  for (const field of fields) {
+    // oxlint-disable-next-line no-await-in-loop -- one field after another, each from rest.
+    await page.getByRole("heading", { name: "Details" }).focus();
+    // oxlint-disable-next-line no-await-in-loop -- the pointer away, so the field is at rest.
+    await page.mouse.move(1, 1);
+
+    // oxlint-disable-next-line no-await-in-loop -- read at rest.
+    const rest = await fieldLook(field.rest(page));
+
+    // oxlint-disable-next-line no-await-in-loop -- the pointer over it.
+    await field.rest(page).hover();
+
+    // oxlint-disable-next-line no-await-in-loop -- read hovered.
+    const hover = await fieldLook(field.rest(page));
+
+    // oxlint-disable-next-line no-await-in-loop -- the keyboard in it.
+    await field.start(page);
+    // oxlint-disable-next-line no-await-in-loop -- the pointer away, so only focus tints it.
+    await page.mouse.move(1, 1);
+
+    // oxlint-disable-next-line no-await-in-loop -- read typed in.
+    const typing = await fieldLook(field.typing(page));
+
+    looks.push({ hover, name: field.name, rest, typing });
+    // oxlint-disable-next-line no-await-in-loop -- leaves the field as it was.
+    await page.keyboard.press("Escape");
+  }
+
+  return looks;
+};
+
+/** What breaks "typed where it is read" for one field, or nothing. */
+const inPlaceProblems = (
+  looks: Awaited<ReturnType<typeof inPlaceLooks>>,
+  cue: string
+): string[] =>
+  looks.flatMap(({ hover, name, rest, typing }) => {
+    const problems: string[] = [];
+
+    if (rest.background !== "rgba(0, 0, 0, 0)") {
+      problems.push(`${name} is tinted at rest (${rest.background})`);
+    }
+
+    if (hover.background !== cue || hover.cursor !== "text") {
+      problems.push(
+        `${name} hovered shows ${hover.background} and a ${hover.cursor} cursor, not the tint ${cue} and a text cursor`
+      );
+    }
+
+    if (typing.background !== cue) {
+      problems.push(
+        `${name} typed in is tinted ${typing.background}, not ${cue}`
+      );
+    }
+
+    if (typing.ring !== "none" || typing.border !== "none") {
+      problems.push(
+        `${name} typed in draws a ring (${typing.ring}) or border (${typing.border})`
+      );
+    }
+
+    if (
+      Math.abs(typing.textLeft - rest.textLeft) > 0.5 ||
+      Math.abs(typing.textTop - rest.textTop) > 0.5 ||
+      Math.abs(typing.height - rest.height) > 0.5 ||
+      typing.font !== rest.font
+    ) {
+      problems.push(
+        `${name}'s words move when typing starts: (${rest.textLeft}, ${rest.textTop}) ${rest.height} px ${rest.font} → (${typing.textLeft}, ${typing.textTop}) ${typing.height} px ${typing.font}`
+      );
+    }
+
+    return problems;
+  });
+
 /** The ISO day of the calendar day that has focus, or "" when focus is elsewhere. */
 const focusedDay = async (page: Page): Promise<string> =>
   String(
@@ -3503,6 +3676,77 @@ const EDIT_DOC = {
       via: "screenshot",
     },
   ],
+};
+
+/** A note long enough to wrap five times, the words the lead saw jump a line when typing started. */
+const WRAP_DOC: typeof EDIT_DOC = {
+  ...EDIT_DOC,
+  items: [
+    {
+      ...base(723, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "check the flaky login test and ask anna about the retry budget before friday and also write down which retries we allow per request so the budget stays visible",
+      via: "typed",
+    },
+  ],
+};
+
+/** The first word of each line the words inside an element wrap to, read where they are drawn. */
+const lineStarts = async (locator: Locator): Promise<string[]> =>
+  z.array(z.string()).parse(
+    await locator.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const starts: string[] = [];
+      let lastTop = Number.NEGATIVE_INFINITY;
+
+      for (
+        let node = walker.nextNode();
+        node !== null;
+        node = walker.nextNode()
+      ) {
+        const text = node.textContent ?? "";
+
+        for (const match of text.matchAll(/\S+/gu)) {
+          const range = document.createRange();
+
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + 1);
+
+          const { top } = range.getBoundingClientRect();
+
+          if (top > lastTop + 4) {
+            starts.push(match[0]);
+            lastTop = top;
+          }
+        }
+      }
+
+      return starts;
+    })
+  );
+
+/** The open note's line starts at each shelf width from the narrowest to a wide one: in the editor, or as read. */
+const wrapSweep = async (page: Page, editing: boolean) => {
+  const words = editing
+    ? page.getByRole("textbox", { name: "Edit item" })
+    : item(page, 723).locator("[data-row-keys]");
+
+  const seen = new Map<number, string>();
+
+  for (let width = NARROWEST; width <= 460; width += 4) {
+    // oxlint-disable-next-line no-await-in-loop -- one width after another.
+    await page.setViewportSize({ height: 700, width });
+    // oxlint-disable-next-line no-await-in-loop -- read once the row has settled at this width.
+    await page.waitForTimeout(40);
+    // oxlint-disable-next-line no-await-in-loop -- read at this width.
+    const starts = await lineStarts(words);
+
+    seen.set(width, starts.join(" / "));
+  }
+
+  return seen;
 };
 
 const EditBoxSchema = z.object({
@@ -5223,6 +5467,33 @@ const STRESS_SCENES: readonly Scene[] = (
       data: { view: stressView(EDIT_DOC) },
       keepPointer: true,
       name: "stress-edit-in-place-note",
+    },
+    {
+      // Typing starts in a note that wraps five times, at every width: each line still begins with the word it began with as read.
+      act: async (page) => {
+        await clickToEdit(page, 723, "budget");
+      },
+      check: async (page) => {
+        const typed = await wrapSweep(page, true);
+
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(200);
+
+        const read = await wrapSweep(page, false);
+
+        const moved = [...read].filter(
+          ([width, lines]) => typed.get(width) !== lines
+        );
+
+        const [first] = moved;
+
+        return first === undefined
+          ? null
+          : `typing in the open note breaks its lines elsewhere at ${moved.length} widths; at ${first[0]} px it reads “${first[1]}” and edits as “${typed.get(first[0])}”`;
+      },
+      data: { view: stressView(WRAP_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-wrap",
     },
     {
       // An open file without a note, before any click: the quiet Add a note… shows where the note would be.
@@ -8864,10 +9135,532 @@ const SCENES: readonly Scene[] = [
       await page.waitForFunction(
         () => document.activeElement?.getAttribute("aria-label") === "Step 1"
       );
+      // Typed in, so the step stays once the keyboard leaves it.
+      await page.keyboard.type("Confirm the date");
     },
     check: stepRowCheck,
     data: { view: shelfView() },
     name: "shelf-details-step-editing",
+    page: "shelf",
+  },
+  {
+    // A click on Add step while a new step is still blank: the blank one goes once the click is done, not under the pointer, so the click adds a step.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.click((add.left + add.right) / 2, middle(add));
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page.getByRole("textbox", { name: /^Step /u }).all();
+
+      const focus = await page.evaluate(
+        "document.activeElement?.getAttribute('aria-label') ?? ''"
+      );
+
+      return steps.length === 1 && focus === "Step 1"
+        ? null
+        : `after the click there are ${steps.length} steps and focus is on “${String(focus)}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-from-blank",
+    page: "shelf",
+  },
+  {
+    // A press on Add step, then Shift+Tab back into the blank step before the release elsewhere: the step the keyboard is in stays.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.move((add.left + add.right) / 2, middle(add));
+      await page.mouse.down();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Shift+Tab");
+      await page.mouse.move(add.right + 40, add.bottom + 60);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page.getByRole("textbox", { name: /^Step /u }).all();
+
+      const focus = await page.evaluate(
+        "document.activeElement?.getAttribute('aria-label') ?? ''"
+      );
+
+      return steps.length === 1 && focus === "Step 1"
+        ? null
+        : `after the release there are ${steps.length} steps and focus is on “${String(focus)}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-press-back",
+    page: "shelf",
+  },
+  {
+    // Two lines pasted into the middle of a window's description: one line, the caret after what was pasted, and one Undo takes the paste back.
+    act: async (page) => {
+      await page
+        .context()
+        .grantPermissions(["clipboard-read", "clipboard-write"]);
+      await details(page, 10);
+      await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .click();
+      await page.evaluate(async () => {
+        await navigator.clipboard.writeText("first\nsecond");
+      });
+
+      const field = page.getByRole("textbox", {
+        name: "Description of Office move budget",
+      });
+
+      await field.evaluate((element) => {
+        if (element instanceof HTMLTextAreaElement) {
+          element.setSelectionRange(4, 4);
+        }
+      });
+      await page.keyboard.press("ControlOrMeta+V");
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", {
+        name: "Description of Office move budget",
+      });
+
+      const read = async () =>
+        await field.evaluate((element) =>
+          element instanceof HTMLTextAreaElement
+            ? { caret: element.selectionStart, value: element.value }
+            : null
+        );
+
+      const pasted = await read();
+
+      await page.keyboard.press("ControlOrMeta+Z");
+
+      const undone = await read();
+
+      return pasted?.value ===
+        "The first secondtotal is CHF 260 over the cap" &&
+        pasted.caret === 16 &&
+        undone?.value === "The total is CHF 260 over the cap"
+        ? null
+        : `pasted ${JSON.stringify(pasted)}, then Undo ${JSON.stringify(undone)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-window-description-paste",
+    page: "shelf",
+  },
+  {
+    // In forced colors no tint shows, so a window's description the keyboard is on has an outline.
+    act: async (page) => {
+      await page.emulateMedia({ forcedColors: "active" });
+      await details(page, 10);
+      await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .focus();
+    },
+    check: async (page) => {
+      const outline = await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
+
+          return {
+            color: style.outlineColor,
+            style: style.outlineStyle,
+            width: style.outlineWidth,
+          };
+        });
+
+      return outline.style !== "none" &&
+        outline.width !== "0px" &&
+        outline.color !== "rgba(0, 0, 0, 0)"
+        ? null
+        : `the focused description's outline is ${JSON.stringify(outline)}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-window-description-forced-focus",
+    page: "shelf",
+  },
+  {
+    // Words with runs of spaces between them wrap the same as words and as the field, so a click on them moves nothing.
+    act: async (page) => {
+      await details(page, 10);
+      await page
+        .getByRole("button", {
+          name: /Edit the description of Office move budget$/u,
+        })
+        .click();
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.insertText(
+        "The     total     is     CHF     260     over     the     cap"
+      );
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      const words = page.getByRole("button", {
+        name: /Edit the description of Office move budget$/u,
+      });
+
+      const read = tall(await boxOf(words));
+
+      await words.click();
+
+      const typing = tall(
+        await boxOf(
+          page.getByRole("textbox", {
+            name: "Description of Office move budget",
+          })
+        )
+      );
+
+      return Math.abs(read - typing) < 1
+        ? null
+        : `the description is ${read}px tall as words and ${typing}px as a field`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-window-description-spaces",
+    page: "shelf",
+    width: 360,
+  },
+  {
+    // Every field of a text item's details typed in where it is read: one tint on hover and while typing, no ring, the words where they were; Description on the same filled box as the steps, its words in line with the item's.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { exact: true, name: "Step 3" }).focus();
+    },
+    check: async (page) => {
+      const { background: cue } = await fieldLook(
+        page.getByRole("textbox", { exact: true, name: "Step 3" })
+      );
+
+      const looks = await inPlaceLooks(page, [
+        alwaysField("Description", "Description"),
+        alwaysField("Step 3", "Step 3"),
+        {
+          name: "A window's description",
+          rest: (on) =>
+            on.getByRole("button", {
+              name: /Edit the description of Office move budget$/u,
+            }),
+          start: async (on) => {
+            await on
+              .getByRole("button", {
+                name: /Edit the description of Office move budget$/u,
+              })
+              .click();
+          },
+          typing: (on) =>
+            on.getByRole("textbox", {
+              name: "Description of Office move budget",
+            }),
+        },
+      ]);
+
+      const problems = inPlaceProblems(looks, cue);
+      const description = looks.find((look) => look.name === "Description");
+      const stepLook = looks.find((look) => look.name === "Step 3");
+
+      // Where the item's own words start: inside the box at the top of details, past its border and padding.
+      const wordsLeft = await page
+        .locator("[data-details] > div")
+        .first()
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
+
+          return (
+            element.getBoundingClientRect().left +
+            Number(style.borderLeftWidth.replace("px", "")) +
+            Number(style.paddingLeft.replace("px", ""))
+          );
+        });
+
+      if (description !== undefined && stepLook !== undefined) {
+        if (
+          description.rest.card === "" ||
+          description.rest.card !== stepLook.rest.card
+        ) {
+          problems.push(
+            `Description sits on ${description.rest.card === "" ? "the bare window" : description.rest.card}, the steps on ${stepLook.rest.card}`
+          );
+        }
+
+        if (Math.abs(description.rest.textLeft - wordsLeft) > 0.5) {
+          problems.push(
+            `Description's words start at x ${description.rest.textLeft}, the item's at ${wordsLeft}`
+          );
+        }
+      }
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-in-place-fields",
+    page: "shelf",
+    platforms: ["macos", "windows"],
+  },
+  {
+    // A picture's Title, Caption and pin labels: the same tint, no ring, the words where they were, each on a filled box.
+    act: async (page) => {
+      await details(page, 11);
+      await page.getByRole("textbox", { exact: true, name: "Title" }).focus();
+    },
+    check: async (page) => {
+      const { background: cue } = await fieldLook(
+        page.getByRole("textbox", { exact: true, name: "Title" })
+      );
+
+      const looks = await inPlaceLooks(page, [
+        alwaysField("Title", "Title"),
+        alwaysField("Caption", "Caption, copied with the image"),
+        alwaysField("Pin 1's label", "Label for pin 1"),
+      ]);
+
+      const problems = [
+        ...inPlaceProblems(looks, cue),
+        ...looks
+          .filter((look) => look.rest.card === "")
+          .map((look) => `${look.name} sits on the bare window`),
+      ];
+
+      return problems.length === 0 ? null : problems.join("; ");
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-in-place-picture",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await page
+        .getByRole("textbox", { exact: true, name: "Description" })
+        .hover();
+      await page.waitForTimeout(250);
+    },
+    data: { view: shelfView() },
+    keepPointer: true,
+    name: "shelf-details-description-hover",
+    page: "shelf",
+  },
+  {
+    act: async (page) => {
+      await details(page, 10);
+      await page
+        .getByRole("textbox", { exact: true, name: "Description" })
+        .click();
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(250);
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-description-typing",
+    page: "shelf",
+  },
+  {
+    // Description added and not typed yet: its placeholder says what goes there.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Description/u }).click();
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.getAttribute("aria-label") === "Description"
+      );
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(250);
+    },
+    check: async (page) => {
+      const field = page.getByRole("textbox", {
+        exact: true,
+        name: "Description",
+      });
+
+      const placeholder = await field.getAttribute("placeholder");
+
+      return (await field.isVisible()) && (placeholder ?? "") !== ""
+        ? null
+        : "an empty Description shows no placeholder";
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-description-empty",
+    page: "shelf",
+  },
+  {
+    // A step added and left untyped goes once the keyboard leaves its row (Tab to its ×, then on), so the list never shows a blank step beside Add step.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      return steps === 5
+        ? null
+        : `${steps} steps show after a blank one was left, not the 5 typed`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-left-blank",
+    page: "shelf",
+  },
+  {
+    // Next steps added from Add and left untyped: no blank step and no empty box, only Add step.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const field = page.getByRole("region", { name: "Next steps" });
+      const steps = await field.getByRole("textbox").count();
+      const box = await field.locator("ul").isVisible();
+
+      return steps === 0 && !box
+        ? null
+        : `Next steps left untyped shows ${steps} blank step fields${box ? " and an empty box" : ""}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-steps-left-blank",
+    page: "shelf",
+  },
+  {
+    // A step that held words and was cleared stays once the keyboard leaves it, and ⌘Z in it brings its words back.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("textbox", { name: "Step 1" }).focus();
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.press("Backspace");
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+      await page.getByRole("textbox", { name: "Step 1" }).focus();
+      await page.keyboard.press("ControlOrMeta+Z");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      const first = await page
+        .getByRole("textbox", { name: "Step 1" })
+        .inputValue();
+
+      return steps === 5 && first !== ""
+        ? null
+        : `a cleared step left and undone shows ${steps} steps, the first reading "${first}"`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-cleared-kept",
+    page: "shelf",
+  },
+  {
+    // A new step typed in and undone to blank has held words, so it stays once the keyboard leaves it.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      // One insertion, so one ⌘Z takes all of it back.
+      await page.keyboard.insertText("Book the room");
+      await page.keyboard.press("ControlOrMeta+Z");
+      await page.getByRole("heading", { name: "Details" }).focus();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page
+        .getByRole("textbox", { name: /^Step \d/u })
+        .count();
+
+      const last = await page
+        .getByRole("textbox", { name: "Step 6" })
+        .inputValue()
+        .catch(() => null);
+
+      return steps === 6 && last === ""
+        ? null
+        : `a new step typed in and undone to blank shows ${steps} steps, the sixth reading ${last === null ? "nothing" : `"${last}"`}`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-undone-kept",
+    page: "shelf",
+  },
+  {
+    // Tab from a blank new step reaches its ×, so the keyboard can remove it.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const landed = await page.evaluate(() =>
+        document.activeElement?.getAttribute("aria-label")
+      );
+
+      return landed === "Remove step 6"
+        ? null
+        : `Tab from a blank step lands on ${landed ?? "nothing"}, not its ×`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-blank-tab",
+    page: "shelf",
+  },
+  {
+    // Shift+Tab from a blank new step reaches its checkbox.
+    act: async (page) => {
+      await details(page, 10);
+      await page.getByRole("button", { name: "Add step" }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 6"
+      );
+      await page.keyboard.press("Shift+Tab");
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const landed = await page.evaluate(() => ({
+        label: document.activeElement?.getAttribute("aria-label"),
+        role: document.activeElement?.getAttribute("role"),
+      }));
+
+      return landed.role === "checkbox" && landed.label === "Step 6"
+        ? null
+        : `Shift+Tab from a blank step lands on ${landed.label ?? "nothing"}, not its checkbox`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-step-blank-shift-tab",
     page: "shelf",
   },
   {

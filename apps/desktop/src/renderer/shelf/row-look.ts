@@ -9,8 +9,8 @@ export const WORDS = "text-sm leading-snug break-words";
 
 export const DONE = "text-muted-foreground line-through";
 
-/** Words being typed in where they are read, in the row's text or the note under its picture: the quiet tint details' fields have, a little above and below them and exactly as wide as their column, so nothing moves and the tint ends where the picture and the foot line do. */
-export const EDITING = "bg-muted dark:bg-muted/50 -my-1 rounded-xs py-1";
+/** Words being typed in where they are read, in the row's text or the note under its picture: the tint details' fields have (textarea.tsx IN_PLACE), a little above and below them and exactly as wide as their column, so nothing moves and the tint ends where the picture and the foot line do. */
+export const EDITING = "bg-foreground/5 -my-1 rounded-xs py-1";
 
 /** A right-click on any part of an item opens its menu at the pointer. */
 export const contextMenuAt =

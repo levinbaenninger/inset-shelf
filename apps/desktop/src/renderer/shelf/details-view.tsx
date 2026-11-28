@@ -54,7 +54,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Textarea } from "@/components/ui/textarea";
+import { IN_PLACE, Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -144,12 +144,6 @@ export interface DetailsProps {
   readonly attachments: AttachmentHandlers & AttachmentAdders;
 }
 
-const newStep = (): Step => ({
-  done: false,
-  id: crypto.randomUUID(),
-  text: "",
-});
-
 const TIME = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 const k = (accelerator: string): string => keyText(accelerator, isMac);
@@ -163,6 +157,11 @@ const isUndoKey = (event: KeyboardEvent): boolean =>
 
 /** The card surface the list's items sit on, so details read as the same material. */
 const SURFACE = "border-foreground/10 bg-background/60 rounded-lg border";
+
+/** One typed-in field on its card, its words in line with the item's own at the top of details. */
+const FieldBox = ({ children }: { readonly children: ReactNode }) => (
+  <div className={cn(SURFACE, "p-1.5")}>{children}</div>
+);
 
 /** A labelled part of details; the label is small and quiet, like a section name in the list. */
 const Field = ({
@@ -244,7 +243,6 @@ const AutoText = ({
   onEdited,
   onSave,
   placeholder,
-  rows = 2,
   value,
 }: {
   readonly value: string;
@@ -256,7 +254,6 @@ const AutoText = ({
   /** Focus left after the text changed: what it held when focus came in. */
   readonly onEdited?: (before: string) => void;
   readonly autoFocus?: boolean;
-  readonly rows?: number;
 }) => {
   const [text, setText] = useState(value);
   const [saved, setSaved] = useState(value);
@@ -321,13 +318,8 @@ const AutoText = ({
     value: text,
   };
 
-  // Read as text until typed in: no border, a quiet tint on hover and focus. A
-  // one-line text wraps as it grows, an input's height while it fits, so a long title shows whole.
-  return multiline ? (
-    <Textarea {...props} rows={rows} variant="quiet" />
-  ) : (
-    <Textarea {...props} rows={1} variant="quietLine" />
-  );
+  // Read as text until typed in. A one-line text wraps as it grows, so a long title shows whole.
+  return <Textarea {...props} variant="inPlace" />;
 };
 
 /**
@@ -337,7 +329,9 @@ const AutoText = ({
  */
 const StepsEditor = ({
   focusSeq,
+  newStep,
   onChange,
+  onLeave,
   onRemoved,
   onUndo,
   steps,
@@ -345,11 +339,57 @@ const StepsEditor = ({
   readonly steps: readonly Step[];
   /** Changes when the last step should take focus. */
   readonly focusSeq: number;
+  readonly newStep: () => Step;
   readonly onChange: (steps: readonly Step[]) => void;
+  /** Focus has left the step's row, for good: not to its own checkbox or ×, nor only out of the window. */
+  readonly onLeave: (step: Step) => void;
   readonly onRemoved: (step: Step, index: number) => void;
   readonly onUndo: () => boolean;
 }) => {
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
+  // Rows a press took focus from: they go once the press is done, so what was pressed is still under the pointer when it is released.
+  const pressing = useRef(false);
+  const leftDuringPress = useRef<{ step: Step; row: Element }[]>([]);
+
+  const leave = useEffectEvent((step: Step) => {
+    onLeave(step);
+  });
+
+  useEffect(() => {
+    const down = (): void => {
+      pressing.current = true;
+    };
+
+    const up = (): void => {
+      const left = leftDuringPress.current;
+
+      pressing.current = false;
+      leftDuringPress.current = [];
+
+      if (left.length > 0) {
+        // The click comes after the release, so the rows go after it.
+        setTimeout(() => {
+          // A row the keyboard went back to during the press stays.
+          for (const { row, step } of left) {
+            if (!row.contains(document.activeElement)) {
+              leave(step);
+            }
+          }
+        }, 0);
+      }
+    };
+
+    document.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, []);
+
   // The step to focus once the next render has it on screen.
   const focusTarget = useRef<string | null>(null);
   // data-step-removed marks a removal not yet followed by typing: ⌘Z in a step
@@ -459,9 +499,34 @@ const StepsEditor = ({
 
   // The circle, the words and the × each sit in a box one line tall (h-7), so they share a centre line, typed in or not.
   return (
-    <ul className={cn(SURFACE, "flex flex-col px-2 py-1.5")} ref={listRef}>
+    <ul
+      className={cn(SURFACE, "flex flex-col px-2 py-1.5 empty:hidden")}
+      ref={listRef}
+    >
       {steps.map((step, index) => (
-        <li className="group/step flex items-start gap-2" key={step.id}>
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the row only hears focus leave it; its checkbox, words and × take the keys.
+        <li
+          className="group/step flex items-start gap-2"
+          key={step.id}
+          onBlur={(event) => {
+            if (
+              document.hasFocus() &&
+              !(
+                event.relatedTarget instanceof Node &&
+                event.currentTarget.contains(event.relatedTarget)
+              )
+            ) {
+              if (pressing.current) {
+                leftDuringPress.current.push({
+                  row: event.currentTarget,
+                  step,
+                });
+              } else {
+                onLeave(step);
+              }
+            }
+          }}
+        >
           <span className="flex h-7 shrink-0 items-center">
             {/* Named by its words, as in the open row, and checked or not says the rest; a step not typed yet goes by its number. */}
             <Checkbox
@@ -480,10 +545,10 @@ const StepsEditor = ({
               }}
             />
           </span>
-          <textarea
+          <Textarea
             aria-label={`Step ${index + 1}`}
             className={cn(
-              "placeholder:text-muted-foreground focus-visible:ring-ring/50 focus-visible:bg-foreground/[0.04] field-sizing-content min-h-7 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1.5 py-1 text-sm leading-5 outline-none focus-visible:ring-3",
+              "min-w-0 flex-1",
               step.done && "text-muted-foreground line-through"
             )}
             maxLength={STEP_TEXT_MAX}
@@ -509,6 +574,7 @@ const StepsEditor = ({
               }
             }}
             value={step.text}
+            variant="inPlace"
           />
           <span className="flex h-7 shrink-0 items-center opacity-0 transition-opacity group-focus-within/step:opacity-100 group-hover/step:opacity-100">
             <Button
@@ -552,6 +618,9 @@ const windowPlace = (window: WindowRef): string =>
     .filter((part, at, all) => part !== "" && all.indexOf(part) === at)
     .join(" · ");
 
+/** One line, as a window's description reads: a pasted text's breaks become spaces. */
+const oneLine = (text: string): string => text.replaceAll(/\s*\n\s*/gu, " ");
+
 /**
  * A window's description as words, or a quiet + Description when it has
  * none; a click edits it in a field of the same height. Return or leaving
@@ -572,7 +641,7 @@ const WindowDescription = ({
   // Return and Esc hand focus back to the words; a click elsewhere keeps it where it went.
   const refocus = useRef(false);
   const shown = useRef<HTMLButtonElement>(null);
-  const field = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (editing) {
@@ -583,23 +652,33 @@ const WindowDescription = ({
     }
   }, [editing]);
 
-  const line = "-mx-1.5 min-h-6 rounded-md px-1.5 text-sm";
-
   if (editing) {
     return (
-      <input
+      <Textarea
         aria-label={`Description of ${name}`}
-        className={cn(
-          line,
-          "placeholder:text-muted-foreground focus-visible:ring-ring/50 bg-foreground/[0.04] h-6 min-w-0 outline-none focus-visible:ring-3"
-        )}
         defaultValue={value}
         maxLength={DESCRIPTION_MAX}
         onBlur={() => {
           setEditing(false);
         }}
         onChange={(event) => {
-          onSave(event.target.value);
+          // Text dropped in, which onPaste doesn't see, goes to one line here.
+          const typed = oneLine(event.target.value);
+
+          if (typed !== event.target.value) {
+            event.target.value = typed;
+          }
+
+          onSave(typed);
+        }}
+        onPaste={(event) => {
+          const pasted = event.clipboardData.getData("text/plain");
+
+          if (pasted.includes("\n")) {
+            event.preventDefault();
+            // oxlint-disable-next-line typescript/no-deprecated -- insertText is the browser's own edit, so the caret ends after it and Undo takes it back.
+            document.execCommand("insertText", false, oneLine(pasted));
+          }
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) {
@@ -623,6 +702,7 @@ const WindowDescription = ({
         }}
         placeholder="What this window shows"
         ref={field}
+        variant="inPlace"
       />
     );
   }
@@ -635,7 +715,7 @@ const WindowDescription = ({
   return value === "" ? (
     <Button
       aria-label={`Add a description of ${name}`}
-      className="-ml-1.5 self-start"
+      className="self-start"
       onClick={edit}
       ref={shown}
       size="xs"
@@ -647,10 +727,10 @@ const WindowDescription = ({
   ) : (
     <button
       aria-label={`${value}. Edit the description of ${name}`}
+      // The field's own look, so a click turns the words into it without a move.
       className={cn(
-        line,
-        // Focus tints the words as hover does; a ring would read as the field again.
-        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 max-w-full self-start text-left break-words outline-none"
+        IN_PLACE,
+        "text-left break-words whitespace-pre-wrap outline-none focus-visible:outline-hidden"
       )}
       onClick={edit}
       ref={shown}
@@ -771,7 +851,8 @@ const WindowRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex min-w-0 flex-col">
+      {/* Out past the row's inset by the field's own, so the words line up with the picture. */}
+      <div className="-mx-1.5 flex min-w-0 flex-col">
         <WindowDescription
           name={name}
           onSave={(description) => {
@@ -818,12 +899,12 @@ const PinLabels = ({
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
       {pins.map((pin, index) => (
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
-        // The pin sits beside a label's first line (h-8, a one-line field's height), however many lines it wraps to.
+        // The pin sits beside a label's first line (h-7, a one-line field's height), however many lines it wraps to.
         <li
           className="flex items-start gap-2"
           key={`${index}:${pin.x}:${pin.y}`}
         >
-          <span className="flex h-8 shrink-0 items-center">
+          <span className="flex h-7 shrink-0 items-center">
             <PinGlyph height={18} number={index + 1} />
           </span>
           <AutoText
@@ -1030,16 +1111,18 @@ const Content = (props: ContentProps) => {
         <FileLine item={item} />
       )}
       <Field icon={TextIcon} label="Title">
-        <AutoText
-          label="Title"
-          max={TITLE_MAX}
-          multiline={false}
-          onSave={(title) => {
-            onApply({ id: item.id, title, type: "setTitle" });
-          }}
-          placeholder="Shown as the main line"
-          value={item.title ?? ""}
-        />
+        <FieldBox>
+          <AutoText
+            label="Title"
+            max={TITLE_MAX}
+            multiline={false}
+            onSave={(title) => {
+              onApply({ id: item.id, title, type: "setTitle" });
+            }}
+            placeholder="Shown as the main line"
+            value={item.title ?? ""}
+          />
+        </FieldBox>
       </Field>
       <Field
         action={
@@ -1052,23 +1135,24 @@ const Content = (props: ContentProps) => {
         icon={StickyNote01Icon}
         label="Caption"
       >
-        <AutoText
-          autoFocus={editing}
-          key={editing ? "editing" : "note"}
-          label={
-            item.kind === "image"
-              ? "Caption, copied with the image"
-              : "Caption, copied with the file"
-          }
-          max={TEXT_MAX}
-          multiline
-          onSave={(note) => {
-            onApply({ id: item.id, note, type: "editNote" });
-          }}
-          placeholder="A line to paste along with it"
-          rows={1}
-          value={item.note}
-        />
+        <FieldBox>
+          <AutoText
+            autoFocus={editing}
+            key={editing ? "editing" : "note"}
+            label={
+              item.kind === "image"
+                ? "Caption, copied with the image"
+                : "Caption, copied with the file"
+            }
+            max={TEXT_MAX}
+            multiline
+            onSave={(note) => {
+              onApply({ id: item.id, note, type: "editNote" });
+            }}
+            placeholder="A line to paste along with it"
+            value={item.note}
+          />
+        </FieldBox>
       </Field>
       {item.kind === "image" && item.pins.length > 0 ? (
         <PinLabels
@@ -1475,7 +1559,24 @@ export const DetailsView = (props: DetailsProps) => {
     steps: steps.length > 0 || added.has("steps"),
   };
 
+  // Steps added here and never typed in: only these go when left blank, so Add step stays the one way to add one. A step that held words stays once cleared, and ⌘Z in it brings them back.
+  const untyped = useRef(new Set<string>());
+
+  const newStep = (): Step => {
+    const step = { done: false, id: crypto.randomUUID(), text: "" };
+
+    untyped.current.add(step.id);
+
+    return step;
+  };
+
   const saveSteps = (next: readonly Step[]): void => {
+    for (const step of next) {
+      if (step.text.trim() !== "") {
+        untyped.current.delete(step.id);
+      }
+    }
+
     setSteps(next);
     props.onApply({ id: item.id, steps: [...next], type: "setSteps" });
   };
@@ -1578,22 +1679,24 @@ export const DetailsView = (props: DetailsProps) => {
         />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
-            <AutoText
-              autoFocus={descriptionFocus > 0}
-              key={descriptionFocus}
-              label="Description"
-              max={DESCRIPTION_MAX}
-              multiline
-              onSave={(description) => {
-                props.onApply({
-                  description,
-                  id: item.id,
-                  type: "setDescription",
-                });
-              }}
-              placeholder="Add a description"
-              value={item.description}
-            />
+            <FieldBox>
+              <AutoText
+                autoFocus={descriptionFocus > 0}
+                key={descriptionFocus}
+                label="Description"
+                max={DESCRIPTION_MAX}
+                multiline
+                onSave={(description) => {
+                  props.onApply({
+                    description,
+                    id: item.id,
+                    type: "setDescription",
+                  });
+                }}
+                placeholder="Add a description"
+                value={item.description}
+              />
+            </FieldBox>
           </Field>
         ) : null}
         {shown.steps ? (
@@ -1608,7 +1711,13 @@ export const DetailsView = (props: DetailsProps) => {
           >
             <StepsEditor
               focusSeq={stepsFocus}
+              newStep={newStep}
               onChange={saveSteps}
+              onLeave={(step) => {
+                if (step.text.trim() === "" && untyped.current.has(step.id)) {
+                  saveSteps(steps.filter((other) => other.id !== step.id));
+                }
+              }}
               onRemoved={(step, index) => {
                 props.onUndoable({ index, kind: "step", step });
               }}
