@@ -166,6 +166,11 @@ describe(secondTap, () => {
       )
     ).toBe(expected);
   });
+
+  it("captures files copied in Explorer or Finder, whatever the notice offers", () => {
+    expect(secondTap(offer, { kind: "files" })).toBe("capture");
+    expect(secondTap(null, { kind: "files" })).toBe("capture");
+  });
 });
 
 describe(withWhy, () => {

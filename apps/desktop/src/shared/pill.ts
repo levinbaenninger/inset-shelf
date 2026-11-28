@@ -302,8 +302,14 @@ export const secondTap = (
   offer: WhyOffer | null,
   result:
     | { readonly kind: "text"; readonly text: string }
+    | { readonly kind: "files" }
     | { readonly kind: "none" }
 ): "why" | "capture" | "toggle" => {
+  // Files copied in Explorer or Finder are never the text the notice offers a why for.
+  if (result.kind === "files") {
+    return "capture";
+  }
+
   if (offer === null || !SECOND_TAP_SAYS_WHY) {
     return result.kind === "text" ? "capture" : "toggle";
   }

@@ -20,7 +20,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 
 import { saveErrorText } from "../../src/main/save-error.ts";
-import { SHELF_MAX_HEIGHT_DIP } from "../../src/shared/geometry.ts";
+import { dockedBeside } from "../../src/shared/geometry.ts";
 import { noticeFate } from "../../src/shared/notice-fate.ts";
 import type { NoticeFate } from "../../src/shared/notice-fate.ts";
 
@@ -85,6 +85,15 @@ const EventSchema = z.object({
   tone: z.string().optional(),
   via: z.string().optional(),
   windows: z.number(),
+  /** The work area of the display the shelf opened on, logged with `shelfShown`. */
+  workArea: z
+    .object({
+      height: z.number(),
+      width: z.number(),
+      x: z.number(),
+      y: z.number(),
+    })
+    .optional(),
 });
 
 type AppEvent = z.infer<typeof EventSchema>;
@@ -628,15 +637,14 @@ const checkShelfStaysInFront = async (): Promise<void> => {
       ? JSON.stringify(bounds)
       : "the tray is out of reach on this desktop; shown with the shortcut"
   );
-  const height = Math.min(target.height, SHELF_MAX_HEIGHT_DIP);
+  const workArea = shown?.workArea;
 
   record(
-    "the shelf docks beside the window in front, centred on its height",
+    "the shelf docks beside the window in front, centred on its height, at its one height",
     bounds !== undefined &&
-      bounds.x === target.x + target.width + 8 &&
-      Math.abs(bounds.y - (target.y + (target.height - height) / 2)) <= 1 &&
-      bounds.height === height,
-    `window ${JSON.stringify(target)}`
+      workArea !== undefined &&
+      dockedBeside(bounds, target, workArea),
+    `window ${JSON.stringify(target)}, work area ${JSON.stringify(workArea)}`
   );
   await delay(500);
 

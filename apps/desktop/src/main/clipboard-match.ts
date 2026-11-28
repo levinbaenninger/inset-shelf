@@ -146,13 +146,37 @@ export const clipboardContent = async (
   text: await textIn(read, "text/plain"),
 });
 
-/** holdsAgain, judged from one read of the clipboard rather than reading it again. */
+/** Every file list on the clipboard (a URI list per item that has one), as one text. */
+const fileListsIn = async (
+  read: readonly ClipboardContents[]
+): Promise<string> => {
+  const lists = await Promise.all(
+    read.map(async (item) =>
+      "text/uri-list" in item ? await textIn([item], "text/uri-list") : ""
+    )
+  );
+
+  return lists.map(plain).join("\n");
+};
+
+/**
+ * holdsAgain, judged from one read of the clipboard rather than reading it
+ * again. Copied files are what a clipboard of files holds, so they must be the
+ * same files: another list of files isn't the clipboard put back.
+ */
 export const holdsAgainIn = async (
   saved: readonly ClipboardContents[],
   current: readonly ClipboardContents[]
-): Promise<boolean> =>
-  await holdsAgain(
+): Promise<boolean> => {
+  const files = await fileListsIn(saved);
+
+  if (files !== "" && files !== (await fileListsIn(current))) {
+    return false;
+  }
+
+  return await holdsAgain(
     saved,
     current.flatMap((item) => Object.keys(item)),
     await textIn(current, "text/plain")
   );
+};

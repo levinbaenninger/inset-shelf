@@ -29,7 +29,7 @@ import { z } from "zod";
 
 import { fellBackMessage, goneMessage } from "../src/shared/code-place.ts";
 import {
-  SHELF_MAX_HEIGHT_DIP,
+  SHELF_HEIGHT_DIP,
   SHELF_MIN_WIDTH_DIP,
   SHELF_WIDTH_DIP,
 } from "../src/shared/geometry.ts";
@@ -13745,7 +13745,7 @@ const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   // src/main/settings-window.ts: 420 wide, as tall as its content.
   settings: { height: 560, width: 420 },
   // What users get by default: the width the shelf opens at, and its height beside a window at least that tall.
-  shelf: { height: SHELF_MAX_HEIGHT_DIP, width: SHELF_WIDTH_DIP },
+  shelf: { height: SHELF_HEIGHT_DIP, width: SHELF_WIDTH_DIP },
   // src/main/toast-window.ts: a done notice's window; a failed one is 360×72.
   toast: { height: 44, width: 260 },
 };

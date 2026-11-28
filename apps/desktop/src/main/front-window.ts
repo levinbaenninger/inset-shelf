@@ -20,6 +20,8 @@ import { E2E_EDITORS } from "./e2e-log";
 import { NO_WINDOW, readFocusedWindow } from "./page-address";
 import type { FocusedWindow, WebArea } from "./page-address";
 import { t3ThreadTitle } from "./t3-threads";
+import { isTaskbarWindow } from "./taskbar-window";
+import type { FrontKind } from "./tray-menu";
 import { documentPath } from "./window-origin";
 
 export interface FrontWindow {
@@ -51,6 +53,43 @@ const isWindowsShell = (title: string, owner: string): boolean =>
   process.platform === "win32" &&
   path.win32.basename(owner).toLowerCase() === "explorer.exe" &&
   (title === "Program Manager" || title.trim() === "");
+
+/**
+ * Windows: what has the focus, the taskbar or the hidden icons' flyout
+ * (opened from it) or any other window, a File Explorer folder included;
+ * null where nothing is in front or this isn't Windows.
+ */
+export const frontKind = async (): Promise<FrontKind | null> => {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  try {
+    const front = await activeWindow();
+
+    if (front === undefined) {
+      return null;
+    }
+
+    const { height, width, x, y } = toDip(front.bounds);
+
+    const shell = isTaskbarWindow(
+      {
+        bounds: rect<"screen">(x, y, width, height),
+        ownerPath: front.owner.path,
+        title: front.title,
+      },
+      screen.getAllDisplays().map(({ bounds, workArea }) => ({
+        bounds,
+        workArea,
+      }))
+    );
+
+    return shell ? "shell" : "other";
+  } catch {
+    return null;
+  }
+};
 
 /** Only web pages and pages opened from a file are kept as links. */
 const pageUrl = (url: string | undefined): string | null => {

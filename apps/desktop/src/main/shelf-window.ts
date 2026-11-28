@@ -35,6 +35,8 @@ export interface ShelfWindow {
   readonly hide: () => void;
   readonly onShown: (listener: (bounds: Rectangle) => void) => void;
   readonly onHidden: (listener: () => void) => void;
+  /** The shelf lost the keyboard, to another window or by hiding. */
+  readonly onBlur: (listener: () => void) => void;
   /** Gives the shelf the keyboard, when another Inset window closes over it. */
   readonly focus: () => void;
   /** The window a file dialog belongs to, so it opens above the shelf. */
@@ -154,6 +156,9 @@ export const createShelfWindow = (options: ShelfWindowOptions): ShelfWindow => {
     isVisible: () => !window.isDestroyed() && window.isVisible(),
     load: async () => {
       await window.loadURL(options.url);
+    },
+    onBlur: (listener) => {
+      window.on("blur", listener);
     },
     onHidden: (listener) => {
       onHidden = listener;

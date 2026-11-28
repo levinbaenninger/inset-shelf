@@ -27,10 +27,14 @@ export type E2eEvent =
   | "recallShown"
   // A notice: main sent it (`text`, `tone`, and `via` the shelf page or the toast window), then the shelf page put it on screen. The toast window reports nothing, so a notice sent its way is never logged as shown.
   | "noticeSent"
-  | "noticeShown";
+  | "noticeShown"
+  // Windows: a left click on the notification-area icon, and what it did (`kind`: show, focus or hide).
+  | "trayClicked";
 
 export interface E2eDetails {
   readonly bounds?: Rectangle;
+  /** The work area of the display the shelf opened on. */
+  readonly workArea?: Rectangle;
   readonly itemId?: string;
   readonly kind?: string;
   readonly via?: string;

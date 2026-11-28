@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  dockedBeside,
   dockShelf,
   noticeBesidePointer,
   noticeInWindowCorner,
@@ -16,13 +17,13 @@ import {
 describe(dockShelf, () => {
   const work = rect<"screen">(0, 25, 1440, 850);
 
-  it("docks beside the right edge of the window, at its top and height", () => {
+  it("docks beside the right edge of the window, centred on its height, 620 tall", () => {
     expect(dockShelf(rect<"screen">(100, 100, 800, 600), work)).toStrictEqual(
-      rect(908, 100, 340, 600)
+      rect(908, 90, 340, 620)
     );
   });
 
-  it("centres a shelf at most 620 tall on a taller window", () => {
+  it("centres the shelf on a taller window", () => {
     expect(dockShelf(rect<"screen">(100, 25, 800, 850), work)).toStrictEqual(
       rect(908, 140, 340, 620)
     );
@@ -30,11 +31,11 @@ describe(dockShelf, () => {
 
   it("docks to the left when there is no room on the right", () => {
     expect(dockShelf(rect<"screen">(500, 100, 900, 600), work)).toStrictEqual(
-      rect(152, 100, 340, 600)
+      rect(152, 90, 340, 620)
     );
   });
 
-  it("sits inside the right edge of a window that fills the screen, centred, at most 620 tall", () => {
+  it("sits inside the right edge of a window that fills the screen, centred, 620 tall", () => {
     expect(dockShelf(rect<"screen">(0, 25, 1440, 850), work)).toStrictEqual(
       rect(1092, 140, 340, 620)
     );
@@ -69,7 +70,7 @@ describe(dockShelf, () => {
           desktop,
           WINDOWS_FRAME_INSET_DIP
         )
-      ).toStrictEqual(rect(659, 100, 340, 593));
+      ).toStrictEqual(rect(659, 87, 340, 620));
     });
 
     it("sits inside a maximized window, whose bounds overhang the screen", () => {
@@ -83,14 +84,86 @@ describe(dockShelf, () => {
     });
   });
 
-  it("keeps a short window's shelf tall enough and on screen", () => {
+  it("keeps a short window's shelf at the one height, on screen", () => {
     expect(dockShelf(rect<"screen">(100, 700, 400, 120), work)).toStrictEqual(
-      rect(508, 515, 340, 360)
+      rect(508, 255, 340, 620)
     );
   });
 
   it("opens at the right without a window, centred on the screen's height", () => {
-    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 170, 340, 560));
+    expect(dockShelf(null, work)).toStrictEqual(rect(1092, 140, 340, 620));
+  });
+
+  it("opens at one height however it was opened", () => {
+    const heights = [
+      null,
+      rect<"screen">(100, 100, 800, 600),
+      rect<"screen">(100, 25, 800, 850),
+      rect<"screen">(300, 200, 500, 420),
+      rect<"screen">(0, 25, 1440, 850),
+    ].map((target) => dockShelf(target, work).height);
+
+    expect(new Set(heights)).toStrictEqual(new Set([620]));
+  });
+});
+
+describe(dockedBeside, () => {
+  const work = rect<"screen">(0, 25, 1440, 850);
+  const target = rect<"screen">(100, 100, 800, 600);
+
+  it("accepts the shelf centred on the window, 620 tall", () => {
+    expect(dockedBeside(rect(908, 90, 340, 620), target, work)).toBeTruthy();
+  });
+
+  it("rejects a shelf lower than the centre when the centre fits the screen", () => {
+    expect(dockedBeside(rect(908, 500, 340, 620), target, work)).toBeFalsy();
+  });
+
+  it("rejects a shelf higher than the centre", () => {
+    expect(dockedBeside(rect(908, 30, 340, 620), target, work)).toBeFalsy();
+  });
+
+  it("accepts the shelf held at the top edge of the work area when the centre would leave it", () => {
+    expect(
+      dockedBeside(
+        rect(908, 25, 340, 620),
+        rect<"screen">(100, 25, 800, 300),
+        work
+      )
+    ).toBeTruthy();
+  });
+
+  it("accepts the shelf held at the bottom edge of the work area", () => {
+    expect(
+      dockedBeside(
+        rect(908, 255, 340, 620),
+        rect<"screen">(100, 700, 800, 175),
+        work
+      )
+    ).toBeTruthy();
+  });
+
+  it("takes the shelf's height from the work area on a screen too short for 620", () => {
+    const short = rect<"screen">(0, 25, 1280, 575);
+
+    expect(
+      dockedBeside(
+        rect(908, 25, 340, 559),
+        rect<"screen">(100, 100, 800, 400),
+        short
+      )
+    ).toBeTruthy();
+    expect(
+      dockedBeside(
+        rect(908, 25, 340, 620),
+        rect<"screen">(100, 100, 800, 400),
+        short
+      )
+    ).toBeFalsy();
+  });
+
+  it("rejects a shelf that isn't beside the window", () => {
+    expect(dockedBeside(rect(950, 90, 340, 620), target, work)).toBeFalsy();
   });
 });
 

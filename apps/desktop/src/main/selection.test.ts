@@ -78,6 +78,7 @@ const fakeClipboard = (
     holds: async (saved, current) => await sameClipboard(saved, current),
     now: () => time,
     readable: readableClipboard,
+    readFiles: async () => await Promise.resolve([]),
     readHtml: async () => await Promise.resolve(html),
     readSource: async () => await Promise.resolve(source),
     readText: async () => {
@@ -125,6 +126,31 @@ const fakeClipboard = (
   };
 };
 
+/** The app copies these files, and Finder their names as text too; the clipboard holds "earlier" again once put back. */
+const withFiles = (paths: readonly string[], names: string | null) => {
+  const clip = fakeClipboard("earlier", names);
+  let files: readonly string[] = [];
+
+  const deps: SelectionDeps<Snapshot> = {
+    ...clip.deps,
+    clear: () => {
+      clip.deps.clear();
+      files = [];
+    },
+    copy: () => {
+      clip.deps.copy();
+      files = paths;
+    },
+    readFiles: async () => await Promise.resolve(files),
+    restore: async (saved) => {
+      await clip.deps.restore(saved);
+      files = [];
+    },
+  };
+
+  return { clip, deps, files: () => files };
+};
+
 describe(captureSelection, () => {
   it("returns the copied selection and restores the clipboard", async () => {
     const clip = fakeClipboard("earlier", "Total ignores the discount");
@@ -150,6 +176,58 @@ describe(captureSelection, () => {
       unchecked: false,
     });
     expect(clip.content()).toBe("earlier");
+  });
+
+  describe("with files selected in Explorer or Finder", () => {
+    it("returns the files Explorer copied, and puts the clipboard back", async () => {
+      const { clip, deps, files } = withFiles(
+        [
+          String.raw`C:	empchart-sample.png`,
+          String.raw`C:	emp
+otes.txt`,
+        ],
+        null
+      );
+
+      await expect(captureSelection(deps)).resolves.toStrictEqual({
+        kind: "files",
+        paths: [
+          String.raw`C:	empchart-sample.png`,
+          String.raw`C:	emp
+otes.txt`,
+        ],
+        restored: true,
+        unchecked: false,
+      });
+      expect(clip.content()).toBe("earlier");
+      expect(files()).toStrictEqual([]);
+    });
+
+    it("takes the files over the names Finder copies beside them", async () => {
+      const { deps } = withFiles(
+        ["/Users/me/chart-sample.png"],
+        "chart-sample.png"
+      );
+
+      await expect(captureSelection(deps)).resolves.toMatchObject({
+        kind: "files",
+        paths: ["/Users/me/chart-sample.png"],
+      });
+    });
+
+    it("doesn't wait for text that a copy of files never brings", async () => {
+      const { clip, deps } = withFiles(
+        [
+          String.raw`C:	emp
+otes.txt`,
+        ],
+        null
+      );
+
+      await captureSelection(deps);
+
+      expect(clip.deps.now()).toBeLessThan(200);
+    });
   });
 
   it("keeps the HTML copied with the selection, read before the clipboard goes back", async () => {

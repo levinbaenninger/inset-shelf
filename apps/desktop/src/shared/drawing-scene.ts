@@ -106,3 +106,19 @@ export const openedMarks = (
       : { at, kind: "pin", label: pin.label };
   }),
 ];
+
+/**
+ * What the drawing window and its header call the page: Annotate for an
+ * image being marked up, New Drawing for a blank page, and Drawing for one
+ * saved before. The taskbar and Alt+Tab show the same word as the page.
+ */
+export const drawingTitle = (opened: {
+  readonly image: unknown;
+  readonly marks: readonly unknown[];
+}): string => {
+  if (opened.image !== null) {
+    return "Annotate";
+  }
+
+  return opened.marks.length === 0 ? "New Drawing" : "Drawing";
+};

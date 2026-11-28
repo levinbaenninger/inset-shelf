@@ -8,6 +8,8 @@ export interface SelectionDeps<S> {
   readonly readHtml: () => Promise<string>;
   /** The address of the page the text was copied from, as browsers note it beside the text, or "". */
   readonly readSource: () => Promise<string>;
+  /** The paths of the files the app copied, as Explorer and Finder copy a selected file; empty for none. */
+  readonly readFiles: () => Promise<readonly string[]>;
   /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
   /**
@@ -65,6 +67,11 @@ export type SelectionResult =
       /** Null when the app noted no page. */
       readonly source: string | null;
     })
+  /** Files selected in Explorer or Finder: saved as dropping them on the shelf would. */
+  | (PutBackResult & {
+      readonly kind: "files";
+      readonly paths: readonly string[];
+    })
   | (PutBackResult & { readonly kind: "none" })
   /** Another app held the clipboard, so the selection couldn't be copied. Left alone if it held it from the start. */
   | (PutBackResult & { readonly kind: "busy" });
@@ -90,22 +97,39 @@ const readSnapshot = async <S>(
   return await readSnapshot(deps, until, retryMs);
 };
 
+interface Copied {
+  readonly held: boolean;
+  readonly text: string;
+  /** The files copied: Explorer copies them without text, Finder with their names as text. */
+  readonly files: readonly string[];
+}
+
+const readFiles = async <S>(
+  deps: SelectionDeps<S>
+): Promise<readonly string[]> => await deps.readFiles().catch(() => []);
+
 /**
- * Waits for the copied text. Nothing there yet is waited for a moment (the
- * app is still copying, or nothing was selected); a clipboard another app
- * holds, which reads as nothing too, is waited for until `until`.
+ * Waits for the copied text or files. Nothing there yet is waited for a
+ * moment (the app is still copying, or nothing was selected); a clipboard
+ * another app holds, which reads as nothing too, is waited for until `until`.
  */
 const pollText = async <S>(
   deps: SelectionDeps<S>,
   quietUntil: number,
   until: number
-): Promise<{ readonly held: boolean; readonly text: string }> => {
+): Promise<Copied> => {
   await deps.wait(POLL_MS);
 
   const text = await deps.readText();
 
   if (text !== "") {
-    return { held: false, text };
+    return { files: await readFiles(deps), held: false, text };
+  }
+
+  const files = await readFiles(deps);
+
+  if (files.length > 0) {
+    return { files, held: false, text: "" };
   }
 
   const snapshot = await deps.snapshot().catch(() => null);
@@ -116,21 +140,69 @@ const pollText = async <S>(
     const again = await deps.readText();
 
     if (again !== "") {
-      return { held: false, text: again };
+      return { files: await readFiles(deps), held: false, text: again };
     }
   }
 
   if (deps.now() >= (held ? until : quietUntil)) {
-    return { held, text: "" };
+    return { files: [], held, text: "" };
   }
 
   return await pollText(deps, quietUntil, until);
 };
 
+/** Whether the clipboard still lists the files the capture read; trivially so for a capture of text. */
+const stillCopied = async <S>(
+  deps: SelectionDeps<S>,
+  files: readonly string[]
+): Promise<boolean> => {
+  if (files.length === 0) {
+    return true;
+  }
+
+  const now = await readFiles(deps);
+
+  return (
+    now.length === files.length && now.every((file, at) => file === files[at])
+  );
+};
+
+/** The last name in a path, whichever way it is separated. */
+const nameOf = (file: string): string =>
+  file.split(/[\\/]+/u).findLast((part) => part !== "") ?? "";
+
+/**
+ * Whether the text beside the files is only their names, as Finder copies a
+ * selected file, with or without its extension, or nothing. Any other text
+ * was selected in an app that put a file URL next to it: the text is the
+ * selection.
+ */
+const namesTheFiles = (text: string, files: readonly string[]): boolean => {
+  const lines = new Set(
+    text
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+  );
+
+  if (lines.size === 0) {
+    return true;
+  }
+
+  const names = files.map(nameOf);
+  const stems = names.map((name) => name.replace(/\.[^.]+$/u, ""));
+
+  return [names, stems].some(
+    (spelled) =>
+      [...lines].every((line) => spelled.includes(line)) &&
+      spelled.every((name) => lines.has(name))
+  );
+};
+
 type Baseline<S> =
   /** The clipboard as the capture left it, to tell a newer copy apart later. */
   | { readonly kind: "read"; readonly snapshot: S }
-  /** It couldn't be read at all: one try to put back, without retries. */
+  /** It couldn't be read at all, though it still lists any files the capture read: one try to put back, without retries. */
   | { readonly kind: "unread" }
   /** Another app copied something newer meanwhile: it is left alone. */
   | { readonly kind: "newer" }
@@ -140,21 +212,32 @@ type Baseline<S> =
 /**
  * The clipboard right after the capture. A read under a hold says nothing:
  * what comes back after the hold is the capture only if it is exactly what
- * was copied, text and HTML; anything else is a newer copy to leave alone.
+ * was copied, text and HTML, or the same files; anything else is a newer
+ * copy to leave alone. Files carry no text or HTML to tell a newer copy by,
+ * so their list is read again, whether the first read held or not.
  */
 const baseline = async <S>(
   deps: SelectionDeps<S>,
-  copied: { readonly html: string; readonly text: string },
+  copied: {
+    readonly files: readonly string[];
+    readonly html: string;
+    readonly text: string;
+  },
   until: number
 ): Promise<Baseline<S>> => {
   const first = await deps.snapshot().catch(() => null);
 
+  // Unread, a newer copy of files is still told apart by their list, and left alone when the list differs or can't be read.
   if (first === null) {
-    return { kind: "unread" };
+    return (await stillCopied(deps, copied.files))
+      ? { kind: "unread" }
+      : { kind: "newer" };
   }
 
   if (deps.readable(first)) {
-    return { kind: "read", snapshot: first };
+    return (await stillCopied(deps, copied.files))
+      ? { kind: "read", snapshot: first }
+      : { kind: "newer" };
   }
 
   const later = await readSnapshot(deps, until, RESTORE_RETRY_MS);
@@ -166,7 +249,9 @@ const baseline = async <S>(
   // Judged from that one read: a second read could fall under a hold that starts meanwhile.
   const { html, text } = await deps.content(later);
 
-  return text === copied.text && html === copied.html
+  return text === copied.text &&
+    html === copied.html &&
+    (await stillCopied(deps, copied.files))
     ? { kind: "read", snapshot: later }
     : { kind: "newer" };
 };
@@ -269,7 +354,7 @@ export const captureSelection = async <S>(
   const copiedAt = deps.now();
   const until = copiedAt + RESTORE_DEADLINE_MS;
 
-  const { held, text } = await pollText(
+  const { files, held, text } = await pollText(
     deps,
     copiedAt + POLL_MS * POLL_LIMIT,
     until
@@ -284,7 +369,7 @@ export const captureSelection = async <S>(
   const html = text === "" ? "" : await deps.readHtml().catch(() => "");
   const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
-  const left = await baseline(deps, { html, text }, until);
+  const left = await baseline(deps, { files, html, text }, until);
 
   let ended: PutBackResult;
 
@@ -313,6 +398,11 @@ export const captureSelection = async <S>(
       ended = NOT_TRIED;
       break;
     }
+  }
+
+  // Finder copies a file's name as text beside it: the file is what was selected. Other text beside a file URL is the selection.
+  if (files.length > 0 && namesTheFiles(text, files)) {
+    return { kind: "files", paths: files, ...ended };
   }
 
   if (text.trim() === "") {

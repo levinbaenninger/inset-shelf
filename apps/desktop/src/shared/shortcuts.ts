@@ -42,7 +42,7 @@ export const shortcutSheet = (mac: boolean): readonly ShortcutGroup[] => {
       rows: [
         {
           keys: [labels.doubleShift],
-          label: "Save the selected text, or show the shelf",
+          label: "Save the selected text or files, or show the shelf",
         },
         {
           keys: [`${labels.doubleShift} again`],

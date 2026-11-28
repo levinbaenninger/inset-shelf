@@ -138,7 +138,25 @@ describe(updateNotice, () => {
     ).toBe("Downloading version 0.1.901…");
     expect(
       updateNotice(checking(true), { kind: "error", message: "offline" })
-    ).toBe("Couldn’t check for updates: offline");
+    ).toBe("Couldn’t check for updates: offline.");
+  });
+
+  it("ends a failed check's notice with one full stop", () => {
+    expect(
+      updateNotice(checking(true), {
+        kind: "error",
+        message:
+          "this copy came from a zip. Install it with the Setup file to get updates",
+      })
+    ).toBe(
+      "Couldn’t check for updates: this copy came from a zip. Install it with the Setup file to get updates."
+    );
+    expect(
+      updateNotice(checking(true), {
+        kind: "error",
+        message: "Code signature did not match.",
+      })
+    ).toBe("Couldn’t check for updates: Code signature did not match.");
   });
 
   it("stays quiet about background checks", () => {
