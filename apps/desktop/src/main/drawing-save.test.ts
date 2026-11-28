@@ -422,6 +422,8 @@ const cardShot = async (app: Awaited<ReturnType<typeof setup>>) => {
     throw new Error("not added");
   }
 
+  await app.controller.flush();
+
   const shown: string[] = [];
   // The window's hide, as main hears of it: after Save, Cancel or its close button alike.
   const window = { hidden: (): void => {} };
@@ -457,7 +459,7 @@ const cardShot = async (app: Awaited<ReturnType<typeof setup>>) => {
     );
   };
 
-  /** Save, or Retry in a held quit (`forQuit`), puts the marks on it and closes the window. */
+  /** Save, or Retry in a held quit (`forQuit`), puts the marks on it and closes the window; the shelf is on the disk once it returns. */
   const save = async (forQuit = false) => {
     if (forQuit) {
       saves.forQuit(new AbortController().signal);
@@ -470,6 +472,7 @@ const cardShot = async (app: Awaited<ReturnType<typeof setup>>) => {
       pins: [],
       png: PNG,
     });
+    await app.controller.flush();
   };
 
   return { annotate, id, save, saves, shown };
