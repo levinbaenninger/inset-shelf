@@ -9612,7 +9612,8 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
 
       const left = await keyboardPlace(page);
 
-      return tabbed.label === "Show details" && left.label === "Search the shelf"
+      return tabbed.label === "Show details" &&
+        left.label === "Search the shelf"
         ? null
         : `Tab went to ${placeText(tabbed)}, and when the view left the search's results focus was on ${placeText(left)}, not on the search`;
     },
