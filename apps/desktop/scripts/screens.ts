@@ -10170,9 +10170,20 @@ const SCENES: readonly Scene[] = [
     check: async (page) => {
       const selected = await item(page, 11).getAttribute("aria-current");
 
-      return selected === "true"
+      // The frames details take to give the keyboard back, once they are gone.
+      await page.evaluate(
+        "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+      );
+
+      const keyboard = await keyboardPlace(page);
+
+      if (selected !== "true") {
+        return "Show on the screenshot's notice went back to the list without selecting its item";
+      }
+
+      return keyboard.row === uuid(11)
         ? null
-        : "Show on the screenshot's notice went back to the list without selecting its item";
+        : `Show on the screenshot's notice selected its item but left the keyboard on ${placeText(keyboard)}`;
     },
     data: { view: shelfView() },
     name: "shelf-screenshot-keeps-details-show",
