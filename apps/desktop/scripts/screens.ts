@@ -9601,6 +9601,10 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
       await searchFor(page, "monday");
       await page.keyboard.press("ArrowDown");
       await unmatchWords(page);
+      // Return hands the keyboard to the row a frame on.
+      await page.waitForFunction(
+        "document.activeElement?.closest('[data-row-keys]') !== null"
+      );
       await page.keyboard.press("Tab");
     },
     check: async (page) => {
@@ -9648,6 +9652,10 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     act: async (page) => {
       await select(page, 10);
       await page.keyboard.press("ArrowDown");
+      // ↓ hands the keyboard to the row a frame on.
+      await page.waitForFunction(
+        "document.activeElement?.closest('[data-row-keys]') !== null"
+      );
       await page.keyboard.press("Delete");
       await page.waitForTimeout(400);
     },
