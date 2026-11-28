@@ -1,3 +1,4 @@
+import { noticeText } from "./added-file";
 import type { AddedNotice } from "./added-file";
 import type { SelectionResult } from "./selection";
 
@@ -22,8 +23,9 @@ export const selectionProblem = (result: SelectionResult): string | null => {
  * The notice that carries the clipboard problem to the user where they are.
  * The shelf's banner shows it only while the shelf is open; a hidden shelf
  * would keep it out of sight behind the capture's own notice (`shown`). Sent
- * after that notice, it is the one left showing, so a failed one's reason is
- * said first in it.
+ * after that notice, it is the one left showing, so it says a failed one's
+ * headline first and each file's reason last: a failed toast shows two
+ * lines, which the reasons of a few files would fill.
  */
 export const warningToUser = (
   result: SelectionResult,
@@ -37,7 +39,10 @@ export const warningToUser = (
   }
 
   return {
-    message: shown?.tone === "failed" ? `${shown.message} ${message}` : message,
+    message:
+      shown?.tone === "failed"
+        ? noticeText({ ...shown, headline: `${shown.headline} ${message}` })
+        : message,
     tone: "failed",
   };
 };

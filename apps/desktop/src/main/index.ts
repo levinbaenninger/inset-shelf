@@ -79,7 +79,7 @@ import type {
   WebContents,
 } from "electron";
 
-import { addedNotice } from "./added-file";
+import { addedNotice, noticeText } from "./added-file";
 import type { AddedNotice } from "./added-file";
 import { appMenuTemplate, HELP_URL } from "./app-menu";
 import { attachResult, createAttachments } from "./attachments";
@@ -1108,13 +1108,13 @@ const start = async (): Promise<void> => {
       if (!written.ok) {
         notify(written.message, "failed");
 
-        return { message: written.message, tone: "failed" };
+        return { headline: written.message, reasons: [], tone: "failed" };
       }
     }
 
     const notice = addedNotice(added, tried, problems, noun);
 
-    notify(notice.message, notice.tone);
+    notify(noticeText(notice), notice.tone);
 
     return notice;
   };
@@ -1327,7 +1327,9 @@ const start = async (): Promise<void> => {
           );
 
           warn(
-            written.ok ? null : { message: written.message, tone: "failed" }
+            written.ok
+              ? null
+              : { headline: written.message, reasons: [], tone: "failed" }
           );
         })();
       }

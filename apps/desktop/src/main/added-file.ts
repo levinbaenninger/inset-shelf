@@ -37,10 +37,16 @@ export const classifyAddedFile = (filePath: string): AddedFile => {
   };
 };
 
+/** How adding went: what came of it, and why each file that couldn't be added wasn't. */
 export interface AddedNotice {
-  readonly message: string;
+  readonly headline: string;
+  readonly reasons: readonly string[];
   readonly tone: "done" | "failed";
 }
+
+/** The notice's words as the toast says them: what came of it, then each reason. */
+export const noticeText = (notice: AddedNotice): string =>
+  [notice.headline, ...notice.reasons].join(" ");
 
 /** What the notice says once files or pictures dropped or pasted on the shelf were added as items: done only when every one was. */
 export const addedNotice = (
@@ -51,13 +57,16 @@ export const addedNotice = (
 ): AddedNotice => {
   if (added === tried && problems.length === 0) {
     return {
-      message: added === 1 ? `Added 1 ${noun}` : `Added ${added} ${noun}s`,
+      headline: added === 1 ? `Added 1 ${noun}` : `Added ${added} ${noun}s`,
+      reasons: [],
       tone: "done",
     };
   }
 
-  const lead =
-    added === 0 ? "Nothing was added." : `Added ${added} of ${tried}.`;
-
-  return { message: [lead, ...problems].join(" "), tone: "failed" };
+  return {
+    headline:
+      added === 0 ? "Nothing was added." : `Added ${added} of ${tried}.`,
+    reasons: problems,
+    tone: "failed",
+  };
 };
