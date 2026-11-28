@@ -745,13 +745,17 @@ describe("a code capture's copy", () => {
     });
   });
 
-  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> in HTML", () => {
-    expect(
-      copiedAfter("recall.py", "def __init__(self):\n    return *a*  # <1>")
-    ).toStrictEqual({
-      html: "<pre><code>def __init__(self):\n    return *a*  # &lt;1>\n</code></pre>",
-      text: "def __init__(self):\n    return *a*  # <1>",
-    });
+  it("copies an edited one as the code block it shows: its words as typed in plain text, <pre><code> in HTML, the same text in both", () => {
+    expect([
+      copiedAfter("recall.py", "def __init__(self):\n    return *a*  # <1>"),
+      copiedAfter("recall.py", "call()\n"),
+    ]).toStrictEqual([
+      {
+        html: "<pre><code>def __init__(self):\n    return *a*  # &lt;1></code></pre>",
+        text: "def __init__(self):\n    return *a*  # <1>",
+      },
+      { html: "<pre><code>call()\n</code></pre>", text: "call()\n" },
+    ]);
   });
 
   it("copies an edited Markdown file's selection as the Markdown the shelf shows", () => {
