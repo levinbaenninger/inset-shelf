@@ -470,6 +470,16 @@ const extensionOf = (name: string): string => {
 };
 
 /**
+ * A code capture's file, and whether its name is whole: a code place's, a
+ * lone title's, or a title of exactly the row's parts. With more, a dash may
+ * sit inside the name, so it may be only the name's first part.
+ */
+interface CodeFile {
+  readonly name: string;
+  readonly whole: boolean;
+}
+
+/**
  * The file a code editor's title names, for telling code from prose: by the
  * row's parts, else the whole title when it holds no dash, as Code titles a
  * file opened on its own, unless what follows its last dot has a space, as a
@@ -482,7 +492,7 @@ const titleFile = (
   editor: CodeEditor,
   title: string | null,
   app: string | null
-): string | null => {
+): CodeFile | null => {
   const split = splitTitle(editor, title, app);
 
   if (split === null) {
@@ -493,7 +503,7 @@ const titleFile = (
       /\s/u.test(extensionOf(lone)) ||
       PROSE_FILES.has(extensionOf(lone))
       ? null
-      : lone;
+      : { name: lone, whole: true };
   }
 
   const prose = split.parts.some((_, index) =>
@@ -502,7 +512,11 @@ const titleFile = (
     )
   );
 
-  return prose ? null : titleParts(editor, title, app).file;
+  const name = prose ? null : titleParts(editor, title, app).file;
+
+  return name === null
+    ? null
+    : { name, whole: split.parts.length === editor.title.length };
 };
 
 /**
@@ -517,7 +531,7 @@ const titleFile = (
 const codeFile = (
   { context, via }: Pick<TextItem, "context" | "via">,
   editors: readonly CodeEditor[]
-): string | null => {
+): CodeFile | null => {
   if (via !== "selection" || context === null) {
     return null;
   }
@@ -528,7 +542,7 @@ const codeFile = (
   if (place !== null) {
     const name = fileName(place);
 
-    return PROSE_FILES.has(extensionOf(name)) ? null : name;
+    return PROSE_FILES.has(extensionOf(name)) ? null : { name, whole: true };
   }
 
   const editor = codeEditor(context.app, editors);
@@ -536,7 +550,7 @@ const codeFile = (
   const file =
     editor === undefined ? null : titleFile(editor, context.title, context.app);
 
-  return file === null || extensionOf(file) === "" ? null : file;
+  return file === null || extensionOf(file.name) === "" ? null : file;
 };
 
 /** Whether a text item is code (`codeFile`), which reads and edits with every line's whitespace kept. */
@@ -550,14 +564,15 @@ const LANGUAGE = /^[a-z0-9]+$/u;
 
 /**
  * The language a code capture copies as, from its file's extension: "ts"
- * for recall.ts. Null for an item that is not code, or whose file's
- * extension names no language.
+ * for recall.ts. Null for an item that is not code, whose file's name may be
+ * only its first part (`CodeFile`), or whose extension names no language.
  */
 export const codeLanguage = (
   item: Pick<TextItem, "context" | "via">,
   editors: readonly CodeEditor[] = CODE_EDITORS
 ): string | null => {
-  const language = extensionOf(codeFile(item, editors) ?? "").slice(1);
+  const file = codeFile(item, editors);
+  const language = file?.whole === true ? extensionOf(file.name).slice(1) : "";
 
   return LANGUAGE.test(language) ? language : null;
 };
