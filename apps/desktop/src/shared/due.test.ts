@@ -162,6 +162,7 @@ describe(parseSearch, () => {
   it("takes a due filter out of the words", () => {
     expect(parseSearch("Quote  due:today chairs")).toStrictEqual({
       due: "today",
+      here: false,
       pendingDue: null,
       terms: ["quote", "chairs"],
     });
@@ -170,10 +171,22 @@ describe(parseSearch, () => {
   it("holds back a due word still being typed instead of searching for it", () => {
     expect(parseSearch("chairs due:to")).toStrictEqual({
       due: null,
+      here: false,
       pendingDue: "to",
       terms: ["chairs"],
     });
     expect(parseSearch("due:").pendingDue).toBe("");
+  });
+
+  it("takes from:here out of the words, in any case and with other words", () => {
+    expect(parseSearch("From:Here auth")).toStrictEqual({
+      due: null,
+      here: true,
+      pendingDue: null,
+      terms: ["auth"],
+    });
+    expect(parseSearch("from:here").terms).toStrictEqual([]);
+    expect(parseSearch("from:her").here).toBeFalsy();
   });
 });
 

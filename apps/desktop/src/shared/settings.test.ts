@@ -18,4 +18,11 @@ describe(readSettings, () => {
     );
     expect(readSettings("{ broken")).toStrictEqual(DEFAULT_SETTINGS);
   });
+
+  it("turns recall on for settings saved before it existed, and keeps it off once turned off", () => {
+    expect(
+      readSettings(JSON.stringify({ markDoneOnCopy: true })).recall
+    ).toBeTruthy();
+    expect(readSettings(JSON.stringify({ recall: false })).recall).toBeFalsy();
+  });
 });

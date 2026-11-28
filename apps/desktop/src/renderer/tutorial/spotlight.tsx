@@ -1,6 +1,6 @@
 import { Button } from "@inset/ui/components/button";
 import type { SpotlightStep, TutorialView } from "@shared/tutorial";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { anchorPresent, findAnchor } from "./anchors";
 import { CoachBubble, useBoxOf } from "./bubble";
@@ -139,7 +139,8 @@ const Walk = ({
 
   // Focus stays in the bubble: whatever takes it while the walk runs (a field's autofocus, the window coming forward)
   // gives it back a frame later, once that code is done. When the walk ends, focus goes back where it was, so a picked item keeps its keys.
-  useEffect(() => {
+  // Layout effects: they end in the same commit that removes the walk, so no key or focus falls in between.
+  useLayoutEffect(() => {
     const before = returnPoint();
     let frame = 0;
 
@@ -173,7 +174,7 @@ const Walk = ({
   });
 
   // The walk takes every key: ← → Return Esc move it, Tab stays in the bubble, and nothing reaches the page behind.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       const onButton =
         event.target instanceof HTMLButtonElement &&

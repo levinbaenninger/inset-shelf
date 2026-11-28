@@ -1,6 +1,7 @@
 import {
   AppWindowIcon,
   ArrowLeft01Icon,
+  Attachment01Icon,
   ArrowUpRight01Icon,
   Calendar03Icon,
   Cancel01Icon,
@@ -21,6 +22,7 @@ import type { DetailField, ShelfView } from "@shared/contracts";
 import { dateText, dueChipText } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
 import {
+  attachmentName,
   DESCRIPTION_MAX,
   PIN_LABEL_MAX,
   STEP_TEXT_MAX,
@@ -29,8 +31,11 @@ import {
   withPinLabel,
 } from "@shared/shelf";
 import type {
+  AttachedImage,
+  AttachmentId,
   FileItem,
   ImageItem,
+  Pin,
   ShelfItem,
   ShelfOp,
   Step,
@@ -49,17 +54,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Truncated } from "@/shared/clamp";
 import { PinGlyph, PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import {
+  AttachmentCount,
+  AttachmentGrid,
+  AttachMenuItems,
+} from "./attachment-strip";
+import type { AttachmentAdders, AttachmentHandlers } from "./attachment-strip";
+import { editPoint, useCaretStart, wordsClick } from "./edit-start";
 import {
   dueLabel,
   DueMenu,
@@ -70,6 +82,7 @@ import {
 } from "./item-meta";
 import { LinkList, SourceLine, TextEditor } from "./item-row";
 import { Markdown } from "./markdown";
+import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
 
 /** What ⌘Z in details can bring back. */
@@ -78,8 +91,15 @@ export type DetailsUndo =
   | { readonly kind: "window"; readonly windowId: WindowRef["id"] }
   | {
       readonly kind: "pinLabel";
+      /** The attached picture whose pin it is; null for the item's own. */
+      readonly attachmentId: AttachmentId | null;
       readonly index: number;
       readonly label: string;
+    }
+  | {
+      readonly kind: "attachment";
+      readonly attachmentId: AttachmentId;
+      readonly name: string;
     };
 
 /** A field to open, from the Add menu or a field shortcut; seq makes each request new. */
@@ -121,6 +141,7 @@ export interface DetailsProps {
   readonly banner: ReactNode;
   /** The last Discard changes: when it is this item's, every field shows what is saved again. */
   readonly discarded: ShelfView["discarded"];
+  readonly attachments: AttachmentHandlers & AttachmentAdders;
 }
 
 const newStep = (): Step => ({
@@ -162,8 +183,8 @@ const Field = ({
         icon={icon}
         size={13}
       />
-      <h3 className="text-muted-foreground flex-1 text-xs font-medium">
-        {label}
+      <h3 className="text-muted-foreground min-w-0 flex-1 text-xs font-medium">
+        <Truncated className="block" text={label} />
       </h3>
       {action}
     </div>
@@ -282,8 +303,13 @@ const AutoText = ({
       }
     },
     onChange: (event: { readonly target: { readonly value: string } }) => {
-      setText(event.target.value);
-      onSave(event.target.value);
+      // A one-line text stays one line, even when a pasted text has breaks.
+      const typed = multiline
+        ? event.target.value
+        : event.target.value.replaceAll(/\s*\n\s*/gu, " ");
+
+      setText(typed);
+      onSave(typed);
     },
     onFocus: () => {
       before.current = text;
@@ -295,7 +321,13 @@ const AutoText = ({
     value: text,
   };
 
-  return multiline ? <Textarea {...props} rows={rows} /> : <Input {...props} />;
+  // Read as text until typed in: no border, a quiet tint on hover and focus. A
+  // one-line text wraps as it grows, an input's height while it fits, so a long title shows whole.
+  return multiline ? (
+    <Textarea {...props} rows={rows} variant="quiet" />
+  ) : (
+    <Textarea {...props} rows={1} variant="quietLine" />
+  );
 };
 
 /**
@@ -431,9 +463,10 @@ const StepsEditor = ({
       {steps.map((step, index) => (
         <li className="group/step flex items-start gap-2" key={step.id}>
           <span className="flex h-7 shrink-0 items-center">
+            {/* Named by its words, as in the open row, and checked or not says the rest; a step not typed yet goes by its number. */}
             <Checkbox
               aria-label={
-                step.done ? "Mark step as not done" : "Mark step as done"
+                step.text.trim() === "" ? `Step ${index + 1}` : step.text
               }
               checked={step.done}
               onCheckedChange={() => {
@@ -617,7 +650,7 @@ const WindowDescription = ({
       className={cn(
         line,
         // Focus tints the words as hover does; a ring would read as the field again.
-        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 self-start text-left break-words outline-none"
+        "hover:bg-muted focus-visible:bg-muted dark:hover:bg-muted/50 dark:focus-visible:bg-muted/50 max-w-full self-start text-left break-words outline-none"
       )}
       onClick={edit}
       ref={shown}
@@ -657,7 +690,7 @@ const WindowRow = ({
   };
 
   return (
-    <li className="flex flex-col gap-1.5">
+    <li className="group/window relative flex flex-col gap-1.5">
       <div className="flex min-w-0 items-center gap-2.5">
         <button
           aria-label={`${reopen}: ${name}`}
@@ -667,12 +700,20 @@ const WindowRow = ({
         >
           <WindowThumb className="h-9 w-14" window={window} />
         </button>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <p className="truncate text-sm leading-tight font-medium">{name}</p>
-          <p className="text-muted-foreground truncate text-xs">
-            {windowPlace(window)}
-          </p>
+        {/* The name ends where the actions begin. */}
+        <div className="flex min-w-0 flex-1 flex-col pr-17">
+          <Truncated
+            className="text-sm leading-tight font-medium"
+            text={name}
+          />
+          <Truncated
+            className="text-muted-foreground text-xs"
+            text={windowPlace(window)}
+          />
         </div>
+      </div>
+      {/* Quiet at rest, so they are seen without competing with the name; full on hover, or while the keyboard or a menu is on them. */}
+      <div className="absolute top-0 right-0 flex h-9 items-center gap-0.5 opacity-40 transition-opacity group-focus-within/window:opacity-100 group-hover/window:opacity-100 has-[[data-state=open]]:opacity-100">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -730,7 +771,7 @@ const WindowRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex min-w-0 flex-col pl-16.5">
+      <div className="flex min-w-0 flex-col">
         <WindowDescription
           name={name}
           onSave={(description) => {
@@ -750,15 +791,19 @@ const WindowRow = ({
 
 /** The pins, right under the image they mark, each with an optional label: "1 · label". */
 const PinLabels = ({
-  item,
-  onApply,
+  label = "Pins",
+  onEdited,
   onOpenPins,
-  onUndoable,
+  onSave,
+  pins,
 }: {
-  readonly item: ImageItem;
-  readonly onApply: (op: ShelfOp) => void;
+  readonly pins: readonly Pin[];
+  /** The field's name: "Pins" for the item's own picture. */
+  readonly label?: string;
+  readonly onSave: (pins: Pin[]) => void;
+  /** A label typed in, with what it said before, for ⌘Z. */
+  readonly onEdited: (index: number, label: string) => void;
   readonly onOpenPins: () => void;
-  readonly onUndoable: (undo: DetailsUndo) => void;
 }) => (
   <Field
     action={
@@ -768,29 +813,28 @@ const PinLabels = ({
       </Button>
     }
     icon={Location01Icon}
-    label="Pins"
+    label={label}
   >
     <ol className={cn(SURFACE, "flex flex-col gap-1 p-1.5")}>
-      {item.pins.map((pin, index) => (
+      {pins.map((pin, index) => (
         // A pin has no id: its number and place name it, so a label field never shows another pin's text after a removal.
+        // The pin sits beside a label's first line (h-8, a one-line field's height), however many lines it wraps to.
         <li
-          className="flex items-center gap-2"
+          className="flex items-start gap-2"
           key={`${index}:${pin.x}:${pin.y}`}
         >
-          <PinGlyph height={18} number={index + 1} />
+          <span className="flex h-8 shrink-0 items-center">
+            <PinGlyph height={18} number={index + 1} />
+          </span>
           <AutoText
             label={`Label for pin ${index + 1}`}
             max={PIN_LABEL_MAX}
             multiline={false}
-            onEdited={(label) => {
-              onUndoable({ index, kind: "pinLabel", label });
+            onEdited={(before) => {
+              onEdited(index, before);
             }}
-            onSave={(label) => {
-              onApply({
-                id: item.id,
-                pins: withPinLabel(item.pins, index, label),
-                type: "setPins",
-              });
+            onSave={(text) => {
+              onSave(withPinLabel(pins, index, text));
             }}
             placeholder={`What pin ${index + 1} marks`}
             value={pin.label ?? ""}
@@ -800,6 +844,88 @@ const PinLabels = ({
     </ol>
   </Field>
 );
+
+/**
+ * The item's attachments, and under them the pin labels of the picture
+ * whose tile last had the keyboard or a click.
+ */
+const AttachmentsField = ({
+  attachments: handlers,
+  item,
+  onApply,
+  onUndoable,
+}: Pick<DetailsProps, "attachments" | "item" | "onApply" | "onUndoable">) => {
+  const [picked, setPicked] = useState<AttachmentId | null>(null);
+
+  const pinned = item.attachments.find(
+    (attachment): attachment is AttachedImage =>
+      attachment.id === picked &&
+      attachment.kind === "image" &&
+      attachment.pins.length > 0
+  );
+
+  if (item.attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      <Field
+        action={<AttachmentCount count={item.attachments.length} />}
+        icon={Attachment01Icon}
+        label="Attachments"
+      >
+        <AttachmentGrid
+          active={pinned?.id ?? null}
+          attachments={item.attachments}
+          handlers={{
+            ...handlers,
+            remove: (attachment) => {
+              onApply({
+                attachmentId: attachment.id,
+                id: item.id,
+                type: "removeAttachment",
+              });
+              onUndoable({
+                attachmentId: attachment.id,
+                kind: "attachment",
+                name: attachmentName(attachment),
+              });
+            },
+          }}
+          onPick={(attachment) => {
+            setPicked(attachment.id);
+          }}
+        />
+      </Field>
+      {pinned === undefined ? null : (
+        <PinLabels
+          label={`Pins on ${pinned.name}`}
+          onEdited={(index, label) => {
+            onUndoable({
+              attachmentId: pinned.id,
+              index,
+              kind: "pinLabel",
+              label,
+            });
+          }}
+          onOpenPins={() => {
+            handlers.open(pinned, true);
+          }}
+          onSave={(pins) => {
+            onApply({
+              attachmentId: pinned.id,
+              id: item.id,
+              pins,
+              type: "setAttachmentPins",
+            });
+          }}
+          pins={pinned.pins}
+        />
+      )}
+    </>
+  );
+};
 
 const FileLine = ({ item }: { readonly item: FileItem }) => (
   <p
@@ -813,7 +939,7 @@ const FileLine = ({ item }: { readonly item: FileItem }) => (
       icon={File01Icon}
       size={16}
     />
-    <span className="truncate">{item.file.name}</span>
+    <Truncated text={item.file.name} />
   </p>
 );
 
@@ -840,17 +966,35 @@ const TextContent = ({
   onStopEditing,
 }: Omit<ContentProps, "item" | "onOpenImage" | "onOpenPins" | "onUndoable"> & {
   readonly item: TextItem;
-}) =>
-  editing ? (
-    <TextEditor
-      item={item}
-      onDone={onStopEditing}
-      onSave={(text) => {
-        onApply({ id: item.id, text, type: "editText" });
-      }}
-    />
+}) => {
+  const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+
+  return editing ? (
+    // The same card as the words read in, so starting an edit moves nothing.
+    <div className={cn(SURFACE, "px-3 py-2.5")}>
+      <TextEditor
+        caretAt={caretAt}
+        item={item}
+        onDone={onStopEditing}
+        onSave={(text) => {
+          onApply({ id: item.id, text, type: "editText" });
+        }}
+      />
+    </div>
   ) : (
-    <div className={cn(SURFACE, "px-3 py-2.5")} onDoubleClick={onEdit}>
+    // A click on the words edits them there, as in the open row; a link still opens.
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Edit in the item menu (Return) edits from the keyboard; the click only says where the caret goes.
+    <div
+      className={cn(SURFACE, "cursor-text px-3 py-2.5")}
+      onClick={(event) => {
+        const point = editPoint(wordsClick(event));
+
+        if (point !== null) {
+          setCaretAt(point);
+          onEdit();
+        }
+      }}
+    >
       <Markdown
         className="text-sm leading-snug break-words"
         interactive
@@ -859,6 +1003,7 @@ const TextContent = ({
       />
     </div>
   );
+};
 
 /** The item's own content at the top: its words, or its image or file with title, pins and note. */
 const Content = (props: ContentProps) => {
@@ -927,10 +1072,19 @@ const Content = (props: ContentProps) => {
       </Field>
       {item.kind === "image" && item.pins.length > 0 ? (
         <PinLabels
-          item={item}
-          onApply={onApply}
+          onEdited={(index, label) => {
+            props.onUndoable({
+              attachmentId: null,
+              index,
+              kind: "pinLabel",
+              label,
+            });
+          }}
           onOpenPins={props.onOpenPins}
-          onUndoable={props.onUndoable}
+          onSave={(pins) => {
+            onApply({ id: item.id, pins, type: "setPins" });
+          }}
+          pins={item.pins}
         />
       ) : null}
     </div>
@@ -963,11 +1117,15 @@ const FIELDS: readonly DetailField[] = ["description", "steps", "due"];
  */
 const AddMenu = ({
   addable,
+  attachments,
   item,
   onAdd,
   onLinkWindow,
   onOpenPins,
-}: Pick<DetailsProps, "item" | "onLinkWindow" | "onOpenPins"> & {
+}: Pick<
+  DetailsProps,
+  "attachments" | "item" | "onLinkWindow" | "onOpenPins"
+> & {
   readonly addable: readonly DetailField[];
   readonly onAdd: (field: DetailField) => void;
 }) => {
@@ -1024,6 +1182,10 @@ const AddMenu = ({
               Add Pins…
             </DropdownMenuItem>
           ) : null}
+          <AttachMenuItems
+            adders={attachments}
+            count={item.attachments.length}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -1214,7 +1376,11 @@ const SourceField = ({
           </div>
         )}
         {item.kind === "text" && item.links.length > 0 ? (
-          <LinkList links={item.links} onOpenLink={onOpenLink} />
+          <LinkList
+            links={item.links}
+            onOpenLink={onOpenLink}
+            sourceUrl={item.context?.url ?? null}
+          />
         ) : null}
       </div>
     </Field>
@@ -1404,6 +1570,12 @@ export const DetailsView = (props: DetailsProps) => {
           onStopEditing={props.onStopEditing}
           onUndoable={props.onUndoable}
         />
+        <AttachmentsField
+          attachments={props.attachments}
+          item={item}
+          onApply={props.onApply}
+          onUndoable={props.onUndoable}
+        />
         {shown.description ? (
           <Field icon={TextAlignLeftIcon} label="Description">
             <AutoText
@@ -1469,6 +1641,7 @@ export const DetailsView = (props: DetailsProps) => {
         ) : null}
         <AddMenu
           addable={FIELDS.filter((field) => !shown[field])}
+          attachments={props.attachments}
           item={item}
           onAdd={open}
           onLinkWindow={props.onLinkWindow}

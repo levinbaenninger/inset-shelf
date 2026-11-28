@@ -2,8 +2,21 @@ import { once } from "node:events";
 import { pathToFileURL } from "node:url";
 
 import type { ActionResult } from "@shared/contracts";
-import { emptyShelf, ItemIdSchema, SectionIdSchema } from "@shared/shelf";
-import type { ImageItem, ItemId, ShelfDoc } from "@shared/shelf";
+import {
+  AttachmentIdSchema,
+  emptyShelf,
+  ItemIdSchema,
+  SectionIdSchema,
+} from "@shared/shelf";
+import type {
+  AttachedImage,
+  Attachment,
+  AttachmentId,
+  ImageItem,
+  ItemId,
+  Picture,
+  ShelfDoc,
+} from "@shared/shelf";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createCopyCommands } from "./copy-commands";
@@ -20,7 +33,9 @@ const uuid = (n: number) =>
 interface Items {
   readonly text: ItemId;
   readonly image: ItemId;
+  /** A file item with a picture attached to it. */
   readonly file: ItemId;
+  readonly picture: AttachmentId;
   /** The image as a new drawing hands it over, just added. */
   readonly drawing: ImageItem;
 }
@@ -51,6 +66,16 @@ const ENTRY_POINTS: Record<keyof CopyCommands, EntryPoint> = {
   copyList: {
     run: async (commands, items) =>
       await commands.copyList([items.text, items.image, items.file]),
+    waitsForSave: true,
+  },
+  copyOwnPicture: {
+    run: async (commands, items) =>
+      await commands.copyOwnPicture(items.drawing),
+    waitsForSave: false,
+  },
+  copyPicture: {
+    run: async (commands, items) =>
+      await commands.copyPicture(items.file, items.picture),
     waitsForSave: true,
   },
   copyScreenshot: {
@@ -86,6 +111,31 @@ const NOT_SAVED = {
   ok: false,
   retrySave: true,
 };
+
+/** An attached picture whose file is `<uuid(n + 1)>.png`. */
+const attachedPicture = (n: number, widthPx = 40): AttachedImage => ({
+  addedAt: "2026-11-20T10:00:00.000Z",
+  id: AttachmentIdSchema.parse(uuid(n)),
+  image: {
+    file: `${uuid(n + 1)}.png`,
+    heightPx: 10,
+    pixelsPerDip: 2,
+    widthPx,
+  },
+  kind: "image",
+  name: `Screenshot ${n}`,
+  pins: [],
+});
+
+const attachedFile = (n: number): Attachment => ({
+  addedAt: "2026-11-20T10:00:00.000Z",
+  file: { bytes: 3, name: `Quote ${n}.pdf`, stored: `${uuid(n + 1)}.pdf` },
+  id: AttachmentIdSchema.parse(uuid(n)),
+  kind: "file",
+});
+
+/** Pictures whose file is gone from the data folder. */
+const MISSING = `${uuid(81)}.png`;
 
 const added = (id: ItemId | null): ItemId => {
   if (id === null) {
@@ -199,8 +249,25 @@ const setup = async (
     toItem: (data) => data,
   });
 
+  const exports: { file: string; longSideMax?: number }[] = [];
+  // The PNG an export returns, by picture file; "PNG" for any other.
+  const pngs = new Map<string, Buffer>();
+
   const commands = createCopyCommands({
-    exportImage: () => ({ png: Buffer.from("PNG"), widthPx: 40 }),
+    exportImage: (picture: Picture, longSideMax?: number) => {
+      exports.push(
+        longSideMax === undefined
+          ? { file: picture.image.file }
+          : { file: picture.image.file, longSideMax }
+      );
+
+      return picture.image.file === MISSING
+        ? null
+        : {
+            png: pngs.get(picture.image.file) ?? Buffer.from("PNG"),
+            widthPx: 40,
+          };
+    },
     gate,
     mac: true,
     onCopied: (ids, kind) => {
@@ -242,6 +309,10 @@ const setup = async (
     id: text,
     type: "setDescription",
   });
+
+  const picture = attachedPicture(70);
+
+  controller.apply({ attachments: [picture], id: file, type: "attach" });
   await controller.flush();
   events.length = 0;
 
@@ -300,7 +371,9 @@ const setup = async (
     disk,
     events,
     holdNextSave,
-    items: { drawing, file, image, text },
+    exports,
+    items: { drawing, file, image, picture: picture.id, text },
+    pngs,
     savedText,
     timers,
     written,
@@ -318,6 +391,7 @@ describe(createCopyCommands, () => {
       text: "Call Rieder at 9",
       type: "editText",
     });
+    controller.apply({ id: items.file, note: "Floor 3", type: "editNote" });
 
     const results = [];
 
@@ -331,6 +405,8 @@ describe(createCopyCommands, () => {
       { name: "copyDetails", result: NOT_SAVED },
       { name: "copyDrawing", result: { ok: true } },
       { name: "copyList", result: NOT_SAVED },
+      { name: "copyOwnPicture", result: { ok: true } },
+      { name: "copyPicture", result: NOT_SAVED },
       { name: "copyScreenshot", result: { ok: true } },
       { name: "copyWithLink", result: NOT_SAVED },
     ]);
@@ -338,7 +414,11 @@ describe(createCopyCommands, () => {
     expect(events.filter((event) => event === "save")).toStrictEqual(["save"]);
     await expect(
       Promise.all(written.map(async (contents) => await formats(contents[0])))
-    ).resolves.toStrictEqual([{ "image/png": "PNG" }, { "image/png": "PNG" }]);
+    ).resolves.toStrictEqual([
+      { "image/png": "PNG" },
+      { "image/png": "PNG" },
+      { "image/png": "PNG" },
+    ]);
     // Only the drawing is an item; the setting may check it off.
     expect(copied).toStrictEqual(["item:1"]);
     expect(controller.view().status.saveError).toBe("disk full");
@@ -787,6 +867,145 @@ describe(createCopyCommands, () => {
     await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
       "image/png": "PNG",
     });
+  });
+
+  it("copies an item with ⌘C exactly as it did before pictures and files were attached to it", async () => {
+    const { commands, controller, items, written } = await setup();
+
+    await commands.copy(items.text);
+    await commands.copy(items.image);
+    controller.apply({
+      attachments: [attachedPicture(72), attachedFile(74)],
+      id: items.text,
+      type: "attach",
+    });
+    controller.apply({
+      attachments: [attachedPicture(76)],
+      id: items.image,
+      type: "attach",
+    });
+    await commands.copy(items.text);
+    await commands.copy(items.image);
+
+    const [text, image, attachedText, attachedImage] = await Promise.all(
+      written.map(async (contents) => await formats(contents[0]))
+    );
+
+    expect({ attachedImage, attachedText }).toStrictEqual({
+      attachedImage: image,
+      attachedText: text,
+    });
+  });
+
+  it("copies an item's details with its attached pictures inside the HTML, scaled down, and names a file or a missing picture", async () => {
+    const { commands, controller, exports, items, written } = await setup();
+
+    controller.apply({
+      attachments: [
+        attachedPicture(72, 3000),
+        attachedFile(74),
+        { ...attachedPicture(80), name: "Gone" },
+      ],
+      id: items.image,
+      type: "attach",
+    });
+    exports.length = 0;
+
+    await expect(commands.copyDetails(items.image)).resolves.toStrictEqual({
+      ok: true,
+    });
+
+    const png = Buffer.from("PNG").toString("base64");
+
+    const img = (width: number, alt: string) =>
+      `<img src="data:image/png;base64,${png}" width="${width}" alt="${alt}">`;
+
+    await expect(formats(written[0]?.[0])).resolves.toStrictEqual({
+      "text/html": [
+        "<p>Image</p>",
+        `<p>${img(40, "Image")}</p>`,
+        "<p>Attachments:</p>",
+        `<p>Screenshot 72<br>${img(1500, "Screenshot 72")}</p>`,
+        "<p>Quote 74.pdf</p>",
+        "<p>Gone (picture not found)</p>",
+      ].join(""),
+      "text/plain": [
+        "Image",
+        "",
+        "Attachments:",
+        "- Screenshot 72",
+        "- Quote 74.pdf",
+        "- Gone",
+      ].join("\n"),
+    });
+    expect(exports).toStrictEqual([
+      { file: `${uuid(90)}.png`, longSideMax: 1600 },
+      { file: `${uuid(73)}.png`, longSideMax: 1600 },
+      { file: MISSING, longSideMax: 1600 },
+    ]);
+  });
+
+  it("puts each item's attached pictures in its line of a list, and names the rest once the HTML is full", async () => {
+    const { commands, controller, items, pngs, written } = await setup();
+
+    // Three pictures of 8 MB each in base64: the third would take the HTML past 20 MB.
+    for (const n of [73, 75, 77]) {
+      pngs.set(`${uuid(n)}.png`, Buffer.alloc(6_000_000));
+    }
+
+    controller.apply({
+      attachments: [attachedPicture(72), attachedPicture(74)],
+      id: items.text,
+      type: "attach",
+    });
+    controller.apply({
+      attachments: [attachedPicture(76)],
+      id: items.image,
+      type: "attach",
+    });
+
+    await commands.copyList([items.text, items.image]);
+
+    const { "text/html": listHtml = "", "text/plain": listText } =
+      await formats(written[0]?.[0]);
+
+    const pictures = listHtml
+      .split("<li>")
+      .map((line) => line.split("<img ").length - 1);
+
+    expect({ listText, pictures }).toStrictEqual({
+      listText: [
+        "1. Call Rieder",
+        "   Before Friday",
+        "   Attachments: Screenshot 72, Screenshot 74",
+        "2. Image",
+        "   Attachments: Screenshot 76",
+      ].join("\n"),
+      // Nothing before the list; the text item's two; none on the image's line, which the image item's own picture follows after the list.
+      pictures: [0, 2, 1],
+    });
+  });
+
+  it("copies an attached picture alone, and says when it has gone", async () => {
+    const { commands, controller, items, written } = await setup();
+
+    await expect(
+      commands.copyPicture(items.file, items.picture)
+    ).resolves.toStrictEqual({ ok: true });
+    controller.apply({
+      attachmentId: items.picture,
+      id: items.file,
+      type: "removeAttachment",
+    });
+    await expect(
+      commands.copyPicture(items.file, items.picture)
+    ).resolves.toStrictEqual({
+      message: "This picture is no longer on the shelf.",
+      ok: false,
+    });
+    await expect(
+      Promise.all(written.map(async (contents) => await formats(contents[0])))
+    ).resolves.toStrictEqual([{ "image/png": "PNG" }]);
   });
 
   it("says when the item has gone and copies nothing", async () => {

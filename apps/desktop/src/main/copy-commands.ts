@@ -2,15 +2,21 @@ import { pathToFileURL } from "node:url";
 
 import type { ActionResult } from "@shared/contracts";
 import {
+  hasAttachments,
+  itemDetailsHtml,
   itemDetailsText,
   itemsAsList,
   itemTextWithLink,
   listHtmlWithImage,
 } from "@shared/shelf";
 import type {
+  AttachmentId,
   FileItem,
   ImageItem,
+  InlinePicture,
+  InlinePictures,
   ItemId,
+  Picture,
   ShelfDoc,
   ShelfItem,
 } from "@shared/shelf";
@@ -27,9 +33,19 @@ export interface ExportedPng {
   readonly widthPx: number;
 }
 
+/** Pictures inside copied HTML are scaled to at most this many pixels on their long side. */
+export const INLINE_SIDE_MAX = 1600;
+
+/** Copied HTML stops taking pictures past this many characters; the rest go by name. */
+export const INLINE_HTML_MAX = 20_000_000;
+
 export interface CopyCommandDeps {
   readonly gate: CopyGate;
-  readonly exportImage: (item: ImageItem) => ExportedPng | null;
+  /** The picture with its pins drawn in, scaled down to `longSideMax` pixels on its long side when given. */
+  readonly exportImage: (
+    picture: Picture,
+    longSideMax?: number
+  ) => ExportedPng | null;
   /** A copy of the file under its own name, to put on the clipboard; null when it can't be read. */
   readonly stageFile: (item: FileItem) => string | null;
   readonly mac: boolean;
@@ -54,6 +70,13 @@ export interface CopyCommands {
   readonly copyScreenshot: (png: Uint8Array) => Promise<ActionResult>;
   /** A new drawing's Copy and Save, as it was just added: its own picture, so no save is waited for. */
   readonly copyDrawing: (item: ImageItem) => Promise<ActionResult>;
+  /** A new attached drawing's Copy and Save, as it was just attached: its own picture, so no save is waited for. */
+  readonly copyOwnPicture: (picture: Picture) => Promise<ActionResult>;
+  /** Copy and Save for an attached picture: that picture alone, with its pins, once the disk holds it. */
+  readonly copyPicture: (
+    id: ItemId,
+    attachmentId: AttachmentId
+  ) => Promise<ActionResult>;
 }
 
 const text = (value: string): Blob => new Blob([value], { type: "text/plain" });
@@ -63,7 +86,91 @@ const GONE: Payload = { problem: "This item no longer exists." };
 const itemIn = (doc: ShelfDoc, id: ItemId): ShelfItem | undefined =>
   doc.items.find((item) => item.id === id);
 
+const htmlBlob = (value: string): Blob =>
+  new Blob([value], { type: "text/html" });
+
 export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
+  /**
+   * Exports pictures for copied HTML in order, scaled down, until the HTML
+   * would pass INLINE_HTML_MAX: that one and every later one go by name.
+   */
+  const inliner = () => {
+    let room = INLINE_HTML_MAX;
+
+    return (
+      picture: Picture,
+      alt: string
+    ): InlinePicture | "missing" | undefined => {
+      if (room <= 0) {
+        return undefined;
+      }
+
+      const exported = deps.exportImage(picture, INLINE_SIDE_MAX);
+
+      if (exported === null) {
+        return "missing";
+      }
+
+      const base64 = exported.png.toString("base64");
+
+      if (base64.length > room) {
+        room = 0;
+
+        return undefined;
+      }
+
+      room -= base64.length;
+
+      return {
+        alt,
+        base64,
+        width: picture.image.widthPx / picture.image.pixelsPerDip,
+      };
+    };
+  };
+
+  const attachedPictures = (
+    items: readonly ShelfItem[],
+    inline: ReturnType<typeof inliner>
+  ): InlinePictures =>
+    new Map(
+      items.flatMap((item) =>
+        item.attachments.flatMap((attachment) => {
+          const picture =
+            attachment.kind === "image"
+              ? inline(attachment, attachment.name)
+              : undefined;
+
+          return picture === undefined ? [] : [[attachment.id, picture]];
+        })
+      )
+    );
+
+  /** Copy with Details: plain text, and for an item with attachments HTML with their pictures too. */
+  const detailsData = (item: ShelfItem): Payload => {
+    const plain = text(itemDetailsText(item));
+
+    if (!hasAttachments(item)) {
+      return { data: { "text/plain": plain } };
+    }
+
+    const inline = inliner();
+
+    const own =
+      item.kind === "image"
+        ? (inline(item, item.note.trim() === "" ? "Image" : item.note) ?? null)
+        : null;
+
+    return {
+      data: {
+        "text/html": htmlBlob(
+          itemDetailsHtml(item, own, attachedPictures([item], inline))
+        ),
+        "text/plain": plain,
+      },
+    };
+  };
+
   const fileData = (item: FileItem): Payload => {
     const file = deps.stageFile(item);
 
@@ -126,7 +233,7 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
    * the rest keep the words. Without any words, the image alone.
    */
   const listData = (items: readonly ShelfItem[]): Payload => {
-    const list = itemsAsList(items);
+    const list = itemsAsList(items, attachedPictures(items, inliner()));
     const firstImage = items.find((item) => item.kind === "image");
 
     const exported =
@@ -187,7 +294,12 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
 
       return result;
     },
-    copyDetails: async (id) => await copyText(id, itemDetailsText),
+    copyDetails: async (id) =>
+      await deps.gate.copy([id], (doc) => {
+        const item = itemIn(doc, id);
+
+        return item === undefined ? GONE : detailsData(item);
+      }),
     copyList: async (ids) => {
       let copied: readonly ShelfItem[] = [];
 
@@ -225,6 +337,35 @@ export const createCopyCommands = (deps: CopyCommandDeps): CopyCommands => {
 
       return result;
     },
+    copyOwnPicture: async (picture) => {
+      const exported = deps.exportImage(picture);
+
+      return exported === null
+        ? { message: "The image can’t be read.", ok: false }
+        : await deps.gate.copyOwn({
+            "image/png": new Blob([exported.png], { type: "image/png" }),
+          });
+    },
+    copyPicture: async (id, attachmentId) =>
+      await deps.gate.copy([id], (doc) => {
+        const attachment = itemIn(doc, id)?.attachments.find(
+          (candidate) => candidate.id === attachmentId
+        );
+
+        if (attachment?.kind !== "image") {
+          return { problem: "This picture is no longer on the shelf." };
+        }
+
+        const exported = deps.exportImage(attachment);
+
+        return exported === null
+          ? { problem: "The image can’t be read." }
+          : {
+              data: {
+                "image/png": new Blob([exported.png], { type: "image/png" }),
+              },
+            };
+      }),
     copyScreenshot: async (png) =>
       await deps.gate.copyOwn({
         "image/png": new Blob([png], { type: "image/png" }),

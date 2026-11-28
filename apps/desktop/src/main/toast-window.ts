@@ -1,39 +1,54 @@
-import type { NoticeCorner, NoticeTone, ToastView } from "@shared/contracts";
-import { noticeBesidePointer, pt, rect, size } from "@shared/geometry";
+import type { NoticeCorner } from "@shared/contracts";
+import {
+  noticeBesidePointer,
+  noticeInWindowCorner,
+  pt,
+  rect,
+  resizeAtCorner,
+  size,
+} from "@shared/geometry";
 import type { Point, Rect, Size } from "@shared/geometry";
+import { holdsKeys, INITIAL_PILL, offerOf, stepPill } from "@shared/pill";
+import type {
+  PillBody,
+  PillEffect,
+  PillEvent,
+  PillState,
+  PillView,
+  WhyOffer,
+  WhyOutcome,
+} from "@shared/pill";
+import type { PlaceKey } from "@shared/recall";
 import type { ItemId } from "@shared/shelf";
 import { BrowserWindow, screen } from "electron";
 import type { WebContents } from "electron";
 
+import { e2eLog } from "./e2e-log";
+import { giveKeys, takeKeys } from "./pill-keys";
 import { harden, secureWebPreferences } from "./window-security";
 
-/** The window is clear; the notice is drawn inside it, hugging the corner nearest the pointer, with room for its shadow. */
-const SIZE: Readonly<Record<NoticeTone, Size<"screen">>> = {
-  done: size(260, 44),
-  failed: size(360, 72),
+/** The window is clear; the pill is drawn inside it, hugging the corner nearest the pointer, with room for its shadow. */
+const sizeOf = (view: PillBody): Size<"screen"> => {
+  if (view.kind === "why") {
+    return size(320, 44);
+  }
+
+  return view.kind === "notice" && view.tone === "failed"
+    ? size(360, 72)
+    : size(260, 44);
 };
-
-const VISIBLE_MS = 2500;
-
-/** After the pointer leaves the notice: long enough to come back to it. */
-const AFTER_HOVER_MS = 1200;
 
 export interface ToastWindow {
   readonly webContents: WebContents;
   readonly load: () => Promise<void>;
-  /**
-   * Shows a short confirmation beside the pointer, without taking focus.
-   * Clicks pass through, except on the notice itself, which opens the shelf
-   * at `item` when it names one.
-   */
-  readonly show: (title: string, tone: NoticeTone, item?: ItemId) => void;
-  /** The pointer is on the notice or has left it. */
-  readonly hover: (on: boolean) => void;
-  /** Hides notice `seq` and gives the item it named, or null when it is gone or a newer notice replaced it. */
-  readonly take: (seq: number) => { readonly item: ItemId | null } | null;
-  readonly hide: () => void;
-  readonly view: () => ToastView | null;
-  readonly onView: (listener: (view: ToastView) => void) => void;
+  /** What happened, for the pill to show, change or hide. See src/shared/pill.ts. */
+  readonly send: (event: PillEvent) => void;
+  /** The why field has the keyboard, or is taking it. */
+  readonly holdsKeys: () => boolean;
+  /** What the notice showing now offers a second Double Shift: the why field, or the words a write couldn't keep. */
+  readonly offer: () => (WhyOffer & { readonly seq: number }) | null;
+  readonly view: () => PillView | null;
+  readonly onView: (listener: (view: PillView) => void) => void;
   readonly allowClose: () => void;
 }
 
@@ -45,39 +60,67 @@ const cornerNear = (
 ): NoticeCorner =>
   `${bounds.y >= pointer.y ? "top" : "bottom"}-${bounds.x >= pointer.x ? "left" : "right"}`;
 
+const workAreaAt = (point: Point<"screen">): Rect<"screen"> => {
+  const { workArea } = screen.getDisplayNearestPoint(point);
+
+  return rect(workArea.x, workArea.y, workArea.width, workArea.height);
+};
+
 export const createToastWindow = (options: {
   readonly preload: string;
   readonly url: string;
+  /** A click on the pill: the shelf opens at the item it named, in its details at `field` when one is given. */
+  readonly openShelf: (
+    item: ItemId | null,
+    field: "description" | null
+  ) => void;
+  /** Return in the why field, or a click away from it: the item's description gets the words, and how the write ended comes back. */
+  readonly saveWhy: (item: ItemId, text: string) => Promise<WhyOutcome>;
+  /** A click on the recall pill: the shelf opens beside the window the pill was shown for, filtered to its items. */
+  readonly openRecall: (
+    recalled: Omit<Extract<PillEffect, { type: "openRecall" }>, "type">
+  ) => void;
+  /** The recall pill went: clicked, closed or left alone. */
+  readonly recallEnded: (
+    place: PlaceKey,
+    how: "opened" | "dismissed" | "ignored"
+  ) => void;
 }): ToastWindow => {
-  let current: ToastView | null = null;
-  let item: ItemId | null = null;
-  let seq = 0;
+  let state: PillState = INITIAL_PILL;
+  let current: PillView | null = null;
   let timer: NodeJS.Timeout | undefined;
   let closable = false;
-  let listener: (view: ToastView) => void = ignore;
+  let listener: (view: PillView) => void = ignore;
+  // Events raised while effects run (the window's blur, which giveKeys causes) step after them.
+  const queue: PillEvent[] = [];
+  let stepping = false;
 
   const window = new BrowserWindow({
     backgroundColor: "#00000000",
     focusable: false,
     frame: false,
     hasShadow: false,
-    height: SIZE.done.height,
+    height: 44,
     resizable: false,
     show: false,
     skipTaskbar: true,
     transparent: true,
     type: process.platform === "darwin" ? "panel" : undefined,
     webPreferences: secureWebPreferences(options.preload),
-    width: SIZE.done.width,
+    width: 260,
   });
 
-  window.setAlwaysOnTop(true, "pop-up-menu");
+  const raise = (): void => {
+    window.setAlwaysOnTop(true, "pop-up-menu");
+  };
+
+  raise();
   window.setVisibleOnAllWorkspaces(true, {
     skipTransformProcessType: true,
     visibleOnFullScreen: true,
   });
 
-  // Forwarded moves tell the page when the pointer reaches the notice, which then takes the click.
+  // Forwarded moves tell the page when the pointer reaches the pill, which then takes the click.
   const passClicks = (): void => {
     window.setIgnoreMouseEvents(true, { forward: true });
   };
@@ -91,73 +134,234 @@ export const createToastWindow = (options: {
     }
   });
 
-  const hide = (): void => {
-    clearTimeout(timer);
-    passClicks();
+  const draw = (
+    view: PillBody,
+    bounds: Rect<"screen">,
+    corner: NoticeCorner
+  ): void => {
+    current = { ...view, corner };
+    listener(current);
+    window.setBounds(bounds);
 
-    if (window.isVisible()) {
-      window.hide();
+    // As before for notices; a showing why field is left alone, so it keeps the keyboard it holds or is taking.
+    if (view.kind !== "why" || !window.isVisible()) {
+      window.showInactive();
     }
   };
 
-  const hideIn = (ms: number): void => {
-    clearTimeout(timer);
-    timer = setTimeout(hide, ms);
+  const showBesidePointer = (view: PillBody): void => {
+    const cursor = screen.getCursorScreenPoint();
+    const pointer = pt<"screen">(cursor.x, cursor.y);
+
+    const bounds = noticeBesidePointer(
+      pointer,
+      sizeOf(view),
+      workAreaAt(pointer)
+    );
+
+    draw(view, bounds, cornerNear(pointer, bounds));
   };
+
+  /** Inside a window's bottom-right corner, or the screen's under the pointer without one. */
+  const showInWindow = (
+    view: PillBody,
+    target: Rect<"screen"> | null
+  ): void => {
+    const cursor = screen.getCursorScreenPoint();
+
+    const near =
+      target === null
+        ? pt<"screen">(cursor.x, cursor.y)
+        : pt<"screen">(
+            target.x + target.width / 2,
+            target.y + target.height / 2
+          );
+
+    draw(
+      view,
+      noticeInWindowCorner(target, sizeOf(view), workAreaAt(near)),
+      "bottom-right"
+    );
+  };
+
+  /** Where the pill already is, grown or shrunk around the corner it is drawn in. */
+  const showInPlace = (view: PillBody): void => {
+    if (current === null) {
+      showBesidePointer(view);
+
+      return;
+    }
+
+    const { height, width, x, y } = window.getBounds();
+    const bounds = rect<"screen">(x, y, width, height);
+
+    draw(
+      view,
+      resizeAtCorner(
+        bounds,
+        current.corner,
+        sizeOf(view),
+        workAreaAt(pt(x, y))
+      ),
+      current.corner
+    );
+  };
+
+  const run = (effect: PillEffect): void => {
+    switch (effect.type) {
+      case "show": {
+        if (effect.at === "window") {
+          showInWindow(effect.view, effect.window);
+        } else if (effect.at === "pointer") {
+          showBesidePointer(effect.view);
+        } else {
+          showInPlace(effect.view);
+        }
+
+        if (effect.view.kind === "why" && effect.view.phase === "typing") {
+          e2eLog("whyOpened");
+        }
+
+        break;
+      }
+
+      case "hide": {
+        passClicks();
+
+        if (window.isVisible()) {
+          window.hide();
+        }
+
+        break;
+      }
+
+      case "timer": {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          // oxlint-disable-next-line no-use-before-define -- a timer's end is the next event the pill steps through.
+          send({ seq: effect.seq, type: "timeout" });
+        }, effect.ms);
+        break;
+      }
+
+      case "stopTimer": {
+        clearTimeout(timer);
+        break;
+      }
+
+      case "clicks": {
+        if (effect.take) {
+          window.setIgnoreMouseEvents(false);
+        } else {
+          passClicks();
+        }
+
+        break;
+      }
+
+      case "takeKeys": {
+        takeKeys(window);
+        break;
+      }
+
+      case "giveKeys": {
+        giveKeys(window, { raise });
+        passClicks();
+        break;
+      }
+
+      case "saveWhy": {
+        void (async () => {
+          const outcome = await options.saveWhy(effect.item, effect.text);
+
+          if (outcome.kind === "saved") {
+            e2eLog("whySaved", { itemId: effect.item, text: effect.text });
+          } else {
+            e2eLog("whyNotSaved", {
+              itemId: effect.item,
+              reason: outcome.kind,
+            });
+          }
+
+          // oxlint-disable-next-line no-use-before-define -- how the write ended is the next event the pill steps through.
+          send({
+            outcome,
+            seq: effect.seq,
+            text: effect.text,
+            type: "whyStored",
+          });
+        })();
+
+        break;
+      }
+
+      case "openShelf": {
+        if (effect.field !== null) {
+          e2eLog("whyFallback", { itemId: effect.item ?? undefined });
+        }
+
+        options.openShelf(effect.item, effect.field);
+        break;
+      }
+
+      case "openRecall": {
+        options.openRecall(effect);
+        break;
+      }
+
+      case "recallEnded": {
+        options.recallEnded(effect.place, effect.how);
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  };
+
+  const send = (event: PillEvent): void => {
+    queue.push(event);
+
+    if (stepping) {
+      return;
+    }
+
+    stepping = true;
+
+    try {
+      for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+        const step = stepPill(state, next);
+
+        ({ state } = step);
+
+        for (const effect of step.effects) {
+          run(effect);
+        }
+      }
+    } finally {
+      stepping = false;
+    }
+  };
+
+  // A click elsewhere or another app took the keyboard from the why field.
+  window.on("blur", () => {
+    send({ type: "blurred" });
+  });
 
   return {
     allowClose: () => {
       closable = true;
     },
-    hide,
+    holdsKeys: () => holdsKeys(state),
     load: async () => {
       await window.loadURL(options.url);
     },
+    offer: () => offerOf(state),
     onView: (next) => {
       listener = next;
     },
-    hover: (on) => {
-      if (!window.isVisible()) {
-        return;
-      }
-
-      if (on) {
-        clearTimeout(timer);
-        window.setIgnoreMouseEvents(false);
-      } else {
-        passClicks();
-        hideIn(AFTER_HOVER_MS);
-      }
-    },
-    show: (title, tone, named) => {
-      const cursor = screen.getCursorScreenPoint();
-      const { workArea } = screen.getDisplayNearestPoint(cursor);
-      const pointer = pt<"screen">(cursor.x, cursor.y);
-
-      const bounds = noticeBesidePointer(
-        pointer,
-        SIZE[tone],
-        rect(workArea.x, workArea.y, workArea.width, workArea.height)
-      );
-
-      seq += 1;
-      current = { corner: cornerNear(pointer, bounds), seq, title, tone };
-      item = named ?? null;
-      listener(current);
-      passClicks();
-      window.setBounds(bounds);
-      window.showInactive();
-      hideIn(VISIBLE_MS);
-    },
-    take: (taken) => {
-      if (current?.seq !== taken || !window.isVisible()) {
-        return null;
-      }
-
-      hide();
-
-      return { item };
-    },
+    send,
     view: () => current,
     webContents: window.webContents,
   };

@@ -80,29 +80,43 @@ export interface PinMarkerProps {
   /** Tip to top in CSS pixels. */
   readonly height?: number;
   readonly selected?: boolean;
+  /** A preview whose frame clips: a pin at its edge moves in just far enough to show whole. */
+  readonly inset?: boolean;
 }
 
-/** A numbered map pin over an image, its tip exactly on the point. */
+/** `place`, kept between `low` and the far edge less `high` pixels. */
+const within = (place: string, low: number, high: number): string =>
+  `clamp(${low}px, ${place}, calc(100% - ${high}px))`;
+
+/** A numbered map pin over an image, its tip exactly on the point (or, `inset`, as near it as shows the whole pin). */
 export const PinMarker = ({
-  height,
+  height = PIN_HEIGHT,
+  inset = false,
   left,
   number,
   selected = false,
   top,
-}: PinMarkerProps) => (
-  <span
-    aria-hidden="true"
-    className={cn(
-      "pointer-events-none absolute top-(--pin-y) left-(--pin-x) -translate-x-(--tip-x) -translate-y-(--tip-y)",
-      selected && "pin-selected"
-    )}
-    style={{
-      "--pin-x": left,
-      "--pin-y": top,
-      "--tip-x": TIP_X,
-      "--tip-y": TIP_Y,
-    }}
-  >
-    <PinGlyph height={height} number={number} />
-  </span>
-);
+}: PinMarkerProps) => {
+  const scale = height / PIN_HEIGHT;
+  const half = (PIN_BOX.width * scale) / 2;
+  const above = -PIN_BOX.y * scale;
+  const below = PIN_BOX.height * scale - above;
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute top-(--pin-y) left-(--pin-x) -translate-x-(--tip-x) -translate-y-(--tip-y)",
+        selected && "pin-selected"
+      )}
+      style={{
+        "--pin-x": inset ? within(left, half, half) : left,
+        "--pin-y": inset ? within(top, above, below) : top,
+        "--tip-x": TIP_X,
+        "--tip-y": TIP_Y,
+      }}
+    >
+      <PinGlyph height={height} number={number} />
+    </span>
+  );
+};

@@ -9,7 +9,13 @@ import {
   shelfMenu,
 } from "./menus";
 import type { MenuEntry, MenuKeyPress } from "./menus";
-import { emptyShelf, ItemIdSchema, SectionIdSchema, NO_META } from "./shelf";
+import {
+  AttachmentIdSchema,
+  emptyShelf,
+  ItemIdSchema,
+  SectionIdSchema,
+  NO_META,
+} from "./shelf";
 import type { ImageItem, ShelfDoc } from "./shelf";
 
 const uuid = (n: number) =>
@@ -220,8 +226,24 @@ describe(itemMenu, () => {
       steps: [{ done: false, id: uuid(70), text: "Reply" }],
     };
 
+    const withAttachment = {
+      ...item,
+      attachments: [
+        {
+          addedAt: "2026-10-22T10:00:00.000Z",
+          file: { bytes: 3, name: "Quote.pdf", stored: `${uuid(61)}.pdf` },
+          id: AttachmentIdSchema.parse(uuid(60)),
+          kind: "file" as const,
+        },
+      ],
+    };
+
     expect(labels(itemMenu(item, doc))).not.toContain("Copy with Details");
     expect(labels(itemMenu(withSteps, doc)).slice(0, 2)).toStrictEqual([
+      "Copy",
+      "Copy with Details",
+    ]);
+    expect(labels(itemMenu(withAttachment, doc)).slice(0, 2)).toStrictEqual([
       "Copy",
       "Copy with Details",
     ]);

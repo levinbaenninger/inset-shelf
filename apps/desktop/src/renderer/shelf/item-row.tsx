@@ -20,7 +20,7 @@ import { cn } from "@inset/ui/lib/utils";
 import { COLOR_HEX } from "@shared/colors";
 import type { NotSavedItem } from "@shared/contracts";
 import { insetUrl } from "@shared/inset-url";
-import { itemText, TEXT_MAX } from "@shared/shelf";
+import { itemText, PICTURE_KIND } from "@shared/shelf";
 import type {
   FileItem,
   ImageItem,
@@ -33,34 +33,46 @@ import type {
 import { keyText } from "@shared/shortcut";
 import { openingApp, sourceLabel } from "@shared/web-source";
 import type { Service } from "@shared/web-source";
-import { useEffect, useRef, useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
+import {
+  isValidElement,
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Clamp, tooltipText, Truncated, useCut } from "@/shared/clamp";
 import { PinMarker } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
 import { coach } from "@/tutorial/anchors";
 
+import { AttachmentStrip } from "./attachment-strip";
+import type { AttachmentHandlers } from "./attachment-strip";
 import { NotSavedLine } from "./banners";
 import { liveEdits } from "./drafts";
-import { whenText } from "./format";
-import {
-  filledSteps,
-  PinLegend,
-  metaBadges,
-  StepChecklist,
-  WindowStrip,
-} from "./item-meta";
+import { editPoint, useCaretStart, wordsClick } from "./edit-start";
+import { fileSizeText, whenText } from "./format";
+import { badgeNodes, PinLegend, StepChecklist, WindowStrip } from "./item-meta";
 import type { LiveEdit } from "./live-edits";
 import { Markdown } from "./markdown";
 import { MarkdownField } from "./markdown-field";
+import type { ScreenPoint } from "./markdown-field";
 import type { MenuAnchor } from "./menus";
+import { Note } from "./note";
+import { bindRow } from "./row-actions";
+import type { RowActions } from "./row-actions";
+import { contextMenuAt, DONE, EDITING, WORDS } from "./row-look";
+import { checkedSteps, linksOf, ROW_CAPS, rowParts } from "./row-parts";
+import type { RowLinks, RowOpen } from "./row-parts";
+import type { RowDropLook, RowDropProps } from "./use-attach-drop";
 import type { ItemDrag } from "./use-item-drag";
 import { isTextField } from "./use-shelf-keys";
 
@@ -78,20 +90,6 @@ export const focusRow = (row: Element | null): boolean => {
 
   return target !== null && document.activeElement === target;
 };
-
-/** A right-click on any part of an item opens its menu at the pointer. */
-const contextMenuAt =
-  (open: RowHandlers["onContextMenu"]) =>
-  (event: MouseEvent): void => {
-    event.preventDefault();
-    open({
-      align: "start",
-      height: 0,
-      width: 0,
-      x: event.clientX,
-      y: event.clientY,
-    });
-  };
 
 const SERVICE_ICON: Record<Service, typeof Link01Icon> = {
   chatgpt: ChatGptIcon,
@@ -127,6 +125,20 @@ const SourceText = ({ label }: { readonly label: string }) => {
   );
 };
 
+/** The source line's tooltip: the whole line when it shows cut, then where a click goes, 300 characters in all; null when it would only repeat what shows. */
+const sourceTitle = (
+  shown: string,
+  opens: string | null,
+  cut: boolean
+): string | undefined => {
+  const lines = [
+    ...(cut ? [shown] : []),
+    ...(opens === null || opens === shown ? [] : [opens]),
+  ];
+
+  return lines.length === 0 ? undefined : tooltipText(lines.join("\n"));
+};
+
 /**
  * Where an item came from, in one quiet line: the site and what on it for
  * pages the shelf knows, else the app and window. A page address opens in the
@@ -143,10 +155,19 @@ export const SourceLine = ({
   const icon = service === null ? Link01Icon : SERVICE_ICON[service];
   // A desktop app it came from opens again (elsewhere than macOS, only at a link); else the page does.
   const app = openingApp(context, isMac);
+  const shown = label === "" ? (context.url ?? "") : label;
+  const plain = useRef<HTMLParagraphElement>(null);
+  const link = useRef<HTMLButtonElement>(null);
+  const plainCut = useCut(plain);
+  const linkCut = useCut(link);
 
   if (context.url === null && app === null) {
     return label === "" ? null : (
-      <p className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs">
+      <p
+        className="text-muted-foreground flex min-w-0 items-center gap-1 text-xs"
+        ref={plain}
+        title={plainCut ? tooltipText(label) : undefined}
+      >
         {service === null ? null : (
           <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
         )}
@@ -160,11 +181,16 @@ export const SourceLine = ({
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-w-0 items-center gap-1 self-start rounded-sm text-left text-xs outline-none focus-visible:ring-3"
       {...coach("item-source")}
       onClick={onOpenLink}
-      title={app === null ? (context.url ?? undefined) : `Open ${app}`}
+      ref={link}
+      title={sourceTitle(
+        shown,
+        app === null ? context.url : `Open ${app}`,
+        linkCut
+      )}
       type="button"
     >
       <HugeiconsIcon className="shrink-0" icon={icon} size={12} />
-      <SourceText label={label === "" ? (context.url ?? "") : label} />
+      <SourceText label={shown} />
     </button>
   );
 };
@@ -172,37 +198,90 @@ export const SourceLine = ({
 const hostOf = (url: string): string =>
   new URL(url).hostname.replace(/^www\./u, "");
 
-/** The links in a copied selection, listed while the item is open; each opens in the browser. */
-export const LinkList = ({
-  links,
+const sameHost = (a: string, b: string): boolean => {
+  try {
+    return hostOf(a) === hostOf(b);
+  } catch {
+    return false;
+  }
+};
+
+/** One link of a copied selection: its words, and its site under them when both don't fit on one line. */
+const LinkRow = ({
+  fold,
+  link,
   onOpenLink,
+  siteShown,
 }: {
-  readonly links: TextItem["links"];
+  /** On one line where the row is long already: its site shows beside the words when it fits whole, and not at all when it doesn't. */
+  readonly fold: boolean;
+  readonly link: TextItem["links"][number];
   readonly onOpenLink: (url: string) => void;
-}) => (
-  <div className="flex flex-col gap-0.5">
-    {links.map((link) => (
-      <button
-        className="hover:bg-foreground/5 focus-visible:ring-ring/50 -mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs outline-none focus-visible:ring-3"
-        key={link.url}
-        onClick={() => {
-          onOpenLink(link.url);
-        }}
-        title={link.url}
-        type="button"
+  /** The site already shows on the source line above: it isn't named again. */
+  readonly siteShown: boolean;
+}) => {
+  const ref = useRef<HTMLButtonElement>(null);
+  const cut = useCut(ref);
+
+  return (
+    <button
+      className="hover:bg-foreground/5 focus-visible:ring-ring/50 -mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs outline-none focus-visible:ring-3"
+      onClick={() => {
+        onOpenLink(link.url);
+      }}
+      ref={ref}
+      title={sourceTitle(link.text, link.url, cut)}
+      type="button"
+    >
+      <HugeiconsIcon
+        className="text-muted-foreground shrink-0"
+        icon={Link01Icon}
+        size={12}
+      />
+      {/* The site goes under the words when both don't fit on one line, so it stays readable. A folded row shows only the first line: a site that would be cut to a few letters isn't shown, and its link's tooltip still names the address. */}
+      <span
+        className={cn(
+          "flex min-w-0 flex-wrap gap-x-1.5",
+          fold && "h-4 overflow-hidden"
+        )}
       >
-        <HugeiconsIcon
-          className="text-muted-foreground shrink-0"
-          icon={Link01Icon}
-          size={12}
-        />
-        <span className="truncate">{link.text}</span>
-        {link.text === link.url ? null : (
-          <span className="text-muted-foreground shrink-0">
+        <span className="max-w-full truncate">{link.text}</span>
+        {link.text === link.url || siteShown ? null : (
+          <span
+            className="text-muted-foreground max-w-full truncate"
+            data-link-site
+          >
             {hostOf(link.url)}
           </span>
         )}
-      </button>
+      </span>
+    </button>
+  );
+};
+
+/** The links in a copied selection, listed while the item is open; each opens in the browser. */
+export const LinkList = ({
+  fold = false,
+  links,
+  onOpenLink,
+  sourceUrl = null,
+}: {
+  /** Each link on one line. */
+  readonly fold?: boolean;
+  readonly links: TextItem["links"];
+  readonly onOpenLink: (url: string) => void;
+  /** The page the source line above names: a link on the same site doesn't name it again. */
+  readonly sourceUrl?: string | null;
+}) => (
+  <div className="flex flex-col gap-0.5">
+    {links.map((link) => (
+      <LinkRow
+        fold={fold}
+        key={link.url}
+        link={link}
+        onOpenLink={onOpenLink}
+        siteShown={sourceUrl !== null && sameHost(sourceUrl, link.url)}
+      />
     ))}
   </div>
 );
@@ -228,7 +307,7 @@ const FileName = ({
       event.stopPropagation();
       onDragImage();
     }}
-    title="Drag into another app"
+    title={tooltipText(`${item.file.name}\nDrag into another app`)}
     type="button"
   >
     <HugeiconsIcon
@@ -249,7 +328,14 @@ const FileName = ({
 
 /** Badges wrapped below the line are out of sight, so screen readers skip them too. */
 const hideWrapped = (line: HTMLElement): void => {
-  const { bottom } = line.getBoundingClientRect();
+  const { bottom, top } = line.getBoundingClientRect();
+  const words = line.previousElementSibling;
+
+  // Badges on a line of their own under the words: the row marks it, so they can reach its right edge.
+  line.parentElement?.toggleAttribute(
+    "data-wrapped",
+    words !== null && top >= words.getBoundingClientRect().bottom - 1
+  );
 
   for (const badge of line.children) {
     if (badge.getBoundingClientRect().top >= bottom) {
@@ -264,21 +350,29 @@ const hideWrapped = (line: HTMLElement): void => {
  * A line with its words on the left and the metadata badges right-aligned.
  * The words keep at least 14 characters; badges that don't fit wrap out of
  * sight, lowest priority first, so the line never grows. `reach` lets the
- * badges run on under the More button's column, below its button.
+ * badges run on under the More button's column, below its button. With
+ * `ownLine`, badges that would leave the words (an icon and a name) under
+ * 12 characters take a line of their own under them instead.
  */
 const BadgeLine = ({
   badges,
   children,
+  ownLine = false,
   reach,
 }: {
   readonly badges: readonly ReactNode[];
   readonly children: ReactNode;
   readonly reach: boolean;
+  readonly ownLine?: boolean;
 }) => {
   const words = children !== null && children !== undefined;
   const ref = useRef<HTMLDivElement>(null);
 
-  // A new observer reports once on every render, when the badges may have changed, and again on each resize.
+  // Which badges show: the observer starts again when they change, as useMeasure does on its words, and reports on each resize.
+  const shown = badges
+    .map((badge) => (isValidElement(badge) ? String(badge.key) : ""))
+    .join(" ");
+
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
       if (entry?.target instanceof HTMLElement) {
@@ -286,27 +380,45 @@ const BadgeLine = ({
       }
     });
 
-    if (ref.current !== null) {
+    if (ref.current !== null && shown !== "") {
       observer.observe(ref.current);
     }
 
     return () => {
       observer.disconnect();
     };
-  });
+  }, [shown]);
 
   if (badges.length === 0) {
     return words ? <div className="flex min-w-0">{children}</div> : null;
   }
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-2", reach && "-mr-9")}>
-      {words ? <div className="flex min-w-0 flex-1">{children}</div> : null}
+    <div
+      className={cn(
+        "group/badges flex min-w-0 items-center gap-2",
+        reach && "-mr-9",
+        ownLine && "flex-wrap gap-y-1.5",
+        // Wrapped under the words, the badges end where the row's Details does; the words keep clear of ⋯, so whether they wrap stays the same.
+        ownLine && !reach && "data-[wrapped]:-mr-9"
+      )}
+    >
+      {words ? (
+        <div
+          className={cn(
+            "flex min-w-0 flex-1",
+            ownLine && "min-w-[min(100%,calc(12ch+1.5rem))]",
+            ownLine && !reach && "group-data-[wrapped]/badges:mr-9"
+          )}
+        >
+          {children}
+        </div>
+      ) : null}
       <div
         className={cn(
           // Never narrower than its widest badge, the Due chip: the words give way first.
           "ml-auto flex h-5 min-w-min shrink-0 flex-wrap justify-end gap-1 overflow-hidden",
-          words ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
+          words && !ownLine ? "max-w-[calc(100%-14ch-0.5rem)]" : "max-w-full"
         )}
         data-badges
         ref={ref}
@@ -343,9 +455,11 @@ export interface RowHandlers {
   readonly onRetrySave: () => void;
   /** Not saved: Discard changes, or Delete for an item the disk has never held. */
   readonly onDiscardChanges: () => void;
+  readonly attachments: AttachmentHandlers;
 }
 
-export interface ItemRowProps extends RowHandlers {
+/** What a row is drawn from: its data, and its handlers bound to it (row-actions.ts). */
+interface RowViewProps extends RowHandlers {
   readonly item: ShelfItem;
   /** One of the first run's example items (the tutorial's), tagged so. */
   readonly example?: boolean;
@@ -364,6 +478,10 @@ export interface ItemRowProps extends RowHandlers {
   readonly now: Date;
   /** A failed save left this item's changes unwritten. */
   readonly notSaved: NotSavedItem | undefined;
+  /** Files from outside dropped on the card attach to it (use-attach-drop.ts). */
+  readonly dropProps: Partial<RowDropProps>;
+  /** Files are over the card: it lights as their target, or refuses them when full. */
+  readonly dropLook: RowDropLook;
 }
 
 /** What an item is called on its row's buttons: its words, or its title when it has one. */
@@ -373,40 +491,56 @@ const rowName = (item: ShelfItem): string =>
 const percent = (value: number, total: number): string =>
   `${(value / total) * 100}%`;
 
-const KIND_LABEL = {
-  area: "Screen area",
-  drawing: "Drawing",
-  paste: "Pasted image",
-  pin: "Pinned spot",
-  screenshot: "Screenshot",
-} as const;
-
-const FILE_SIZE = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 1,
-  notation: "compact",
-  style: "unit",
-  unit: "byte",
-  unitDisplay: "narrow",
-});
-
 /** An image's main line: its title, else its note, else what kind of image it is. */
 const imageCaption = (item: ImageItem): string =>
-  item.title ?? (item.note === "" ? KIND_LABEL[item.via] : item.note);
+  item.title ?? (item.note === "" ? PICTURE_KIND[item.via] : item.note);
 
-const metaText = (item: ShelfItem): string => {
-  const when = whenText(item.createdAt);
-
+/** What the foot says after the time: how the item was captured, a file's size, a picture's source. Empty for a typed note. */
+const metaRest = (item: ShelfItem): string => {
   if (item.kind === "text") {
-    return item.via === "selection" ? `${when} · from a selection` : when;
+    return item.via === "selection" ? "from a selection" : "";
   }
 
   if (item.kind === "file") {
-    return `${when} · ${FILE_SIZE.format(item.file.bytes)}`;
+    return fileSizeText(item.file.bytes);
   }
 
   const where = item.source === null ? "" : ` · ${item.source}`;
 
-  return `${when} · ${KIND_LABEL[item.via]}${where}`;
+  return `${PICTURE_KIND[item.via]}${where}`;
+};
+
+const metaText = (item: ShelfItem): string => {
+  const when = whenText(item.createdAt);
+  const rest = metaRest(item);
+
+  return rest === "" ? when : `${when} · ${rest}`;
+};
+
+/**
+ * The foot's words beside badges, where room is short: the time always
+ * shows, and what follows it shows when it has room for a word or two and
+ * not at all when it would be cut to a letter. The whole line is the time's
+ * tooltip then.
+ */
+const FootWords = ({ item }: { readonly item: ShelfItem }) => {
+  const rest = metaRest(item);
+
+  return (
+    <span
+      className="text-muted-foreground flex h-4 min-w-0 flex-1 flex-wrap gap-x-1 overflow-hidden text-xs"
+      data-foot-words
+    >
+      <Truncated
+        className="min-w-0"
+        text={whenText(item.createdAt)}
+        tooltip={metaText(item)}
+      />
+      {rest === "" ? null : (
+        <Truncated className="min-w-16 flex-1" text={`· ${rest}`} />
+      )}
+    </span>
+  );
 };
 
 /**
@@ -416,6 +550,7 @@ const metaText = (item: ShelfItem): string => {
  * holds them as it holds every other edit (Round 7).
  */
 export const TextEditor = ({
+  caretAt = null,
   item,
   onDone,
   onSave,
@@ -423,6 +558,8 @@ export const TextEditor = ({
   readonly item: TextItem;
   readonly onSave: (text: string) => void;
   readonly onDone: () => void;
+  /** Where a click started the edit: the caret goes there, else to the end. */
+  readonly caretAt?: ScreenPoint | null;
 }) => {
   const [text, setText] = useState(item.text);
   // Escape throws the edit away; the blur that follows must not save it.
@@ -459,128 +596,33 @@ export const TextEditor = ({
   };
 
   return (
-    <div className="border-input dark:bg-input/30 focus-within:border-ring focus-within:ring-ring/50 rounded-lg border px-2.5 py-2 focus-within:ring-3">
-      <MarkdownField
-        ariaLabel="Edit item"
-        autoFocus
-        keys={{
-          onEscape: () => {
-            cancelled.current = true;
-            live.current?.cancel();
-            onDone();
-          },
-          onSubmit: finish,
-        }}
-        onBlur={(markdown) => {
-          // An untouched note keeps its own Markdown, not the field's rewrite of it.
-          finish(markdown === text ? markdown : text);
-        }}
-        followValue={false}
-        onChange={(markdown) => {
-          setText(markdown);
-          edit().change(markdown);
-        }}
-        value={item.text}
-      />
-    </div>
-  );
-};
-
-/** The note under an image or a file saves as you type; the main process waits for a pause before writing. */
-const NoteField = ({
-  autoFocus,
-  item,
-  onChange,
-  onDone,
-  onHide,
-}: {
-  readonly item: ImageItem | FileItem;
-  readonly autoFocus: boolean;
-  readonly onChange: (note: string) => void;
-  readonly onDone: () => void;
-  readonly onHide: () => void;
-}) => {
-  const [note, setNote] = useState(item.note);
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (autoFocus) {
-      ref.current?.focus();
-    }
-  }, [autoFocus]);
-
-  return (
-    <Textarea
-      aria-label={
-        item.kind === "image" ? "Note for this image" : "Note for this file"
-      }
-      className="min-h-0 resize-none"
-      maxLength={TEXT_MAX}
-      onChange={(event) => {
-        setNote(event.target.value);
-        onChange(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        const escape = event.key === "Escape";
-
-        if (
-          escape ||
-          (event.key === "Enter" &&
-            !event.shiftKey &&
-            !event.nativeEvent.isComposing)
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          event.currentTarget.blur();
+    <MarkdownField
+      ariaLabel="Edit item"
+      autoFocus
+      caretAt={caretAt}
+      // The read text's own type, so the words stay exactly where they were.
+      className={cn("min-h-0", WORDS, item.done && DONE, EDITING)}
+      keys={{
+        onEscape: () => {
+          cancelled.current = true;
+          live.current?.cancel();
           onDone();
-
-          if (escape) {
-            onHide();
-          }
-        }
+        },
+        onSubmit: finish,
       }}
-      placeholder="What matters here?"
-      ref={ref}
-      rows={1}
-      value={note}
+      onBlur={(markdown) => {
+        // An untouched note keeps its own Markdown, not the field's rewrite of it.
+        finish(markdown === text ? markdown : text);
+      }}
+      followValue={false}
+      onChange={(markdown) => {
+        setText(markdown);
+        edit().change(markdown);
+      }}
+      value={item.text}
     />
   );
 };
-
-/**
- * The note under an image or file as text: two lines until the item is
- * selected. A double-click, Return or Edit Caption opens it for typing.
- */
-const NoteText = ({
-  item,
-  onContextMenu,
-  onEdit,
-  onSelect,
-  selected,
-}: {
-  readonly item: ImageItem | FileItem;
-  readonly selected: boolean;
-} & Pick<RowHandlers, "onContextMenu" | "onEdit" | "onSelect">) =>
-  item.note === "" ? null : (
-    <button
-      className={cn(
-        "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug break-words whitespace-pre-wrap outline-none focus-visible:ring-3",
-        // Under a title the caption is the second line, quiet as it is in details.
-        item.title !== null && "text-muted-foreground",
-        item.done && "text-muted-foreground line-through"
-      )}
-      data-row-keys
-      onClick={onSelect}
-      onContextMenu={contextMenuAt(onContextMenu)}
-      onDoubleClick={onEdit}
-      type="button"
-    >
-      {/* A clamp has no effect on a button itself, only on a box inside it. */}
-      <span className={cn("block", !selected && "line-clamp-2")}>
-        {item.note}
-      </span>
-    </button>
-  );
 
 /** The picture, which selects on click, opens large on a double-click and drags out as a file. */
 const Picture = ({
@@ -601,7 +643,9 @@ const Picture = ({
     aria-label={`Select: ${imageCaption(item)}`}
     className={cn(
       "bg-muted after:ring-foreground/10 focus-visible:ring-ring/50 relative block shrink-0 cursor-grab overflow-hidden rounded-md outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:ring-1 after:ring-inset focus-visible:ring-3 active:cursor-grabbing",
-      compact ? "w-24" : "w-full"
+      // A third of the row, and 4rem in a shelf under 330 px, so the words beside it keep room to read; open, as
+      // wide as the picture shows (12rem tall at most), so its pins stay on what they mark.
+      compact ? "w-[clamp(4rem,32%,6rem)] max-[330px]:w-16" : "w-fit max-w-full"
     )}
     draggable
     data-row-keys
@@ -619,15 +663,20 @@ const Picture = ({
   >
     <img
       alt={imageCaption(item)}
-      className="block h-auto w-full"
+      className={cn(
+        "block h-auto",
+        compact ? "w-full" : "max-h-(--picture) w-auto max-w-full"
+      )}
       draggable={false}
       height={item.image.heightPx}
       src={insetUrl.attachment(item.image.file)}
+      style={compact ? undefined : { "--picture": `${ROW_CAPS.picture}px` }}
       width={item.image.widthPx}
     />
     {item.pins.map((pin, index) => (
       <PinMarker
         height={compact ? 13 : 20}
+        inset
         // Pins have no identity but their place, which is their number.
         // oxlint-disable-next-line react/no-array-index-key
         key={index}
@@ -692,7 +741,7 @@ const ImageBody = ({
           {/* A clamp has no effect on a button itself, only on a box inside it. */}
           {item.title === null ? (
             <span className="line-clamp-2 min-w-0">
-              {item.note === "" ? KIND_LABEL[item.via] : item.note}
+              {item.note === "" ? PICTURE_KIND[item.via] : item.note}
             </span>
           ) : (
             <span className="flex min-w-0 flex-col">
@@ -720,34 +769,69 @@ const ImageBody = ({
         onSelect={onSelect}
       />
       {item.title === null ? null : (
-        <p
+        <Clamp
           className={cn(
             "text-sm leading-snug font-medium break-words",
             item.done && "text-muted-foreground line-through"
           )}
+          lines={ROW_CAPS.title}
+          what="the title"
         >
           {item.title}
-        </p>
+        </Clamp>
       )}
-      {editing ? (
-        <NoteField
-          autoFocus
-          item={item}
-          key={item.id}
-          onChange={onEditNote}
-          onDone={onStopEditing}
-          onHide={onHide}
-        />
-      ) : (
-        <NoteText
-          item={item}
-          onContextMenu={onContextMenu}
-          onEdit={onEdit}
-          onSelect={onSelect}
-          selected={selected}
-        />
-      )}
+      <Note
+        editing={editing}
+        item={item}
+        onContextMenu={onContextMenu}
+        onEdit={onEdit}
+        onEditNote={onEditNote}
+        onHide={onHide}
+        onSelect={onSelect}
+        onStopEditing={onStopEditing}
+        selected={selected}
+      />
     </div>
+  );
+};
+
+/** A file's title: two lines on the closed row, three on the open one until Show more. */
+const FileTitle = ({
+  item,
+  onContextMenu,
+  onSelect,
+  selected,
+}: {
+  readonly item: FileItem;
+  readonly selected: boolean;
+} & Pick<RowHandlers, "onContextMenu" | "onSelect">) => {
+  const title = (
+    <button
+      className={cn(
+        "focus-visible:ring-ring/50 w-full rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
+        item.done && "text-muted-foreground line-through"
+      )}
+      data-row-keys
+      onClick={onSelect}
+      onContextMenu={contextMenuAt(onContextMenu)}
+      type="button"
+    >
+      <span className={cn("block", !selected && "line-clamp-2")}>
+        {item.title}
+      </span>
+    </button>
+  );
+
+  return selected ? (
+    <Clamp
+      className="text-sm leading-snug"
+      lines={ROW_CAPS.title}
+      what="the title"
+    >
+      {title}
+    </Clamp>
+  ) : (
+    title
   );
 };
 
@@ -782,22 +866,14 @@ const FileBody = ({
 >) => (
   <div className="flex min-w-0 flex-col gap-2">
     {item.title === null ? null : (
-      <button
-        className={cn(
-          "focus-visible:ring-ring/50 rounded-sm text-left text-sm leading-snug font-medium break-words outline-none focus-visible:ring-3",
-          item.done && "text-muted-foreground line-through"
-        )}
-        data-row-keys
-        onClick={onSelect}
-        onContextMenu={contextMenuAt(onContextMenu)}
-        type="button"
-      >
-        <span className={cn("block", !selected && "line-clamp-2")}>
-          {item.title}
-        </span>
-      </button>
+      <FileTitle
+        item={item}
+        onContextMenu={onContextMenu}
+        onSelect={onSelect}
+        selected={selected}
+      />
     )}
-    <BadgeLine badges={badges} reach={item.title !== null}>
+    <BadgeLine badges={badges} ownLine reach={item.title !== null}>
       <FileName
         item={item}
         onContextMenu={onContextMenu}
@@ -805,24 +881,17 @@ const FileBody = ({
         onSelect={onSelect}
       />
     </BadgeLine>
-    {editing ? (
-      <NoteField
-        autoFocus
-        item={item}
-        key={item.id}
-        onChange={onEditNote}
-        onDone={onStopEditing}
-        onHide={onHide}
-      />
-    ) : (
-      <NoteText
-        item={item}
-        onContextMenu={onContextMenu}
-        onEdit={onEdit}
-        onSelect={onSelect}
-        selected={selected}
-      />
-    )}
+    <Note
+      editing={editing}
+      item={item}
+      onContextMenu={onContextMenu}
+      onEdit={onEdit}
+      onEditNote={onEditNote}
+      onHide={onHide}
+      onSelect={onSelect}
+      onStopEditing={onStopEditing}
+      selected={selected}
+    />
   </div>
 );
 
@@ -830,6 +899,7 @@ const FileBody = ({
 const TextBody = ({
   editing,
   item,
+  links,
   onContextMenu,
   onEdit,
   onEditText,
@@ -841,6 +911,8 @@ const TextBody = ({
   readonly item: TextItem;
   readonly selected: boolean;
   readonly editing: boolean;
+  /** The links its words held, which the open row lists: each folded to one line when its description is long. */
+  readonly links: RowLinks;
 } & Pick<
   RowHandlers,
   | "onContextMenu"
@@ -850,30 +922,50 @@ const TextBody = ({
   | "onSelect"
   | "onStopEditing"
 >) => {
+  const [caretAt, setCaretAt] = useCaretStart<ScreenPoint>(editing);
+
   if (editing) {
     return (
-      <TextEditor item={item} onDone={onStopEditing} onSave={onEditText} />
+      <TextEditor
+        caretAt={caretAt}
+        item={item}
+        onDone={onStopEditing}
+        onSave={onEditText}
+      />
     );
   }
 
-  const words = cn(
-    "text-sm leading-snug break-words",
-    item.done && "text-muted-foreground line-through"
-  );
+  const words = cn(WORDS, item.done && DONE);
 
   return (
     <>
-      {/* Open, its links work; closed, the whole text selects the card and shows two lines. */}
+      {/* Open, a click on its words edits them there and its links work; closed, the whole text selects the card and shows two lines. */}
       {selected ? (
-        // Where focus comes back to from details: the row, whose keys are Return and Space.
-        <div className="rounded-sm outline-none" data-row-keys tabIndex={-1}>
-          <Markdown
-            className={words}
-            interactive
-            onOpenLink={onOpenLink}
-            text={item.text}
-          />
-        </div>
+        // Ten lines at most until Show more; an edit shows all of it.
+        <Clamp className={WORDS} lines={ROW_CAPS.words} what="the text">
+          {/* Where focus comes back to from details: the row, whose keys are Return and Space. */}
+          {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Return on the row edits it (use-shelf-keys.ts); the click only says where the caret goes. */}
+          <div
+            className="cursor-text rounded-sm outline-none"
+            data-row-keys
+            onClick={(event) => {
+              const point = editPoint(wordsClick(event));
+
+              if (point !== null) {
+                setCaretAt(point);
+                onEdit();
+              }
+            }}
+            tabIndex={-1}
+          >
+            <Markdown
+              className={words}
+              interactive
+              onOpenLink={onOpenLink}
+              text={item.text}
+            />
+          </div>
+        </Clamp>
       ) : (
         <button
           className={cn(
@@ -894,9 +986,13 @@ const TextBody = ({
           />
         </button>
       )}
-      {selected && item.links.length > 0 ? (
-        <LinkList links={item.links} onOpenLink={onOpenLink} />
-      ) : null}
+      {links === "none" ? null : (
+        <LinkList
+          fold={links === "folded"}
+          links={item.links}
+          onOpenLink={onOpenLink}
+        />
+      )}
     </>
   );
 };
@@ -922,46 +1018,98 @@ const SourceRow = ({
   </BadgeLine>
 );
 
-/** What an open row shows besides its words: the description, checkable steps and the linked windows. */
+/** A quiet line under a list that says how much more details hold, and opens them. */
+const MoreLine = ({
+  onShowDetails,
+  text,
+}: {
+  readonly text: string;
+  readonly onShowDetails: () => void;
+}) => (
+  <Button
+    className="-ml-2 max-w-full self-start"
+    onClick={onShowDetails}
+    size="xs"
+    variant="quiet"
+  >
+    <Truncated className="min-w-0" text={text} />
+    <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
+  </Button>
+);
+
+const moreSteps = ({ more, moreDone }: { more: number; moreDone: number }) =>
+  `${more} more ${more === 1 ? "step" : "steps"}${moreDone === 0 ? "" : ` · ${moreDone} done`}`;
+
+/**
+ * What an open row shows besides its words, each only once it is set: pin
+ * labels, the description, checkable steps and the linked windows, each
+ * under its own cap (row-parts.ts ROW_CAPS), with its own line under it
+ * that says how much more details hold and opens them.
+ */
 const Expansion = ({
   item,
+  onDescriptionLines,
   onReopenWindow,
+  onShowDetails,
   onToggleStep,
+  open,
 }: {
+  readonly open: RowOpen;
   readonly item: ShelfItem;
+  /** How many lines the description takes whole. */
+  readonly onDescriptionLines: (lines: number) => void;
   readonly onToggleStep: (step: Step) => void;
   readonly onReopenWindow: (window: WindowRef) => void;
+  readonly onShowDetails: () => void;
 }) => {
-  const description = item.description.trim();
-  const steps = filledSteps(item.steps);
-
-  const labelled =
-    item.kind === "image" && item.pins.some((pin) => pin.label !== undefined);
+  const { pins, steps } = open;
 
   if (
-    description === "" &&
-    steps.length === 0 &&
-    item.windows.length === 0 &&
-    !labelled
+    !open.description &&
+    steps === null &&
+    open.windows === 0 &&
+    pins === null
   ) {
     return null;
   }
 
   return (
     <div className="flex flex-col gap-2 pt-0.5">
-      {labelled && item.kind === "image" ? (
-        <PinLegend pins={item.pins} />
+      {pins === null || item.kind !== "image" ? null : (
+        <div className="flex flex-col gap-1">
+          <PinLegend pins={item.pins} shown={pins.shown} />
+          {pins.more === 0 ? null : (
+            <MoreLine
+              onShowDetails={onShowDetails}
+              text={`${pins.more} more ${pins.more === 1 ? "pin" : "pins"}`}
+            />
+          )}
+        </div>
+      )}
+      {open.description ? (
+        <Clamp
+          className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-line"
+          lines={ROW_CAPS.description}
+          onLines={onDescriptionLines}
+          what="the description"
+        >
+          {item.description.trim()}
+        </Clamp>
       ) : null}
-      {description === "" ? null : (
-        <p className="text-muted-foreground text-sm leading-snug break-words whitespace-pre-wrap">
-          {description}
-        </p>
+      {steps === null ? null : (
+        <div className="flex flex-col gap-1">
+          <StepChecklist onToggle={onToggleStep} steps={steps.shown} />
+          {steps.more === 0 ? null : (
+            <MoreLine onShowDetails={onShowDetails} text={moreSteps(steps)} />
+          )}
+        </div>
       )}
-      {steps.length === 0 ? null : (
-        <StepChecklist onToggle={onToggleStep} steps={item.steps} />
-      )}
-      {item.windows.length === 0 ? null : (
-        <WindowStrip onReopen={onReopenWindow} windows={item.windows} />
+      {open.windows === 0 ? null : (
+        <WindowStrip
+          onMore={onShowDetails}
+          onReopen={onReopenWindow}
+          windows={item.windows}
+        />
       )}
     </div>
   );
@@ -977,21 +1125,150 @@ const TagStripe = ({ item }: { readonly item: ShelfItem }) =>
     />
   );
 
-/** A file without a source line carries its badges on the file's own line, not on a line of their own. */
-const placedBadges = (
-  item: ShelfItem,
-  badges: readonly ReactNode[]
-): {
-  readonly fileLine: readonly ReactNode[];
-  readonly sourceLine: readonly ReactNode[];
-} =>
-  item.kind === "file" && item.context === null
-    ? { fileLine: badges, sourceLine: [] }
-    : { fileLine: [], sourceLine: badges };
+/** ⋯, which opens the item's menu under it: shown on the open row, on hover or focus, and as a tick once copied. */
+const MoreButton = ({
+  copied,
+  onOpen,
+  shown,
+}: {
+  readonly copied: boolean;
+  readonly onOpen: RowHandlers["onContextMenu"];
+  readonly shown: boolean;
+}) => (
+  <span
+    className={cn(
+      "-my-0.5 shrink-0",
+      shown
+        ? "opacity-100"
+        : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+    )}
+  >
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={copied ? "Copied" : "More"}
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
 
-export const ItemRow = (props: ItemRowProps) => {
+            onOpen({
+              align: "end",
+              height: box.height,
+              width: box.width,
+              x: box.left,
+              y: box.top,
+            });
+          }}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <HugeiconsIcon icon={copied ? Tick02Icon : MoreHorizontalIcon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="left">{copied ? "Copied" : "More"}</TooltipContent>
+    </Tooltip>
+  </span>
+);
+
+/**
+ * The open row's foot: when and how it was captured, and Details (→). A row
+ * without a source has its badges here too, before Details, under the rules
+ * of every badge line: the words give way, and the Due chip always shows.
+ */
+const OpenFooter = ({
+  badges,
+  item,
+  onShowDetails,
+}: {
+  readonly badges: readonly ReactNode[];
+  readonly item: ShelfItem;
+  readonly onShowDetails: () => void;
+}) => (
+  // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
+  <div className="-mr-9 flex min-h-6 items-center gap-2">
+    <div className="min-w-0 flex-1">
+      <BadgeLine badges={badges} reach={false}>
+        {badges.length === 0 ? (
+          <Truncated
+            className="text-muted-foreground min-w-0 flex-1 text-xs"
+            text={metaText(item)}
+          />
+        ) : (
+          <FootWords item={item} />
+        )}
+      </BadgeLine>
+    </div>
+    <Button
+      aria-label="Show details"
+      className="-mr-2.75 shrink-0"
+      data-details-button
+      onClick={onShowDetails}
+      size="xs"
+      title={`Details (${keyText("Right", isMac)})`}
+      variant="quiet"
+    >
+      Details
+      <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
+    </Button>
+  </div>
+);
+
+const DROP_LOOK: Readonly<Record<RowDropLook, string | null>> = {
+  full: "ring-destructive/50 ring-2 ring-inset",
+  none: null,
+  open: "bg-pin/10 ring-pin ring-2 ring-inset",
+};
+
+/**
+ * The steps checked when the row opened, which it lists last until it opens
+ * again (row-parts.ts rowSteps): a step ticked there stays under the pointer.
+ */
+const useCheckedAtOpen = (
+  steps: readonly Step[],
+  open: boolean
+): ReadonlySet<string> => {
+  const [opened, setOpened] = useState({ checked: checkedSteps(steps), open });
+
+  if (opened.open !== open) {
+    setOpened({ checked: checkedSteps(steps), open });
+  }
+
+  return opened.checked;
+};
+
+/** An opened row comes into view whole where it fits, its Details line included. */
+const useRevealOnOpen = (
+  row: RefObject<HTMLElement | null>,
+  open: boolean
+): void => {
+  useEffect(() => {
+    const frame = open
+      ? requestAnimationFrame(() => {
+          row.current?.scrollIntoView({ block: "nearest" });
+        })
+      : null;
+
+    return () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [row, open]);
+};
+
+const RowView = (props: RowViewProps) => {
   const { copied, editing, item, selected } = props;
-  const badges = placedBadges(item, metaBadges(item, props.now, selected));
+
+  const parts = rowParts(
+    item,
+    selected,
+    useCheckedAtOpen(item.steps, selected)
+  );
+
+  const badges = badgeNodes(parts.badges, props.now);
+  const rowRef = useRef<HTMLLIElement>(null);
+  const [descriptionLines, setDescriptionLines] = useState(0);
+
+  useRevealOnOpen(rowRef, selected && !editing);
 
   return (
     <li
@@ -1002,9 +1279,11 @@ export const ItemRow = (props: ItemRowProps) => {
           ? "border-primary"
           : "border-foreground/10 hover:border-foreground/20",
         props.picked && "bg-primary/10",
-        props.dragging && "opacity-40"
+        props.dragging && "opacity-40",
+        DROP_LOOK[props.dropLook]
       )}
       data-item-id={item.id}
+      ref={rowRef}
       // A modified click picks instead of opening; caught before the card's own buttons see it.
       onClickCapture={(event) => {
         const toggle = isMac ? event.metaKey : event.ctrlKey;
@@ -1017,6 +1296,7 @@ export const ItemRow = (props: ItemRowProps) => {
       }}
       // A text field inside keeps ordinary text dragging.
       {...(editing ? {} : props.dragProps)}
+      {...props.dropProps}
       // An open text item has no button of its own: a double-click edits it, a right-click opens its menu.
       onContextMenuCapture={(event) => {
         if (!isTextField(event.target)) {
@@ -1056,6 +1336,7 @@ export const ItemRow = (props: ItemRowProps) => {
           <TextBody
             editing={editing}
             item={item}
+            links={linksOf(parts.open, descriptionLines)}
             onContextMenu={props.onContextMenu}
             onEdit={props.onEdit}
             onEditText={props.onEditText}
@@ -1082,7 +1363,7 @@ export const ItemRow = (props: ItemRowProps) => {
         ) : null}
         {item.kind === "file" ? (
           <FileBody
-            badges={badges.fileLine}
+            badges={parts.badgesOn === "file" ? badges : []}
             editing={editing}
             item={item}
             onContextMenu={props.onContextMenu}
@@ -1095,15 +1376,25 @@ export const ItemRow = (props: ItemRowProps) => {
             selected={selected}
           />
         ) : null}
-        {selected ? (
+        <AttachmentStrip
+          attachments={item.attachments}
+          handlers={props.attachments}
+          onMore={props.onShowDetails}
+          onSelect={props.onSelect}
+          strip={parts.strip}
+        />
+        {parts.open === null ? null : (
           <Expansion
             item={item}
+            onDescriptionLines={setDescriptionLines}
             onReopenWindow={props.onReopenWindow}
+            onShowDetails={props.onShowDetails}
             onToggleStep={props.onToggleStep}
+            open={parts.open}
           />
-        ) : null}
+        )}
         <SourceRow
-          badges={badges.sourceLine}
+          badges={parts.badgesOn === "source" ? badges : []}
           context={item.context}
           onOpenLink={() => {
             props.onOpenLink();
@@ -1118,60 +1409,44 @@ export const ItemRow = (props: ItemRowProps) => {
           />
         )}
         {selected ? (
-          // Reaches under the ⋯ column, as the badges do, and past the button's own inset, so the › ends where the Due chip does.
-          <div className="-mr-9 flex min-h-6 items-center gap-2">
-            <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
-              {metaText(item)}
-            </p>
-            <Button
-              aria-label="Show details"
-              className="-mr-2.75 shrink-0"
-              data-details-button
-              onClick={props.onShowDetails}
-              size="xs"
-              title={`Details (${keyText("Right", isMac)})`}
-              variant="quiet"
-            >
-              Details
-              <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
-            </Button>
-          </div>
+          <OpenFooter
+            badges={parts.badgesOn === "foot" ? badges : []}
+            item={item}
+            onShowDetails={props.onShowDetails}
+          />
         ) : null}
       </div>
-      <span
-        className={cn(
-          "-my-0.5 shrink-0",
-          selected || copied
-            ? "opacity-100"
-            : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-        )}
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={copied ? "Copied" : "More"}
-              onClick={(event) => {
-                const box = event.currentTarget.getBoundingClientRect();
-
-                props.onContextMenu({
-                  align: "end",
-                  height: box.height,
-                  width: box.width,
-                  x: box.left,
-                  y: box.top,
-                });
-              }}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <HugeiconsIcon icon={copied ? Tick02Icon : MoreHorizontalIcon} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            {copied ? "Copied" : "More"}
-          </TooltipContent>
-        </Tooltip>
-      </span>
+      <MoreButton
+        copied={copied}
+        onOpen={props.onContextMenu}
+        shown={selected || copied}
+      />
     </li>
   );
 };
+
+/** A row's data, and the list's actions; the row re-renders only when its data changes. */
+export type ItemRowProps = Omit<
+  RowViewProps,
+  keyof ReturnType<typeof bindRow>
+> & {
+  readonly actions: RowActions;
+};
+
+/**
+ * One item in the list. Memoised on its data: a change to another row, the
+ * selection elsewhere or the search text leaves it alone. Its handlers are
+ * bound once per item and call the list's latest code when they run.
+ */
+const BoundRow = ({ actions, ...props }: ItemRowProps) => {
+  const { item, selected } = props;
+
+  const handlers = useMemo(
+    () => bindRow(actions, item, selected),
+    [actions, item, selected]
+  );
+
+  return <RowView {...props} {...handlers} />;
+};
+
+export const ItemRow = memo(BoundRow);

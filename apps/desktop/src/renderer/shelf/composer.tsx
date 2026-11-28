@@ -2,7 +2,7 @@ import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@inset/ui/lib/utils";
 import { parseComposer, TEXT_MAX } from "@shared/shelf";
-import { useImperativeHandle, useRef } from "react";
+import { useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 
 import {
@@ -10,6 +10,7 @@ import {
   InputGroupAddon,
   InputGroupButton,
 } from "@/components/ui/input-group";
+import { Truncated } from "@/shared/clamp";
 import { coach } from "@/tutorial/anchors";
 
 import { MarkdownField } from "./markdown-field";
@@ -19,9 +20,6 @@ import type { AddActions } from "./menus";
 
 export interface ComposerProps {
   readonly sectionName: string;
-  /** Held by the shelf as Markdown, so it can clear the field once a note is added. */
-  readonly text: string;
-  readonly onTextChange: (text: string) => void;
   readonly onSubmit: (text: string) => void;
   /** ↑ in an empty composer moves into the list. */
   readonly onLeaveUp: () => void;
@@ -39,6 +37,8 @@ export interface ComposerProps {
 /**
  * Return adds the note, ⇧↩ adds a line (or a list item), and "# Name"
  * switches to (or makes) a section. Markdown is formatted as it is typed.
+ * The note being typed is the composer's own: a keystroke renders the field,
+ * never the list above it.
  */
 export const Composer = ({
   addActions,
@@ -46,13 +46,13 @@ export const Composer = ({
   onEscape,
   onLeaveUp,
   onSubmit,
-  onTextChange,
   ref,
   sectionName,
   sectionNames,
-  text,
 }: ComposerProps) => {
   const field = useRef<MarkdownFieldHandle>(null);
+  // Markdown, so the field can be cleared once a note is added.
+  const [text, setText] = useState("");
 
   useImperativeHandle<MarkdownFieldHandle | null, MarkdownFieldHandle | null>(
     ref,
@@ -73,7 +73,8 @@ export const Composer = ({
       className={cn("px-2 pt-1 pb-2", hidden && "hidden")}
       {...coach("composer")}
     >
-      <InputGroup className="h-auto items-start">
+      {/* The field keeps at least half the width: a longer "# Name" chip wraps to its own line under it. */}
+      <InputGroup className="h-auto flex-wrap items-start [&>:has(>[data-slot=input-group-control])]:min-w-1/2">
         <InputGroupAddon align="inline-start-top">
           <AddMenu
             actions={addActions}
@@ -100,30 +101,34 @@ export const Composer = ({
               if (markdown.trim() === "") {
                 onEscape();
               } else {
-                onTextChange("");
+                setText("");
               }
             },
             onLeaveUp,
             onSubmit: (markdown) => {
               if (markdown.trim() !== "") {
                 onSubmit(markdown.slice(0, TEXT_MAX));
-                onTextChange("");
+                setText("");
               }
             },
           }}
-          onChange={onTextChange}
+          onChange={setText}
           placeholder="Jot down a thought…"
           ref={field}
           value={text}
         />
-        {/* Inline at the field's end, so "# Name" reads as a command, not a heading. */}
-        <InputGroupAddon align="inline-end" aria-live="polite">
+        {/* At the field's end, so "# Name" reads as a command, not a heading. */}
+        <InputGroupAddon
+          align="inline-end"
+          aria-live="polite"
+          className="ml-2 max-w-[calc(100%-0.5rem)] min-w-0"
+        >
           {entry.kind === "section" ? (
-            <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-56 min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
+            <span className="bg-pin/14 text-pin-ink dark:bg-pin/22 inline-flex h-5 max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium">
               <span className="shrink-0">↩</span>
-              <span className="truncate">
-                {existing ? "Go to section" : "New section"} ‘{entry.name}’
-              </span>
+              <Truncated
+                text={`${existing ? "Go to section" : "New section"} ‘${entry.name}’`}
+              />
             </span>
           ) : null}
         </InputGroupAddon>

@@ -13,7 +13,7 @@ import type {
 } from "@shared/contracts";
 import { parseSearch } from "@shared/due";
 import type { MenuChoice } from "@shared/menus";
-import { groupItems, itemText, UNDO_MAX } from "@shared/shelf";
+import { groupItems, UNDO_MAX } from "@shared/shelf";
 import type {
   ItemId,
   SectionId,
@@ -24,7 +24,7 @@ import type {
 import { keyText } from "@shared/shortcut";
 import type { TutorialAction, TutorialView } from "@shared/tutorial";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ComponentProps, PointerEvent } from "react";
+import type { ComponentProps, PointerEvent, ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Toaster } from "@/components/ui/sonner";
@@ -34,7 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { onMenusOpen } from "@/lib/menu-keys";
-import { filePath, shelfBridge } from "@/shared/bridge";
+import { shelfBridge } from "@/shared/bridge";
 import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
 import { usePushedView } from "@/shared/use-pushed-view";
@@ -44,20 +44,35 @@ import { HintLayer } from "@/tutorial/hint-layer";
 import { Spotlight } from "@/tutorial/spotlight";
 import { useTutorial } from "@/tutorial/use-tutorial";
 
+import { noteFieldTakesKeyboard } from "./arrival";
+import type { Arrival, KeyboardPlace } from "./arrival";
+import {
+  attachDropped,
+  dropLook,
+  dropRing,
+  fullToast,
+  pasteClipboardImage,
+  useFileDrops,
+} from "./attach-files";
+import type { AttachmentHandlers } from "./attachment-strip";
 import { Banners, NotSavedBanner } from "./banners";
 import { Composer } from "./composer";
 import { ConfirmDialog } from "./confirm-dialog";
 import type { ConfirmRequest } from "./confirm-dialog";
 import { DetailsView } from "./details-view";
+import type { DetailsUndo } from "./details-view";
 import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
+import { useFromHere } from "./from-here";
 import { focusRow, ItemRow } from "./item-row";
-import { Markdown } from "./markdown";
+import { keptItems } from "./kept-items";
+import { lookAt } from "./made-items";
 import { editorWithFocus } from "./markdown-field";
 import type { MarkdownFieldHandle } from "./markdown-field";
 import { PointerMenu, ShelfMenu } from "./menus";
 import type { OpenMenu } from "./menus";
 import { QuitPromptDialog } from "./quit-prompt";
+import { useRowActions } from "./row-actions";
 import {
   DueSuggestions,
   NoMatches,
@@ -76,7 +91,10 @@ import {
   togglePick,
 } from "./selection";
 import { ShortcutSheet } from "./shortcut-sheet";
+import { Excerpt, NOTICE_MS, UNDO_VISIBLE_MS } from "./toast-parts";
+import { useAttachDrop } from "./use-attach-drop";
 import { useDetails } from "./use-details";
+import type { Details } from "./use-details";
 import { useItemDrag } from "./use-item-drag";
 import { useSearchHighlight } from "./use-search-highlight";
 import { isTextField, useShelfKeys } from "./use-shelf-keys";
@@ -88,12 +106,22 @@ onMenusOpen((open) => {
 });
 
 const COPIED_MS = 1400;
-const UNDO_VISIBLE_MS = 6000;
 
-const load = async (): Promise<ShelfView> => await api.getView();
+// The last shelf the page took, so the next keeps the items that didn't change (kept-items.ts).
+let held: ShelfView | null = null;
+
+const keep = (view: ShelfView): ShelfView => {
+  held = { ...view, doc: keptItems(held?.doc, view.doc) };
+
+  return held;
+};
+
+const load = async (): Promise<ShelfView> => keep(await api.getView());
 
 const subscribe = (listener: (view: ShelfView | null) => void) =>
-  api.on("view", listener);
+  api.on("view", (view) => {
+    listener(view === null ? null : keep(view));
+  });
 
 const apply = (op: ShelfOp): void => {
   api.apply(op);
@@ -250,116 +278,38 @@ const HeaderButton = ({
   </Tooltip>
 );
 
-/** How long a confirmation toast stays: long enough to read, short enough to forget. */
-const NOTICE_MS = 1800;
-
 const noticeToast = (message: string): void => {
   toast.success(message, { duration: NOTICE_MS });
 };
 
-const ignoreLink = (): void => undefined;
+/**
+ * Hides the shelf. A control that held the keyboard (an item, the ×) lets
+ * go of it first, so the shelf opens again with the caret in the note
+ * field; a field being typed in keeps it.
+ */
+const hideShelf = (): void => {
+  const active = document.activeElement;
 
-/** An item's words for a toast: a note formatted as on its card, cut to one line. */
-const Excerpt = ({ item }: { readonly item: ShelfItem }) =>
-  item.kind === "text" ? (
-    <Markdown
-      className="line-clamp-1 break-words"
-      interactive={false}
-      onOpenLink={ignoreLink}
-      text={item.text}
-    />
-  ) : (
-    <span className="line-clamp-1 break-words">{itemText(item)}</span>
-  );
+  if (active instanceof HTMLElement && !isTextField(active)) {
+    active.blur();
+  }
+
+  api.hide();
+};
 
 const deletedToast = (id: ItemId): string => `deleted-${id}`;
 
-/** Files dropped or pasted in: by path when they have one, else as image bytes (an image copied from a page). */
-const addDataFiles = async (files: readonly File[]): Promise<void> => {
-  const paths = files.flatMap((file) => {
-    const found = filePath(file);
-
-    return found === "" ? [] : [found];
-  });
-
-  if (paths.length > 0) {
-    const result = await api.addFiles(paths);
-
-    if (result.ok) {
-      noticeToast(
-        paths.length === 1 ? "Added 1 file" : `Added ${paths.length} files`
-      );
-    }
-
-    return;
+/** What a screenshot card's Add to “…” goes to: the item open in details, else the one selected, never one of several picked. */
+const selectionForMain = (
+  detailsId: ItemId | undefined,
+  picked: readonly ItemId[],
+  selectedId: ItemId | null
+): ItemId | null => {
+  if (detailsId !== undefined) {
+    return detailsId;
   }
 
-  const images = files.filter((file) => file.type.startsWith("image/"));
-
-  await Promise.all(
-    images.map(async (file) => {
-      await api.pasteImage(new Uint8Array(await file.arrayBuffer()));
-    })
-  );
-};
-
-const hasFiles = (event: DragEvent): boolean =>
-  event.dataTransfer?.types.includes("Files") === true;
-
-/**
- * Files can be dropped anywhere on the shelf, or pasted when the clipboard
- * holds files. One of the shelf's own images or files dragged back in is not
- * added again (`ownDrag`).
- */
-const useFileDrops = (ownDrag: () => boolean): boolean => {
-  const [over, setOver] = useState(false);
-
-  const onDragOver = useEffectEvent((event: DragEvent) => {
-    if (hasFiles(event) && !ownDrag()) {
-      event.preventDefault();
-      setOver(true);
-    }
-  });
-
-  const onDragLeave = useEffectEvent((event: DragEvent) => {
-    if (event.relatedTarget === null) {
-      setOver(false);
-    }
-  });
-
-  const onDrop = useEffectEvent((event: DragEvent) => {
-    setOver(false);
-
-    if (hasFiles(event) && !ownDrag()) {
-      event.preventDefault();
-      void addDataFiles([...(event.dataTransfer?.files ?? [])]);
-    }
-  });
-
-  const onPaste = useEffectEvent((event: ClipboardEvent) => {
-    const files = [...(event.clipboardData?.files ?? [])];
-
-    if (files.length > 0) {
-      event.preventDefault();
-      void addDataFiles(files);
-    }
-  });
-
-  useEffect(() => {
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
-    window.addEventListener("drop", onDrop);
-    window.addEventListener("paste", onPaste);
-
-    return () => {
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave);
-      window.removeEventListener("drop", onDrop);
-      window.removeEventListener("paste", onPaste);
-    };
-  }, []);
-
-  return over;
+  return picked.length > 1 ? null : selectedId;
 };
 
 /**
@@ -515,7 +465,7 @@ const ShelfToaster = ({ raised }: { readonly raised: boolean }) => {
 };
 
 /** A removal in details that Undo or ⌘Z puts back. */
-const undoableToast = (message: string, undo: () => boolean): void => {
+const undoableToast = (message: ReactNode, undo: () => boolean): void => {
   toast(message, {
     action: {
       label: "Undo",
@@ -527,6 +477,19 @@ const undoableToast = (message: string, undo: () => boolean): void => {
     duration: UNDO_VISIBLE_MS,
     id: "details-undo",
   });
+};
+
+/** What a removal in details says above its Undo. */
+const removedTitle = (
+  entry: Exclude<DetailsUndo, { readonly kind: "pinLabel" }>
+): ReactNode => {
+  if (entry.kind === "attachment") {
+    return (
+      <span className="line-clamp-2 wrap-anywhere">Removed “{entry.name}”</span>
+    );
+  }
+
+  return entry.kind === "step" ? "Step removed" : "Window removed";
 };
 
 /** Opens a linked window again, or every window of the item when none is given. */
@@ -607,13 +570,26 @@ const DetailsNotSaved = ({
     />
   );
 
+/** A capture's focus closes details, unless it asks for them at a field: the why field's way in when the pill couldn't get the keyboard. */
+const showFocusDetails = (
+  details: Details,
+  focus: NonNullable<ShelfView["focus"]>
+): void => {
+  if (focus.field === undefined) {
+    details.close();
+  } else {
+    details.open(focus.id, focus.field);
+  }
+};
+
 const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const { canUndo, doc, focus, status } = view;
   const [query, setQuery] = useState("");
+  const fromHere = useFromHere(view.here, query, setQuery);
   const now = useNow();
   const [editingId, setEditingId] = useState<ItemId | null>(null);
   // The item being typed in stays shown while its words stop matching the search.
-  const groups = groupItems(doc, query, now, editingId);
+  const groups = fromHere(groupItems(doc, query, now, editingId));
   const { collapsed, setOpen } = useCollapsedSections();
   // A search shows its matches in folded sections too.
   const searching = query.trim() !== "";
@@ -629,10 +605,6 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
   // ↑ and ↓ walk the items in the order they are shown, across sections.
   const ids = items.map((item) => item.id);
-
-  const newest = doc.items.findLast(
-    (item) => item.sectionId === doc.activeSectionId
-  )?.id;
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -685,14 +657,19 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     },
   });
 
-  const dropping = useFileDrops(drag.draggingOut);
+  const attachDrop = useAttachDrop({
+    onDrop: (item, files) => {
+      void attachDropped(item, files);
+    },
+    onFull: fullToast,
+    ownDrag: drag.draggingOut,
+  });
 
   const sectionName =
     doc.sections.find((section) => section.id === doc.activeSectionId)?.name ??
     "";
 
   const [selectedId, setSelectedId] = useState<ItemId | null>(null);
-  const [draft, setDraft] = useState("");
   const [handledFocus, setHandledFocus] = useState(0);
   const [copiedId, setCopiedId] = useExpiringState<ItemId>(COPIED_MS);
   // The deletions shown as toasts, newest last, so ⌘Z can close the one it undoes.
@@ -726,6 +703,30 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   const examples = new Set<string>(tutorial.examples);
   const detailsItem = details.item;
   const inDetails = detailsItem !== undefined;
+
+  const dropping = useFileDrops(
+    () => drag.draggingOut() || attachDrop.draggingOut(),
+    () => details.item?.id ?? null
+  );
+
+  /** What a tile does, in a row or in details. */
+  const attachmentHandlers = (id: ItemId): AttachmentHandlers => ({
+    dragOut: (attachment) => {
+      flushEdits();
+      attachDrop.startDragOut();
+      api.startAttachmentDrag({ attachmentId: attachment.id, id });
+    },
+    open: (attachment, pins = false) => {
+      api.openAttachment({ attachmentId: attachment.id, id, pinMode: pins });
+    },
+  });
+
+  const selection = selectionForMain(detailsItem?.id, picked, selectedId);
+
+  useEffect(() => {
+    api.selection(selection);
+  }, [selection]);
+
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useSearchHighlight(listRef, query);
@@ -800,7 +801,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     setHandledFocus(focus.seq);
     setSelectedId(focus.id);
     setEditingId(kind === "image" || focus.edit === true ? focus.id : null);
-    details.close();
+    showFocusDetails(details, focus);
   }
 
   useEffect(() => {
@@ -810,30 +811,22 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
   }, [focus]);
 
   const hasChecklist = tutorial.checklist !== null;
-  const checklistUp = useRef(hasChecklist);
+  // An item made now comes into view. The items the shelf opens with are
+  // not new, so the first paint leaves the list where it starts (on the
+  // checklist while it shows), and so does deleting or moving the newest
+  // item; an item brought forward by main comes into view through `focus`
+  // above.
+  const heldItems = useRef<ReadonlySet<ItemId> | null>(null);
 
   useEffect(() => {
-    checklistUp.current = hasChecklist;
-  }, [hasChecklist]);
+    const looked = lookAt(heldItems.current, doc.items);
 
-  // New items arrive at the bottom: keep the newest in view. The shelf
-  // opens on the checklist while it shows, though: the first newest item
-  // is passed over then, whichever of the shelf and the tutorial loads first.
-  const opened = useRef(false);
+    heldItems.current = looked.held;
 
-  useEffect(() => {
-    if (newest === undefined) {
-      return;
+    if (looked.made !== undefined) {
+      reveal(looked.made);
     }
-
-    const first = !opened.current;
-
-    opened.current = true;
-
-    if (!(first && checklistUp.current)) {
-      reveal(newest);
-    }
-  }, [newest]);
+  }, [doc.items]);
 
   // The checklist coming up, at launch or from Getting Started, brings the list back to it.
   useEffect(() => {
@@ -1129,7 +1122,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       } else if (picked.length > 0) {
         unpick();
       } else {
-        api.hide();
+        hideShelf();
       }
     },
     move: (offset: 1 | -1) => {
@@ -1555,30 +1548,54 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     []
   );
 
-  // Coming forward, the shelf is ready for a note, unless something else is
-  // under way: a note or item being edited, or a search with words in it.
-  const onWindowFocus = useEffectEvent(() => {
+  // Coming forward, the shelf is ready for a note unless something else is
+  // under way (src/renderer/shelf/arrival.ts). Main says when it showed the
+  // shelf; a focus without that is a window closing over the open shelf.
+  const onArrival = useEffectEvent((arrival: Arrival) => {
     const active = document.activeElement;
 
-    const idle =
-      active === null ||
-      active === document.body ||
-      (active === searchRef.current && query === "");
+    const on = (): KeyboardPlace["on"] => {
+      if (active === null || active === document.body) {
+        return "nothing";
+      }
 
-    if (idle && editingId === null) {
+      if (active === searchRef.current) {
+        return query === "" ? "emptySearch" : "search";
+      }
+
+      return isTextField(active) ? "text" : "control";
+    };
+
+    if (
+      noteFieldTakesKeyboard(arrival, {
+        editing: editingId !== null,
+        inDetails,
+        menuOpen: openMenu !== null,
+        on: on(),
+      })
+    ) {
       composerRef.current?.focus();
     }
   });
 
   useEffect(() => {
-    window.addEventListener("focus", onWindowFocus);
+    const onFocus = (): void => {
+      onArrival("refocused");
+    };
+
+    window.addEventListener("focus", onFocus);
 
     if (document.hasFocus()) {
-      onWindowFocus();
+      onFocus();
     }
 
+    const stopShown = api.on("shown", () => {
+      onArrival("shown");
+    });
+
     return () => {
-      window.removeEventListener("focus", onWindowFocus);
+      window.removeEventListener("focus", onFocus);
+      stopShown();
     };
   }, []);
 
@@ -1614,11 +1631,96 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
     };
   }, []);
 
+  // What every row asks of the shelf, by item: one object for the list, so a row re-renders only when its own data changes.
+  const rowActions = useRowActions({
+    attachments: attachmentHandlers,
+    contextMenu: (id, anchor) => {
+      // On one of several picked items, the menu acts on all of them.
+      const several = picked.length > 1 && picked.includes(id);
+
+      showMenu(
+        {
+          ...anchor,
+          target: several
+            ? { ids: picked, kind: "items" }
+            : { id, kind: "item", place: "row" },
+        },
+        id
+      );
+
+      // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      if (!several) {
+        unpick();
+        setSelectedId(id);
+      }
+    },
+    discardChanges,
+    dragImage: (id) => {
+      flushEdits();
+      drag.startDragOut(id);
+      api.startDrag(id);
+    },
+    dragProps: drag.itemProps,
+    dropProps: attachDrop.rowProps,
+    edit: (id) => {
+      setSelectedId(id);
+      setEditingId(id);
+    },
+    editNote: (id, note) => {
+      apply({ id, note, type: "editNote" });
+    },
+    editText: (id, text) => {
+      apply({ id, text, type: "editText" });
+    },
+    hide: hideShelf,
+    open: (id) => {
+      api.openImage(id);
+    },
+    openLink: (id, url) => {
+      api.openLink({ id, url });
+    },
+    pick,
+    reopenWindow,
+    retrySave: () => {
+      void retrySave();
+    },
+    select: (id) => {
+      // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
+      if (editingId !== id) {
+        setEditingId(null);
+
+        const field = document.activeElement;
+
+        if (field instanceof HTMLElement && isTextField(field)) {
+          field.blur();
+        }
+      }
+
+      unpick();
+      setAnchorId(id);
+      setSelectedId(id);
+    },
+    showDetails: openDetails,
+    stopEditing: () => {
+      setEditingId(null);
+    },
+    toggle: (id) => {
+      apply({ id, type: "toggleDone" });
+    },
+    toggleStep: (id, step) => {
+      apply({ id, stepId: step.id, type: "toggleStep" });
+    },
+  });
+
   return (
     <div
       className={cn(
         "shelf-panel text-foreground flex h-svh flex-col rounded-xl",
-        dropping && "ring-pin ring-2 ring-inset"
+        dropRing(dropping, attachDrop.target)
       )}
       onPointerDownCapture={onPanelPointerDown}
     >
@@ -1634,6 +1736,18 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
               status={status}
             />
           }
+          attachments={{
+            ...attachmentHandlers(detailsItem.id),
+            attachFiles: () => {
+              api.pickFilesFor(detailsItem.id);
+            },
+            newDrawing: () => {
+              api.newDrawingFor(detailsItem.id);
+            },
+            pasteImage: () => {
+              void pasteClipboardImage(detailsItem.id);
+            },
+          }}
           discarded={view.discarded}
           editing={editingId === detailsItem.id}
           item={detailsItem}
@@ -1645,7 +1759,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             setEditingId(detailsItem.id);
           }}
           onHide={() => {
-            api.hide();
+            hideShelf();
           }}
           onLinkWindow={() => {
             api.linkWindows(detailsItem.id);
@@ -1680,10 +1794,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 
             // A label edit shows as it is typed; only removals need a toast to undo them.
             if (entry.kind !== "pinLabel") {
-              undoableToast(
-                entry.kind === "step" ? "Step removed" : "Window removed",
-                details.undo
-              );
+              undoableToast(removedTitle(entry), details.undo);
             }
           }}
           request={details.request}
@@ -1693,10 +1804,11 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
       <div className="flex min-h-0 flex-1 flex-col" hidden={inDetails}>
         <header className="drag-region flex h-12 shrink-0 items-center gap-1 px-2">
           <SearchBar
+            here={view.here}
             inputRef={searchRef}
             onChange={setQuery}
             onHide={() => {
-              api.hide();
+              hideShelf();
             }}
             query={query}
           />
@@ -1711,7 +1823,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
             icon={Cancel01Icon}
             label="Hide Shelf"
             onClick={() => {
-              api.hide();
+              hideShelf();
             }}
           />
         </header>
@@ -1805,122 +1917,32 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
                   }}
                   renaming={renamingId === group.section.id}
                   section={group.section}
+                  several={doc.sections.length > 1}
                 />
-                {open && group.items.length === 0 ? (
-                  <p className="text-muted-foreground px-2 pb-1 text-xs">
-                    Nothing here yet
+                {/* Only where new items go: an empty section otherwise is just its heading. */}
+                {open &&
+                group.active &&
+                !searching &&
+                group.items.length === 0 ? (
+                  <p className="text-muted-foreground/70 px-7 pb-1 text-xs">
+                    New notes and captures land here
                   </p>
                 ) : null}
                 {open ? (
                   <ul className="flex flex-col gap-1.5">
                     {group.items.map((item) => (
                       <ItemRow
+                        actions={rowActions}
                         copied={copiedId === item.id}
-                        dragProps={drag.itemProps(item.id, itemText(item))}
                         dragging={drag.draggingId === item.id}
-                        example={examples.has(item.id)}
-                        onPick={(mode) => {
-                          pick(item.id, mode);
-                        }}
-                        picked={picked.includes(item.id)}
+                        dropLook={dropLook(attachDrop.target, item.id)}
                         editing={editingId === item.id}
+                        example={examples.has(item.id)}
                         item={item}
                         key={item.id}
-                        onContextMenu={(anchor) => {
-                          // On one of several picked items, the menu acts on all of them.
-                          const several =
-                            picked.length > 1 && picked.includes(item.id);
-
-                          showMenu(
-                            {
-                              ...anchor,
-                              target: several
-                                ? { ids: picked, kind: "items" }
-                                : { id: item.id, kind: "item", place: "row" },
-                            },
-                            item.id
-                          );
-
-                          // The menu takes the keyboard; a field keeping focus behind it would be hidden from assistive technology.
-                          if (document.activeElement instanceof HTMLElement) {
-                            document.activeElement.blur();
-                          }
-
-                          if (!several) {
-                            unpick();
-                            setSelectedId(item.id);
-                          }
-                        }}
-                        onDragImage={() => {
-                          flushEdits();
-                          drag.startDragOut(item.id);
-                          api.startDrag(item.id);
-                        }}
-                        onEdit={() => {
-                          setSelectedId(item.id);
-                          setEditingId(item.id);
-                        }}
-                        onEditNote={(note) => {
-                          apply({ id: item.id, note, type: "editNote" });
-                        }}
-                        onOpen={() => {
-                          api.openImage(item.id);
-                        }}
-                        onOpenLink={(url) => {
-                          api.openLink({ id: item.id, url });
-                        }}
-                        onHide={() => {
-                          api.hide();
-                        }}
-                        onEditText={(text) => {
-                          apply({ id: item.id, text, type: "editText" });
-                        }}
-                        onSelect={() => {
-                          // Picking another item ends editing elsewhere, so Copy and the list keys act on the pick.
-                          if (editingId !== item.id) {
-                            setEditingId(null);
-
-                            const field = document.activeElement;
-
-                            if (
-                              field instanceof HTMLElement &&
-                              isTextField(field)
-                            ) {
-                              field.blur();
-                            }
-                          }
-
-                          unpick();
-                          setAnchorId(item.id);
-                          setSelectedId(item.id);
-                        }}
-                        onStopEditing={() => {
-                          setEditingId(null);
-                        }}
-                        onToggle={() => {
-                          apply({ id: item.id, type: "toggleDone" });
-                        }}
-                        onToggleStep={(step) => {
-                          apply({
-                            id: item.id,
-                            stepId: step.id,
-                            type: "toggleStep",
-                          });
-                        }}
-                        onReopenWindow={(window) => {
-                          reopenWindow(item.id, window);
-                        }}
-                        onShowDetails={() => {
-                          openDetails(item.id);
-                        }}
                         notSaved={notSaved.get(item.id)}
-                        onDiscardChanges={() => {
-                          discardChanges(item.id);
-                        }}
-                        onRetrySave={() => {
-                          void retrySave();
-                        }}
                         now={now}
+                        picked={picked.includes(item.id)}
                         selected={selectedId === item.id}
                       />
                     ))}
@@ -1989,7 +2011,7 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
         hidden={inDetails}
         sectionNames={doc.sections.map((section) => section.name)}
         onEscape={() => {
-          api.hide();
+          hideShelf();
         }}
         onLeaveUp={() => {
           // The item just above the note field: the last one shown, past folded sections.
@@ -2004,10 +2026,8 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
           setOpen(doc.activeSectionId, true);
           apply({ text, type: "compose" });
         }}
-        onTextChange={setDraft}
         ref={composerRef}
         sectionName={sectionName}
-        text={draft}
       />
     </div>
   );

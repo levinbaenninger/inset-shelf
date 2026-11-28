@@ -192,7 +192,13 @@ const Entries = ({
             variant={entry.destructive === true ? "destructive" : "default"}
           >
             <EntryIcon icon={entry.icon} />
-            <span className="truncate">{entry.label}</span>
+            {/* Entries without a mark name sections, which may be too long to show whole. */}
+            <span
+              className="truncate"
+              title={entry.icon === undefined ? entry.label : undefined}
+            >
+              {entry.label}
+            </span>
             {entry.checked === true ? (
               <HugeiconsIcon className="ml-auto" icon={Tick02Icon} />
             ) : null}

@@ -6,13 +6,13 @@ import {
   Location01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
 import {
   dateText,
   DUE_CHOICE_LABEL,
   DUE_CHOICES,
   dueBucket,
-  dueChipText,
   dueFor,
   dueText,
   isoDay,
@@ -21,10 +21,10 @@ import {
 } from "@shared/due";
 import type { DueBucket } from "@shared/due";
 import { insetUrl } from "@shared/inset-url";
-import type { Pin, ShelfItem, Step, WindowRef } from "@shared/shelf";
+import type { Pin, Step, WindowRef } from "@shared/shelf";
 import { keyText } from "@shared/shortcut";
-import { useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,8 +48,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Truncated } from "@/shared/clamp";
 import { PinGlyph } from "@/shared/pin-marker";
 import { isMac } from "@/shared/platform";
+
+import { filledSteps, WINDOW_STRIP, windowsThatFit } from "./row-parts";
+import type { RowBadge } from "./row-parts";
 
 const BADGE_TONE: Readonly<Record<DueBucket | "plain", string>> = {
   later: "bg-foreground/[0.06] text-muted-foreground",
@@ -108,7 +112,10 @@ export const dueLabel = (due: string, now: Date): string => {
     : `Due ${dueText(due, now)}, ${date}`;
 };
 
-/** The Due chip: "Overdue · Nov 3" in red once overdue, in the accent when due today. */
+/**
+ * The Due chip on a row: "Overdue" in red once overdue, the day in the
+ * accent when due today, else the day. Its title and label give the date.
+ */
 export const DueBadge = ({
   due,
   now,
@@ -121,69 +128,57 @@ export const DueBadge = ({
     label={dueLabel(due, now)}
     tone={dueBucket(due, now)}
   >
-    {dueChipText(due, now)}
+    {dueBucket(due, now) === "overdue" ? "Overdue" : dueText(due, now)}
   </Badge>
 );
 
-const stepsDone = (steps: readonly Step[]): number =>
-  steps.filter((step) => step.done).length;
+/** The counted badges: an icon, the number, and the words said aloud. */
+const COUNTED = {
+  pins: { icon: Location01Icon, many: "pins", one: "pin" },
+  windows: {
+    icon: AppWindowIcon,
+    many: "linked windows",
+    one: "linked window",
+  },
+} as const;
 
-/** Steps that hold words; an empty one being typed doesn't count. */
-export const filledSteps = (steps: readonly Step[]): readonly Step[] =>
-  steps.filter((step) => step.text.trim() !== "");
+const badgeNode = (badge: RowBadge, now: Date): ReactElement => {
+  if (badge.kind === "due") {
+    return <DueBadge due={badge.due} key="due" now={now} />;
+  }
 
-/**
- * The badges on an item's source line, at most three, most telling first:
- * due, step progress, linked windows, pins. A description has none. An open
- * row lists its steps and windows, so it leaves out their counts.
- */
-export const metaBadges = (
-  item: ShelfItem,
-  now: Date,
-  open = false
-): readonly ReactNode[] => {
-  const steps = open ? [] : filledSteps(item.steps);
-  const pins = item.kind === "image" ? item.pins.length : 0;
-
-  return [
-    item.due === null ? null : <DueBadge due={item.due} key="due" now={now} />,
-    steps.length === 0 ? null : (
+  if (badge.kind === "steps") {
+    return (
       <Badge
         icon={CheckListIcon}
         key="steps"
-        label={`${stepsDone(steps)} of ${steps.length} steps done`}
+        label={`${badge.done} of ${badge.total} steps done`}
       >
-        {stepsDone(steps)}/{steps.length}
+        {badge.done}/{badge.total}
       </Badge>
-    ),
-    open || item.windows.length === 0 ? null : (
-      <Badge
-        icon={AppWindowIcon}
-        key="windows"
-        label={
-          item.windows.length === 1
-            ? "1 linked window"
-            : `${item.windows.length} linked windows`
-        }
-      >
-        {item.windows.length}
-      </Badge>
-    ),
-    pins === 0 ? null : (
-      <Badge
-        icon={Location01Icon}
-        key="pins"
-        label={pins === 1 ? "1 pin" : `${pins} pins`}
-      >
-        {pins}
-      </Badge>
-    ),
-  ]
-    .filter((badge) => badge !== null)
-    .slice(0, 3);
+    );
+  }
+
+  const { icon, many, one } = COUNTED[badge.kind];
+
+  return (
+    <Badge
+      icon={icon}
+      key={badge.kind}
+      label={badge.count === 1 ? `1 ${one}` : `${badge.count} ${many}`}
+    >
+      {badge.count}
+    </Badge>
+  );
 };
 
-/** Checkable next steps, inline in the open row: ticking one never leaves the list. */
+/** A row's badges (row-parts.ts), as chips. */
+export const badgeNodes = (
+  badges: readonly RowBadge[],
+  now: Date
+): readonly ReactElement[] => badges.map((badge) => badgeNode(badge, now));
+
+/** Checkable next steps, inline in the open row: ticking one never leaves the list. Each shows two lines at most. */
 export const StepChecklist = ({
   onToggle,
   steps,
@@ -193,42 +188,54 @@ export const StepChecklist = ({
 }) => (
   <ul aria-label="Next steps" className="flex flex-col">
     {filledSteps(steps).map((step) => (
-      <li className="flex min-h-6 items-start gap-2 py-0.5" key={step.id}>
+      <li
+        className="flex min-h-6 items-start gap-2 py-0.5"
+        data-step-id={step.id}
+        key={step.id}
+      >
         <Checkbox
-          aria-label={
-            step.done ? `Not done: ${step.text}` : `Done: ${step.text}`
-          }
+          aria-label={step.text}
           checked={step.done}
           className="mt-0.5 size-3.5"
           onCheckedChange={() => {
             onToggle(step);
           }}
         />
-        <span
+        {/* Two lines in the row; details show the whole step. */}
+        <Truncated
           className={cn(
             "min-w-0 text-sm leading-snug break-words",
             step.done && "text-muted-foreground line-through"
           )}
-        >
-          {step.text}
-        </span>
+          lines={2}
+          text={step.text}
+        />
       </li>
     ))}
   </ul>
 );
 
 /** The labelled pins under an image, as "1 · label"; unlabelled pins are left out. */
-export const PinLegend = ({ pins }: { readonly pins: readonly Pin[] }) => (
+export const PinLegend = ({
+  pins,
+  shown,
+}: {
+  readonly pins: readonly Pin[];
+  /** How many labelled pins to list. */
+  readonly shown: number;
+}) => (
   <ol aria-label="Pin labels" className="flex flex-col gap-1">
-    {pins.map((pin, index) =>
-      pin.label === undefined ? null : (
-        // oxlint-disable-next-line react/no-array-index-key -- a pin's place is its number.
-        <li className="flex min-w-0 items-center gap-1.5 text-sm" key={index}>
-          <PinGlyph height={15} number={index + 1} />
-          <span className="min-w-0 truncate">{pin.label}</span>
-        </li>
+    {pins
+      .flatMap((pin, index) =>
+        pin.label === undefined ? [] : [{ label: pin.label, number: index + 1 }]
       )
-    )}
+      .slice(0, shown)
+      .map(({ label, number }) => (
+        <li className="flex min-w-0 items-center gap-1.5 text-sm" key={number}>
+          <PinGlyph height={15} number={number} />
+          <Truncated className="min-w-0" text={label} />
+        </li>
+      ))}
   </ol>
 );
 
@@ -281,38 +288,100 @@ export const WindowThumb = ({
   </span>
 );
 
-/** The linked windows as a strip of small pictures; each reopens its window. */
+/**
+ * The linked windows as one line of small pictures, each reopening its
+ * window: as many as fit the line's width (row-parts.ts windowsThatFit),
+ * then "+N", which opens details, for the rest.
+ */
 export const WindowStrip = ({
+  onMore,
   onReopen,
   windows,
 }: {
   readonly windows: readonly WindowRef[];
   readonly onReopen: (window: WindowRef) => void;
-}) => (
-  <ul aria-label="Linked windows" className="flex flex-wrap gap-1.5">
-    {windows.map((window) => (
-      <li key={window.id}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              aria-label={`${reopenLabel(window)}: ${windowName(window)}`}
-              className="focus-visible:ring-ring/50 block rounded-md outline-none hover:opacity-85 focus-visible:ring-3"
-              onClick={() => {
-                onReopen(window);
-              }}
-              type="button"
-            >
-              <WindowThumb className="h-10 w-16" window={window} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {reopenLabel(window)} · {windowName(window)}
-          </TooltipContent>
-        </Tooltip>
-      </li>
-    ))}
-  </ul>
-);
+  readonly onMore: () => void;
+}) => {
+  const ref = useRef<HTMLUListElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
+
+  // The line's own width, the only thing it measures: a block, as wide as the row whatever it holds.
+  useLayoutEffect(() => {
+    const line = ref.current;
+
+    const observer = new ResizeObserver(() => {
+      setWidth(line?.clientWidth ?? null);
+    });
+
+    if (line !== null) {
+      observer.observe(line);
+      setWidth(line.clientWidth);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const shown = width === null ? 0 : windowsThatFit(width, windows.length);
+
+  const more = width === null ? 0 : windows.length - shown;
+
+  return (
+    <ul
+      aria-label="Linked windows"
+      className="flex items-center gap-(--gap)"
+      ref={ref}
+      // The sizes windowsThatFit counted with, so what is drawn is what was counted.
+      style={{
+        "--gap": `${WINDOW_STRIP.gap}px`,
+        "--more": `${WINDOW_STRIP.more}px`,
+        "--thumb-height": `${WINDOW_STRIP.thumb.height}px`,
+        "--thumb-width": `${WINDOW_STRIP.thumb.width}px`,
+      }}
+    >
+      {windows.slice(0, shown).map((window) => (
+        <li key={window.id}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={`${reopenLabel(window)}: ${windowName(window)}`}
+                className="focus-visible:ring-ring/50 block rounded-md outline-none hover:opacity-85 focus-visible:ring-3"
+                onClick={() => {
+                  onReopen(window);
+                }}
+                type="button"
+              >
+                <WindowThumb
+                  className="h-(--thumb-height) w-(--thumb-width)"
+                  window={window}
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {reopenLabel(window)} · {windowName(window)}
+            </TooltipContent>
+          </Tooltip>
+        </li>
+      ))}
+      {more === 0 ? null : (
+        // The room the count of windows that fit left for it.
+        <li className="w-(--more)">
+          <Button
+            aria-label={`${more} more ${more === 1 ? "window" : "windows"} in details`}
+            // Its words start one gap after the last thumbnail: the button's own inset lies in that gap.
+            className="-ml-1"
+            onClick={onMore}
+            size="count"
+            variant="quiet"
+          >
+            +{more}
+          </Button>
+        </li>
+      )}
+    </ul>
+  );
+};
 
 /** A quick choice's day, right of its name: "Sat, Nov 7". */
 const dayHint = (iso: string, now: Date): string => {

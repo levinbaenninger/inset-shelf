@@ -7,7 +7,12 @@ import { setImmediate } from "node:timers/promises";
 import type { QuitPrompt } from "@shared/contracts";
 import { parseSceneFile } from "@shared/drawing-scene";
 import type { StrokeMark } from "@shared/drawing-scene";
-import { ItemIdSchema, SectionIdSchema } from "@shared/shelf";
+import {
+  ATTACHMENTS_MAX,
+  AttachmentIdSchema,
+  ItemIdSchema,
+  SectionIdSchema,
+} from "@shared/shelf";
 import {
   afterEach,
   beforeEach,
@@ -29,6 +34,19 @@ const uuid = (n: number) =>
 const SECTION = SectionIdSchema.parse(uuid(1));
 
 const PNG = new Uint8Array([137, 80, 78, 71]);
+
+/** What the saves need only for attachments: new ids from uuid(80) up, and every notice they give. */
+const attaching = (notices: string[] = []) => {
+  let next = 80;
+
+  return {
+    newAttachmentId: () => AttachmentIdSchema.parse(uuid((next += 1))),
+    notify: (message: string) => {
+      notices.push(message);
+    },
+    now: () => new Date("2026-11-21T10:00:00.000Z"),
+  };
+};
 
 const fullDisk = (): Error =>
   Object.assign(new Error("no space left"), { code: "ENOSPC" });
@@ -115,6 +133,7 @@ const setup = async (dir: string, blocked = false) => {
 
   const saves = createDrawingSaves({
     added: () => {},
+    focus: () => {},
     clearStaging: () => {},
     close: () => {
       window.visible = false;
@@ -125,7 +144,10 @@ const setup = async (dir: string, blocked = false) => {
     copies: {
       copy: async () => await Promise.resolve({ ok: true }),
       copyDrawing: async () => await Promise.resolve({ ok: true }),
+      copyOwnPicture: async () => await Promise.resolve({ ok: true }),
+      copyPicture: async () => await Promise.resolve({ ok: true }),
     },
+    ...attaching(),
     decode: (png) => ({ heightPx: 3, png, widthPx: 4 }),
     ended: () => {
       settledSave.dispatchEvent(new Event("settled"));
@@ -135,7 +157,7 @@ const setup = async (dir: string, blocked = false) => {
     store,
   });
 
-  saves.open(null);
+  saves.open({ kind: "new" });
 
   const shown: QuitPrompt[] = [];
   let prompt: QuitPrompt | null = null;
@@ -231,13 +253,17 @@ const setup = async (dir: string, blocked = false) => {
 const savesReading = (app: Awaited<ReturnType<typeof setup>>) =>
   createDrawingSaves({
     added: () => {},
+    focus: () => {},
     clearStaging: () => {},
     close: () => {},
     controller: app.controller,
     copies: {
       copy: async () => await Promise.resolve({ ok: true }),
       copyDrawing: async () => await Promise.resolve({ ok: true }),
+      copyOwnPicture: async () => await Promise.resolve({ ok: true }),
+      copyPicture: async () => await Promise.resolve({ ok: true }),
     },
+    ...attaching(),
     decode: (png) => ({ heightPx: 3, png, widthPx: 4 }),
     ended: () => {},
     readFile: async (at) => {
@@ -331,7 +357,7 @@ const annotating = async (app: Awaited<ReturnType<typeof setup>>) => {
 
     const opening = await saves.opening(item);
 
-    saves.open({ id, opening });
+    saves.open({ id, kind: "item" }, opening);
 
     return opening;
   };
@@ -694,13 +720,17 @@ describe(createDrawingSaves, () => {
 
     const saves = createDrawingSaves({
       added: () => {},
+      focus: () => {},
       clearStaging: () => {},
       close: () => {},
       controller: app.controller,
       copies: {
         copy: async () => await Promise.resolve({ ok: true }),
         copyDrawing: async () => await Promise.resolve({ ok: true }),
+        copyOwnPicture: async () => await Promise.resolve({ ok: true }),
+        copyPicture: async () => await Promise.resolve({ ok: true }),
       },
+      ...attaching(),
       decode: (png) => ({ heightPx: 3, png, widthPx: 4 }),
       ended: () => {},
       readFile: async (at) => {
@@ -722,7 +752,7 @@ describe(createDrawingSaves, () => {
       throw new Error("no image");
     }
 
-    saves.open({ id, opening: await saves.opening(item) });
+    saves.open({ id, kind: "item" }, await saves.opening(item));
     saves.forQuit(new AbortController().signal);
     app.disk.full = true;
     await saves.save({
@@ -919,7 +949,7 @@ describe(createDrawingSaves, () => {
       const app = await setup(dir);
       const saves = savesReading(app);
 
-      saves.open(null);
+      saves.open({ kind: "new" });
       await saves.save({
         copy: false,
         forQuit: false,
@@ -931,7 +961,7 @@ describe(createDrawingSaves, () => {
 
       const first = await relaunched(app);
 
-      saves.open({ id: first.item.id, opening: first.opening });
+      saves.open({ id: first.item.id, kind: "item" }, first.opening);
       await saves.save({
         copy: false,
         forQuit: false,
@@ -955,5 +985,306 @@ describe(createDrawingSaves, () => {
         second: HELLO.slice(0, 1),
       });
     });
+  });
+});
+
+/** A note on the shelf, saved, holding `held` attached pictures of its own, and saves for it that read from the disk. */
+const noteWith = async (app: Awaited<ReturnType<typeof setup>>, held = 1) => {
+  const original = new Uint8Array([1, 2, 3]);
+  const notices: string[] = [];
+  const id = app.controller.apply({ text: "Quote", type: "compose" });
+
+  if (id === null) {
+    throw new Error("not added");
+  }
+
+  const pictures = await Promise.all(
+    Array.from({ length: held }, async (_, at) => ({
+      addedAt: "2026-11-20T10:00:00.000Z",
+      id: AttachmentIdSchema.parse(uuid(60 + at)),
+      image: {
+        file: await app.store.writeAttachment(original),
+        heightPx: 3,
+        pixelsPerDip: 1,
+        widthPx: 4,
+      },
+      kind: "image" as const,
+      name: `Screenshot ${at}`,
+      pins: [],
+    }))
+  );
+
+  app.controller.apply({ attachments: pictures, id, type: "attach" });
+  await app.controller.flush();
+
+  const focused: string[] = [];
+
+  const saves = createDrawingSaves({
+    added: () => {},
+    clearStaging: () => {},
+    close: () => {},
+    focus: (shown) => {
+      focused.push(shown);
+    },
+    controller: app.controller,
+    copies: {
+      copy: async () => await Promise.resolve({ ok: true }),
+      copyDrawing: async () => await Promise.resolve({ ok: true }),
+      copyOwnPicture: async () => await Promise.resolve({ ok: true }),
+      copyPicture: async () => await Promise.resolve({ ok: true }),
+    },
+    decode: (png) => ({ heightPx: 3, png, widthPx: 4 }),
+    ended: () => {},
+    readFile: async (at) => {
+      try {
+        return new Uint8Array(await readFile(at));
+      } catch {
+        return null;
+      }
+    },
+    show: () => {},
+    store: app.store,
+    ...attaching(notices),
+  });
+
+  return { focused, id, notices, original, pictures, saves };
+};
+
+describe("drawing on an item's attachments", () => {
+  let dir = "";
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "drawing-attach-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { force: true, recursive: true });
+  });
+
+  const marked = {
+    copy: false,
+    forQuit: false,
+    marks: HELLO,
+    pins: [{ x: 1, y: 2 }],
+    png: PNG,
+  };
+
+  it("saves marks and pins onto an attached picture, keeps its name, and lets the old picture go", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app);
+    const [picture] = note.pictures;
+
+    if (picture === undefined) {
+      throw new Error("no picture");
+    }
+
+    const target = {
+      attachmentId: picture.id,
+      id: note.id,
+      kind: "attachment",
+    } as const;
+
+    note.saves.open(target, await note.saves.opening(picture));
+
+    const saved = await note.saves.save(marked);
+
+    await app.controller.flush();
+
+    const { files, items } = await app.reopened();
+    const [attachment] = items[0]?.attachments ?? [];
+
+    if (attachment?.kind !== "image") {
+      throw new Error("no attached picture");
+    }
+
+    expect({
+      drawnInto: attachment.image.file === picture.image.file,
+      files: [...files].toSorted(),
+      kept: await keptMarks(app, attachment.scene?.file ?? ""),
+      name: attachment.name,
+      pins: attachment.pins,
+      saved,
+      scene: attachment.scene?.base,
+      target: note.saves.target(),
+    }).toStrictEqual({
+      drawnInto: false,
+      files: sorted(
+        picture.image.file,
+        attachment.image.file,
+        attachment.scene?.file ?? ""
+      ),
+      kept: HELLO,
+      name: "Screenshot 0",
+      pins: [{ x: 1, y: 2 }],
+      saved: { ok: true },
+      scene: picture.image,
+      target,
+    });
+
+    // Saved again with every mark taken out: only the new picture is left, the earlier ones and the marks go.
+    note.saves.open(target, await note.saves.opening(attachment));
+    await note.saves.save({ ...marked, marks: [] });
+    await app.controller.flush();
+    const again = await app.reopened();
+    const [last] = again.items[0]?.attachments ?? [];
+
+    expect(again.files).toStrictEqual([
+      last?.kind === "image" ? last.image.file : "",
+    ]);
+  });
+
+  it("leaves the shelf where the user was after a save on an attached picture or a new drawing attached to the item", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app);
+    const [picture] = note.pictures;
+
+    if (picture === undefined) {
+      throw new Error("no picture");
+    }
+
+    note.saves.open(
+      { attachmentId: picture.id, id: note.id, kind: "attachment" },
+      await note.saves.opening(picture)
+    );
+    await note.saves.save(marked);
+    note.saves.open({ id: note.id, kind: "newAttachment" });
+    await note.saves.save(marked);
+    await app.controller.flush();
+
+    expect({
+      attachments: app.controller.item(note.id)?.attachments.length,
+      focused: note.focused,
+    }).toStrictEqual({ attachments: 2, focused: [] });
+  });
+
+  it("shows the item a new drawing became when its item was full", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app, ATTACHMENTS_MAX);
+
+    note.saves.open({ id: note.id, kind: "newAttachment" });
+    await note.saves.save(marked);
+    await app.controller.flush();
+
+    expect(note.focused).toStrictEqual([
+      app.controller.view().doc.items.at(-1)?.id,
+    ]);
+  });
+
+  it("says when the attached picture, or its item, is no longer on the shelf", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app);
+    const [picture] = note.pictures;
+
+    if (picture === undefined) {
+      throw new Error("no picture");
+    }
+
+    note.saves.open(
+      { attachmentId: picture.id, id: note.id, kind: "attachment" },
+      await note.saves.opening(picture)
+    );
+    app.controller.apply({
+      attachmentId: picture.id,
+      id: note.id,
+      type: "removeAttachment",
+    });
+    const removed = await note.saves.save(marked);
+
+    note.saves.open({ id: note.id, kind: "newAttachment" });
+    app.controller.apply({ id: note.id, type: "remove" });
+    const deleted = await note.saves.save(marked);
+
+    // The removals' writes end before the folder is deleted.
+    await app.controller.flush();
+
+    expect({ deleted, removed }).toStrictEqual({
+      deleted: { message: "This item is no longer on the shelf.", ok: false },
+      removed: {
+        message: "This picture is no longer on the shelf.",
+        ok: false,
+      },
+    });
+  });
+
+  it("attaches a new drawing to the item once however often a held quit's Retry saves it", async () => {
+    const app = await setup(dir);
+    const id = app.controller.apply({ text: "Quote", type: "compose" });
+
+    if (id === null) {
+      throw new Error("not added");
+    }
+
+    await app.controller.flush();
+    app.saves.open({ id, kind: "newAttachment" });
+
+    await app.quit();
+    app.disk.full = true;
+    app.quitHold.answer("retry");
+    await vi.waitFor(() => {
+      expect(app.prompt()?.state).toBe("stillFailing");
+    });
+    app.disk.full = false;
+    app.quitHold.answer("retry");
+    await vi.waitFor(() => {
+      expect(app.finished).toStrictEqual(["quit"]);
+    });
+    await Promise.all(app.pageSaves);
+    const { items } = await app.reopened();
+
+    expect(
+      items.map((item) =>
+        item.attachments.map((attachment) =>
+          attachment.kind === "image" ? attachment.name : attachment.file.name
+        )
+      )
+    ).toStrictEqual([["Drawing"]]);
+  });
+
+  it("saves a new drawing for an item that is full as its own item, and says so", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app, ATTACHMENTS_MAX);
+
+    note.saves.open({ id: note.id, kind: "newAttachment" });
+
+    const saved = await note.saves.save(marked);
+    const { items } = app.controller.view().doc;
+
+    await app.controller.flush();
+
+    expect({
+      attachments: items.map((item) => item.attachments.length),
+      kinds: items.map((item) => item.kind),
+      notices: note.notices,
+      saved,
+    }).toStrictEqual({
+      attachments: [ATTACHMENTS_MAX, 0],
+      kinds: ["text", "image"],
+      notices: [
+        `The item already holds ${ATTACHMENTS_MAX} attachments, so the drawing was saved as its own item.`,
+      ],
+      saved: { ok: true },
+    });
+  });
+
+  it("saves a new drawing for a full item as one item of its own however often a held quit's Retry saves it", async () => {
+    const app = await setup(dir);
+    const note = await noteWith(app, ATTACHMENTS_MAX);
+
+    app.saves.open({ id: note.id, kind: "newAttachment" });
+    await app.quit();
+    app.disk.full = true;
+    app.quitHold.answer("retry");
+    await vi.waitFor(() => {
+      expect(app.prompt()?.state).toBe("stillFailing");
+    });
+    app.disk.full = false;
+    app.quitHold.answer("retry");
+    await vi.waitFor(() => {
+      expect(app.finished).toStrictEqual(["quit"]);
+    });
+    await Promise.all(app.pageSaves);
+    const { items } = await app.reopened();
+
+    expect(items.map((item) => item.kind)).toStrictEqual(["text", "image"]);
   });
 });

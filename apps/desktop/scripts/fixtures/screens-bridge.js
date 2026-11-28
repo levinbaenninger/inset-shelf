@@ -64,6 +64,9 @@ globalThis.__applied = [];
 /** Every operation and copy the shelf asked main for, in order: `{ call: "copy", arg: id }`. */
 globalThis.__calls = [];
 
+/** Every item the shelf page told main it has selected or open in details, in order. */
+globalThis.__selection = [];
+
 const logged = (call, answer) => (arg) => {
   // A call without an argument logs null, so the log reads back as JSON.
   globalThis.__calls.push({ arg: arg ?? null, call });
@@ -96,9 +99,57 @@ const updateItem = (doc, id, change) => ({
   items: doc.items.map((item) => (item.id === id ? change(item) : item)),
 });
 
+// Attachments removed in details, so ⌘Z can put each back where it was, as main remembers them.
+const removedAttachments = new Map();
+
+const attachmentKey = (op) => `${op.id}/${op.attachmentId}`;
+
+/** An item's attachments after a removal or a restore, as src/shared/shelf.ts and the controller change them. */
+const changeAttachments = (doc, op) =>
+  updateItem(doc, op.id, (item) => {
+    const list = item.attachments ?? [];
+
+    if (op.type === "removeAttachment") {
+      const index = list.findIndex((entry) => entry.id === op.attachmentId);
+
+      if (index === -1) {
+        return item;
+      }
+
+      removedAttachments.set(attachmentKey(op), {
+        attachment: list[index],
+        index,
+      });
+
+      return { ...item, attachments: list.filter((_, at) => at !== index) };
+    }
+
+    const removed = removedAttachments.get(attachmentKey(op));
+
+    if (removed === undefined) {
+      return item;
+    }
+
+    removedAttachments.delete(attachmentKey(op));
+
+    return {
+      ...item,
+      attachments: list.toSpliced(
+        Math.min(removed.index, list.length),
+        0,
+        removed.attachment
+      ),
+    };
+  });
+
 /** The operations scenes perform, as src/shared/shelf.ts applies them. */
 const applyOp = (doc, op) => {
   switch (op.type) {
+    case "removeAttachment":
+    case "restoreAttachment": {
+      return changeAttachments(doc, op);
+    }
+
     case "toggleDone": {
       return updateItem(doc, op.id, (item) => ({ ...item, done: !item.done }));
     }
@@ -169,6 +220,8 @@ const applyOp = (doc, op) => {
 
 if (page === "shelf") {
   let view = { discarded: null, notSaved: [], ...data.view };
+  // How many files were dropped on items so far, for each one's own id.
+  let dropped = 0;
 
   // What the disk holds: Discard changes puts an item back as it is here.
   const savedDoc = data.savedDoc ?? data.view.doc;
@@ -196,8 +249,10 @@ if (page === "shelf") {
       : [...view.notSaved, { id: op.id, undo: known ? "discard" : "delete" }];
   };
 
-  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC.
-  const echo = (next) => {
+  // `echo: "later"` sends the new view a moment after an operation, as main does over IPC; `ipc: true` sends a copy, as IPC's structured clone does.
+  const echo = (shown) => {
+    const next = data.ipc === true ? structuredClone(shown) : shown;
+
     if (data.echo === "later") {
       setTimeout(() => {
         globalThis.__emit("view", next);
@@ -267,10 +322,61 @@ if (page === "shelf") {
       on,
       openImage: logged("openImage", nothing),
       openLink: logged("openLink", nothing),
+      // Attachments: each call logged; files dropped on an item land on it, and the answer names them, as main's does when all of it fits.
+      addFilesTo: logged("addFilesTo", ({ id, paths }) => {
+        const added = paths.map((file) => {
+          dropped += 1;
+
+          return {
+            addedAt: "2026-11-25T14:15:00.000Z",
+            file: {
+              bytes: 4,
+              name: file.split("/").at(-1),
+              stored: `dropped-${dropped}.bin`,
+            },
+            id: `00000000-0000-4000-8000-${String(700_000 + dropped).padStart(12, "0")}`,
+            kind: "file",
+          };
+        });
+
+        view = {
+          ...view,
+          doc: updateItem(view.doc, id, (item) => ({
+            ...item,
+            attachments: [...(item.attachments ?? []), ...added],
+          })),
+        };
+        echo(view);
+
+        return Promise.resolve({
+          attached: added.map((attachment) => attachment.id),
+          message: null,
+        });
+      }),
+      newDrawingFor: logged("newDrawingFor", nothing),
+      openAttachment: logged("openAttachment", nothing),
+      pasteImageTo: logged(
+        "pasteImageTo",
+        resolved({ attached: [], message: null })
+      ),
+      // A picture pasted in the list, as a new item; main's notice says how it went.
+      pasteImage: logged("pasteImage", nothing),
+      // Files dropped or pasted on the shelf, as new items.
+      addFiles: logged("addFiles", nothing),
+      pickFilesFor: logged("pickFilesFor", nothing),
+      // A report, not an action: kept apart, so scenes that compare what the page asked for stay exact.
+      selection: (id) => {
+        globalThis.__selection.push(id);
+      },
+      startAttachmentDrag: logged("startAttachmentDrag", nothing),
     },
     nothing
   );
-  globalThis.insetFiles = { pathFor: () => "" };
+  // A scene's `filePaths` gives dropped files a path, as Finder's have; otherwise they have none, as a picture copied from a page.
+  globalThis.insetFiles = {
+    pathFor: (file) =>
+      data.filePaths === true ? `/Users/anna/Desktop/${file.name}` : "",
+  };
 }
 
 if (page === "picker") {
@@ -331,6 +437,11 @@ if (page === "drawing") {
           call: "save",
         });
 
+        // `saveFails`: main refuses every save with this message.
+        if (data.saveFails !== undefined) {
+          return Promise.resolve({ message: data.saveFails, ok: false });
+        }
+
         if (data.holdSave !== true) {
           return ok();
         }
@@ -346,6 +457,64 @@ if (page === "drawing") {
       setDirty: (dirty) => {
         globalThis.__dirty.push(dirty);
       },
+    },
+    nothing
+  );
+}
+
+if (page === "toast") {
+  globalThis.insetToast = withFallback(
+    {
+      getView: resolved(data.view),
+      hover: nothing,
+      on,
+      open: logged("open", nothing),
+      // Say why: main answers a ready field by showing its caret.
+      cancelWhy: logged("cancelWhy", nothing),
+      dismiss: logged("dismiss", nothing),
+      // `whySaves`: main answers Return with the words on their way to the disk, as the pill's write state shows them.
+      saveWhy: logged("saveWhy", (sent) => {
+        if (data.whySaves === true) {
+          globalThis.__emit("view", {
+            ...data.view,
+            phase: "saving",
+            seq: sent.seq,
+            text: sent.text.trim(),
+          });
+        }
+      }),
+      why: logged("why", nothing),
+      whyInput: logged("whyInput", nothing),
+      whyReady: logged("whyReady", (seq) => {
+        if (data.view?.kind === "why" && data.view.phase === "taking") {
+          globalThis.__emit("view", { ...data.view, phase: "typing", seq });
+        }
+      }),
+    },
+    nothing
+  );
+}
+
+if (page === "screenshot") {
+  /** Each time the card told main the pointer or the keyboard is on it (true) or has left (false). */
+  globalThis.__hover = [];
+  globalThis.insetScreenshot = withFallback(
+    {
+      addToItem: logged("addToItem", nothing),
+      addToShelf: logged("addToShelf", nothing),
+      annotate: logged("annotate", nothing),
+      copy: logged("copy", nothing),
+      dismiss: logged("dismiss", nothing),
+      getTutorial: resolved(data.tutorial),
+      getView: resolved(data.view),
+      hold: logged("hold", nothing),
+      hover: (held) => {
+        globalThis.__hover.push(held);
+      },
+      on,
+      saveToDownloads: logged("saveToDownloads", nothing),
+      startDrag: logged("startDrag", nothing),
+      tutorial: logged("tutorial", nothing),
     },
     nothing
   );

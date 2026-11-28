@@ -12,7 +12,7 @@ import {
 import path from "node:path";
 
 import {
-  attachmentsOf,
+  storedFilesOf,
   AttachmentFileSchema,
   emptyShelf,
   parseShelfDocument,
@@ -126,15 +126,19 @@ export const nodeStoreFs: StoreFs = {
   writeTemp,
 };
 
-/** Fails the next document write once; set by INSET_FAIL_NEXT_WRITE for the desktop test. */
-export const failNextWrite = (fs: StoreFs): StoreFs => {
-  let armed = true;
+/** Fails the `nth` document write from now, once; set by INSET_FAIL_NEXT_WRITE (1 when set without a number) for the desktop test. */
+export const failNextWrite = (fs: StoreFs, nth = 1): StoreFs => {
+  let left = nth;
 
   return {
     ...fs,
     writeTemp: async (file, data) => {
-      if (armed && file.endsWith(DOC_FILE)) {
-        armed = false;
+      if (left > 0 && file.endsWith(DOC_FILE)) {
+        left -= 1;
+      }
+
+      if (left === 0 && file.endsWith(DOC_FILE)) {
+        left = -1;
         throw Object.assign(new Error("Simulated write failure."), {
           code: "ENOSPC",
         });
@@ -300,7 +304,7 @@ const collectGarbage = async (
     return;
   }
 
-  const used = new Set([...doc.items.flatMap(attachmentsOf), ...kept]);
+  const used = new Set([...doc.items.flatMap(storedFilesOf), ...kept]);
 
   const names = await fs.list(attachments);
 

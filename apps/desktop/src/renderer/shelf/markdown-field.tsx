@@ -36,6 +36,12 @@ export interface MarkdownFieldKeys {
   readonly onLeaveUp?: () => void;
 }
 
+/** A point on screen, in CSS pixels: where a click asked for the caret. */
+export interface ScreenPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface MarkdownFieldHandle {
   readonly focus: () => void;
   /** The editable element, to tell whether it has focus. */
@@ -87,6 +93,7 @@ const fieldAttributes = (
 export const MarkdownField = ({
   ariaLabel,
   autoFocus = false,
+  caretAt = null,
   className,
   controlSlot = false,
   followValue = true,
@@ -105,6 +112,8 @@ export const MarkdownField = ({
   readonly ariaLabel: string;
   readonly placeholder?: string;
   readonly autoFocus?: boolean;
+  /** With autoFocus: the caret goes to the words under this point, where the user clicked, instead of the end. */
+  readonly caretAt?: ScreenPoint | null;
   readonly className?: string;
   /** In an input group, the field is its control, which draws the group's focus ring. */
   readonly controlSlot?: boolean;
@@ -125,7 +134,7 @@ export const MarkdownField = ({
   });
 
   const editor = useEditor({
-    autofocus: autoFocus ? "end" : false,
+    autofocus: autoFocus && caretAt === null ? "end" : false,
     content: value,
     contentType: "markdown",
     enableInputRules: headingRules ? true : RULES_WITHOUT_HEADINGS,
@@ -220,6 +229,26 @@ export const MarkdownField = ({
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  // Placed once the words are laid out where the read text was, so the point lands on the same word.
+  const placed = useRef(false);
+
+  useEffect(() => {
+    if (!autoFocus || caretAt === null || editor === null || placed.current) {
+      return;
+    }
+
+    placed.current = true;
+    requestAnimationFrame(() => {
+      const at = editor.view.posAtCoords({ left: caretAt.x, top: caretAt.y });
+
+      editor
+        .chain()
+        .focus()
+        .setTextSelection(at?.pos ?? editor.state.doc.content.size)
+        .run();
+    });
+  }, [autoFocus, caretAt, editor]);
 
   // The value set from outside (cleared after adding a note) replaces what is typed.
   useEffect(() => {

@@ -8,14 +8,17 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@inset/ui/components/button";
 import { cn } from "@inset/ui/lib/utils";
+import type { ShelfHere } from "@shared/contracts";
 import {
   DUE_FILTER_LABEL,
   DUE_FILTERS,
   dueSuggestions,
+  FROM_HERE,
   parseSearch,
 } from "@shared/due";
 import type { DueFilter } from "@shared/due";
 import { keyText } from "@shared/shortcut";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import {
@@ -40,6 +43,13 @@ import {
 } from "@/components/ui/tooltip";
 import { isMac } from "@/shared/platform";
 
+import {
+  FromHereChip,
+  hereText,
+  withFromHere,
+  withoutFromHere,
+} from "./from-here";
+
 const DUE_WORD = /(?:^|\s)due:\S*/gu;
 
 /** The search with its due filter swapped for another, or taken out. */
@@ -56,70 +66,136 @@ export const withDueFilter = (
   return words === "" ? `due:${filter}` : `${words} due:${filter}`;
 };
 
-/** The filter button in the search field: the due filters, so `due:` can be found without knowing it. */
-const DueFilterMenu = ({
+/** The tick by the filter that is on. */
+const On = () => (
+  <HugeiconsIcon
+    aria-label="On"
+    className="text-primary mr-1 inline size-3.5"
+    icon={Tick02Icon}
+  />
+);
+
+/**
+ * The filter button in the search field: the due filters, so `due:` can be
+ * found without knowing it, and with items from the window the shelf opened
+ * beside, From this window (`from:here`).
+ */
+const FilterMenu = ({
   current,
+  fromHere,
+  here,
   onChoose,
+  onFromHere,
 }: {
   readonly current: DueFilter | null;
   readonly onChoose: (filter: DueFilter | null) => void;
-}) => (
-  <DropdownMenu modal={false}>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <DropdownMenuTrigger asChild>
-          <InputGroupButton
-            aria-label="Filter by Due"
-            aria-pressed={current !== null}
-            size="icon-xs"
-          >
-            <HugeiconsIcon
-              className={cn(current !== null && "text-primary")}
-              icon={FilterHorizontalIcon}
-            />
-          </InputGroupButton>
-        </DropdownMenuTrigger>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">Filter by Due</TooltipContent>
-    </Tooltip>
-    <DropdownMenuContent align="end" className="min-w-60">
-      <DropdownMenuLabel>Show items</DropdownMenuLabel>
-      {DUE_FILTERS.map((filter) => (
-        <DropdownMenuItem
-          aria-current={current === filter ? "true" : undefined}
-          key={filter}
-          onSelect={() => {
-            onChoose(current === filter ? null : filter);
-          }}
-        >
-          {DUE_FILTER_LABEL[filter]}
-          <DropdownMenuShortcut>
-            {current === filter ? (
+  readonly here: ShelfHere | null | undefined;
+  readonly fromHere: boolean;
+  readonly onFromHere: (on: boolean) => void;
+}) => {
+  const anyOn = current !== null || fromHere;
+  const recall = here !== null && here !== undefined && here.ids.length > 0;
+
+  return (
+    <DropdownMenu modal={false}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <InputGroupButton
+              aria-label="Filter"
+              aria-pressed={anyOn}
+              size="icon-xs"
+            >
               <HugeiconsIcon
-                aria-label="On"
-                className="text-primary mr-1 inline size-3.5"
-                icon={Tick02Icon}
+                className={cn(anyOn && "text-primary")}
+                icon={FilterHorizontalIcon}
               />
-            ) : null}
-            due:{filter}
-          </DropdownMenuShortcut>
-        </DropdownMenuItem>
-      ))}
-      {current === null ? null : (
-        <>
-          <DropdownMenuSeparator />
+            </InputGroupButton>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Filter</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="min-w-60">
+        <DropdownMenuLabel>Show items</DropdownMenuLabel>
+        {DUE_FILTERS.map((filter) => (
           <DropdownMenuItem
+            aria-current={current === filter ? "true" : undefined}
+            key={filter}
             onSelect={() => {
-              onChoose(null);
+              onChoose(current === filter ? null : filter);
             }}
           >
-            Show All
+            {DUE_FILTER_LABEL[filter]}
+            <DropdownMenuShortcut>
+              {current === filter ? <On /> : null}
+              due:{filter}
+            </DropdownMenuShortcut>
           </DropdownMenuItem>
-        </>
-      )}
-    </DropdownMenuContent>
-  </DropdownMenu>
-);
+        ))}
+        {recall ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              aria-current={fromHere ? "true" : undefined}
+              onSelect={() => {
+                onFromHere(!fromHere);
+              }}
+              title={hereText(here)}
+            >
+              From this window
+              <DropdownMenuShortcut>
+                {fromHere ? <On /> : null}
+                {FROM_HERE}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+        {anyOn ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                onChoose(null);
+                onFromHere(false);
+              }}
+            >
+              Show All
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+/** The search field's own width, in px, from which the full placeholder fits beside the from-here chip. */
+const ROOMY_FIELD = 330;
+
+/** Whether the field is that wide, read from the field itself: what else shares its row doesn't matter. */
+const useRoomy = (field: RefObject<HTMLElement | null>): boolean => {
+  const [roomy, setRoomy] = useState(false);
+
+  useLayoutEffect(() => {
+    const group = field.current;
+
+    const read = (): void => {
+      setRoomy((group?.clientWidth ?? 0) >= ROOMY_FIELD);
+    };
+
+    const observer = new ResizeObserver(read);
+
+    if (group !== null) {
+      observer.observe(group);
+      read();
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [field]);
+
+  return roomy;
+};
 
 /**
  * Under the search field while `due:` is typed: the filters it may become,
@@ -168,6 +244,7 @@ export const DueSuggestions = ({
  * calendar. Escape clears a search, and hides the shelf when there is none.
  */
 export const SearchBar = ({
+  here,
   inputRef,
   onChange,
   onHide,
@@ -177,66 +254,90 @@ export const SearchBar = ({
   readonly onChange: (query: string) => void;
   readonly onHide: () => void;
   readonly inputRef: RefObject<HTMLInputElement | null>;
-}) => (
-  <InputGroup brand>
-    <InputGroupAddon>
-      <HugeiconsIcon icon={Search01Icon} />
-    </InputGroupAddon>
-    <InputGroupInput
-      aria-label="Search the shelf"
-      onChange={(event) => {
-        onChange(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        const { pendingDue } = parseSearch(query);
+  /** Recall: the open items from the window the shelf opened beside. */
+  readonly here?: ShelfHere | null;
+}) => {
+  const chip = here !== null && here !== undefined && here.ids.length > 0;
+  const field = useRef<HTMLDivElement>(null);
+  // Beside the from-here chip in a narrower field, the placeholder is one word, never cut.
+  const wide = useRoomy(field);
+  const { due, here: fromHere } = parseSearch(query);
 
-        const [first] = pendingDue === null ? [] : dueSuggestions(pendingDue);
-
-        // Return finishes a due: being typed with the first filter it may become.
-        if (event.key === "Enter" && first !== undefined) {
-          event.preventDefault();
-          onChange(withDueFilter(query, first));
-        }
-
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (query === "") {
-            onHide();
-          } else {
-            onChange("");
-          }
-        }
-      }}
-      placeholder="Search or due:today"
-      ref={inputRef}
-      title={`Search (${keyText("CommandOrControl+F", isMac)})`}
-      type="text"
-      value={query}
-    />
-    <InputGroupAddon align="inline-end">
-      {query === "" ? null : (
-        <InputGroupButton
-          aria-label="Clear Search"
-          onClick={() => {
-            onChange("");
-            inputRef.current?.focus();
-          }}
-          size="icon-xs"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} />
-        </InputGroupButton>
-      )}
-      <DueFilterMenu
-        current={parseSearch(query).due}
-        onChoose={(filter) => {
-          onChange(withDueFilter(query, filter));
+  return (
+    // A container, so the chip and Clear Search follow the field's width (from-here.tsx).
+    <InputGroup brand className="@container/search" ref={field}>
+      <InputGroupAddon>
+        <HugeiconsIcon icon={Search01Icon} />
+      </InputGroupAddon>
+      <InputGroupInput
+        aria-label="Search the shelf"
+        onChange={(event) => {
+          onChange(event.target.value);
         }}
+        onKeyDown={(event) => {
+          const { pendingDue } = parseSearch(query);
+
+          const [first] = pendingDue === null ? [] : dueSuggestions(pendingDue);
+
+          // Return finishes a due: being typed with the first filter it may become.
+          if (event.key === "Enter" && first !== undefined) {
+            event.preventDefault();
+            onChange(withDueFilter(query, first));
+          }
+
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (query === "") {
+              onHide();
+            } else {
+              onChange("");
+            }
+          }
+        }}
+        placeholder={chip && !wide ? "Search" : "Search or due:today"}
+        ref={inputRef}
+        title={`Search (${keyText("CommandOrControl+F", isMac)})`}
+        type="text"
+        value={query}
       />
-    </InputGroupAddon>
-  </InputGroup>
-);
+      <InputGroupAddon align="inline-end">
+        {/* The chip keeps the keyboard, so Return on it turns the filter off again. */}
+        <FromHereChip here={here} onChange={onChange} query={query} />
+        {query === "" ? null : (
+          <InputGroupButton
+            aria-label="Clear Search"
+            // Searching only from:here in a field under 240 px, the pressed chip clears it the same way and the field keeps the room to show it.
+            className={cn(
+              query === FROM_HERE &&
+                (here?.ids.length ?? 0) > 0 &&
+                "@max-[240px]/search:hidden"
+            )}
+            onClick={() => {
+              onChange("");
+              inputRef.current?.focus();
+            }}
+            size="icon-xs"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} />
+          </InputGroupButton>
+        )}
+        <FilterMenu
+          current={due}
+          fromHere={fromHere}
+          here={here}
+          onChoose={(filter) => {
+            onChange(withDueFilter(query, filter));
+          }}
+          onFromHere={(on) => {
+            onChange(on ? withFromHere(query) : withoutFromHere(query));
+          }}
+        />
+      </InputGroupAddon>
+    </InputGroup>
+  );
+};
 
 const NOTHING_DUE: Readonly<Record<DueFilter, string>> = {
   any: "Nothing has a Due",
@@ -248,7 +349,11 @@ const NOTHING_DUE: Readonly<Record<DueFilter, string>> = {
 
 /** What an empty search says, so a filter reads as one. */
 const noMatchesText = (query: string): string => {
-  const { due, terms } = parseSearch(query);
+  const { due, here, terms } = parseSearch(query);
+
+  if (here && due === null && terms.length === 0) {
+    return "No open items came from the window in front";
+  }
 
   if (due !== null && terms.length === 0) {
     return NOTHING_DUE[due];
@@ -274,7 +379,7 @@ export const NoMatches = ({
       icon={parseSearch(query).due === null ? Search01Icon : Calendar03Icon}
       size={22}
     />
-    <p className="text-muted-foreground text-sm break-words">
+    <p className="text-muted-foreground max-w-full text-sm wrap-anywhere">
       {noMatchesText(query)}
     </p>
     <Button onClick={onClear} size="sm" variant="outline">

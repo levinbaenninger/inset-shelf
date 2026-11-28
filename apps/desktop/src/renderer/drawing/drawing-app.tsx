@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { drawingBridge } from "@/shared/bridge";
+import { Clamp } from "@/shared/clamp";
 import { useLocalKeys } from "@/shared/keys";
 import { isMac } from "@/shared/platform";
 import { useExpiringState } from "@/shared/use-expiring-state";
@@ -758,19 +759,25 @@ const Editor = ({
 
   return (
     <main className="bg-background flex h-svh flex-col overflow-hidden select-none">
-      {/* A problem saving takes the title's place; saving itself is in the toolbar. */}
       <WindowHeader>
-        {problem === null ? (
-          <WindowTitle>{pageTitle(opened)}</WindowTitle>
-        ) : (
-          <p
-            className="text-destructive mr-auto min-w-0 truncate text-xs"
-            role="alert"
+        <WindowTitle>{pageTitle(opened)}</WindowTitle>
+      </WindowHeader>
+      {/* A problem saving, under the header, across the whole window; saving itself is in the toolbar. */}
+      {problem === null ? null : (
+        <div
+          className="bg-destructive/10 text-destructive flex shrink-0 flex-col gap-1 border-b px-4 py-2 text-xs select-text"
+          role="alert"
+        >
+          <Clamp
+            className="break-words"
+            lines={2}
+            more="Show full message"
+            spare
           >
             {problem}
-          </p>
-        )}
-      </WindowHeader>
+          </Clamp>
+        </div>
+      )}
       <div className="relative min-h-0 flex-1" ref={areaRef}>
         <section
           aria-label="Pins"

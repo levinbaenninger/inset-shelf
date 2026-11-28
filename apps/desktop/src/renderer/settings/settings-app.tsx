@@ -80,6 +80,7 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
   const copyId = useId();
   const shotId = useId();
   const tipsId = useId();
+  const recallId = useId();
   const { settings } = view;
   const page = useRef<HTMLElement>(null);
 
@@ -181,6 +182,21 @@ const SettingsForm = ({ view }: { readonly view: SettingsView }) => {
             </Row>
           </Group>
         ) : null}
+        <Group title="Recall">
+          <Row
+            label="Show items from the window in front"
+            labelFor={recallId}
+            note={`A small pill when you return to a window, page or repo that open items came from.${isMac ? " Needs Screen Recording or Accessibility." : ""}`}
+          >
+            <Switch
+              checked={settings.recall}
+              id={recallId}
+              onCheckedChange={(checked) => {
+                api.update({ recall: checked });
+              }}
+            />
+          </Row>
+        </Group>
         <Group title="Copying">
           <Row
             label="Mark as done when copied"

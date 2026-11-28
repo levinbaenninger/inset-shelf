@@ -1,14 +1,18 @@
 /**
- * Screenshots the shelf, the window-link picker, the drawing window and the
- * first-run onboarding of the
+ * Screenshots the shelf, the window-link picker, the drawing window, the
+ * first-run onboarding, the capture notice and the screenshot card of the
  * built renderer in their main states, light and dark, without Electron. Each
  * page runs in Playwright's Chromium with a fake preload bridge
  * (scripts/fixtures/screens-bridge.js) that answers from the sample data
- * below. The shelf is shot at 360×620 with an item that has every field
- * filled in, and the run fails a scene where anything overflows.
+ * below. The shelf is shot at the size it opens at beside a tall window
+ * (src/shared/geometry.ts) with an item that has every field filled in, and the run fails a scene where anything overflows. The
+ * stress- scenes push the longest labels the data allows through the shelf,
+ * the notice, the card and the drawing window at their smallest sizes
+ * (scripts/fixtures/screens-layout.js says what counts as broken).
  *
  *   vp run screens          (builds first)
  *   node scripts/screens.ts [output folder]
+ *   SCREENS=stress- node scripts/screens.ts   (only the scenes named so)
  *
  * The default output folder is release/screens.
  */
@@ -22,6 +26,12 @@ import { isDeepStrictEqual } from "node:util";
 import { chromium } from "playwright";
 import type { Browser, Locator, Page } from "playwright";
 import { z } from "zod";
+
+import {
+  SHELF_MAX_HEIGHT_DIP,
+  SHELF_MIN_WIDTH_DIP,
+  SHELF_WIDTH_DIP,
+} from "../src/shared/geometry.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const RENDERER = path.join(ROOT, "out", "renderer");
@@ -184,7 +194,13 @@ const renderFixtures = async (browser: Browser): Promise<void> => {
 
 // The shelf's sample document
 
-const now = new Date();
+/** Every scene runs at this moment, in this time zone, so two runs draw the same pixels: the fixtures' dates and the page's clock agree. */
+const TIME_ZONE = "Europe/Zurich";
+
+// The fixtures' days (isoDay) are counted in the same zone as the page's.
+process.env.TZ = TIME_ZONE;
+
+const now = new Date("2026-11-25T15:15:00+01:00");
 
 const isoDay = (offset: number): string => {
   const day = new Date(
@@ -222,7 +238,13 @@ const OFFICE = uuid(1);
 const INBOX = uuid(2);
 const LATER = uuid(3);
 
-const META = { description: "", due: null, steps: [], windows: [] };
+const META = {
+  attachments: [],
+  description: "",
+  due: null,
+  steps: [],
+  windows: [],
+};
 
 const step = (n: number, text: string, done = false) => ({
   done,
@@ -359,7 +381,7 @@ const ITEMS = [
 const DOC = {
   activeSectionId: OFFICE,
   items: ITEMS,
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [
     { id: OFFICE, name: "Office move" },
     { id: INBOX, name: "Inbox" },
@@ -391,7 +413,7 @@ const shelfView = (doc: ShelfFixture = DOC) => ({
 const EMPTY_DOC = {
   activeSectionId: INBOX,
   items: [],
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [{ id: INBOX, name: "Inbox" }],
 };
 
@@ -650,7 +672,7 @@ const DETAILS_HINT = {
   page: "shelf",
   placement: "below",
   task: null,
-  text: "Add a description, next steps, a due date or linked windows. None of it is needed when you capture.",
+  text: "Add a description, next steps, a due date, linked windows, or a screenshot or file. None of it is needed when you capture.",
   title: null,
 };
 
@@ -708,7 +730,7 @@ const EXAMPLE_DOC = {
       }
     ),
   ],
-  schemaVersion: 3,
+  schemaVersion: 4,
   sections: [{ id: INBOX, name: "Inbox" }],
 };
 
@@ -880,7 +902,13 @@ const pulseRespectsMotion = async (page: Page): Promise<string | null> => {
 
 // Scenes
 
-type PageName = "shelf" | "picker" | "drawing" | "onboarding";
+type PageName =
+  | "shelf"
+  | "picker"
+  | "drawing"
+  | "onboarding"
+  | "toast"
+  | "screenshot";
 
 interface Scene {
   readonly name: string;
@@ -889,6 +917,8 @@ interface Scene {
   readonly platforms?: readonly Platform[];
   /** The window's width, where it differs from the page's usual size: the shelf's narrowest is 300. */
   readonly width?: number;
+  /** The window's height, where it differs from the page's usual size. */
+  readonly height?: number;
   /** Fails the scene when anything in the list or details overflows or wraps badly. */
   readonly layoutCheck?: boolean;
   readonly act?: (page: Page) => Promise<void>;
@@ -2113,12 +2143,31 @@ const notSavedRows = async (page: Page) =>
       .count(),
   });
 
+/** "Not saved" stays on one line beside its buttons, or above them where the shelf is too narrow for both. */
+const notSavedOneLine = async (page: Page): Promise<string | null> => {
+  const heights = await page
+    .getByText("Not saved", { exact: true })
+    .evaluateAll((labels) =>
+      labels.map((label) => label.getBoundingClientRect().height)
+    );
+
+  return heights.length > 0 && heights.every((height) => height < 24)
+    ? null
+    : `each row's “Not saved” must take one line: ${JSON.stringify(heights)} px high`;
+};
+
 /**
  * Round 7: each item a failed save left unwritten says "Not saved" on its
  * row. Discard changes on A puts back only A's saved words; the new capture
  * keeps its line, and offers Delete instead, as the disk has never held it.
  */
 const notSavedCheck = async (page: Page): Promise<string | null> => {
+  const wrapped = await notSavedOneLine(page);
+
+  if (wrapped !== null) {
+    return wrapped;
+  }
+
   const before = await notSavedRows(page);
 
   if (
@@ -2841,9 +2890,14 @@ const calendarKeysCheck = async (page: Page): Promise<string | null> => {
   }
 
   // A click on text that takes no keyboard (empty space, in effect) closes the calendar and,
-  // as nothing took the keyboard, gives it back to Due.
+  // as nothing took the keyboard, gives it back to Due. The item's own words edit on a click,
+  // so the footer that says when it was added is that text.
   await openCalendar(page, /^Due Today/u);
-  await page.getByText("Book the movers for Monday").first().click();
+  await page
+    .locator("[data-details]")
+    .getByText(/^Added /u)
+    .first()
+    .click();
   await calendar(page).waitFor({ state: "detached" });
   await page.waitForTimeout(150);
 
@@ -3001,6 +3055,44 @@ const detailsButtonCheck = async (page: Page): Promise<string | null> => {
     : null;
 };
 
+/** The open row lists all five of item 10's steps, those still to do first, and its three windows as buttons. */
+const openStepsFirst = async (page: Page): Promise<string | null> => {
+  const row = item(page, 10);
+
+  const done = await row
+    .locator("[data-step-id] [role=checkbox]")
+    .evaluateAll((boxes) =>
+      boxes.map((box) => box.getAttribute("aria-checked") === "true")
+    );
+
+  const firstDone = done.indexOf(true);
+
+  const windows = await row
+    .getByRole("list", { name: "Linked windows" })
+    .getByRole("button")
+    .count();
+
+  if (done.length !== 5 || windows !== 3) {
+    return `the open row must list its 5 steps and 3 windows: ${done.length} steps, ${windows} windows`;
+  }
+
+  // A box is named by its step alone; checked or not says the rest.
+  const ticked = FULL.steps.find((entry) => entry.done)?.text ?? "";
+
+  const named = await row
+    .getByRole("checkbox", { checked: true, exact: true, name: ticked })
+    .count();
+
+  if (named !== 1) {
+    return `a done step's checkbox must be named by its words, “${ticked}”: ${named} found`;
+  }
+
+  return done.at(0) === false &&
+    (firstDone === -1 || !done.slice(firstDone).includes(false))
+    ? null
+    : `the open row must list open steps first (checked: ${JSON.stringify(done)})`;
+};
+
 /** Entries A and B alone, so the list keeps empty space below them, even with B open. */
 const SHORT_DOC = {
   ...DOC,
@@ -3086,6 +3178,4521 @@ const clickElsewhereCheck = async (page: Page): Promise<string | null> => {
     : `a click on search with B's menu open left focus on “${String(searching)}”`;
 };
 
+// Stress scenes: the longest labels the data allows (src/shared/shelf.ts), German-length words and every badge at once, at the shelf's narrowest width, in the shelf, the capture notice and the screenshot card.
+
+const NARROWEST = SHELF_MIN_WIDTH_DIP;
+
+const LONG_WORD =
+  "Donaudampfschifffahrtsgesellschaftskapitänsmützenabteilungsleiterstellvertreterin";
+
+const LONG_TITLE =
+  "Bildschirmaufnahme und Systemaudio für die Quartalsübersicht aufnehmen, die Zwischenablage wiederherstellen und danach die Ergebnisse an das gesamte Projektteam schicken";
+
+const LONG_URL =
+  "https://intranet.rieder-moebel.ch/projekte/2026/bueroumzug/dritter-stock/angebote/2026-114-bueromoebel-lieferung-und-montage?ansicht=vollstaendig&sprache=de&version=12";
+
+const LONG_PAGE =
+  "Angebot 2026-114: Büromöbel, Lieferung und Montage für den dritten Stock – Zwischenablage wiederhergestellt";
+
+const LONG_APP = "Bildschirmaufnahme und Systemaudio";
+
+const LONG_WINDOW =
+  "Projektplanung_Büroumzug_Final_v12_überarbeitet_Zwischenablage_wiederhergestellt.numbers";
+
+const LONG_FILE =
+  "Bildschirmaufnahme_und_Systemaudio_2026-11-25_um_14.32.07_Quartalsübersicht_final_überarbeitet.pdf";
+
+const LONG_STEP =
+  "Zwischenablage wiederhergestellt, danach die Bildschirmaufnahme und Systemaudio mit dem Projektteam abstimmen: Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz";
+
+const LONG_PIN =
+  "Die Fehlermeldung „Zwischenablage wiederhergestellt“ überdeckt den Anmeldeknopf auf kleinen Bildschirmen";
+
+const LONG_DESCRIPTION = `Die Bildschirmaufnahme und Systemaudio fehlen in der Quartalsübersicht. ${LONG_WORD} hat die Zwischenablage wiederhergestellt, siehe ${LONG_URL}`;
+
+/** At SECTION_NAME_MAX (60) or just under it. */
+const SECTION_PHRASE = "Bildschirmaufnahme und Systemaudio – Quartalsübersicht";
+
+const SECTION_WORD =
+  "Donaudampfschifffahrtsgesellschaftskapitänsmützenabteilung";
+
+const STRESS_A = uuid(701);
+const STRESS_B = uuid(702);
+const STRESS_C = uuid(703);
+const STRESS_D = uuid(704);
+
+const longWindow = (index: number, description = "") => ({
+  ...windowRef(index, description),
+  app: LONG_APP,
+  appPath: `/Applications/${LONG_APP}.app`,
+  id: uuid(750 + index),
+  title: LONG_WINDOW,
+});
+
+const LONG_STEPS = [
+  step(71, LONG_STEP, true),
+  step(72, LONG_WORD),
+  step(73, "Book the lift for the delivery day"),
+];
+
+/** A text item with every badge: overdue since last year, steps, linked windows, a long page as its source. */
+const STRESS_TEXT = {
+  ...base(710, 50, STRESS_A),
+  color: "purple",
+  context: { app: "Safari", appLink: null, title: LONG_PAGE, url: LONG_URL },
+  description: LONG_DESCRIPTION,
+  due: isoDay(-400),
+  html: null,
+  kind: "text",
+  links: [{ text: LONG_PAGE, url: LONG_URL }],
+  steps: LONG_STEPS,
+  text: LONG_TITLE,
+  via: "selection",
+  windows: [longWindow(0, LONG_DESCRIPTION), longWindow(1), longWindow(2)],
+};
+
+/** An image with every badge, pins with long labels and a long title. */
+const STRESS_IMAGE = {
+  ...base(711, 45, STRESS_A),
+  description: LONG_DESCRIPTION,
+  due: isoDay(-400),
+  image: LOGIN,
+  kind: "image",
+  note: LONG_TITLE,
+  pins: [
+    { label: LONG_PIN, x: 760, y: 380 },
+    { label: LONG_WORD, x: 820, y: 780 },
+    { x: 1210, y: 900 },
+  ],
+  source: LONG_APP,
+  steps: LONG_STEPS,
+  title: `Anmeldeseite: ${LONG_PIN}`,
+  via: "screenshot",
+  windows: [longWindow(3, LONG_DESCRIPTION), longWindow(4)],
+};
+
+/** A file without a title or a source, so its badges share the file name's line. */
+const STRESS_FILE = {
+  ...base(712, 40, STRESS_A),
+  due: isoDay(-400),
+  file: { bytes: 2_480_000_000, name: LONG_FILE, stored: `${uuid(713)}.pdf` },
+  kind: "file",
+  note: LONG_DESCRIPTION,
+  title: null,
+  windows: [longWindow(0), longWindow(1)],
+};
+
+const STRESS_ITEMS = [
+  STRESS_TEXT,
+  STRESS_IMAGE,
+  STRESS_FILE,
+  {
+    ...base(714, 35, STRESS_A),
+    file: { bytes: 18_000, name: LONG_FILE, stored: `${uuid(715)}.pdf` },
+    kind: "file",
+    note: "",
+    title: LONG_TITLE,
+    windows: [],
+  },
+  {
+    ...base(716, 30, STRESS_A),
+    context: {
+      app: LONG_APP,
+      appLink: null,
+      title: LONG_WINDOW,
+      url: null,
+    },
+    html: null,
+    kind: "text",
+    links: [],
+    text: LONG_WORD,
+    via: "selection",
+  },
+  {
+    ...base(717, 25, STRESS_A),
+    context: { app: "Safari", appLink: null, title: null, url: LONG_URL },
+    done: true,
+    html: null,
+    kind: "text",
+    links: [],
+    text: `Zwischenablage wiederhergestellt: ${LONG_URL}`,
+    via: "selection",
+  },
+  {
+    ...base(718, 20, STRESS_B),
+    due: isoDay(0),
+    html: null,
+    kind: "text",
+    links: [],
+    text: `**${LONG_WORD}** und ${LONG_WORD}`,
+    via: "typed",
+  },
+];
+
+const STRESS_DOC = {
+  activeSectionId: STRESS_A,
+  items: STRESS_ITEMS,
+  schemaVersion: 4,
+  sections: [
+    { id: STRESS_A, name: SECTION_PHRASE },
+    { id: STRESS_B, name: SECTION_WORD },
+    { id: STRESS_C, name: "Zwischenablage wiederhergestellt" },
+    { id: STRESS_D, name: "Inbox" },
+  ],
+};
+
+const STRESS_STATUS = {
+  ...STATUS,
+  keys: "missing",
+  problem: `Bildschirmaufnahme und Systemaudio konnten nicht gestartet werden, weil ${LONG_APP} die Aufnahme blockiert. ${LONG_WORD}.`,
+  saveError: `Die Zwischenablage wurde wiederhergestellt, aber die Ablage konnte nicht gespeichert werden: ${LONG_URL}`,
+};
+
+const stressView = (
+  doc:
+    | typeof STRESS_DOC
+    | typeof EMPTY_DOC
+    | typeof CROWDED_DOC
+    | typeof EDIT_DOC = STRESS_DOC,
+  status: typeof STRESS_STATUS | typeof STATUS = STATUS
+) => ({
+  ...shelfView(),
+  doc,
+  status,
+});
+
+/** Thirty pins across the sign-in screen, every one labelled at PIN_LABEL_MAX length or with one long word. */
+const MANY_PINS = Array.from({ length: 30 }, (_, index) => ({
+  label: index % 2 === 0 ? LONG_PIN : LONG_WORD,
+  x: 200 + ((index * 157) % 1500),
+  y: 150 + ((index * 97) % 900),
+}));
+
+/** The image with thirty labelled pins, twenty steps and ten linked windows, and a plain note beside it: lists an open row and details must hold. */
+const CROWDED_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...STRESS_IMAGE,
+      pins: MANY_PINS,
+      steps: Array.from({ length: 20 }, (_, index) =>
+        step(80 + index, index % 3 === 0 ? LONG_STEP : `Step ${index + 1}`)
+      ),
+      windows: Array.from({ length: 10 }, (_, index) =>
+        longWindow(index % 5, index === 0 ? LONG_DESCRIPTION : "")
+      ).map((window, index) => ({ ...window, id: uuid(760 + index) })),
+    },
+    // A neighbour, so the scene shows the crowded row among others.
+    {
+      ...base(719, 50, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Book the lift for the delivery day",
+      via: "typed",
+    },
+  ],
+};
+
+const composerField = (page: Page) =>
+  page.getByRole("textbox", { name: /^New note in/u });
+
+/** As main does when the shelf is hidden and shown again: the window loses focus, takes it back, and main says it showed the shelf. */
+const hideAndShow = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  await page.evaluate('globalThis.__emit("shown", null)');
+  await page.waitForTimeout(150);
+};
+
+/** A window closing over the open shelf (drawing, picker) gives it the keyboard back: focus without a hide. */
+const refocus = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  await page.waitForTimeout(150);
+};
+
+const FocusOwnerSchema = z.object({
+  composer: z.boolean(),
+  item: z.string().nullable(),
+});
+
+const focusOwner = async (page: Page) =>
+  FocusOwnerSchema.parse(
+    await page.evaluate(() => {
+      const active = document.activeElement;
+
+      return {
+        composer:
+          active?.getAttribute("aria-label")?.startsWith("New note in") ===
+          true,
+        item:
+          active?.closest<HTMLElement>("[data-item-id]")?.dataset.itemId ??
+          null,
+      };
+    })
+  );
+
+const focusRowOf = async (page: Page, n: number): Promise<void> => {
+  await select(page, n);
+  await item(page, n).locator("[data-row-keys]").first().focus();
+};
+
+const OpacitySchema = z.object({ label: z.string(), opacity: z.number() });
+
+/** The focused control and its least opaque ancestor: a control that takes focus unseen fails. */
+const focusedOpacity = async (page: Page) =>
+  OpacitySchema.parse(
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      let opacity = 1;
+
+      for (
+        let element = active;
+        element !== null;
+        element = element.parentElement
+      ) {
+        opacity = Math.min(opacity, Number(getComputedStyle(element).opacity));
+      }
+
+      return {
+        label:
+          active?.getAttribute("aria-label") ??
+          active?.textContent?.trim() ??
+          "",
+        opacity,
+      };
+    })
+  );
+
+// Editing in place: the words stay where they are read, and the caret lands on the word clicked.
+
+const EDIT_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(720, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Book the movers for Monday morning",
+      via: "typed",
+    },
+    {
+      ...base(721, 25, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Pack the office before the move:\n\n- Desks and **chairs**\n- Lamps from the `storage` room\n- The [floor plan](https://rieder-moebel.ch/plan) for the movers",
+      via: "typed",
+    },
+    {
+      ...IMAGE,
+      ...base(722, 20, STRESS_A),
+      image: LOGIN,
+      kind: "image",
+      note: "Spacing, the button and the error text all need work before the release build goes out",
+      pins: [],
+      source: null,
+      title: null,
+      via: "screenshot",
+    },
+  ],
+};
+
+const EditBoxSchema = z.object({
+  height: z.number(),
+  left: z.number(),
+  top: z.number(),
+});
+
+const EditStartSchema = z.object({
+  box: EditBoxSchema,
+  /** An editor or the note's field shows, not the words as they are read. */
+  editing: z.boolean(),
+  x: z.number(),
+  y: z.number(),
+});
+
+/**
+ * The words of item `id` as they show: the union of their glyphs, read or in
+ * the editor, or the note's field. And, read, the middle of `word` in them.
+ */
+const wordsBox = async (page: Page, id: string, word: string | null) =>
+  await page.evaluate(
+    ({ id: itemId, word: target }) => {
+      const row = document.querySelector(`[data-item-id="${itemId}"]`);
+      const field = row?.querySelector("textarea");
+
+      if (field instanceof HTMLTextAreaElement) {
+        const { height, left, top } = field.getBoundingClientRect();
+
+        return { box: { height, left, top }, editing: true, x: 0, y: 0 };
+      }
+
+      const editor = row?.querySelector("[aria-label='Edit item']") ?? null;
+
+      // The open item's words: its text, or the note under its picture.
+      const words =
+        editor ?? row?.querySelector("[data-row-keys]:not(:has(img))") ?? null;
+
+      if (words === null) {
+        return null;
+      }
+
+      const all = document.createRange();
+
+      all.selectNodeContents(words);
+
+      const { height, left, top } = all.getBoundingClientRect();
+      const walker = document.createTreeWalker(words, NodeFilter.SHOW_TEXT);
+
+      for (
+        let node = walker.nextNode();
+        node !== null;
+        node = walker.nextNode()
+      ) {
+        const at =
+          target === null ? -1 : (node.textContent ?? "").indexOf(target);
+
+        if (target !== null && at !== -1) {
+          const range = document.createRange();
+
+          range.setStart(node, at);
+          range.setEnd(node, at + target.length);
+
+          const rect = range.getBoundingClientRect();
+
+          return {
+            box: { height, left, top },
+            editing: editor !== null,
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          };
+        }
+      }
+
+      return {
+        box: { height, left, top },
+        editing: editor !== null,
+        x: 0,
+        y: 0,
+      };
+    },
+    { id, word }
+  );
+
+/** The word the caret is in, in the editor or the note's field. */
+const caretWord = async (page: Page): Promise<string> =>
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    let text = "";
+    let at = 0;
+
+    if (active instanceof HTMLTextAreaElement) {
+      text = active.value;
+      at = active.selectionStart;
+    } else {
+      const selection = window.getSelection();
+
+      text = selection?.anchorNode?.textContent ?? "";
+      at = selection?.anchorOffset ?? 0;
+    }
+
+    const letter = /[\p{L}\p{N}]/u;
+    let start = at;
+    let end = at;
+
+    while (start > 0 && letter.test(text[start - 1] ?? "")) {
+      start -= 1;
+    }
+
+    while (end < text.length && letter.test(text[end] ?? "")) {
+      end += 1;
+    }
+
+    return text.slice(start, end);
+  });
+
+/**
+ * Notes where item `n`'s words are, and clicks `word` in them: once on the
+ * open item, or twice on the closed one, as a user starts editing there.
+ */
+const clickToEdit = async (
+  page: Page,
+  n: number,
+  word: string,
+  how: "open and click" | "double-click closed" = "open and click"
+): Promise<void> => {
+  if (how === "open and click") {
+    await select(page, n);
+    await page.waitForTimeout(200);
+  }
+
+  const start = EditStartSchema.parse(await wordsBox(page, uuid(n), word));
+
+  await page.evaluate((box) => {
+    Object.assign(globalThis, { __readBox: box });
+  }, start.box);
+
+  await (how === "open and click"
+    ? page.mouse.click(start.x, start.y)
+    : page.mouse.dblclick(start.x, start.y));
+  await page.waitForTimeout(300);
+};
+
+/** Whether the caret sits at the very end of the editor that has the keyboard. */
+const caretAtEnd = async (page: Page): Promise<boolean> =>
+  await page.evaluate(() => {
+    const editor = document.activeElement;
+    const selection = window.getSelection();
+
+    if (
+      editor?.getAttribute("aria-label") !== "Edit item" ||
+      selection === null
+    ) {
+      return false;
+    }
+
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let last: Node | null = null;
+
+    for (
+      let node = walker.nextNode();
+      node !== null;
+      node = walker.nextNode()
+    ) {
+      last = node;
+    }
+
+    return (
+      selection.isCollapsed &&
+      selection.anchorNode === last &&
+      selection.anchorOffset === (last?.textContent ?? "").length
+    );
+  });
+
+/** The words didn't move or change height by more than a pixel once editing started, and the caret is in `word`. */
+const editedInPlace = async (
+  page: Page,
+  n: number,
+  word: string
+): Promise<string | null> => {
+  const read = EditBoxSchema.parse(await page.evaluate("globalThis.__readBox"));
+
+  const edited = EditStartSchema.safeParse(await wordsBox(page, uuid(n), null));
+
+  if (!edited.success || !edited.data.editing) {
+    return "clicking the open item's words started no edit";
+  }
+
+  const moved = (["top", "left", "height"] as const).filter(
+    (side) => Math.abs(edited.data.box[side] - read[side]) > 1
+  );
+
+  if (moved.length > 0) {
+    return `starting the edit moved the words: ${moved.map((side) => `${side} ${read[side].toFixed(1)} → ${edited.data.box[side].toFixed(1)}`).join(", ")}`;
+  }
+
+  const at = await caretWord(page);
+
+  return at === word
+    ? null
+    : `the caret landed in “${at}”, not in “${word}”, the word clicked`;
+};
+
+const SCREENSHOT_VIEW = {
+  heightPx: LOGIN.heightPx,
+  imageUrl: `/.fixtures/${LOGIN.file}`,
+  save: { state: "idle" },
+  seq: 1,
+  target: null,
+  widthPx: LOGIN.widthPx,
+};
+
+/** What the card must keep in view of a long reason: the words that say what went wrong. */
+const CARD_REASON = "Datenträger voll";
+
+/** Main's reason a card's save failed: a sentence of its own, here a long one. It says what went wrong first, as main's own sentences do (save-error.ts), so a long name after it can't push that out of the card's two lines. */
+const CARD_FAILURE = `${CARD_REASON}: „${LONG_WORD}“.`;
+
+/** The card as main shows it once a save failed. */
+const failedCard = (
+  to: "shelf" | "item" | null,
+  message = CARD_FAILURE,
+  target: { readonly id: string; readonly label: string } | null = null,
+  only = false
+) => ({
+  ...SCREENSHOT_VIEW,
+  save: { message, only, state: "failed", to },
+  target,
+});
+
+const CardButtonSchema = z.object({
+  covered: z.boolean(),
+  found: z.boolean(),
+  opacity: z.number(),
+});
+
+/** Whether the card's button with this name shows (not faded out) and nothing covers its middle. */
+const cardButtonUsable = async (
+  page: Page,
+  name: string
+): Promise<string | null> => {
+  const state = CardButtonSchema.parse(
+    await page.evaluate((label) => {
+      const button = [...document.querySelectorAll("button")].find(
+        (each) =>
+          (each.getAttribute("aria-label") ?? each.textContent?.trim()) ===
+          label
+      );
+
+      if (button === undefined) {
+        return { covered: false, found: false, opacity: 0 };
+      }
+
+      let opacity = 1;
+
+      for (
+        let element: Element | null = button;
+        element !== null;
+        element = element.parentElement
+      ) {
+        opacity = Math.min(opacity, Number(getComputedStyle(element).opacity));
+      }
+
+      const box = button.getBoundingClientRect();
+
+      const top = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2
+      );
+
+      return {
+        covered: top === null || !button.contains(top),
+        found: true,
+        opacity,
+      };
+    }, name)
+  );
+
+  if (!state.found) {
+    return `no “${name}” on the card`;
+  }
+
+  if (state.opacity < 0.9) {
+    return `“${name}” is faded out (opacity ${state.opacity})`;
+  }
+
+  return state.covered ? `something covers “${name}”` : null;
+};
+
+/** The failed card: its message in two lines at most under the picture, every action in view without hover. */
+/** Add to Shelf sits in the middle of the 280-wide card, whatever shows beside it. */
+const cardMiddle = (add: {
+  readonly left: number;
+  readonly right: number;
+}): string | null => {
+  const at = (add.left + add.right) / 2;
+
+  return Math.abs(at - 140) > 0.5
+    ? `Add to Shelf sits off the card's middle (${at} ≠ 140)`
+    : null;
+};
+
+const failedCardCheck = (names: readonly string[]) =>
+  async function check(page: Page): Promise<string | null> {
+    const lines = z.object({ height: z.number(), line: z.number() }).parse(
+      await page.evaluate(() => {
+        const alert = document.querySelector("[role=alert]");
+
+        return alert === null
+          ? { height: 0, line: 1 }
+          : {
+              height: alert.getBoundingClientRect().height,
+              line: Number(
+                getComputedStyle(alert).lineHeight.replace("px", "")
+              ),
+            };
+      })
+    );
+
+    if (lines.height === 0) {
+      return "the failed card doesn't say why";
+    }
+
+    if (lines.height > lines.line * 2 + 1) {
+      return `the failure takes ${Math.round(lines.height / lines.line)} lines, not 2`;
+    }
+
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- one button after another.
+      const problem = await cardButtonUsable(page, name);
+
+      if (problem !== null) {
+        return problem;
+      }
+    }
+
+    return (await page.getByRole("img", { name: "New screenshot" }).isVisible())
+      ? null
+      : "the failed card lost its picture";
+  };
+
+/** Tabs until the keyboard is on the failure message, or says it never got there. */
+const tabToFailure = async (page: Page): Promise<boolean> => {
+  for (let key = 0; key < 12; key += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one key after another.
+    await page.keyboard.press("Tab");
+
+    // oxlint-disable-next-line no-await-in-loop -- read after each key.
+    const on = await page.evaluate(
+      "document.activeElement?.getAttribute('role') ?? ''"
+    );
+
+    if (on === "alert") {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/** With the keyboard on the failure message, it reads it all: whole in view, or in a box it scrolls. */
+const failureEndReached = async (page: Page): Promise<string | null> => {
+  const shown = z
+    .object({ client: z.number(), scroll: z.number(), style: z.string() })
+    .parse(
+      await page.evaluate(() => {
+        const alert = document.querySelector("[role=alert]");
+
+        return {
+          client: alert?.clientHeight ?? 0,
+          scroll: alert?.scrollHeight ?? 0,
+          style: alert === null ? "" : getComputedStyle(alert).overflowY,
+        };
+      })
+    );
+
+  return shown.scroll <= shown.client + 1 || shown.style === "auto"
+    ? null
+    : "the keyboard on the failure message can't reach its end";
+};
+
+/** A plain note that runs to about nine lines at 300 wide, between short ones. */
+const NINE_LINES = `${LONG_DESCRIPTION} Danach die Ergebnisse an das gesamte Projektteam schicken und die Zwischenablage wiederherstellen.`;
+
+const NINE_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(720, 40, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Ask the caretaker for the keys",
+      via: "typed",
+    },
+    {
+      ...base(721, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: NINE_LINES,
+      via: "typed",
+    },
+    {
+      ...base(722, 20, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Book the lift for the delivery day",
+      via: "typed",
+    },
+    {
+      ...base(723, 10, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Order boxes for the archive",
+      via: "typed",
+    },
+  ],
+};
+
+/** An image whose title takes one line more than its cap at 300 wide (four, not three), and whose description takes one more than its own (eleven, not ten). */
+const ONE_OVER_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(726, 30, STRESS_A),
+      description: Array.from(
+        { length: 11 },
+        (_, line) => `Zeile ${line + 1} der Beschreibung`
+      ).join("\n"),
+      image: LOGIN,
+      kind: "image",
+      note: "",
+      pins: [],
+      source: null,
+      title:
+        "Bildschirmaufnahme und Systemaudio für die Quartalsübersicht aufnehmen, die",
+      via: "screenshot",
+    },
+  ],
+};
+
+/** A note with a code line far wider than the shelf at 300. */
+const CODE_DOC = {
+  ...STRESS_DOC,
+  items: [
+    {
+      ...base(727, 30, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: [
+        "Vor dem Umzug sichern:",
+        "",
+        "```",
+        "rsync --archive --delete --exclude node_modules /Volumes/Archiv/Projekte/ sicherung@nas.rieder-moebel.ch:/backup/projekte/",
+        "```",
+      ].join("\n"),
+      via: "typed",
+    },
+  ],
+};
+
+/** An item linked to 25 windows: its open row shows three and “+22”. */
+const MANY_WINDOWS_DOC = {
+  ...NINE_DOC,
+  items: [
+    {
+      ...base(724, 5, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: "Every window of the office move",
+      via: "typed",
+      windows: Array.from({ length: 25 }, (_, index) => ({
+        ...longWindow(index % 5),
+        id: uuid(1000 + index),
+      })),
+    },
+  ],
+};
+
+/** A long note whose only link is in its last line, well below the open row's cut. */
+const LINK_BELOW_DOC = {
+  ...NINE_DOC,
+  items: [
+    {
+      ...base(725, 5, STRESS_A),
+      html: null,
+      kind: "text",
+      links: [],
+      text: `${"Die Bildschirmaufnahme und Systemaudio fehlen in der Quartalsübersicht, und die Zwischenablage wurde wiederhergestellt. ".repeat(4)}Siehe [das Protokoll](https://intranet.rieder-moebel.ch/protokoll).`,
+      via: "typed",
+    },
+  ],
+};
+
+const OpenRowSchema = z.object({
+  after: z.boolean(),
+  before: z.boolean(),
+  details: z.boolean(),
+  last: z.boolean(),
+});
+
+/**
+ * An open row shows each part under its own cap. Its Details line is its
+ * last line and in view; with `neighbours`, the rows around it show too.
+ */
+const openRowCheck = (n: number, neighbours: boolean) =>
+  async function check(page: Page): Promise<string | null> {
+    const measured = OpenRowSchema.parse(
+      await page.evaluate((id) => {
+        const list = document.querySelector(".shelf-list");
+        const row = document.querySelector(`[data-item-id="${id}"]`);
+        const detailsLine = row?.querySelector("[data-details-button]");
+
+        if (list === null || row === null || detailsLine === null) {
+          return { after: false, before: false, details: false, last: false };
+        }
+
+        const view = list.getBoundingClientRect();
+
+        const inView = (element: Element | null | undefined): boolean => {
+          const inner = element?.getBoundingClientRect();
+
+          return (
+            inner !== undefined &&
+            inner.bottom > view.top + 4 &&
+            inner.top < view.bottom - 4
+          );
+        };
+
+        const box = detailsLine?.getBoundingClientRect();
+
+        const lines = [...row.querySelectorAll("button, [role=checkbox]")].map(
+          (each) => each.getBoundingClientRect().bottom
+        );
+
+        return {
+          after:
+            row.nextElementSibling === null || inView(row.nextElementSibling),
+          before:
+            row.previousElementSibling === null ||
+            inView(row.previousElementSibling),
+          details:
+            box !== undefined &&
+            box.top >= view.top &&
+            box.bottom <= view.bottom,
+          last: box !== undefined && Math.max(...lines) <= box.bottom + 1,
+        };
+      }, uuid(n))
+    );
+
+    if (!measured.details) {
+      return "the open row's Details line is out of view";
+    }
+
+    if (!measured.last) {
+      return "the open row's Details line isn't its last line";
+    }
+
+    return !neighbours || (measured.before && measured.after)
+      ? null
+      : "the rows around the open one are out of view";
+  };
+
+/** An open row taller than the list: the keyboard reaches its Details line, which comes into view. */
+const reachedDetails = (n: number) =>
+  async function check(page: Page): Promise<string | null> {
+    await item(page, n).getByRole("button", { name: "Show details" }).focus();
+
+    return await openRowCheck(n, false)(page);
+  };
+
+/**
+ * Item 711 with 30 labelled pins, 20 steps and 10 windows, open: three pin
+ * labels, five steps, a line of windows, each list with its own more line,
+ * and Details, its last line, reached by the keyboard although the row is
+ * taller than the list.
+ */
+const openCrowdedCheck = async (page: Page): Promise<string | null> => {
+  const row = item(page, 711);
+
+  const shown = {
+    morePins: await row.getByRole("button", { name: "27 more pins" }).count(),
+    moreSteps: await row.getByRole("button", { name: "15 more steps" }).count(),
+    moreWindows: await row
+      .getByRole("button", { name: /^\d+ more windows in details$/u })
+      .count(),
+    pins: await row
+      .getByRole("list", { name: "Pin labels" })
+      .locator("li")
+      .count(),
+    steps: await row.locator("[data-step-id]").count(),
+    windows: await row
+      .getByRole("list", { name: "Linked windows" })
+      .getByRole("button", { name: /^(?:Open|Bring)/u })
+      .count(),
+  };
+
+  if (
+    shown.pins !== 3 ||
+    shown.steps !== 5 ||
+    shown.windows === 0 ||
+    shown.morePins + shown.moreSteps + shown.moreWindows !== 3
+  ) {
+    return `the crowded row must show every part under its cap: ${JSON.stringify(shown)}`;
+  }
+
+  // ⌫ and Delete on a more line open nothing and delete nothing: they belong to the row only.
+  for (const name of ["27 more pins", "15 more steps"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one control after another, on purpose.
+    await row.getByRole("button", { name }).focus();
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    await page.keyboard.press("Backspace");
+    // oxlint-disable-next-line no-await-in-loop -- one key after another, on purpose.
+    await page.keyboard.press("Delete");
+  }
+
+  if ((await removes(page)) > 0) {
+    return "⌫ or Delete on a more line deleted the item";
+  }
+
+  return await reachedDetails(711)(page);
+};
+
+/** In a strip of tiles that ends in “+N”: the words of “+N” start as far after the last tile as the tiles are apart, and the strip stays inside its row. */
+const moreGapProblem = async (strip: Locator): Promise<string | null> => {
+  const gaps = z
+    .object({ between: z.number(), inside: z.boolean(), toMore: z.number() })
+    .parse(
+      await strip.evaluate((list) => {
+        const entries = [...list.children];
+        const words = entries.at(-1)?.querySelector("button");
+        const tiles = entries.slice(0, -1);
+        const range = document.createRange();
+
+        // The words themselves, not the button around them.
+        if (words !== null && words !== undefined) {
+          range.selectNodeContents(words);
+        }
+
+        const last = tiles.at(-1)?.getBoundingClientRect();
+        const first = tiles[0]?.getBoundingClientRect();
+        const second = tiles[1]?.getBoundingClientRect();
+
+        return {
+          between:
+            first === undefined || second === undefined
+              ? -1
+              : second.left - first.right,
+          inside:
+            range.getBoundingClientRect().right <=
+            (list.parentElement?.getBoundingClientRect().right ?? 0),
+          toMore:
+            last === undefined
+              ? -1
+              : range.getBoundingClientRect().left - last.right,
+        };
+      })
+    );
+
+  if (!gaps.inside) {
+    return "“+N” runs out of its row";
+  }
+
+  return Math.abs(gaps.toMore - gaps.between) <= 1
+    ? null
+    : `“+N” starts ${gaps.toMore} px after the last tile, and the tiles are ${gaps.between} px apart`;
+};
+
+/** An open row without a source: its badges sit on its foot line, after the words and before Details, and take no line of their own. */
+const badgesOnFoot = (n: number) =>
+  async function check(page: Page): Promise<string | null> {
+    const row = item(page, n);
+    const lines = row.locator("[data-badges]");
+    const count = await lines.count();
+
+    if (count !== 1) {
+      return `the open row has ${count} badge lines, not the one on its foot`;
+    }
+
+    const badge = await boxOf(lines.locator("> *").first());
+    const more = await boxOf(row.locator("[data-details-button]"));
+
+    // The time shows whole; what follows it shows with room for a word, or not at all.
+    const words = z
+      .array(
+        z.object({ cut: z.boolean(), shown: z.boolean(), width: z.number() })
+      )
+      .parse(
+        await row.locator("[data-foot-words]").evaluate((foot) => {
+          const { bottom } = foot.getBoundingClientRect();
+
+          return [...foot.children].map((each) => ({
+            cut: each.scrollWidth > each.clientWidth,
+            shown: each.getBoundingClientRect().top < bottom,
+            width: each.clientWidth,
+          }));
+        })
+      );
+
+    const [time, ...rest] = words;
+
+    if (time === undefined || time.cut) {
+      return `the foot's time is cut: ${JSON.stringify(words)}`;
+    }
+
+    if (rest.some((each) => each.shown && each.width < 60)) {
+      return `the foot's words after the time are cut to a letter or two: ${JSON.stringify(words)}`;
+    }
+
+    return badge.right <= more.left &&
+      middle(badge) < more.bottom &&
+      middle(badge) > more.top
+      ? null
+      : `the badge isn't on the foot line before Details: ${JSON.stringify({ badge, more })}`;
+  };
+
+/** The site beside each link of an open row that names one: whether it is in view, and whether it is cut short there. */
+const linkSites = async (page: Page, n: number) =>
+  z.array(z.object({ cut: z.boolean(), shown: z.boolean() })).parse(
+    await item(page, n).evaluate((row) =>
+      [...row.querySelectorAll("[data-link-site]")].map((site) => {
+        const line = site.parentElement;
+
+        const shown =
+          line !== null &&
+          site.getBoundingClientRect().top <
+            line.getBoundingClientRect().bottom - 1;
+
+        return { cut: shown && site.scrollWidth > site.clientWidth, shown };
+      })
+    )
+  );
+
+/** A stress scene: on the shelf unless it says otherwise, and always checked for layout. */
+type StressScene = Omit<Scene, "page" | "layoutCheck"> & {
+  readonly page?: PageName;
+};
+
+const stress = (scene: StressScene): Scene => ({
+  layoutCheck: true,
+  page: "shelf",
+  ...scene,
+});
+
+const STRESS_SCENES: readonly Scene[] = (
+  [
+    {
+      data: { view: stressView() },
+      name: "stress-list",
+      width: NARROWEST,
+    },
+    {
+      data: { view: stressView() },
+      name: "stress-list-wide",
+    },
+    {
+      act: async (page) => {
+        await page
+          .locator(".shelf-list")
+          .first()
+          .evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+          });
+      },
+      data: { view: stressView() },
+      name: "stress-list-end",
+      width: NARROWEST,
+    },
+    {
+      // Show more comes before the link it hides; the link is reachable once it is open.
+      act: async (page) => {
+        await select(page, 725);
+      },
+      check: async (page) => {
+        const words = item(page, 725).locator("[data-row-keys]").first();
+
+        await words.focus();
+        await page.keyboard.press("Tab");
+
+        const first = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent ?? ''"
+        );
+
+        if (first !== "Show more of the text") {
+          return `the first Tab from the open row's words went to “${String(first)}”, not Show more`;
+        }
+
+        // As a user meets it: Enter on Show more, then Tab, with the keyboard left where it is.
+        await page.keyboard.press("Enter");
+        await page.keyboard.press("Tab");
+
+        const next = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        if (next !== "das Protokoll") {
+          return `after Enter on Show more, Tab went to “${String(next)}”, not the link it revealed`;
+        }
+
+        // From the link the keyboard goes on: Show less is the next stop, so nothing is skipped and nothing traps it.
+        await page.keyboard.press("Tab");
+
+        const after = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-label') ?? ''"
+        );
+
+        return after === "Show less of the text"
+          ? null
+          : `from the revealed link, Tab went to “${String(after)}”, not Show less`;
+      },
+      data: { view: shelfView(LINK_BELOW_DOC) },
+      keepPointer: true,
+      name: "stress-open-link-below-cut",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 724);
+      },
+      check: async (page) => {
+        const strip = item(page, 724).getByRole("list", {
+          name: "Linked windows",
+        });
+
+        const shown = await strip
+          .getByRole("button", { name: /^(?:Open|Bring)/u })
+          .count();
+
+        const more = await strip
+          .getByRole("button", {
+            name: `${25 - shown} more windows in details`,
+          })
+          .textContent();
+
+        if (!(shown > 0 && more === `+${25 - shown}`)) {
+          return `the open row must show the windows that fit and “+N” for the other ${25 - shown}: ${String(more)}`;
+        }
+
+        return await moreGapProblem(strip);
+      },
+      data: { view: shelfView(MANY_WINDOWS_DOC) },
+      name: "stress-open-windows-many",
+      width: NARROWEST,
+    },
+    {
+      // One line over each cap: the title shows three lines and the description ten, each with its Show more.
+      act: async (page) => {
+        await select(page, 726);
+      },
+      check: async (page) => {
+        const caps = z
+          .array(
+            z.object({ cap: z.number(), shown: z.number(), whole: z.number() })
+          )
+          .parse(
+            await item(page, 726).evaluate((row) =>
+              [...row.querySelectorAll<HTMLElement>("[style*='--lines']")].map(
+                (words) => {
+                  const line =
+                    Number(
+                      getComputedStyle(words).lineHeight.replace("px", "")
+                    ) || 20;
+
+                  return {
+                    cap: Number(words.style.getPropertyValue("--lines")),
+                    shown: Math.round(
+                      words.getBoundingClientRect().height / line
+                    ),
+                    whole: Math.round(words.scrollHeight / line),
+                  };
+                }
+              )
+            )
+          );
+
+        if (
+          !isDeepStrictEqual(
+            caps.map((each) => [each.cap, each.whole]),
+            [
+              [3, 4],
+              [10, 11],
+            ]
+          )
+        ) {
+          return `the scene must hold a title one line over its cap of 3 and a description one over its cap of 10: ${JSON.stringify(caps)}`;
+        }
+
+        if (caps.some((each) => each.shown !== each.cap)) {
+          return `words one line over their cap must be cut to it: ${JSON.stringify(caps)}`;
+        }
+
+        const more = await item(page, 726)
+          .getByRole("button", { name: /^Show more of the/u })
+          .count();
+
+        return more === 2
+          ? null
+          : `the title and the description must each offer Show more: ${more}`;
+      },
+      data: { view: shelfView(ONE_OVER_DOC) },
+      height: 720,
+      name: "stress-open-one-line-over",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 727);
+      },
+      // A code line wider than the note wraps: reading it must not take a sideways scroll.
+      check: async (page) => {
+        const code = await item(page, 727).evaluate((row) => {
+          const block = row.querySelector("code")?.parentElement;
+
+          return block === null || block === undefined
+            ? null
+            : {
+                height: Math.round(block.getBoundingClientRect().height),
+                inner: block.scrollWidth,
+                outer: block.clientWidth,
+                scrolls: getComputedStyle(block).overflowX !== "visible",
+              };
+        });
+
+        if (code === null) {
+          return "the scene must show a code block";
+        }
+
+        if (code.scrolls || code.inner > code.outer + 1) {
+          return `a long code line must wrap, not scroll sideways: ${JSON.stringify(code)}`;
+        }
+
+        // Three lines of 16 px or more.
+        return code.height >= 48
+          ? null
+          : `the scene's code line must be longer than the note is wide: ${JSON.stringify(code)}`;
+      },
+      data: { view: shelfView(CODE_DOC) },
+      height: 620,
+      name: "stress-open-code",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 721);
+        await item(page, 721).scrollIntoViewIfNeeded();
+      },
+      check: openRowCheck(721, true),
+      data: { view: shelfView(NINE_DOC) },
+      height: 620,
+      name: "stress-open-nine-lines",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 710);
+      },
+      // Its description passes three lines, so its link takes one line.
+      check: async (page) => {
+        const link = await boxOf(
+          item(page, 710)
+            .getByRole("button", { name: /^Angebot 2026-114/u })
+            .first()
+        );
+
+        if (link.bottom - link.top > 24) {
+          return `the link must fold to one line beside a long description: ${link.bottom - link.top}px`;
+        }
+
+        // At this width the site can't show its domain beside the words: it isn't shown as a few letters.
+        const sites = await linkSites(page, 710);
+
+        if (sites.some((site) => site.cut)) {
+          return `a folded link shows its site cut short: ${JSON.stringify(sites)}`;
+        }
+
+        return sites.some((site) => site.shown)
+          ? `the site fits beside its link at 300 wide, so this scene no longer shows it left out: ${JSON.stringify(sites)}`
+          : await reachedDetails(710)(page);
+      },
+      data: { view: stressView() },
+      height: 620,
+      name: "stress-open-text",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 710);
+        await item(page, 710).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-open-text-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 711);
+        await item(page, 711).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-open-image",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 712);
+        await item(page, 712).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-open-file",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+      },
+      data: { view: stressView() },
+      name: "stress-details-text",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+        await page.locator("[data-details]").evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-details-text-end",
+      width: NARROWEST,
+    },
+    {
+      // A linked window's actions sit over its name's end, shown for the keyboard as for the pointer.
+      act: async (page) => {
+        await details(page, 710);
+        await page
+          .getByRole("button", { name: /^More for /u })
+          .first()
+          .focus();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) => {
+        const { label, opacity } = await focusedOpacity(page);
+
+        return opacity > 0.5
+          ? null
+          : `the keyboard on “${label}” can't see it (opacity ${opacity})`;
+      },
+      data: { view: stressView() },
+      name: "stress-details-window-keys",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 711);
+      },
+      data: { view: stressView() },
+      name: "stress-details-image",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 711);
+        await page.locator("[data-details]").evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+      },
+      data: { view: stressView() },
+      name: "stress-details-image-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 712);
+      },
+      data: { view: stressView() },
+      name: "stress-details-file",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 711);
+      },
+      // 30 pins, 20 steps, 10 windows, a long title and caption: each part under its cap, taller than the list, which scrolls; Details is its last line, and the keyboard reaches it.
+      check: openCrowdedCheck,
+      data: { view: stressView(CROWDED_DOC) },
+      height: 620,
+      name: "stress-open-crowded",
+      width: NARROWEST,
+    },
+    {
+      // Its lower half: the keyboard on Details, the row's last line.
+      act: async (page) => {
+        await select(page, 711);
+        await item(page, 711)
+          .getByRole("button", { name: "Show details" })
+          .focus();
+      },
+      check: badgesOnFoot(711),
+      data: { view: stressView(CROWDED_DOC) },
+      height: 620,
+      name: "stress-open-crowded-end",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 711);
+      },
+      check: openCrowdedCheck,
+      data: { view: stressView(CROWDED_DOC) },
+      name: "stress-open-crowded-wide",
+    },
+    {
+      act: async (page) => {
+        await select(page, 710);
+      },
+      // The link's words fill this line too, so its site stays out. With shorter words the site shows beside them, whole.
+      check: async (page) => {
+        const long = await linkSites(page, 710);
+
+        await item(page, 710).evaluate((row) => {
+          for (const site of row.querySelectorAll("[data-link-site]")) {
+            const words = site.previousElementSibling;
+
+            if (words !== null) {
+              words.textContent = "Angebot";
+            }
+          }
+        });
+
+        const short = await linkSites(page, 710);
+
+        if (long.some((site) => site.cut) || short.some((site) => site.cut)) {
+          return `a folded link shows its site cut short: ${JSON.stringify({ long, short })}`;
+        }
+
+        return short.length > 0 && short.every((site) => site.shown)
+          ? await reachedDetails(710)(page)
+          : `a folded link with room beside its words must show its site: ${JSON.stringify(short)}`;
+      },
+      data: { view: stressView() },
+      name: "stress-open-text-wide",
+    },
+    {
+      act: async (page) => {
+        await details(page, 711);
+        await page
+          .getByRole("region", { exact: true, name: "Pins" })
+          .evaluate((element) => {
+            element.scrollIntoView({ block: "start" });
+          });
+      },
+      data: { view: stressView(CROWDED_DOC) },
+      name: "stress-details-crowded",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+        await page.getByRole("button", { name: /Change Due$/u }).click();
+        await page.getByRole("menu").waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-due-picker",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 710);
+      },
+      data: { view: stressView() },
+      name: "stress-item-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await openMenuOn(page, 710);
+        await page.getByRole("menuitem", { name: /^Move to/u }).click();
+        await page.getByRole("menuitem", { name: SECTION_WORD }).waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-move-to",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("button", { name: SECTION_PHRASE, exact: true })
+          .click({ button: "right" });
+        await page.getByRole("menu").waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-section-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("button", { name: "More", exact: true })
+          .first()
+          .click();
+        await page.getByRole("menu").waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-shelf-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: "Search the shelf" })
+          .fill(`${LONG_WORD} Zwischenablage wiederhergestellt`);
+      },
+      data: { view: stressView() },
+      name: "stress-search-long",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Filter" }).click();
+        await page.getByRole("menuitem", { name: /^Overdue/u }).waitFor();
+      },
+      data: { view: stressView() },
+      name: "stress-search-filter",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: "Search the shelf" })
+          .fill("Zwischenablage due:");
+      },
+      data: { view: stressView() },
+      name: "stress-search-due-typing",
+      width: NARROWEST,
+    },
+    {
+      check: async (page) => {
+        const open = page.locator("[role=alert], [role=status]");
+        const count = await open.count();
+
+        if (count !== 1) {
+          return `${count} banners show open; only the most severe should, the others one line`;
+        }
+
+        if (
+          !((await open.textContent()) ?? "").startsWith("Not saved to disk")
+        ) {
+          return "a newer banner took the open slot from Not saved to disk";
+        }
+
+        return (await page
+          .getByRole("button", { name: /^2 more/u })
+          .count()) === 1
+          ? null
+          : "the folded banners don't share one “2 more” line";
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners",
+      width: NARROWEST,
+    },
+    {
+      // Enter on “2 more” opens the others and keeps the keyboard there: on the most severe one's title, then its Show full message.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).focus();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        const on = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        if (open !== 3) {
+          return `“2 more” opened ${open - 1} banners, not 2`;
+        }
+
+        if (on !== "Needs your attention") {
+          return `Enter on “2 more” left the keyboard on “${String(on)}”`;
+        }
+
+        await page.keyboard.press("Tab");
+
+        const next = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        return next === "Show full message"
+          ? null
+          : `the next Tab went to “${String(next)}”, not Show full message`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      keepPointer: true,
+      name: "stress-banners-more",
+      width: NARROWEST,
+    },
+    {
+      // Opened, the banners keep their order, unsaved data first; Show fewer folds them back.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).click();
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const titles = await page
+          .locator(
+            "[role=alert] > p:first-child, [role=status] > p:first-child"
+          )
+          .allTextContents();
+
+        if (
+          !isDeepStrictEqual(titles, [
+            "Not saved to disk",
+            "Needs your attention",
+            "Double Shift is off",
+          ])
+        ) {
+          return `opened, the banners read ${JSON.stringify(titles)}`;
+        }
+
+        await page.getByRole("button", { name: "Show fewer" }).click();
+
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        const more = await page
+          .getByRole("button", { name: /^2 more/u })
+          .count();
+
+        return open === 1 && more === 1
+          ? null
+          : `Show fewer left ${open} banners open and ${more} “2 more” lines`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-more-order",
+      width: NARROWEST,
+    },
+    {
+      // Show fewer from the keyboard leaves it on “2 more”.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("button", { name: "Show fewer" }).focus();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const on = await page.evaluate(
+          "document.activeElement?.getAttribute('aria-expanded') ?? document.activeElement?.tagName"
+        );
+
+        return on === "false"
+          ? null
+          : `Show fewer from the keyboard left focus on ${String(on)}`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      keepPointer: true,
+      name: "stress-banners-fewer-key",
+      width: NARROWEST,
+    },
+    {
+      // A banner that cleared and comes back with the same words is news again: the others fold under it.
+      act: async (page) => {
+        await page.getByRole("button", { name: /^2 more/u }).click();
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(stressView(STRESS_DOC, { ...STRESS_STATUS, saveError: null }))})`
+        );
+        await page.waitForTimeout(100);
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(stressView(STRESS_DOC, STRESS_STATUS))})`
+        );
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const open = await page.locator("[role=alert], [role=status]").count();
+
+        const more = await page
+          .getByRole("button", { name: /^2 more/u })
+          .count();
+
+        return open === 1 && more === 1
+          ? null
+          : `a banner back with the same words left ${open} open and ${more} “2 more” lines`;
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-return",
+      width: NARROWEST,
+    },
+    {
+      // A banner whose words change shows them fresh, folded to its first lines again.
+      act: async (page) => {
+        await page.getByRole("button", { name: "Show full message" }).click();
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(stressView(STRESS_DOC, { ...STRESS_STATUS, saveError: `${STRESS_STATUS.saveError} Der Datenträger ist voll.` }))})`
+        );
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const open = page.getByRole("alert");
+        const text = (await open.textContent()) ?? "";
+
+        const more = await open
+          .locator("[aria-expanded]")
+          .getAttribute("aria-expanded");
+
+        return text.includes("Der Datenträger ist voll.") && more === "false"
+          ? null
+          : "a banner whose words changed didn't show them fresh";
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-new-text",
+      width: NARROWEST,
+    },
+    {
+      // The keyboard reads the whole of the open banner's message.
+      act: async (page) => {
+        await page.getByRole("button", { name: "Show full message" }).focus();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(200);
+      },
+      check: async (page) => {
+        const alert = page.getByRole("alert");
+        const shown = (await alert.textContent()) ?? "";
+
+        const whole = await alert.evaluate((element) => {
+          const text =
+            element.querySelector("[aria-expanded]")?.previousElementSibling;
+
+          return (
+            text instanceof HTMLElement &&
+            text.scrollHeight <= text.clientHeight + 1
+          );
+        });
+
+        return shown.includes(STRESS_STATUS.saveError) && whole
+          ? null
+          : "Show full message didn't show the whole failed save's message";
+      },
+      data: { view: stressView(STRESS_DOC, STRESS_STATUS) },
+      name: "stress-banners-full",
+      width: NARROWEST,
+    },
+    {
+      data: {
+        view: {
+          ...stressView(STRESS_DOC, {
+            ...STATUS,
+            saveError: STRESS_STATUS.saveError,
+          }),
+          notSaved: [
+            { id: uuid(710), undo: "discard" },
+            { id: uuid(712), undo: "delete" },
+          ],
+        },
+      },
+      name: "stress-not-saved",
+      width: NARROWEST,
+    },
+    {
+      data: { view: shelfView(EMPTY_DOC) },
+      name: "stress-empty",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await composerField(page).click();
+        await page.keyboard.type(
+          "# Bildschirmaufnahme und Systemaudio – Jahresübersicht"
+        );
+      },
+      data: { view: stressView() },
+      keepPointer: true,
+      name: "stress-composer-section",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await composerField(page).click();
+        await page.keyboard.type(`${LONG_WORD}${LONG_WORD} ${LONG_URL}`);
+      },
+      data: { view: stressView() },
+      keepPointer: true,
+      name: "stress-composer-long",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await page.evaluate(
+          `globalThis.__emit("notice", ${JSON.stringify({
+            message: `Zwischenablage wiederhergestellt, aber ${LONG_WORD} konnte nicht kopiert werden.`,
+            tone: "failed",
+          })})`
+        );
+        await page.locator("[data-sonner-toast]").first().waitFor();
+        await page.waitForTimeout(500);
+      },
+      data: { view: stressView() },
+      name: "stress-shelf-notice",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await focusRowOf(page, 710);
+        await hideAndShow(page);
+      },
+      check: async (page) => {
+        const owner = await focusOwner(page);
+
+        if (!owner.composer) {
+          return `opening the shelf again left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
+        }
+
+        return await reachedDetails(710)(page);
+      },
+      data: { view: stressView() },
+      height: 620,
+      name: "stress-open-focus",
+      width: NARROWEST,
+    },
+    {
+      // Esc hides the shelf from the list; whatever brings it back, it opens on the note field.
+      act: async (page) => {
+        await focusRowOf(page, 710);
+        await page.keyboard.press("Escape");
+        await refocus(page);
+      },
+      check: async (page) => {
+        const owner = await focusOwner(page);
+
+        return owner.composer
+          ? null
+          : `hidden with Esc from an item and shown again, the shelf left the keyboard on ${owner.item ?? "nothing"}, not in the note field`;
+      },
+      data: { view: stressView() },
+      name: "stress-escape-then-open",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await focusRowOf(page, 710);
+        await refocus(page);
+      },
+      check: async (page) => {
+        const owner = await focusOwner(page);
+
+        return owner.item === uuid(710)
+          ? null
+          : `a window closing over the shelf moved the keyboard off the item it was on (${owner.composer ? "to the note field" : (owner.item ?? "nowhere")})`;
+      },
+      data: { view: stressView() },
+      name: "stress-refocus-keeps-row",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 710);
+        await hideAndShow(page);
+      },
+      check: async (page) =>
+        (await page.locator("[data-details]").count()) === 1
+          ? null
+          : "opening the shelf again closed the details that were open",
+      data: { view: stressView() },
+      name: "stress-open-keeps-details",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 720, "Monday", "double-click closed");
+      },
+      check: async (page) => await editedInPlace(page, 720, "Monday"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-double-click",
+    },
+    {
+      act: async (page) => {
+        await select(page, 721);
+        await page.getByRole("link", { name: "floor plan" }).click();
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const sent = await calls(page);
+        const opened = sent.some((call) => call.call === "openLink");
+
+        const editing = await page
+          .getByRole("textbox", { name: "Edit item" })
+          .count();
+
+        return opened && editing === 0
+          ? null
+          : `a click on a link in the open item ${opened ? "opened it" : "didn't open it"} and ${editing === 0 ? "started no edit" : "started an edit"}`;
+      },
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-link-opens",
+    },
+    {
+      act: async (page) => {
+        await focusRowOf(page, 721);
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(300);
+      },
+      check: async (page) =>
+        (await caretAtEnd(page))
+          ? null
+          : "Return on the open item didn't start an edit with the caret at the end",
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-return-end",
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 720, "movers");
+      },
+      check: async (page) => await editedInPlace(page, 720, "movers"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-line",
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 721, "Lamps");
+      },
+      check: async (page) => await editedInPlace(page, 721, "Lamps"),
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-list",
+    },
+    {
+      act: async (page) => {
+        await clickToEdit(page, 722, "button");
+      },
+      check: async (page) => {
+        // The field's tint is as wide as the text column: it ends where the picture over it does. Read first: finding the caret's word ends the edit.
+        const field = await boxOf(
+          item(page, 722).locator("div:has(> textarea)")
+        );
+
+        const picture = await boxOf(item(page, 722).locator("img").first());
+
+        if (
+          Math.abs(field.left - picture.left) > 0.5 ||
+          Math.abs(field.right - picture.right) > 0.5
+        ) {
+          return `the edit field runs from ${field.left} to ${field.right}, the picture over it from ${picture.left} to ${picture.right}`;
+        }
+
+        return await editedInPlace(page, 722, "button");
+      },
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-edit-in-place-note",
+    },
+    {
+      // An open file without a note, before any click: the quiet Add a note… shows where the note would be.
+      act: async (page) => {
+        await select(page, 714);
+      },
+      check: async (page) =>
+        (await page.getByRole("button", { name: "Add a note…" }).isVisible())
+          ? null
+          : "an open file without a note doesn't offer Add a note…",
+      data: { view: stressView() },
+      name: "stress-open-add-note-idle",
+    },
+    {
+      // An open file without a note offers one; a click starts it.
+      act: async (page) => {
+        await select(page, 714);
+        await page.getByRole("button", { name: "Add a note…" }).click();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) =>
+        (await page.evaluate(
+          () => document.activeElement?.getAttribute("aria-label") ?? ""
+        )) === "Note for this file"
+          ? null
+          : "Add a note… didn't start the note",
+      data: { view: stressView() },
+      name: "stress-open-add-note",
+      width: NARROWEST,
+    },
+    {
+      // The empty section new items go to says so, once; the other empty ones are just their headings.
+      check: async (page) => {
+        const hints = await page
+          .getByText("New notes and captures land here")
+          .count();
+
+        return hints === 1
+          ? null
+          : `${hints} empty sections say new items land there; only the one they go to should`;
+      },
+      data: { view: stressView({ ...EDIT_DOC, activeSectionId: STRESS_D }) },
+      name: "stress-empty-target-section",
+    },
+    {
+      // In details, one click on the words edits them there, as on the open row.
+      act: async (page) => {
+        await details(page, 720);
+
+        const word = page.locator("[data-details]").getByText("Monday", {
+          exact: false,
+        });
+
+        const box = await word.first().evaluate((element) => {
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT
+          );
+
+          for (
+            let node = walker.nextNode();
+            node !== null;
+            node = walker.nextNode()
+          ) {
+            const at = (node.textContent ?? "").indexOf("Monday");
+
+            if (at !== -1) {
+              const range = document.createRange();
+
+              range.setStart(node, at);
+              range.setEnd(node, at + 6);
+
+              const rect = range.getBoundingClientRect();
+
+              return {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+              };
+            }
+          }
+
+          return null;
+        });
+
+        if (box !== null) {
+          await page.mouse.click(box.x, box.y);
+        }
+
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const editing = await page
+          .getByRole("textbox", { name: "Edit item" })
+          .count();
+
+        const at = await caretWord(page);
+
+        return editing === 1 && at === "Monday"
+          ? null
+          : `one click on the words in details ${editing === 1 ? `put the caret in “${at}”` : "started no edit"}, not in “Monday”`;
+      },
+      data: { view: stressView(EDIT_DOC) },
+      keepPointer: true,
+      name: "stress-details-click-edits",
+    },
+    {
+      // A note being typed under a picture ends its edit when the keyboard leaves it, as the words' editor does.
+      act: async (page) => {
+        await clickToEdit(page, 722, "button");
+        await page.getByRole("textbox", { name: /^New note in/u }).focus();
+        await page.waitForTimeout(250);
+      },
+      check: async (page) =>
+        (await page
+          .getByRole("textbox", { name: "Note for this image" })
+          .count()) === 0
+          ? null
+          : "the note's field stayed open after the keyboard left it",
+      data: { view: stressView(EDIT_DOC) },
+      name: "stress-edit-note-blur",
+    },
+    {
+      data: {
+        view: {
+          corner: "bottom-right",
+          kind: "notice",
+          seq: 1,
+          title: `Saved to ${SECTION_PHRASE}`,
+          offer: null,
+          tone: "done",
+        },
+      },
+      name: "stress-notice-done",
+      page: "toast",
+    },
+    {
+      data: {
+        view: {
+          corner: "top-left",
+          kind: "notice",
+          seq: 1,
+          title: `Zwischenablage wiederhergestellt, aber die Bildschirmaufnahme und Systemaudio konnten nicht gespeichert werden, weil ${LONG_WORD} den Datenträger blockiert.`,
+          offer: null,
+          tone: "failed",
+        },
+      },
+      height: 72,
+      name: "stress-notice-failed",
+      page: "toast",
+      width: 360,
+    },
+    {
+      // At rest, with no item to name: Add to Shelf alone, in the card's middle.
+      check: async (page) =>
+        cardMiddle(
+          await boxOf(
+            page.getByRole("button", { exact: true, name: "Add to Shelf" })
+          )
+        ),
+      data: { view: SCREENSHOT_VIEW },
+      name: "stress-screenshot-card",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.evaluate(() => {
+          const add = document.querySelector(
+            "button[aria-label='Add to Shelf']"
+          );
+
+          Object.assign(globalThis, {
+            __atRest: add?.getBoundingClientRect().left ?? -1,
+          });
+        });
+        await page.mouse.move(140, 90);
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const add = await boxOf(
+          page.getByRole("button", { exact: true, name: "Add to Shelf" })
+        );
+
+        const copy = await boxOf(
+          page.getByRole("button", { exact: true, name: "Copy" })
+        );
+
+        const atRest = z
+          .number()
+          .parse(await page.evaluate("globalThis.__atRest"));
+
+        // Copy shows in a slot kept for it: Add to Shelf stays under the pointer.
+        if (Math.abs(add.left - atRest) > 0.5) {
+          return `Add to Shelf moved from ${atRest} to ${add.left} when Copy showed`;
+        }
+
+        // Add to Shelf leads: Copy beside it, no larger.
+        if (
+          tall(copy) > tall(add) ||
+          Math.abs(middle(add) - middle(copy)) > 0.5
+        ) {
+          return "Copy isn't beside Add to Shelf, or is larger";
+        }
+
+        if (copy.left < add.right) {
+          return "Add to Shelf doesn't come first";
+        }
+
+        const corner = await boxOf(
+          page.getByRole("button", { name: "Save to Downloads" })
+        );
+
+        if (copy.right > corner.left - 4) {
+          return `Copy reaches the corner button (${copy.right} against ${corner.left})`;
+        }
+
+        return cardMiddle(add);
+      },
+      data: { view: SCREENSHOT_VIEW },
+      keepPointer: true,
+      name: "stress-screenshot-hover",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await page
+          .getByRole("button", { name: "Saving…" })
+          .click({ force: true });
+      },
+      check: async (page) => {
+        const saving = page.getByRole("button", { name: "Saving…" });
+
+        if ((await saving.getAttribute("aria-disabled")) !== "true") {
+          return "Saving… can be pressed again";
+        }
+
+        const sent = await calls(page);
+
+        if (sent.some((each) => each.call === "addToShelf")) {
+          return "a click on Saving… saved again";
+        }
+
+        const { label } = await focusedOpacity(page);
+
+        if (label !== "Saving…") {
+          return `the keyboard left Saving… for “${label}”`;
+        }
+
+        if (
+          !(await page.getByRole("img", { name: "New screenshot" }).isVisible())
+        ) {
+          return "the picture went while it saves";
+        }
+
+        // Saving… takes the place of Add to Shelf at its size.
+        const savingBox = await boxOf(saving);
+
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify(SCREENSHOT_VIEW)})`
+        );
+
+        const idle = await boxOf(
+          page.getByRole("button", { exact: true, name: "Add to Shelf" })
+        );
+
+        return isDeepStrictEqual(savingBox, idle)
+          ? null
+          : `Saving… is not the size of Add to Shelf: ${JSON.stringify({ idle, savingBox })}`;
+      },
+      data: {
+        view: { ...SCREENSHOT_VIEW, save: { state: "saving", to: "shelf" } },
+      },
+      keepPointer: true,
+      name: "stress-screenshot-saving",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await page.waitForTimeout(300);
+      },
+      check: async (page) => {
+        const { label, opacity } = await focusedOpacity(page);
+
+        const held = z
+          .array(z.boolean())
+          .parse(await page.evaluate("globalThis.__hover"))
+          .at(-1);
+
+        if (label !== "Add to Shelf") {
+          return `the first Tab put the keyboard on “${label}”, not on Add to Shelf`;
+        }
+
+        if (opacity <= 0.5) {
+          return `Tab put the keyboard on “${label}”, which can’t be seen (opacity ${opacity})`;
+        }
+
+        return held === true
+          ? null
+          : "the keyboard on an action didn't keep the card on screen, as the pointer does";
+      },
+      data: { view: SCREENSHOT_VIEW },
+      // The pointer stays off the card, so only the keyboard shows its actions.
+      keepPointer: true,
+      name: "stress-screenshot-focus",
+      page: "screenshot",
+    },
+    {
+      check: async (page) => {
+        const problem = await failedCardCheck([
+          "Retry",
+          "Copy",
+          "Save to Downloads",
+          "Dismiss",
+          "Annotate",
+          "Keep on Screen",
+        ])(page);
+
+        if (problem !== null) {
+          return problem;
+        }
+
+        // At rest the two lines say what went wrong, whatever name follows.
+        const reasonShows = await page
+          .getByRole("alert")
+          .evaluate((alert, reason) => {
+            const text = alert.querySelector("span")?.firstChild;
+            const range = document.createRange();
+
+            if (text === null || text === undefined) {
+              return false;
+            }
+
+            range.setStart(text, 0);
+            range.setEnd(text, reason.length);
+
+            return (
+              range.toString() === reason &&
+              range.getBoundingClientRect().bottom <=
+                alert.getBoundingClientRect().bottom
+            );
+          }, CARD_REASON);
+
+        if (!reasonShows) {
+          return `the failed card's two lines don't show “${CARD_REASON}”`;
+        }
+
+        await page.getByRole("button", { name: "Retry" }).click();
+
+        const sent = await calls(page);
+
+        return sent.some((each) => each.call === "addToShelf" && each.arg === 1)
+          ? null
+          : `Retry sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: failedCard("shelf") },
+      name: "stress-screenshot-add-failed",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        if (!(await tabToFailure(page))) {
+          throw new Error("Tab never reached the failure message");
+        }
+      },
+      check: failureEndReached,
+      data: { view: failedCard("shelf") },
+      keepPointer: true,
+      name: "stress-screenshot-add-failed-focus",
+      page: "screenshot",
+    },
+  ] satisfies readonly StressScene[]
+).map(stress);
+
+/** The drawing window at its smallest (src/shared/geometry.ts VIEWER_MIN). */
+const DRAWING_MIN = { height: 360, width: 600 } as const;
+
+const DRAWING_STRESS_SCENES: readonly Scene[] = (
+  [
+    {
+      data: { view: BLANK_DRAWING },
+      name: "stress-drawing-blank",
+    },
+    {
+      data: { view: drawingView(MANY_PINS, false) },
+      name: "stress-drawing-pins",
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.press("p");
+        await page.keyboard.press("2");
+      },
+      data: { view: drawingView(MANY_PINS, true) },
+      name: "stress-drawing-pin-selected",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Text" }).click();
+        await page
+          .locator("canvas")
+          .first()
+          .click({ position: { x: 120, y: 120 } });
+        await page
+          .getByRole("textbox", { exact: true, name: "Text" })
+          .fill(`${LONG_WORD} ${LONG_STEP}`);
+      },
+      data: { view: BLANK_DRAWING },
+      keepPointer: true,
+      name: "stress-drawing-text",
+    },
+    {
+      // A click near the right edge: the field moves left to stay readable, and keeps 12 px from the edge.
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Text" }).click();
+
+        const canvas = await boxOf(page.locator("canvas").first());
+
+        await page
+          .locator("canvas")
+          .first()
+          .click({ position: { x: canvas.right - canvas.left - 30, y: 120 } });
+        await page
+          .getByRole("textbox", { exact: true, name: "Text" })
+          .fill(`${LONG_WORD} ${LONG_STEP}`);
+      },
+      check: async (page) => {
+        const field = await boxOf(
+          page.getByRole("textbox", { exact: true, name: "Text" })
+        );
+
+        const width = await page.evaluate(
+          "document.documentElement.clientWidth"
+        );
+
+        if (field.right - field.left < 150) {
+          return `near the edge the field is ${Math.round(field.right - field.left)} px wide`;
+        }
+
+        return field.right > Number(width) - 11
+          ? "the field runs into the window's edge"
+          : null;
+      },
+      data: { view: BLANK_DRAWING },
+      keepPointer: true,
+      name: "stress-drawing-text-edge",
+    },
+    {
+      act: async (page) => {
+        await drawStroke(page, 160);
+        await page.getByRole("button", { exact: true, name: "Save" }).click();
+        await page.getByRole("alert").waitFor();
+      },
+      data: {
+        saveFails: `Die Zeichnung konnte nicht gespeichert werden, weil der Datenträger voll ist: ${LONG_WORD}. Zwischenablage wiederhergestellt.`,
+        view: BLANK_DRAWING,
+      },
+      name: "stress-drawing-save-failed",
+    },
+    {
+      act: async (page) => {
+        await drawStroke(page, 160);
+        await page.evaluate('globalThis.__emit("openRefused", null)');
+      },
+      data: { view: drawingView(MANY_PINS, true) },
+      name: "stress-drawing-refused",
+    },
+    {
+      act: async (page) => {
+        await drawStroke(page, 160);
+        await page.evaluate('globalThis.__emit("confirmClose", "earlier")');
+        await page.getByRole("alertdialog").waitFor();
+      },
+      data: { view: drawingView(MANY_PINS, false) },
+      name: "stress-drawing-unsaved",
+    },
+    {
+      data: { view: { ...drawingView(MANY_PINS, true), quitting: true } },
+      name: "stress-drawing-locked",
+    },
+  ] satisfies readonly StressScene[]
+).map((scene) => stress({ ...scene, ...DRAWING_MIN, page: "drawing" }));
+
+// Pill scenes: the notice window's say-why and recall states (src/shared/pill.ts), at its sizes in src/main/toast-window.ts,
+// and the shelf's from:here filter and chip (src/renderer/shelf/from-here.tsx).
+
+/** The why field's window: 320 wide. */
+const WHY_WIDTH = 320;
+
+const pillNotice = (title: string) => ({
+  corner: "bottom-right",
+  kind: "notice",
+  offer: "why",
+  seq: 1,
+  title,
+  tone: "done",
+});
+
+/** The calls named so, with what each was sent. */
+const callsTo = async (page: Page, names: readonly string[]) => {
+  const sent = await calls(page);
+
+  return sent.filter((each) => names.includes(each.call));
+};
+
+const recallView = (count: number, label: string) => ({
+  corner: "bottom-right",
+  count,
+  kind: "recall",
+  label,
+  seq: 3,
+});
+
+/** The recall pill is not the capture notice: no Why, a close button instead. */
+const recallChecks = async (page: Page): Promise<string | null> => {
+  if ((await page.getByRole("button", { name: /^Why/u }).count()) > 0) {
+    return "the recall pill must not offer Why";
+  }
+
+  await page.getByRole("button", { name: /^\d+ items? from /u }).click();
+  await page
+    .getByRole("button", { name: "Don’t show for this place again" })
+    .click();
+
+  const sent = await callsTo(page, ["open", "dismiss"]);
+
+  return isDeepStrictEqual(sent, [
+    { arg: 3, call: "open" },
+    { arg: 3, call: "dismiss" },
+  ])
+    ? null
+    : `a click must open the shelf and × dismiss: ${JSON.stringify(sent)}`;
+};
+
+/** The shelf opened beside the pull request item 14 came from; item 16 too when `both`. */
+const hereView = (
+  filter: boolean,
+  label = "GitHub · inset/shelf #482",
+  both = false
+) => ({
+  ...shelfView(),
+  here: {
+    filter,
+    ids: both ? [uuid(14), uuid(16)] : [uuid(14)],
+    label,
+    seq: 1,
+  },
+});
+
+const SEARCH_FIELD = "Search the shelf";
+
+/** The search, and the items the list shows. */
+const listed = async (page: Page) => {
+  const query = await page
+    .getByRole("textbox", { name: SEARCH_FIELD })
+    .inputValue();
+
+  const ids = await page
+    .locator("[data-item-id]")
+    .evaluateAll((rows) => rows.map((row) => row.dataset.itemId));
+
+  return { ids, query };
+};
+
+/** The search field as it stands: the chip's words in view, the placeholder, and whether anything in it is cut (the chip, or what the field shows of its search or placeholder). */
+const fieldAtWidth = async (page: Page) =>
+  z
+    .object({ cut: z.string(), label: z.string(), placeholder: z.string() })
+    .parse(
+      await page.evaluate(() => {
+        const group = document.querySelector("[data-slot=input-group]");
+        const input = group?.querySelector("input");
+        const chip = group?.querySelector("button[aria-pressed]");
+
+        if (
+          !(group instanceof HTMLElement) ||
+          !(input instanceof HTMLInputElement) ||
+          !(chip instanceof HTMLElement)
+        ) {
+          return { cut: "no field", label: "", placeholder: "" };
+        }
+
+        const style = getComputedStyle(input);
+        const pen = document.createElement("canvas").getContext("2d");
+
+        if (pen !== null) {
+          pen.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        }
+
+        const words = input.value === "" ? input.placeholder : input.value;
+        const needs = pen?.measureText(words).width ?? Infinity;
+
+        const room =
+          input.clientWidth -
+          Number(style.paddingLeft.replace("px", "")) -
+          Number(style.paddingRight.replace("px", ""));
+
+        const cut = [
+          ...(needs > room + 0.5
+            ? [`“${words}” needs ${Math.round(needs)} of ${Math.round(room)}`]
+            : []),
+          ...(chip.scrollWidth > chip.clientWidth ? ["the chip"] : []),
+          ...([...group.querySelectorAll("button")].some(
+            (button) =>
+              button.getClientRects().length > 0 &&
+              button.getBoundingClientRect().right >
+                group.getBoundingClientRect().right + 0.5
+          )
+            ? ["a button runs out of the field"]
+            : []),
+        ];
+
+        return {
+          cut: cut.join(", "),
+          label: [...chip.querySelectorAll("span")]
+            .flatMap((part) =>
+              part.getClientRects().length > 0 ? [part.textContent ?? ""] : []
+            )
+            .join(""),
+          placeholder: input.placeholder,
+        };
+      })
+    );
+
+const whyView = (phase: "taking" | "typing" | "saved") => ({
+  corner: "top-left",
+  kind: "why",
+  phase,
+  seq: 2,
+});
+
+const WHY_WORDS = "because the API changes";
+
+/** What main says when the disk refuses a write (saveErrorText in src/main/save-error.ts). */
+const PILL_WRITE_FAILED = "The disk is full.";
+
+/** The page holds nothing a key could land in, as the pill's window holds no keyboard. */
+const takesNoKey = async (page: Page): Promise<boolean> =>
+  (await page.getByRole("textbox").count()) === 0 &&
+  (await page.evaluate(
+    "document.activeElement === document.body || document.activeElement === null"
+  )) === true;
+
+const WHY_LONG = `Weil die ${LONG_WORD} das Protokoll der Quartalsübersicht vor Freitag braucht`;
+
+const PILL_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) => {
+        await page.getByRole("button", { name: /Saved to Inbox/u }).click();
+        await page.getByRole("button", { name: /^Why/u }).click();
+
+        const sent = await callsTo(page, ["open", "why"]);
+
+        return isDeepStrictEqual(sent, [
+          { arg: 1, call: "open" },
+          { arg: 1, call: "why" },
+        ])
+          ? null
+          : `a click on the words must open the shelf and one on Why the field: ${JSON.stringify(sent)}`;
+      },
+      data: { view: pillNotice("Saved to Inbox") },
+      name: "pill-why-offer",
+    },
+    {
+      data: { view: pillNotice(`Saved to ${SECTION_PHRASE}`) },
+      name: "pill-why-offer-long-section",
+    },
+    {
+      data: { view: pillNotice(`Saved to ${SECTION_WORD}`) },
+      name: "pill-why-offer-long-word",
+    },
+    {
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: "Why this matters" });
+
+        const focusedField = await field.evaluate(
+          (element) => document.activeElement === element
+        );
+
+        if (!focusedField) {
+          return "the field must have the keyboard";
+        }
+
+        const ready = await callsTo(page, ["whyReady"]);
+
+        if (!isDeepStrictEqual(ready.at(0), { arg: 2, call: "whyReady" })) {
+          return `the page must say the field is ready: ${JSON.stringify(ready)}`;
+        }
+
+        await page.keyboard.type("because the API changes");
+        await page.keyboard.press("Enter");
+        await page.keyboard.press("Escape");
+
+        const sent = await callsTo(page, ["saveWhy", "cancelWhy"]);
+
+        return isDeepStrictEqual(sent, [
+          {
+            arg: { seq: 2, text: "because the API changes" },
+            call: "saveWhy",
+          },
+          { arg: 2, call: "cancelWhy" },
+        ])
+          ? null
+          : `Return must save the words and Esc cancel: ${JSON.stringify(sent)}`;
+      },
+      data: { view: whyView("taking") },
+      name: "pill-why-field",
+      width: WHY_WIDTH,
+    },
+    {
+      act: async (page) => {
+        await page.keyboard.type(WHY_LONG);
+      },
+      check: async (page) => {
+        const typed = await callsTo(page, ["whyInput"]);
+
+        return typed.at(-1)?.arg !== undefined &&
+          isDeepStrictEqual(typed.at(-1)?.arg, { seq: 2, text: WHY_LONG })
+          ? null
+          : "every change must reach main, so a click away keeps the words";
+      },
+      data: { view: whyView("taking") },
+      keepPointer: true,
+      name: "pill-why-field-long-text",
+      width: WHY_WIDTH,
+    },
+    {
+      // Typed into the field and sent with Return, as a user does; `whySaves` has main answer with the words on their way to the disk.
+      act: async (page) => {
+        await page.keyboard.type(WHY_WORDS);
+        await page.keyboard.press("Enter");
+        await page.getByText("Saving…").waitFor();
+      },
+      check: async (page) => {
+        if ((await page.getByText("Why saved").count()) > 0) {
+          return "Why saved must wait until the disk holds the words";
+        }
+
+        if (!(await page.getByText(WHY_WORDS, { exact: true }).isVisible())) {
+          return "the pill must show the typed words beside Saving…";
+        }
+
+        // A key pressed now belongs to the app in front: nothing in the pill takes it.
+        await page.keyboard.type("z");
+
+        const sent = await callsTo(page, ["whyInput", "saveWhy"]);
+
+        return (await takesNoKey(page)) &&
+          sent.at(-1)?.call === "saveWhy" &&
+          sent.filter((each) => each.call === "saveWhy").length === 1
+          ? null
+          : `while the words are written the pill must take no key: ${JSON.stringify(sent.slice(-2))}`;
+      },
+      data: { view: whyView("taking"), whySaves: true },
+      keepPointer: true,
+      name: "pill-why-saving",
+      width: WHY_WIDTH,
+    },
+    {
+      check: async (page) => {
+        const said = await page.getByRole("alert").textContent();
+
+        if (
+          said?.includes(PILL_WRITE_FAILED) !== true ||
+          !said.includes(WHY_WORDS)
+        ) {
+          return `a failed write must repeat the words and say why: ${JSON.stringify(said)}`;
+        }
+
+        if (!(await takesNoKey(page))) {
+          return "words that couldn't be written must be offered without taking the keyboard";
+        }
+
+        await page.getByRole("button", { name: /^Try again/u }).click();
+
+        const sent = await callsTo(page, ["why", "saveWhy"]);
+
+        return isDeepStrictEqual(sent, [{ arg: 3, call: "why" }])
+          ? null
+          : `Try again must ask main for the same words again: ${JSON.stringify(sent)}`;
+      },
+      data: {
+        view: {
+          corner: "top-left",
+          kind: "notice",
+          offer: "again",
+          seq: 3,
+          title: `${PILL_WRITE_FAILED} “${WHY_WORDS}” wasn’t saved.`,
+          tone: "failed",
+        },
+      },
+      height: 72,
+      name: "pill-why-failed",
+      width: 360,
+    },
+    {
+      data: { view: whyView("saved") },
+      name: "pill-why-saved",
+      width: WHY_WIDTH,
+    },
+    {
+      check: recallChecks,
+      data: { view: recallView(3, "GitHub · acme/app #12") },
+      name: "pill-recall",
+    },
+    {
+      data: { view: recallView(1, "Notes · Standup") },
+      name: "pill-recall-one",
+    },
+    {
+      data: { view: recallView(128, `Code · ${LONG_WORD}`) },
+      name: "pill-recall-many",
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("button", { name: /^12 items from Safari/u })
+          .hover();
+      },
+      check: async (page) => {
+        const named = await page
+          .getByRole("button", { name: /^12 items from Safari/u })
+          .getAttribute("title");
+
+        return named?.startsWith(
+          `12 items from Safari · ${LONG_TITLE.slice(0, 20)}`
+        ) === true && named.length <= 300
+          ? null
+          : `the recall pill must name its place: ${String(named)}`;
+      },
+      data: { view: recallView(12, `Safari · ${LONG_TITLE}`) },
+      keepPointer: true,
+      name: "pill-recall-long-place",
+    },
+    {
+      check: async (page) => {
+        const shown = await listed(page);
+        const sections = await page.getByText("Inbox", { exact: true }).count();
+
+        return shown.query === "from:here" &&
+          isDeepStrictEqual(shown.ids, [uuid(14)]) &&
+          sections === 0
+          ? null
+          : `opened from the recall pill, the list must show only the item from here, without empty sections: ${JSON.stringify({ ...shown, sections })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here",
+      page: "shelf",
+    },
+    {
+      // On, at the shelf's narrowest: the chip keeps its words, tinted, and the field its room.
+      data: { view: hereView(true, `Safari · ${LONG_TITLE}`) },
+      layoutCheck: true,
+      name: "shelf-from-here-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      check: async (page) => {
+        const before = await listed(page);
+
+        await page
+          .getByRole("button", { name: "Show the 2 items from here" })
+          .click();
+
+        const after = await listed(page);
+
+        if (
+          before.ids.length <= 2 ||
+          after.query !== "from:here" ||
+          !isDeepStrictEqual(after.ids, [uuid(14), uuid(16)])
+        ) {
+          return `the chip must filter the whole list to the items from here: ${JSON.stringify({ after, before })}`;
+        }
+
+        // The chip keeps the keyboard: Return on it takes the filter off again.
+        await page.keyboard.press("Enter");
+
+        const off = await listed(page);
+
+        return off.query === ""
+          ? null
+          : `Return right after the click must take the filter off: ${JSON.stringify(off)}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-chip",
+      page: "shelf",
+    },
+    {
+      act: async (page) => {
+        await page.getByRole("button", { name: "Clear Search" }).click();
+      },
+      check: async (page) => {
+        const shown = await listed(page);
+
+        const chip = await page
+          .getByRole("button", { name: "Show the item from here" })
+          .count();
+
+        return shown.query === "" && shown.ids.length > 1 && chip === 1
+          ? null
+          : `clearing the search must bring every item back, and the chip: ${JSON.stringify({ ...shown, chip })}`;
+      },
+      data: { view: hereView(true) },
+      name: "shelf-from-here-cleared",
+      page: "shelf",
+    },
+    {
+      check: async (page) => {
+        const placeholder = await page
+          .getByRole("textbox", { name: SEARCH_FIELD })
+          .getAttribute("placeholder");
+
+        const short = await page
+          .getByText("Here · 2", { exact: true })
+          .isVisible();
+
+        const long = await page
+          .getByText("2 from here", { exact: true })
+          .isVisible();
+
+        return placeholder === "Search" && short && !long
+          ? null
+          : `at 300 the chip reads “Here · 2” and the field “Search”: ${JSON.stringify({ long, placeholder, short })}`;
+      },
+      data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
+      name: "shelf-from-here-chip-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      // The chip's words, the placeholder and Clear Search follow the field's own width. Swept from the narrowest shelf to a wide one, with the filter off and on, nothing in the field is cut, and the decided looks hold at 300, 340 and 440.
+      check: async (page) => {
+        const sweep = async (on: boolean) => {
+          const seen: {
+            readonly cut: string;
+            readonly label: string;
+            readonly placeholder: string;
+            readonly width: number;
+          }[] = [];
+
+          for (let width = NARROWEST; width <= 440; width += 10) {
+            // oxlint-disable-next-line no-await-in-loop -- one width after another.
+            await page.setViewportSize({ height: 600, width });
+            // oxlint-disable-next-line no-await-in-loop -- the field is measured once it has settled at this width.
+            await page.waitForTimeout(60);
+
+            seen.push({
+              // oxlint-disable-next-line no-await-in-loop -- read at this width.
+              ...(await fieldAtWidth(page)),
+              width,
+            });
+          }
+
+          return seen.map((each) => ({ ...each, on }));
+        };
+
+        const off = await sweep(false);
+
+        await page
+          .getByRole("button", { name: "Show the 2 items from here" })
+          .click();
+
+        const on = await sweep(true);
+        const cut = [...off, ...on].filter((each) => each.cut !== "");
+
+        if (cut.length > 0) {
+          return `the search field cuts its words at ${JSON.stringify(cut)}`;
+        }
+
+        const at = (list: typeof off, width: number) => {
+          const found = list.find((each) => each.width === width);
+
+          return found === undefined
+            ? ""
+            : `${found.label} | ${found.placeholder}`;
+        };
+
+        const looks = {
+          off300: at(off, 300),
+          off340: at(off, 340),
+          off440: at(off, 440),
+          on300: at(on, 300),
+          on340: at(on, 340),
+          on440: at(on, 440),
+        };
+
+        return isDeepStrictEqual(looks, {
+          off300: "Here · 2 | Search",
+          off340: "2 from here | Search",
+          off440: "2 from here | Search or due:today",
+          on300: "Here | Search",
+          on340: "Here | Search",
+          on440: "2 from here | Search or due:today",
+        })
+          ? null
+          : `the field's words at 300, 340 and 440 changed: ${JSON.stringify(looks)}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-widths",
+      page: "shelf",
+    },
+    {
+      // With the filter on the chip stays, pressed; Return on it takes the filter off again, which is what the picture shows.
+      act: async (page) => {
+        const chip = page.getByRole("button", {
+          name: "Show the item from here",
+        });
+
+        const pressed = await chip.getAttribute("aria-pressed");
+
+        await page.evaluate(
+          `globalThis.__pressedBefore = ${JSON.stringify(pressed)}`
+        );
+        await chip.focus();
+        await page.keyboard.press("Enter");
+      },
+      check: async (page) => {
+        if ((await page.evaluate("globalThis.__pressedBefore")) !== "true") {
+          return "with from:here on, the chip must stay, pressed";
+        }
+
+        const shown = await listed(page);
+
+        const pressed = await page
+          .getByRole("button", { name: "Show the item from here" })
+          .getAttribute("aria-pressed");
+
+        return shown.query === "" && shown.ids.length > 1 && pressed === "false"
+          ? null
+          : `Return on the pressed chip must take the filter off and leave the chip, not pressed: ${JSON.stringify({ ...shown, pressed })}`;
+      },
+      data: { view: hereView(true) },
+      keepPointer: true,
+      name: "shelf-from-here-chip-off",
+      page: "shelf",
+    },
+    {
+      // The filter menu offers the items from here beside the due filters.
+      act: async (page) => {
+        await page.getByRole("button", { exact: true, name: "Filter" }).click();
+      },
+      check: async (page) => {
+        await page.getByRole("menuitem", { name: /From this window/u }).click();
+
+        const shown = await listed(page);
+
+        return shown.query === "from:here" &&
+          isDeepStrictEqual(shown.ids, [uuid(14), uuid(16)])
+          ? null
+          : `From this window must filter to the items from here: ${JSON.stringify(shown)}`;
+      },
+      data: { view: hereView(false, undefined, true) },
+      name: "shelf-from-here-menu",
+      page: "shelf",
+    },
+    {
+      act: async (page) => {
+        await page
+          .getByRole("textbox", { name: SEARCH_FIELD })
+          .fill(`from:here ${LONG_WORD}`);
+      },
+      data: { view: hereView(false, `Safari · ${LONG_TITLE}`, true) },
+      name: "shelf-from-here-no-matches-narrow",
+      page: "shelf",
+      width: NARROWEST,
+    },
+    {
+      // The why field couldn't get the keyboard: the shelf opens at the item's description instead.
+      act: async (page) => {
+        await page.evaluate(
+          `globalThis.__emit("view", ${JSON.stringify({ ...shelfView(), focus: { field: "description", id: uuid(10), seq: 1 } })})`
+        );
+        await page.getByRole("button", { name: "Back to the list" }).waitFor();
+      },
+      check: async (page) => {
+        const field = page.getByRole("textbox", { name: "Description" });
+
+        const focusedField = await field.evaluate(
+          (element) => document.activeElement === element
+        );
+
+        return focusedField
+          ? null
+          : "the description field must have the keyboard";
+      },
+      data: { view: shelfView() },
+      name: "pill-why-fallback-shelf",
+      page: "shelf",
+    },
+  ] satisfies readonly StressScene[]
+).map((scene) => stress({ page: "toast", ...scene }));
+
+// Attachments on an item (release/ux-rounds/plans/attachments.md, section 6)
+
+/** An attached picture: one of the sample windows, or a file that isn't in the data folder. */
+const attachedImage = (n: number, name: string, file?: string) => {
+  const win = SAMPLE_WINDOWS[n % SAMPLE_WINDOWS.length] ?? SAMPLE_WINDOWS[0];
+
+  return {
+    addedAt: ago(5),
+    id: uuid(900 + n),
+    image: {
+      file: file ?? png(win.n),
+      heightPx: 720,
+      pixelsPerDip: 1,
+      widthPx: 1152,
+    },
+    kind: "image",
+    name,
+    pins: [],
+  };
+};
+
+const attachedFile = (n: number, name: string, bytes = 48_000) => ({
+  addedAt: ago(5),
+  file: { bytes, name, stored: `${uuid(900 + n)}.bin` },
+  id: uuid(900 + n),
+  kind: "file",
+});
+
+/** Twelve, the most an item holds: eight pictures and four files. */
+const TWELVE = [
+  ...Array.from({ length: 8 }, (_, index) =>
+    attachedImage(index, `Screenshot ${index + 1}`)
+  ),
+  attachedFile(8, "quote-2026-114.pdf", 2_480_000),
+  attachedFile(9, "floor-plan-level-3.dwg"),
+  attachedFile(10, "budget.xlsx", 96_000),
+  attachedFile(11, "notes"),
+];
+
+const LONG_NAME =
+  `${"Angebot-Bueromoebel-Lieferung-und-Montage-dritter-Stock-".repeat(4)}Endfassung.pdf`.slice(
+    -255
+  );
+
+/** File names at the edges: 255 characters, one word without spaces, a long extension. */
+const LONG_NAMES = [
+  attachedFile(20, LONG_NAME),
+  attachedFile(21, `${LONG_WORD}${LONG_WORD}.txt`),
+  attachedFile(22, "export.backup-before-the-move-2026"),
+  attachedImage(23, LONG_TITLE),
+];
+
+const ATTACH_TEXT = {
+  ...base(901, 45),
+  attachments: TWELVE,
+  html: null,
+  kind: "text",
+  links: [],
+  text: "Movers' damage report: photos of every scratch, and the forms they sent",
+  via: "typed",
+};
+
+const ATTACH_IMAGE = {
+  ...IMAGE,
+  ...base(902, 44),
+  attachments: TWELVE,
+  image: LOGIN,
+  kind: "image",
+  note: "The sign-in screen with the problems marked",
+  pins: IMAGE.pins,
+  source: IMAGE.source,
+  title: null,
+  via: "screenshot",
+};
+
+const ATTACH_EVERYTHING = {
+  ...FULL,
+  attachments: TWELVE,
+  due: isoDay(-400),
+  id: uuid(903),
+};
+
+const ATTACH_LONG = {
+  ...base(904, 40),
+  attachments: LONG_NAMES,
+  html: null,
+  kind: "text",
+  links: [],
+  text: "The files Rieder sent with the quote",
+  via: "typed",
+};
+
+const ATTACH_MISSING = {
+  ...base(905, 35),
+  attachments: [
+    attachedImage(30, "Deleted by hand", `${uuid(999)}.png`),
+    attachedImage(31, "Still there"),
+  ],
+  html: null,
+  kind: "text",
+  links: [],
+  text: "A picture whose file was deleted outside the app",
+  via: "typed",
+};
+
+const ATTACH_TWO = {
+  ...base(906, 30),
+  attachments: [attachedImage(40, "Before"), attachedFile(41, "after.pdf")],
+  html: null,
+  kind: "text",
+  links: [],
+  text: "Chair arm, before and after the repair",
+  via: "typed",
+};
+
+/** A screenshot attached with its pins, one labelled at length, and a file beside it. */
+const ATTACH_PINNED = {
+  ...base(907, 25),
+  attachments: [
+    {
+      ...attachedImage(50, `Checkout ${LONG_WORD}`),
+      pins: [
+        { label: "Total is CHF 260 over the cap", x: 300, y: 200 },
+        { label: `${LONG_WORD} ${LONG_WORD}`, x: 700, y: 420 },
+        { x: 900, y: 600 },
+      ],
+    },
+    attachedFile(51, "receipt.pdf"),
+  ],
+  html: null,
+  kind: "text",
+  links: [],
+  text: "The checkout total doesn't match the quote",
+  via: "typed",
+};
+
+const attachDoc = (items: readonly object[]) => ({
+  ...DOC,
+  items: [...items, ...ITEMS.filter((entry) => entry.id === uuid(12))],
+});
+
+const attachView = (items: readonly object[]) => ({
+  ...shelfView(),
+  doc: attachDoc(items),
+});
+
+const ROW_ATTACH_VIEW = attachView([
+  ATTACH_PINNED,
+  ATTACH_TEXT,
+  ATTACH_TWO,
+  ATTACH_MISSING,
+  ATTACH_LONG,
+]);
+
+/** The row's tiles and +N: how many, on one line, inside the card. */
+const stripProblem = async (
+  page: Page,
+  n: number,
+  tiles: number,
+  more: string | null
+): Promise<string | null> => {
+  const strip = z
+    .object({
+      inside: z.boolean(),
+      lines: z.number(),
+      more: z.string().nullable(),
+      tiles: z.number(),
+    })
+    .parse(
+      await item(page, n).evaluate((row) => {
+        const entries = [
+          ...row.querySelectorAll("[data-attachment-strip] > li"),
+        ];
+
+        const card = row.getBoundingClientRect();
+
+        const boxes = entries.map((entry) => entry.getBoundingClientRect());
+
+        return {
+          inside: entries.every(
+            (entry) => entry.getBoundingClientRect().right <= card.right - 1
+          ),
+          // One line: every entry overlaps every other vertically.
+          lines:
+            Math.max(...boxes.map((box) => box.top)) <
+            Math.min(...boxes.map((box) => box.bottom))
+              ? 1
+              : 2,
+          more:
+            entries
+              .find((entry) => entry.textContent?.startsWith("+"))
+              ?.textContent?.trim() ?? null,
+          tiles: entries.filter(
+            (entry) =>
+              entry.querySelector("img, svg") !== null &&
+              !entry.textContent?.startsWith("+")
+          ).length,
+        };
+      })
+    );
+
+  if (strip.tiles !== tiles || strip.more !== more) {
+    return `the row shows ${strip.tiles} tiles and ${strip.more ?? "no +N"}, not ${tiles} and ${more ?? "no +N"}`;
+  }
+
+  if (strip.lines !== 1 || !strip.inside) {
+    return "the row's tiles don't sit on one line inside the card";
+  }
+
+  return more === null
+    ? null
+    : await moreGapProblem(item(page, n).locator("[data-attachment-strip]"));
+};
+
+/** The arguments of every call of one kind the page made, in order. */
+const sentArgs = async (page: Page, call: string) => {
+  const sent = await calls(page);
+
+  return sent.filter((each) => each.call === call).map((each) => each.arg);
+};
+
+/** Whether an element's classes hold the ring files over it draw. */
+const ringed = async (page: Page, selector: string): Promise<boolean> =>
+  z
+    .boolean()
+    .parse(
+      await page.evaluate(
+        `document.querySelector(${JSON.stringify(selector)})?.classList.contains("ring-pin") === true`
+      )
+    );
+
+/** Files dragged from outside over an element, as the system's drag would bring them. */
+const dragFilesOver = async (page: Page, selector: string) =>
+  z.string().parse(
+    await page.evaluate((target) => {
+      const element = document.querySelector(target);
+      const files = new DataTransfer();
+
+      files.items.add(
+        new File(["%PDF"], "offer.pdf", { type: "application/pdf" })
+      );
+
+      const over = new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: files,
+      });
+
+      element?.dispatchEvent(over);
+
+      return files.dropEffect;
+    }, selector)
+  );
+
+/** Drops a PDF on an element as Finder does: dragover, then drop, with the file in a DataTransfer. */
+const dropFilesOn = async (page: Page, selector: string): Promise<void> => {
+  await page.evaluate((target) => {
+    const element = document.querySelector(target);
+    const files = new DataTransfer();
+
+    files.items.add(
+      new File(["%PDF"], "offer.pdf", { type: "application/pdf" })
+    );
+
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      element?.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: files,
+        })
+      );
+    }
+  }, selector);
+};
+
+/** Details' Add menu, opened once the last one has gone, and one of its entries chosen. */
+const chooseInAdd = async (page: Page, name: RegExp): Promise<void> => {
+  await page.getByRole("menu").waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Add a field" }).click();
+  await page.getByRole("menuitem", { name }).click();
+};
+
+/** A picture pasted with ⌘V while the keyboard is in an element, as the system's paste would bring it. */
+const pasteImageInto = async (page: Page, selector: string): Promise<void> => {
+  await page.evaluate((target) => {
+    const clipboard = new DataTransfer();
+
+    clipboard.items.add(new File(["png"], "Pasted.png", { type: "image/png" }));
+    (document.querySelector(target) ?? document.body).dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboard,
+      })
+    );
+  }, selector);
+};
+
+/** The card names an item by its first 40 characters, as main cuts them (src/main/index.ts). */
+const CARD_LABEL = `${LONG_TITLE.slice(0, 39).trimEnd()}…`;
+
+/** What the failure message says of Annotate while Retry is the only add: the words of the dimmed button's hover, as a sentence. */
+const ANNOTATE_NEXT = "Annotate it on its item, once Retry has saved it.";
+
+/** The failed card once Retry adding to “…” is the only add left (`only`, screenshot-saves.ts): one pill, in Add to Shelf's place, and the item named under it. */
+const retryOnly = (
+  name: string,
+  message: string,
+  label: string
+): StressScene => ({
+  check: async (page) => {
+    const retry = `Retry adding to “${label}”`;
+
+    const problem = await failedCardCheck([
+      retry,
+      "Copy",
+      "Save to Downloads",
+      "Dismiss",
+      "Keep on Screen",
+    ])(page);
+
+    if (problem !== null) {
+      return problem;
+    }
+
+    const pill = page.getByRole("button", { exact: true, name: retry });
+
+    // No empty slot above it: Retry is where Add to Shelf was, and no other add is on the card.
+    if (
+      (await page.getByRole("button", { name: /Add to/u }).count()) !== 0 ||
+      (await page.getByRole("button", { name: /Retry/u }).count()) !== 1
+    ) {
+      return "Retry adding to “…” must be the card's only add";
+    }
+
+    const off = cardMiddle(await boxOf(pill));
+
+    if (off !== null) {
+      return off;
+    }
+
+    // The name under it shows whole or cut, inside the card.
+    const closing = await boxOf(page.getByText("”", { exact: true }));
+
+    if (closing.right > 280 - 48 || closing.left < 48) {
+      return "the item's name under Retry reaches a corner button";
+    }
+
+    // Annotate would add it to the shelf: it stays in its corner, off.
+    const annotate = page.getByRole("button", { name: "Annotate" });
+
+    // Its hover says when it works again. The keyboard never reaches a button that is off, so the failure message says it too, after the reason.
+    const said = (await page.getByRole("alert").textContent()) ?? "";
+
+    if (!said.startsWith(message) || !said.endsWith(ANNOTATE_NEXT)) {
+      return `the failure message must start with the reason and end with “${ANNOTATE_NEXT}”: “${said}”`;
+    }
+
+    if (!(await tabToFailure(page))) {
+      return "Tab never reached the failure message";
+    }
+
+    const unread = await failureEndReached(page);
+
+    if (unread !== null) {
+      return unread;
+    }
+
+    const before = await callCount(page);
+
+    await annotate.click({ force: true });
+
+    if ((await annotate.isEnabled()) || (await callCount(page)) > before) {
+      return "Annotate can still be pressed while Retry is the only add";
+    }
+
+    const pillBox = await boxOf(pill);
+
+    await pill.click();
+
+    const sent = await calls(page, before);
+
+    if (
+      !sent.some(
+        (each) =>
+          each.call === "addToItem" &&
+          isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+      )
+    ) {
+      return `Retry sent ${JSON.stringify(sent)}`;
+    }
+
+    // While that Retry saves, the pill reads Saving… and Add to Shelf doesn't come back.
+    await page.evaluate(
+      `globalThis.__emit("view", ${JSON.stringify({
+        ...SCREENSHOT_VIEW,
+        save: { state: "saving", to: "item" },
+        target: { id: uuid(12), label },
+      })})`
+    );
+
+    const saving = page.getByRole("button", { name: "Saving…" });
+
+    await saving.waitFor();
+
+    if ((await page.getByRole("button", { name: /Add to/u }).count()) > 0) {
+      return "Add to Shelf came back while the only Retry saves";
+    }
+
+    // The reason under the picture went, so the pill is lower; it is no wider and no further left or right.
+    const savingBox = await boxOf(saving);
+
+    return savingBox.left === pillBox.left && savingBox.right === pillBox.right
+      ? null
+      : `the pill changed size when it read Saving…: ${JSON.stringify({ pillBox, savingBox })}`;
+  },
+  data: {
+    view: failedCard("item", message, { id: uuid(12), label }, true),
+  },
+  name,
+  page: "screenshot",
+});
+
+const CARD_ITEM = { id: uuid(12), label: CARD_LABEL };
+
+/** A failed Add to “…” whose Retry is the only add: the screenshot stays on its item. */
+const CARD_SOLE = failedCard("item", "The disk is full.", CARD_ITEM, true);
+
+/** The same card once the write that held the screenshot on its item failed too: both adds are back. */
+const CARD_BOTH = failedCard(
+  "item",
+  "Saving didn’t finish in time.",
+  CARD_ITEM
+);
+
+const CARD_RETRY = `Retry adding to “${CARD_LABEL}”`;
+
+/** What one press of Retry adding to “…” sends, as `cardAddsSent` reads it. */
+const CARD_TO_ITEM = JSON.stringify([
+  { arg: { id: CARD_ITEM.id, seq: 1 }, call: "addToItem" },
+]);
+
+/** Main pushes the card anew, as a write's end does (screenshot-saves.ts, retarget). */
+const pushCard = async (
+  page: Page,
+  view: ReturnType<typeof failedCard>
+): Promise<void> => {
+  await page.evaluate(`globalThis.__emit("view", ${JSON.stringify(view)})`);
+  await page.waitForTimeout(100);
+};
+
+/** The name of the control the keyboard is on; the tag of what holds it when that has no name. */
+const cardFocus = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(
+      "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? ''"
+    )
+  );
+
+/** The adds the card sent since `from`. */
+const cardAddsSent = async (page: Page, from: number): Promise<string> => {
+  const sent = await calls(page, from);
+
+  return JSON.stringify(
+    sent
+      .filter((each) => each.call === "addToItem" || each.call === "addToShelf")
+      .map((each) => ({ arg: each.arg, call: each.call }))
+  );
+};
+
+const ATTACHMENT_SCENES: readonly Scene[] = (
+  [
+    {
+      check: async (page) => await stripProblem(page, 901, 3, "+9"),
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-12-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 901);
+      },
+      check: async (page) => await stripProblem(page, 901, 3, "+9"),
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-12-open-narrow",
+      width: NARROWEST,
+    },
+    {
+      check: async (page) => await stripProblem(page, 902, 3, "+9"),
+      data: { view: attachView([ATTACH_IMAGE]) },
+      name: "attach-row-image-item-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await select(page, 902);
+        await item(page, 902).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      check: async (page) => await stripProblem(page, 902, 3, "+9"),
+      data: { view: attachView([ATTACH_IMAGE]) },
+      name: "attach-row-image-item-open-narrow",
+      width: NARROWEST,
+    },
+    {
+      check: async (page) => await stripProblem(page, 903, 3, "+9"),
+      data: { view: attachView([ATTACH_EVERYTHING]) },
+      name: "attach-row-with-everything-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await item(page, 904).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      check: async (page) => {
+        const labels = await item(page, 904)
+          .locator("[data-attachment-strip] button[draggable]")
+          .evaluateAll((buttons) =>
+            buttons.map((button) => button.getAttribute("aria-label") ?? "")
+          );
+
+        return labels.length === 3 && labels[0]?.startsWith(LONG_NAME)
+          ? null
+          : `the tiles don't carry their whole names: ${JSON.stringify(labels)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-long-names",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await item(page, 905).evaluate((element) => {
+          element.scrollIntoView({ block: "end" });
+        });
+      },
+      check: async (page) => {
+        const shown = await item(page, 905)
+          .locator("[data-attachment-strip] [data-missing]")
+          .count();
+
+        const broken = await item(page, 905)
+          .locator("[data-attachment-strip] img")
+          .evaluateAll(
+            (images) =>
+              images.filter(
+                (image) =>
+                  image instanceof HTMLImageElement &&
+                  image.complete &&
+                  image.naturalWidth === 0
+              ).length
+          );
+
+        return shown === 1 && broken === 0
+          ? null
+          : `the missing picture shows ${shown} missing tiles and ${broken} broken images`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-missing-picture",
+    },
+    {
+      check: async (page) =>
+        (await page.locator("[data-attachment-strip]").count()) === 0
+          ? null
+          : "a shelf without attachments shows an attachment strip",
+      data: { view: shelfView() },
+      name: "attach-none-unchanged",
+    },
+    {
+      act: async (page) => {
+        await select(page, 906);
+        await dragFilesOver(page, `[data-item-id="${uuid(906)}"]`);
+      },
+      check: async (page) => {
+        const lit = await ringed(page, `[data-item-id="${uuid(906)}"]`);
+        const panel = await ringed(page, ".shelf-panel");
+
+        if (!lit || panel) {
+          return "files over the open row must light the row and not the window";
+        }
+
+        await select(page, 901);
+
+        const full = await dragFilesOver(page, `[data-item-id="${uuid(901)}"]`);
+
+        const said = await page
+          .getByText(/the most it can/u)
+          .waitFor({ timeout: 2000 })
+          .then(() => true)
+          .catch(() => false);
+
+        return full === "none" && said
+          ? null
+          : `a full open row must refuse files and say why (${full}, ${String(said)})`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-target",
+    },
+    {
+      // Files over a closed row are for the shelf: the window lights, the row doesn't, and a full one refuses nothing.
+      act: async (page) => {
+        await dragFilesOver(page, `[data-item-id="${uuid(906)}"]`);
+      },
+      check: async (page) => {
+        const lit = await ringed(page, `[data-item-id="${uuid(906)}"]`);
+        const panel = await ringed(page, ".shelf-panel");
+
+        await dragFilesOver(page, `[data-item-id="${uuid(901)}"]`);
+        await page.waitForTimeout(300);
+
+        const fullLit = await ringed(page, `[data-item-id="${uuid(901)}"]`);
+        const refused = await page.getByText(/the most it can/u).count();
+
+        if (lit || fullLit || !panel) {
+          return "files over a closed row must light the window, not the row";
+        }
+
+        return refused > 0
+          ? "a closed full row refused files meant as new items"
+          : null;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-closed",
+    },
+    {
+      // A real drop: on the open row it attaches (addFilesTo), on a closed row it makes new items (addFiles).
+      check: async (page) => {
+        await select(page, 906);
+        await dropFilesOn(page, `[data-item-id="${uuid(906)}"]`);
+        await dropFilesOn(page, `[data-item-id="${uuid(901)}"]`);
+        await page.waitForTimeout(100);
+
+        const all = await calls(page);
+
+        const sent = all.filter(
+          (each) => each.call === "addFilesTo" || each.call === "addFiles"
+        );
+
+        const expected = [
+          {
+            arg: { id: uuid(906), paths: ["/Users/anna/Desktop/offer.pdf"] },
+            call: "addFilesTo",
+          },
+          { arg: ["/Users/anna/Desktop/offer.pdf"], call: "addFiles" },
+        ];
+
+        return isDeepStrictEqual(sent, expected)
+          ? null
+          : `the drops sent ${JSON.stringify(sent)}`;
+      },
+      data: { filePaths: true, view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-real",
+    },
+    {
+      // Undo on a drop takes off what that drop attached, and nothing attached after it.
+      act: async (page) => {
+        await select(page, 906);
+        await dropFilesOn(page, `[data-item-id="${uuid(906)}"]`);
+        await page.getByText("Attached 1 file").first().waitFor();
+        await dropFilesOn(page, `[data-item-id="${uuid(906)}"]`);
+        await page.waitForTimeout(300);
+        // The first drop's notice, now under the second's.
+        await page
+          .locator("[data-sonner-toast][data-index='1']")
+          .getByRole("button", { exact: true, name: "Undo" })
+          .evaluate((button: HTMLElement) => {
+            button.click();
+          });
+        await page.waitForTimeout(100);
+      },
+      check: async (page) => {
+        const ops = await applied(page);
+        const removed = ops.filter((op) => op.type === "removeAttachment");
+
+        const tiles = await item(page, 906)
+          .locator("[data-attachment-strip] button")
+          .count();
+
+        return isDeepStrictEqual(
+          removed.map((op) => op.attachmentId),
+          ["00000000-0000-4000-8000-000000700001"]
+        ) && tiles === 3
+          ? null
+          : `Undo must remove only the first drop's file: ${JSON.stringify(removed)}, ${String(tiles)} tiles`;
+      },
+      data: { filePaths: true, view: ROW_ATTACH_VIEW },
+      name: "attach-row-drop-undo",
+    },
+    {
+      act: async (page) => {
+        // A click on a tile selects its row and leaves the keyboard on the tile.
+        await item(page, 906)
+          .locator("[data-attachment-strip] button")
+          .first()
+          .click();
+        await page.keyboard.press("Backspace");
+      },
+      check: async (page) => {
+        const ops = await applied(page);
+
+        return ops.some((op) => op.type === "remove") &&
+          !ops.some((op) => op.type === "removeAttachment")
+          ? null
+          : `⌫ on a row tile must delete the item: ${JSON.stringify(ops)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-row-keys",
+    },
+    {
+      check: async (page) => {
+        const last = async () =>
+          z
+            .array(z.string().nullable())
+            .parse(await page.evaluate("globalThis.__selection"))
+            .at(-1);
+
+        const seen: unknown[] = [];
+
+        await select(page, 906);
+        await page.waitForTimeout(100);
+        seen.push(await last());
+        await page.keyboard.press("ArrowRight");
+        await page.getByRole("button", { name: "Back to the list" }).waitFor();
+        seen.push(await last());
+        await page.getByRole("button", { name: "Back to the list" }).click();
+        await item(page, 906).click({ modifiers: ["Meta"] });
+        await item(page, 12).click({ modifiers: ["Meta"] });
+        await page.waitForTimeout(100);
+        seen.push(await last());
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(100);
+        seen.push(await last());
+
+        const want = [uuid(906), uuid(906), null, null];
+
+        return JSON.stringify(seen) === JSON.stringify(want)
+          ? null
+          : `the selection main hears was ${JSON.stringify(seen)}, not ${JSON.stringify(want)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-selection-reported",
+    },
+    {
+      act: async (page) => {
+        await details(page, 901);
+      },
+      check: async (page) => {
+        const tiles = await page.locator("[data-attachment-grid] > li").count();
+
+        const count = await page
+          .getByRole("region", { name: "Attachments" })
+          .getByText("12/12")
+          .isVisible();
+
+        await page.getByRole("button", { name: "Add a field" }).click();
+
+        const off = await page
+          .getByRole("menuitem", {
+            name: /Attach Files|Paste Image|New Drawing/u,
+          })
+          .evaluateAll(
+            (entries) =>
+              entries.filter(
+                (entry) => entry.getAttribute("aria-disabled") === "true"
+              ).length
+          );
+
+        const said = await page
+          .getByText(/12 attachments, the most an item holds/u)
+          .isVisible();
+
+        return tiles === 12 && count && off === 3 && said
+          ? null
+          : `details at the cap: ${tiles} tiles, 12/12 ${String(count)}, ${off} entries off, line ${String(said)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-12-narrow",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 901);
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByRole("menuitem", { name: /Link Window/u }).waitFor();
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-cap-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+        await page.getByRole("button", { name: "Add a field" }).click();
+        await page.getByRole("menuitem", { name: /Attach Files/u }).waitFor();
+      },
+      check: async (page) => {
+        const before = await callCount(page);
+
+        await page.getByRole("menuitem", { name: /Paste Image/u }).click();
+        await chooseInAdd(page, /Attach Files/u);
+        await chooseInAdd(page, /New Drawing/u);
+        await page.waitForTimeout(100);
+
+        const since = await calls(page, before);
+        const sent = since.map((each) => [each.call, each.arg]);
+
+        const want = [
+          ["pasteImageTo", { bytes: null, id: uuid(906) }],
+          ["pickFilesFor", uuid(906)],
+          ["newDrawingFor", uuid(906)],
+        ];
+
+        return want.every((entry) =>
+          sent.some((each) => JSON.stringify(each) === JSON.stringify(entry))
+        )
+          ? null
+          : `the Add entries sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-add-menu",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 904);
+      },
+      check: async (page) => {
+        const labels = await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .evaluateAll((tiles) =>
+            tiles.map((tile) => tile.getAttribute("aria-label") ?? "")
+          );
+
+        if (labels.length !== 4 || !labels[0]?.startsWith(LONG_NAME)) {
+          return `the tiles in details don't carry their whole names: ${labels.length}`;
+        }
+
+        // The keyboard on a tile shows its whole name.
+        await page.locator("[data-attachment-grid] [data-tile]").nth(2).focus();
+
+        const tip = await page
+          .getByRole("tooltip")
+          .first()
+          .textContent({ timeout: 2000 })
+          .catch(() => null);
+
+        return tip?.includes("export.backup-before-the-move-2026") === true
+          ? null
+          : `the keyboard on a tile must show its whole name: ${String(tip)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-long-names-details",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 904);
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .focus();
+        await page.keyboard.press("Backspace");
+        await page.getByText(/Removed “/u).waitFor();
+      },
+      check: async (page) => {
+        const tile = page.locator("[data-attachment-grid] [data-tile]").first();
+        const tips = page.getByRole("tooltip");
+
+        if (!(await tile.evaluate((each) => each === document.activeElement))) {
+          return "⌫ on a tile must leave the keyboard on the next one";
+        }
+
+        // The app moved the keyboard there, not the user: no name opens over Details and Add.
+        if ((await tips.count()) > 0) {
+          return `⌫ on a tile opened the next tile's name by itself: ${String(await tips.first().textContent())}`;
+        }
+
+        // The whole name stays a key away: the user leaving and coming back with Tab shows it.
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+
+        // A name past the tooltip's 300 letters is cut there: its start is enough to know it.
+        const name = ((await tile.getAttribute("aria-label")) ?? "").slice(
+          0,
+          40
+        );
+
+        const shown = await tips
+          .filter({ hasText: name })
+          .first()
+          .waitFor({ timeout: 2000 })
+          .then(() => true)
+          .catch(() => false);
+
+        return shown && name !== ""
+          ? null
+          : "Tab back onto the tile must show its whole name";
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-long-names-toast",
+      width: NARROWEST,
+    },
+    {
+      act: async (page) => {
+        await details(page, 905);
+      },
+      check: async (page) =>
+        (await page
+          .locator("[data-attachment-grid] [data-missing]")
+          .count()) === 1
+          ? null
+          : "a missing picture in details doesn't show as missing",
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-missing-picture-details",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+        // The keyboard on a tile shows its ×, as the pointer does.
+        await page.keyboard.press("Tab");
+
+        for (let tab = 0; tab < 8; tab += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one key after another.
+          const onTile = await page.evaluate(
+            "document.activeElement?.hasAttribute('data-tile') === true"
+          );
+
+          if (onTile === true) {
+            break;
+          }
+
+          // oxlint-disable-next-line no-await-in-loop -- one key after another.
+          await page.keyboard.press("Tab");
+        }
+      },
+      check: async (page) => {
+        const shown = await page
+          .getByRole("button", { name: "Remove Before" })
+          .evaluate(
+            (button) =>
+              Number(getComputedStyle(button.parentElement ?? button).opacity) >
+              0.9
+          );
+
+        return shown ? null : "the keyboard on a tile doesn't show its ×";
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      keepPointer: true,
+      name: "attach-details-tile-focus",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+      },
+      check: async (page) => {
+        const before = await callCount(page);
+
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .click();
+        await page.locator("[data-attachment-grid] [data-tile]").nth(1).click();
+
+        const sent = await calls(page, before);
+        const opened = sent.filter((each) => each.call === "openAttachment");
+
+        return opened.length === 1 &&
+          JSON.stringify(opened[0]?.arg) ===
+            JSON.stringify({
+              attachmentId: uuid(940),
+              id: uuid(906),
+              pinMode: false,
+            })
+          ? null
+          : `a click on the picture, then the file, sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-open",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+      },
+      check: async (page) => {
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .focus();
+        await page.keyboard.press("Backspace");
+        await page.waitForTimeout(100);
+
+        const tilesAfter = await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .count();
+
+        await page.evaluate(`globalThis.__emit("command", { kind: "undo" })`);
+        await page.waitForTimeout(100);
+
+        const ops = await applied(page);
+
+        const types = ops
+          .map((op) => op.type)
+          .filter((type) => type.endsWith("Attachment"));
+
+        const tilesBack = await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .count();
+
+        return JSON.stringify(types) ===
+          JSON.stringify(["removeAttachment", "restoreAttachment"]) &&
+          tilesAfter === 1 &&
+          tilesBack === 2
+          ? null
+          : `⌫ then ⌘Z on a tile: ${JSON.stringify(types)}, ${tilesAfter} then ${tilesBack} tiles`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-remove-undo",
+    },
+    {
+      act: async (page) => {
+        await details(page, 906);
+      },
+      check: async (page) => {
+        await pasteImageInto(page, "[data-details]");
+        await page.waitForTimeout(150);
+
+        const attached = await sentArgs(page, "pasteImageTo");
+
+        await page.getByRole("button", { name: "Back to the list" }).click();
+        await pasteImageInto(page, ".shelf-list");
+        await page.waitForTimeout(150);
+
+        const inList = await sentArgs(page, "pasteImageTo");
+        const added = await sentArgs(page, "pasteImage");
+
+        return attached.length === 1 &&
+          JSON.stringify(attached[0]).includes(uuid(906)) &&
+          inList.length === 1 &&
+          added.length === 1
+          ? null
+          : `⌘V attached ${attached.length} in details, then ${inList.length - attached.length} in the list, which added ${added.length}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-paste",
+    },
+    {
+      check: async (page) => {
+        const add = page.getByRole("button", { name: /^Add to “/u });
+        const box = await add.boundingBox();
+
+        const corners = await page
+          .getByRole("button", {
+            name: /Dismiss|Keep on Screen|Annotate|Save to Downloads/u,
+          })
+          .evaluateAll((buttons) =>
+            buttons.map((button) => {
+              const rect = button.getBoundingClientRect();
+
+              return {
+                bottom: rect.bottom,
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+              };
+            })
+          );
+
+        if (box === null) {
+          return "the card shows no Add to “…” while an item is selected";
+        }
+
+        const covers = corners.some(
+          (corner) =>
+            box.x < corner.right &&
+            box.x + box.width > corner.left &&
+            box.y < corner.bottom &&
+            box.y + box.height > corner.top
+        );
+
+        const before = await callCount(page);
+
+        await add.click();
+
+        const sent = await calls(page, before);
+
+        if (covers) {
+          return "Add to “…” covers a corner button";
+        }
+
+        const shelfBox = await boxOf(
+          page.getByRole("button", { exact: true, name: "Add to Shelf" })
+        );
+
+        const itemBox = await boxOf(add);
+
+        // Add to Shelf leads: Add to “…” is a line of words under it, lower than the pill and with no fill of its own.
+        if (itemBox.top < shelfBox.bottom || tall(itemBox) >= tall(shelfBox)) {
+          return `Add to “…” must sit under Add to Shelf, smaller: ${JSON.stringify({ itemBox, shelfBox })}`;
+        }
+
+        const fill = await add.evaluate(
+          (button) => getComputedStyle(button).backgroundColor
+        );
+
+        if (fill !== "rgba(0, 0, 0, 0)") {
+          return `Add to “…” is a second pill (${fill}), not a line of words`;
+        }
+
+        // The line names the item: about twenty characters of its name, not nine.
+        const named = await add.evaluate(
+          (button) =>
+            ([...button.querySelectorAll("span")]
+              .map((part) => part.firstChild?.nodeValue ?? "")
+              .find((text) => text.endsWith("…") && text.length > 1)?.length ??
+              1) - 1
+        );
+
+        if (named < 18) {
+          return `Add to “…” shows ${named} characters of the item's name, not about 20`;
+        }
+
+        // The name is cut inside the quotes: the closing one shows.
+        const closing = await boxOf(add.getByText("”", { exact: true }));
+
+        if (closing.right > itemBox.right || closing.left < itemBox.left) {
+          return "the closing quote of Add to “…” is cut off";
+        }
+
+        // The quote sits right after the ellipsis: no empty box between them.
+        const gap = z.number().parse(
+          await add.evaluate((button) => {
+            const name = [...button.querySelectorAll("span")].find(
+              (part) => part.firstChild?.nodeValue?.endsWith("…") === true
+            );
+
+            const quote = [...button.querySelectorAll("span")].find(
+              (part) => part.textContent === "”"
+            );
+
+            const range = document.createRange();
+
+            if (name?.firstChild === null || name?.firstChild === undefined) {
+              return -1;
+            }
+
+            range.selectNodeContents(name.firstChild);
+
+            return (
+              (quote?.getBoundingClientRect().left ?? Number.NaN) -
+              range.getBoundingClientRect().right
+            );
+          })
+        );
+
+        if (!(gap >= -0.5 && gap <= 1)) {
+          return `the closing quote of Add to “…” sits ${gap} px after the ellipsis`;
+        }
+
+        // The press carries the item the button named, so main can refuse it once the card names another.
+        return sent.some(
+          (each) =>
+            each.call === "addToItem" &&
+            isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+        )
+          ? null
+          : `Add to “…” sent ${JSON.stringify(sent)}`;
+      },
+      data: {
+        view: {
+          ...SCREENSHOT_VIEW,
+          target: { id: uuid(12), label: CARD_LABEL },
+        },
+      },
+      name: "screenshot-card-attach",
+      page: "screenshot",
+    },
+    {
+      // On hover Copy shows in its kept slot; Add to Shelf and Add to “…” stay where they were.
+      act: async (page) => {
+        await page.mouse.move(140, 60);
+        await page.waitForTimeout(300);
+      },
+      data: {
+        view: {
+          ...SCREENSHOT_VIEW,
+          target: { id: uuid(12), label: CARD_LABEL },
+        },
+      },
+      keepPointer: true,
+      name: "screenshot-card-attach-hover",
+      page: "screenshot",
+    },
+    {
+      check: async (page) => {
+        const problem = await failedCardCheck([
+          `Retry adding to “${CARD_LABEL}”`,
+          "Add to Shelf",
+          "Copy",
+          "Save to Downloads",
+          "Dismiss",
+        ])(page);
+
+        if (problem !== null) {
+          return problem;
+        }
+
+        const retry = page.getByRole("button", { name: /^Retry adding to “/u });
+
+        if ((await retry.count()) !== 1) {
+          return "a failed Add to “…” must read Retry adding to “…”";
+        }
+
+        await retry.click();
+
+        const sent = await calls(page);
+
+        return sent.some(
+          (each) =>
+            each.call === "addToItem" &&
+            isDeepStrictEqual(each.arg, { id: uuid(12), seq: 1 })
+        )
+          ? null
+          : `Retry on Add to “…” sent ${JSON.stringify(sent)}`;
+      },
+      // The disk refused the screenshot: trying again can work, so the line offers it.
+      data: {
+        view: failedCard("item", "The disk is full.", {
+          id: uuid(12),
+          label: CARD_LABEL,
+        }),
+      },
+      name: "screenshot-card-attach-failed",
+      page: "screenshot",
+    },
+    {
+      // The item filled up: main names it no more and offers no Retry (screenshot-saves.ts), and Add to Shelf is the way left.
+      check: async (page) => {
+        const problem = await failedCardCheck([
+          "Add to Shelf",
+          "Copy",
+          "Save to Downloads",
+          "Dismiss",
+        ])(page);
+
+        if (problem !== null) {
+          return problem;
+        }
+
+        const retries = await page
+          .getByRole("button", { name: /Retry|Add to “/u })
+          .count();
+
+        return retries === 0
+          ? null
+          : "a full item must offer no Retry and no Add to “…”";
+      },
+      data: {
+        view: failedCard(null, "Nothing was attached. An item holds up to 12."),
+      },
+      name: "screenshot-card-attach-full",
+      page: "screenshot",
+    },
+    // The screenshot was changed on its item after a failed Add to “…”: it stays there, so Retry is the one add and the one pill.
+    retryOnly("screenshot-card-retry-only", "The disk is full.", CARD_LABEL),
+    // A write that holds it on its item is still on its way: the same card, for the other reason.
+    retryOnly(
+      "screenshot-card-retry-only-landing",
+      "Saving didn’t finish in time.",
+      CARD_LABEL
+    ),
+    // One unbroken word for the item, and the longest reason.
+    retryOnly(
+      "stress-screenshot-retry-only",
+      CARD_FAILURE,
+      `${LONG_WORD.slice(0, 39)}…`
+    ),
+    {
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Tab");
+      },
+      check: async (page) => {
+        const on = await page.evaluate(
+          "document.activeElement?.textContent ?? ''"
+        );
+
+        // Add to Shelf, Copy beside it, then Add to “…”.
+        return String(on).startsWith("Add to “")
+          ? null
+          : `the third Tab stop is “${String(on)}”, not Add to “…”`;
+      },
+      data: {
+        view: {
+          ...SCREENSHOT_VIEW,
+          target: { id: uuid(12), label: CARD_LABEL },
+        },
+      },
+      keepPointer: true,
+      name: "screenshot-card-attach-focus",
+      page: "screenshot",
+    },
+    {
+      // The keyboard is on the only Retry when a late failed write gives both adds back: the picture shows it on Retry adding to “…”, now the line.
+      act: async (page) => {
+        await page.keyboard.press("Tab");
+        await pushCard(page, CARD_BOTH);
+      },
+      check: async (page) => {
+        const problems: string[] = [];
+        const start = await callCount(page);
+
+        // Retry was the pill and is the line now: the keyboard went with it, and Enter still retries on the item.
+        const afterBoth = await cardFocus(page);
+
+        await page.keyboard.press("Enter");
+
+        const retried = await cardAddsSent(page, start);
+
+        if (afterBoth !== CARD_RETRY || retried !== CARD_TO_ITEM) {
+          problems.push(
+            `both adds came back under a focused Retry pill: the keyboard is on “${afterBoth}” and Enter sent ${retried}`
+          );
+        }
+
+        // The other way: Retry was the line and is the pill now, and Tab goes on from the pill.
+        await page.getByRole("button", { name: CARD_RETRY }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const afterSole = await cardFocus(page);
+
+        await page.keyboard.press("Tab");
+
+        const next = await cardFocus(page);
+
+        if (afterSole !== CARD_RETRY || next !== "Copy") {
+          problems.push(
+            `Retry became the only add under a focused Retry adding to “…” line: the keyboard is on “${afterSole}” and Tab went to “${next}”, not Copy`
+          );
+        }
+
+        // Add to Shelf goes while the keyboard is on it: Enter adds nowhere, and Tab starts at the pill that took its place.
+        await pushCard(page, CARD_BOTH);
+        await page.getByRole("button", { name: "Add to Shelf" }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const mark = await callCount(page);
+
+        await page.keyboard.press("Enter");
+
+        const stray = await cardAddsSent(page, mark);
+
+        await page.keyboard.press("Tab");
+
+        const first = await cardFocus(page);
+
+        if (stray !== "[]" || first !== CARD_RETRY) {
+          problems.push(
+            `Add to Shelf went under the keyboard: Enter sent ${stray}, and Tab went to “${first}”`
+          );
+        }
+
+        // Any other control keeps the keyboard through both changes.
+        await pushCard(page, CARD_BOTH);
+        await page.getByRole("button", { name: "Copy" }).focus();
+        await pushCard(page, CARD_SOLE);
+
+        const kept = [await cardFocus(page)];
+
+        await pushCard(page, CARD_BOTH);
+        kept.push(await cardFocus(page));
+
+        if (kept.some((on) => on !== "Copy")) {
+          problems.push(
+            `the keyboard was on Copy and went to ${JSON.stringify(kept)}`
+          );
+        }
+
+        return problems.length === 0 ? null : problems.join(" || ");
+      },
+      data: { view: CARD_SOLE },
+      keepPointer: true,
+      name: "screenshot-card-retry-focus",
+      page: "screenshot",
+    },
+    {
+      act: async (page) => {
+        await details(page, 907);
+        await page
+          .locator("[data-attachment-grid] [data-tile]")
+          .first()
+          .focus();
+        await page.getByRole("region", { name: /^Pins on /u }).waitFor();
+      },
+      check: async (page) => {
+        const before = await callCount(page);
+        const field = page.getByRole("textbox", { name: "Label for pin 3" });
+
+        await field.click();
+        await field.fill("Discount code field");
+        await field.press("Enter");
+        await page.waitForTimeout(800);
+        await page.evaluate(`globalThis.__emit("command", { kind: "undo" })`);
+        await page.waitForTimeout(100);
+
+        const sent = await calls(page, before);
+
+        const pins = sent.flatMap((each) => {
+          const op = z
+            .looseObject({ attachmentId: z.string(), type: z.string() })
+            .safeParse(each.arg);
+
+          return op.success && op.data.type === "setAttachmentPins"
+            ? [op.data.attachmentId]
+            : [];
+        });
+
+        const others = sent.filter((each) =>
+          JSON.stringify(each.arg).includes('"setPins"')
+        );
+
+        return pins.length >= 2 &&
+          pins.every((id) => id === uuid(950)) &&
+          others.length === 0
+          ? null
+          : `a label on an attached picture, then ⌘Z, sent ${JSON.stringify(sent)}`;
+      },
+      data: { view: ROW_ATTACH_VIEW },
+      name: "attach-details-pin-labels-narrow",
+      width: NARROWEST,
+    },
+  ] satisfies readonly StressScene[]
+).map(stress);
+
 const SCENES: readonly Scene[] = [
   {
     check: async (page) => {
@@ -3121,13 +7728,14 @@ const SCENES: readonly Scene[] = [
     name: "shelf-list-narrow",
     page: "shelf",
     platforms: ["macos", "windows"],
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
       await select(page, 10);
     },
-    check: detailsButtonCheck,
+    check: async (page) =>
+      (await detailsButtonCheck(page)) ?? (await openStepsFirst(page)),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-full-item",
@@ -3136,8 +7744,20 @@ const SCENES: readonly Scene[] = [
   {
     act: async (page) => {
       await select(page, 10);
+    },
+    check: openStepsFirst,
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-expanded-full-item-narrow",
+    page: "shelf",
+    width: NARROWEST,
+  },
+  {
+    act: async (page) => {
+      await select(page, 10);
       await item(page, 10)
-        .getByRole("checkbox", { name: /^(?:Done|Not done): /u })
+        .getByRole("list", { name: "Next steps" })
+        .getByRole("checkbox")
         .first()
         .focus();
     },
@@ -3175,7 +7795,10 @@ const SCENES: readonly Scene[] = [
       const controls = new Map([
         [
           "a step's checkbox",
-          row.getByRole("checkbox", { name: /^(?:Done|Not done): /u }).first(),
+          row
+            .getByRole("list", { name: "Next steps" })
+            .getByRole("checkbox")
+            .first(),
         ],
         [
           "a window",
@@ -3185,7 +7808,7 @@ const SCENES: readonly Scene[] = [
             .first(),
         ],
         ["Details", row.getByRole("button", { name: "Show details" })],
-        ["⋯", row.getByRole("button", { name: "More" })],
+        ["⋯", row.getByRole("button", { exact: true, name: "More" })],
       ]);
 
       for (const [name, control] of controls) {
@@ -3283,6 +7906,7 @@ const SCENES: readonly Scene[] = [
       await select(page, 11);
       await item(page, 11).scrollIntoViewIfNeeded();
     },
+    check: badgesOnFoot(11),
     data: { view: shelfView() },
     layoutCheck: true,
     name: "shelf-expanded-image-pins",
@@ -3290,7 +7914,32 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
+      await select(page, 11);
+      await item(page, 11).scrollIntoViewIfNeeded();
+    },
+    check: badgesOnFoot(11),
+    data: { view: shelfView() },
+    layoutCheck: true,
+    name: "shelf-expanded-image-pins-narrow",
+    page: "shelf",
+    width: NARROWEST,
+  },
+  {
+    act: async (page) => {
       await details(page, 10);
+    },
+    check: async (page) => {
+      // A box is named by its step alone, as in the open row; checked or not says the rest.
+      const ticked = FULL.steps.find((entry) => entry.done)?.text ?? "";
+
+      const named = await page
+        .locator("[data-details]")
+        .getByRole("checkbox", { checked: true, exact: true, name: ticked })
+        .count();
+
+      return named === 1
+        ? null
+        : `in details a done step's checkbox must be named by its words, “${ticked}”: ${named} found`;
     },
     data: { view: shelfView() },
     layoutCheck: true,
@@ -3459,7 +8108,7 @@ const SCENES: readonly Scene[] = [
     name: "shelf-due-calendar",
     page: "shelf",
     // The shelf at its narrowest, so the calendar must fit there.
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -3618,6 +8267,59 @@ const SCENES: readonly Scene[] = [
     },
     data: { view: shelfView() },
     name: "shelf-escape-layers",
+    page: "shelf",
+  },
+  {
+    // The list is at its top and the newest item, out of view below, is deleted: the list stays where it is. An item made then comes into view.
+    act: async (page) => {
+      await page.evaluate(
+        `globalThis.insetShelf.apply({ id: ${JSON.stringify(uuid(15))}, type: "remove" })`
+      );
+      await item(page, 15).waitFor({ state: "detached" });
+      await page.waitForTimeout(200);
+      await page.evaluate(
+        "globalThis.__afterDelete = document.querySelector('.shelf-list').scrollTop"
+      );
+      await page.evaluate(
+        `globalThis.__emit("view", ${JSON.stringify(
+          shelfView({
+            ...DOC,
+            items: [
+              ...ITEMS.filter((each) => each.id !== uuid(15)),
+              {
+                ...base(60, 0),
+                html: null,
+                kind: "text",
+                links: [],
+                text: "Order the name plates",
+                via: "typed",
+              },
+            ],
+          })
+        )})`
+      );
+      await item(page, 60).waitFor();
+      await page.waitForTimeout(200);
+    },
+    check: async (page) => {
+      const afterDelete = z
+        .number()
+        .parse(await page.evaluate("globalThis.__afterDelete"));
+
+      if (afterDelete > 1) {
+        return `deleting the newest item scrolled the list to ${afterDelete}`;
+      }
+
+      const list = await boxOf(page.locator(".shelf-list").first());
+      const made = await boxOf(item(page, 60));
+
+      return made.top >= list.top - 1 && made.bottom <= list.bottom + 1
+        ? null
+        : `an item made now must come into view: ${JSON.stringify({ list, made })}`;
+    },
+    data: { view: shelfView() },
+    height: 400,
+    name: "shelf-newest-deleted-stays",
     page: "shelf",
   },
   {
@@ -3814,7 +8516,7 @@ const SCENES: readonly Scene[] = [
     },
     name: "shelf-quit-held",
     page: "shelf",
-    width: 300,
+    width: NARROWEST,
   },
   {
     check: notSavedCheck,
@@ -3822,6 +8524,14 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "shelf-not-saved",
     page: "shelf",
+  },
+  {
+    check: notSavedOneLine,
+    data: { echo: "later", savedDoc: MENU_DOC, view: NOT_SAVED_VIEW },
+    layoutCheck: true,
+    name: "shelf-not-saved-narrow",
+    page: "shelf",
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -3947,7 +8657,7 @@ const SCENES: readonly Scene[] = [
   },
   {
     act: async (page) => {
-      await page.getByRole("button", { name: "Filter by Due" }).click();
+      await page.getByRole("button", { exact: true, name: "Filter" }).click();
       await page.getByRole("menuitem", { name: /^Overdue/u }).waitFor();
     },
     data: { view: shelfView() },
@@ -4408,7 +9118,7 @@ const SCENES: readonly Scene[] = [
     layoutCheck: true,
     name: "tutorial-examples-narrow",
     page: "shelf",
-    width: 300,
+    width: NARROWEST,
   },
   {
     act: async (page) => {
@@ -4562,6 +9272,14 @@ const SCENES: readonly Scene[] = [
         state: "detached",
       });
       await page.keyboard.press(" ");
+      // The check off reaches main a moment after the key; a busy machine must not read the calls before it.
+      await page
+        .waitForFunction(
+          `globalThis.__calls.slice(${before}).some((each) => each.call === "apply")`,
+          null,
+          { timeout: 1000 }
+        )
+        .catch(() => null);
 
       const afterCalls = await calls(page, before);
       const after = afterCalls.filter((each) => each.call === "apply");
@@ -5853,13 +10571,22 @@ const SCENES: readonly Scene[] = [
     name: "drawing-lock-lifts-mid-stroke",
     page: "drawing",
   },
+  ...STRESS_SCENES,
+  ...DRAWING_STRESS_SCENES,
+  ...PILL_SCENES,
+  ...ATTACHMENT_SCENES,
 ];
 
 const SIZES: Readonly<Record<PageName, { width: number; height: number }>> = {
   drawing: { height: 720, width: 1040 },
   onboarding: { height: 640, width: 460 },
   picker: { height: 520, width: 600 },
-  shelf: { height: 620, width: 360 },
+  // src/main/screenshot-window.ts: 280 wide, as tall as the picture's shape allows within 180–260.
+  screenshot: { height: 180, width: 280 },
+  // What users get by default: the width the shelf opens at, and its height beside a window at least that tall.
+  shelf: { height: SHELF_MAX_HEIGHT_DIP, width: SHELF_WIDTH_DIP },
+  // src/main/toast-window.ts: a done notice's window; a failed one is 360×72.
+  toast: { height: 44, width: 260 },
 };
 
 /** The macOS sidebar material, which Chrome cannot draw, as a flat stand-in. */
@@ -5997,6 +10724,57 @@ const cutBadges = async (page: Page): Promise<readonly string[]> =>
     })
   );
 
+/** The pages whose every label must truncate, wrap or show whole: the shelf, the capture notice, the screenshot card and the drawing window. */
+const STRICT_PAGES: ReadonlySet<PageName> = new Set([
+  "drawing",
+  "shelf",
+  "toast",
+  "screenshot",
+]);
+
+const LAYOUT = path.join(ROOT, "scripts", "fixtures", "screens-layout.js");
+
+const ProblemsSchema = z.array(z.string());
+
+/**
+ * What breaks at the edges, anywhere on the page, menus and notices
+ * included (scripts/fixtures/screens-layout.js): a box past the window's
+ * sides, a menu entry outside its menu, words cut off sideways without an
+ * ellipsis, an ellipsis with no title that holds the whole text, a field the
+ * keyboard isn't in that hides part of its words, words squeezed into a
+ * column under 4ch, and two controls that partly cover each other.
+ */
+const strictProblems = async (page: Page): Promise<readonly string[]> =>
+  ProblemsSchema.parse(await page.evaluate("globalThis.__strictProblems()"));
+
+/** Words under a line cap (clamp.tsx Clamp) show no more lines than it says, until Show more opens them. A message may show one more (its `spare`). */
+const capProblems = async (page: Page): Promise<readonly string[]> =>
+  z.array(z.string()).parse(
+    await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("[style*='--lines']")].flatMap(
+        (words) => {
+          const cap =
+            Number(words.style.getPropertyValue("--lines")) +
+            (words.dataset.spare === undefined ? 0 : 1);
+
+          const line =
+            Number(getComputedStyle(words).lineHeight.replace("px", "")) || 20;
+
+          const shown = Math.round(words.getBoundingClientRect().height / line);
+
+          const opened =
+            words.nextElementSibling?.getAttribute("aria-expanded") === "true";
+
+          return opened || shown <= cap
+            ? []
+            : [
+                `words capped at ${cap} lines show ${shown}: “${(words.textContent ?? "").slice(0, 30)}”`,
+              ];
+        }
+      )
+    )
+  );
+
 const shoot = async (
   browser: Browser,
   origin: string,
@@ -6005,7 +10783,7 @@ const shoot = async (
   theme: Theme
 ): Promise<string> => {
   const size = {
-    ...SIZES[scene.page],
+    height: scene.height ?? SIZES[scene.page].height,
     width: scene.width ?? SIZES[scene.page].width,
   };
 
@@ -6014,6 +10792,7 @@ const shoot = async (
     deviceScaleFactor: 2,
     locale: "en-US",
     reducedMotion: scene.reducedMotion === true ? "reduce" : "no-preference",
+    timezoneId: TIME_ZONE,
     userAgent: USER_AGENT[platform],
     viewport: size,
   });
@@ -6024,6 +10803,9 @@ const shoot = async (
   const page = await context.newPage();
   const errors: string[] = [];
 
+  // The page's clock stands still at the fixtures' moment; its timers still run.
+  await page.clock.setFixedTime(now);
+
   page.on("pageerror", (error) => {
     errors.push(error.message);
   });
@@ -6032,6 +10814,11 @@ const shoot = async (
     `globalThis.__screens = ${JSON.stringify({ data: scene.data, page: scene.page })};`
   );
   await page.addInitScript({ path: BRIDGE });
+
+  if (STRICT_PAGES.has(scene.page)) {
+    await page.addInitScript({ path: LAYOUT });
+  }
+
   await page.goto(`${origin}/${scene.page}.html`);
 
   if (platform === "macos") {
@@ -6065,19 +10852,26 @@ const shoot = async (
 
   const problems =
     scene.layoutCheck === true
-      ? [...(await layoutProblems(page)), ...(await cutBadges(page))]
+      ? [
+          ...(await layoutProblems(page)),
+          ...(await cutBadges(page)),
+          ...(STRICT_PAGES.has(scene.page) ? await strictProblems(page) : []),
+          ...(await capProblems(page)),
+        ]
       : [];
 
   const failed = scene.check === undefined ? null : await scene.check(page);
 
   await context.close();
 
-  if (problems.length > 0) {
-    throw new Error(`layout: ${problems.join("; ")}`);
-  }
+  // Both, when both fail: a layout problem must not hide what the scene itself checks.
+  const reasons = [
+    ...(problems.length > 0 ? [`layout: ${problems.join("; ")}`] : []),
+    ...(failed === null ? [] : [`check: ${failed}`]),
+  ];
 
-  if (failed !== null) {
-    throw new Error(`check: ${failed}`);
+  if (reasons.length > 0) {
+    throw new Error(reasons.join(" | "));
   }
 
   return path.relative(OUT, file);

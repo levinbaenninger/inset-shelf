@@ -5,15 +5,18 @@ import type { DrawingMark } from "./drawing-scene";
 import { defineContract, event, invoke, out, send } from "./ipc";
 import { HandOffChoiceSchema, PermissionIdSchema } from "./onboarding";
 import type { OnboardingView } from "./onboarding";
+import { WHY_MAX } from "./pill";
+import type { PillView } from "./pill";
 import { SettingsSchema } from "./settings";
 import type { SettingsView } from "./settings";
 import {
+  AttachmentIdSchema,
   ItemIdSchema,
   PinsSchema,
   ShelfOpSchema,
   WindowIdSchema,
 } from "./shelf";
-import type { ItemId, ShelfDoc } from "./shelf";
+import type { AttachmentId, ItemId, ShelfDoc } from "./shelf";
 import { TutorialActionSchema } from "./tutorial";
 import type { TutorialView } from "./tutorial";
 
@@ -82,9 +85,24 @@ export interface ShelfView {
     readonly id: ItemId;
     readonly seq: number;
     readonly edit?: boolean;
+    /** Opens the item's details at this field: the why field's way in when the pill couldn't get the keyboard. */
+    readonly field?: DetailField;
   } | null;
   /** An item can be restored with undoRemove. */
   readonly canUndo: boolean;
+  /** Recall: the open items from the window the shelf opened beside; absent or null when there are none. */
+  readonly here?: ShelfHere | null;
+}
+
+/** The open items from the window the shelf opened beside (src/shared/recall.ts). */
+export interface ShelfHere {
+  readonly ids: readonly ItemId[];
+  /** The window's place in a few words: "GitHub · acme/app #12". */
+  readonly label: string;
+  /** Changes with every opening. */
+  readonly seq: number;
+  /** Opened from the recall pill: the list starts filtered to these items. */
+  readonly filter: boolean;
 }
 
 /** The fields the field shortcuts (⌘D, ⌘⇧D, ⌘⇧S) open in details. */
@@ -133,6 +151,12 @@ export type ActionResult =
       readonly retrySave?: true;
     };
 
+/** What attaching to an item did: the attachments it put there, and why any or all weren't, or null when all were. */
+export interface AttachResult {
+  readonly attached: readonly AttachmentId[];
+  readonly message: string | null;
+}
+
 const PASTE_MAX_BYTES = 30 * 1024 * 1024;
 
 /**
@@ -146,6 +170,47 @@ const tutorialMethods = {
   tutorial: send(TutorialActionSchema),
 } as const;
 
+/** Pictures and files attached to an item after capture (src/main/attachments.ts). */
+const attachmentMethods = {
+  /** The file dialog, for files to attach to this item. */
+  pickFilesFor: send(ItemIdSchema),
+  /** Files dropped on an item's row, by path; main reads them. */
+  addFilesTo: invoke(
+    z.object({
+      id: ItemIdSchema,
+      paths: z.array(z.string().min(1).max(4096)).min(1).max(50),
+    }),
+    out<AttachResult>()
+  ),
+  /** A picture pasted with the item open, or with null the clipboard's own: main reads it. */
+  pasteImageTo: invoke(
+    z.object({
+      bytes: z
+        .instanceof(Uint8Array)
+        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES)
+        .nullable(),
+      id: ItemIdSchema,
+    }),
+    out<AttachResult>()
+  ),
+  /** Drags one attachment out as a file: a picture with its pins drawn in, a file as itself. */
+  startAttachmentDrag: send(
+    z.object({ attachmentId: AttachmentIdSchema, id: ItemIdSchema })
+  ),
+  /** The item selected or open in details, so main knows what an attachment from outside the shelf goes to. */
+  selection: send(ItemIdSchema.nullable()),
+  /** New Drawing in details: a blank page in the drawing window, saved as this item's attachment. */
+  newDrawingFor: send(ItemIdSchema),
+  /** Opens an attached picture in the drawing window, to look at or draw on; `pinMode` with the Pin tool. */
+  openAttachment: send(
+    z.object({
+      attachmentId: AttachmentIdSchema,
+      id: ItemIdSchema,
+      pinMode: z.boolean(),
+    })
+  ),
+} as const;
+
 export const shelfContract = defineContract({
   events: {
     command: event<ShelfCommand>(),
@@ -154,11 +219,14 @@ export const shelfContract = defineContract({
     /** A short note on something main did, shown as a toast: a confirmation, or why it failed. */
     notice: event<{ readonly message: string; readonly tone: NoticeTone }>(),
     view: event<ShelfView>(),
+    /** Main showed the shelf: the page puts the caret in the note field unless something is under way. */
+    shown: event<null>(),
     ...tutorialEvents,
   },
   global: "insetShelf",
   methods: {
     ...tutorialMethods,
+    ...attachmentMethods,
     /** Getting Started in the ⋯ menu (Windows): the checklist comes back. */
     gettingStarted: send(z.void()),
     /** Show Me Around in the ⋯ menu (Windows): the walkthrough. */
@@ -168,11 +236,8 @@ export const shelfContract = defineContract({
      * the menu takes every key, so main holds back the menu bar's keys.
      */
     menuOpen: send(z.boolean()),
-    /** Files dropped or pasted into the shelf, by path; main reads them. */
-    addFiles: invoke(
-      z.array(z.string().min(1).max(4096)).min(1).max(50),
-      out<ActionResult>()
-    ),
+    /** Files dropped or pasted into the shelf, by path; main reads them, and its notice says how it went once they are on disk. */
+    addFiles: send(z.array(z.string().min(1).max(4096)).min(1).max(50)),
     apply: send(ShelfOpSchema),
     /** The file dialog, from the "+" in the note field. */
     attachFiles: send(z.void()),
@@ -228,11 +293,10 @@ export const shelfContract = defineContract({
     openSettings: send(z.void()),
     /** Window › Float on Top. */
     setFloatOnTop: send(z.boolean()),
-    pasteImage: invoke(
+    pasteImage: send(
       z
         .instanceof(Uint8Array)
-        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES),
-      out<ActionResult>()
+        .refine((bytes) => bytes.byteLength <= PASTE_MAX_BYTES)
     ),
     startDrag: send(ItemIdSchema),
   },
@@ -249,12 +313,10 @@ export type NoticeCorner =
   | "bottom-left"
   | "bottom-right";
 
-export interface ToastView {
-  readonly corner: NoticeCorner;
-  readonly title: string;
-  readonly seq: number;
-  readonly tone: NoticeTone;
-}
+/** What the pill shows (src/shared/pill.ts). */
+export type ToastView = PillView;
+
+export type { PillView } from "./pill";
 
 /** A new screenshot on its card beside the shelf. */
 export interface ScreenshotView {
@@ -263,9 +325,39 @@ export interface ScreenshotView {
   readonly imageUrl: string;
   readonly widthPx: number;
   readonly heightPx: number;
+  /** The item Add to “…” attaches it to, and its name on the button; null when there is none the user can know, or it holds all it can. */
+  readonly target: { readonly id: ItemId; readonly label: string } | null;
+  /** Where its save stands. */
+  readonly save: ShotSave;
 }
 
+/** Which add saves the screenshot: Add to Shelf, or Add to “…”. */
+export type ShotSaveTo = "shelf" | "item";
+
+/** A screenshot card's save: none yet, writing (its button reads Saving…), or failed (the card says why, and the button pressed reads Retry while it still goes where it went). */
+export type ShotSave =
+  | { readonly state: "idle" }
+  | { readonly state: "saving"; readonly to: ShotSaveTo }
+  | {
+      readonly state: "failed";
+      /** The button that offers Retry; null when none does (the item it went to is gone or full, or the card names another now). */
+      readonly to: ShotSaveTo | null;
+      readonly message: string;
+      /**
+       * Retry is the only add left: the screenshot is in the shelf where
+       * `to` put it, not saved. The user has changed it there since, so the
+       * other add would lose that change; or a write that holds it there is
+       * still on its way, so the other add would leave it in both places.
+       */
+      readonly only: boolean;
+    };
+
 const Seq = z.number().int().min(0);
+
+const WhyTextSchema = z.object({
+  seq: Seq,
+  text: z.string().max(WHY_MAX),
+});
 
 export const toastContract = defineContract({
   events: { view: event<ToastView>() },
@@ -276,16 +368,34 @@ export const toastContract = defineContract({
     hover: send(z.boolean()),
     /** Opens the shelf at what the notice named; `seq` keeps a late click from reaching a newer notice. */
     open: send(Seq),
+    // Say why (src/shared/pill.ts): the capture notice turns into a one-line field.
+    /** The Why target: open the field. */
+    why: send(Seq),
+    /** The field has the keyboard; its caret shows from now on. */
+    whyReady: send(Seq),
+    /** The field's words, on every change, so main keeps them when the field closes another way. */
+    whyInput: send(WhyTextSchema),
+    /** Return. */
+    saveWhy: send(WhyTextSchema),
+    /** Esc. */
+    cancelWhy: send(Seq),
+    /** The recall pill's close button: this place stays quiet from now on. */
+    dismiss: send(Seq),
   },
   name: "toast",
 });
 
 export const screenshotContract = defineContract({
-  events: { view: event<ScreenshotView | null>(), ...tutorialEvents },
+  events: {
+    view: event<ScreenshotView | null>(),
+    ...tutorialEvents,
+  },
   global: "insetScreenshot",
   methods: {
     ...tutorialMethods,
     addToShelf: send(Seq),
+    /** Attaches it to the item the card named when pressed; main refuses once the card names another. */
+    addToItem: send(z.object({ id: ItemIdSchema, seq: Seq })),
     /** Adds it to the shelf and opens it to draw on. */
     annotate: send(Seq),
     copy: send(Seq),

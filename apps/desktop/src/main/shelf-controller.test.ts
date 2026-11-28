@@ -1,6 +1,7 @@
 import { once } from "node:events";
 
 import {
+  AttachmentIdSchema,
   emptyShelf,
   itemDetailsText,
   ItemIdSchema,
@@ -8,7 +9,7 @@ import {
   UNDO_MAX,
   WindowIdSchema,
 } from "@shared/shelf";
-import type { ShelfDoc, WindowRef } from "@shared/shelf";
+import type { Attachment, ShelfDoc, WindowRef } from "@shared/shelf";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createShelfController, EDIT_SAVE_DELAY_MS } from "./shelf-controller";
@@ -88,6 +89,14 @@ const linked = (n: number): WindowRef => ({
   thumb: null,
   title: `Window ${n}`,
   url: null,
+});
+
+/** A file attached to an item, stored as `<uuid(n + 1)>.pdf`. */
+const attachedFile = (n: number): Attachment => ({
+  addedAt: "2026-11-20T10:00:00.000Z",
+  file: { bytes: 3, name: `File ${n}.pdf`, stored: `${uuid(n + 1)}.pdf` },
+  id: AttachmentIdSchema.parse(uuid(n)),
+  kind: "file",
 });
 
 describe(createShelfController, () => {
@@ -364,6 +373,68 @@ describe(createShelfController, () => {
       description: "Before Friday",
       text: "one, edited",
     });
+  });
+
+  it("tells who watches writes when one starts and when it ends, and repaints the shelf for neither", async () => {
+    const disk = new EventTarget();
+
+    const written = (async () => {
+      await once(disk, "written");
+    })();
+
+    const { controller } = setup([], written);
+    let repaints = 0;
+    const heard: { onItsWay: boolean; stored: boolean }[] = [];
+
+    const id = ItemIdSchema.parse(
+      controller.apply({ text: "Call the movers", type: "compose" })
+    );
+
+    controller.subscribe(() => {
+      repaints += 1;
+    });
+    controller.onWrite(() => {
+      heard.push({
+        onItsWay: controller.onItsWay(id) !== undefined,
+        stored: controller.stored(id) !== undefined,
+      });
+    });
+
+    const flushed = controller.flush();
+
+    await Promise.resolve();
+    expect(heard).toStrictEqual([{ onItsWay: true, stored: false }]);
+
+    disk.dispatchEvent(new Event("written"));
+    await flushed;
+
+    expect(heard).toStrictEqual([
+      { onItsWay: true, stored: false },
+      { onItsWay: false, stored: true },
+    ]);
+    expect(repaints).toBe(0);
+  });
+
+  it("tells who watches writes that a refused one ended, with the disk as it was", async () => {
+    const { controller } = setup([{ message: "The disk is full.", ok: false }]);
+    const heard: { onItsWay: boolean; stored: boolean }[] = [];
+
+    const id = ItemIdSchema.parse(
+      controller.apply({ text: "Call the movers", type: "compose" })
+    );
+
+    controller.onWrite(() => {
+      heard.push({
+        onItsWay: controller.onItsWay(id) !== undefined,
+        stored: controller.stored(id) !== undefined,
+      });
+    });
+    await controller.flush();
+
+    expect(heard).toStrictEqual([
+      { onItsWay: true, stored: false },
+      { onItsWay: false, stored: false },
+    ]);
   });
 
   it("counts the items the disk doesn't hold yet", async () => {
@@ -1014,5 +1085,182 @@ describe("Discard changes and each item's saved version", () => {
       back: "<p>Quote <b>CHF 280</b> over</p>",
       typed: null,
     });
+  });
+});
+
+describe("attachments", () => {
+  it("saves attaching and removing at once, and puts a removed attachment back where it was, once", () => {
+    const { controller, timers } = setup();
+    const id = controller.apply({ text: "Quote", type: "compose" });
+
+    if (id === null) {
+      throw new Error("not added");
+    }
+
+    const [a, b, c] = [attachedFile(60), attachedFile(62), attachedFile(64)];
+
+    const names = () =>
+      controller.item(id)?.attachments.map((attachment) => attachment.id);
+
+    controller.apply({ attachments: [a, b, c], id, type: "attach" });
+    controller.apply({ attachmentId: b.id, id, type: "removeAttachment" });
+    const removed = names();
+
+    controller.apply({ attachmentId: b.id, id, type: "restoreAttachment" });
+    const back = names();
+
+    expect(
+      controller.apply({ attachmentId: b.id, id, type: "restoreAttachment" })
+    ).toBeNull();
+    expect({ back, removed, timers }).toStrictEqual({
+      back: [a.id, b.id, c.id],
+      removed: [a.id, c.id],
+      timers: [],
+    });
+  });
+
+  it("deletes an item's attached files only once it falls off the undo list", async () => {
+    const { controller, deleted } = setup();
+    const first = controller.apply({ text: "Quote", type: "compose" });
+
+    if (first === null) {
+      throw new Error("no id");
+    }
+
+    controller.apply({
+      attachments: [attachedFile(60), attachedFile(62)],
+      id: first,
+      type: "attach",
+    });
+
+    const notes = Array.from({ length: UNDO_MAX }, (_, n) =>
+      controller.apply({ text: `note ${n}`, type: "compose" })
+    );
+
+    controller.apply({ id: first, type: "remove" });
+
+    for (const note of notes.slice(0, -1)) {
+      if (note !== null) {
+        controller.apply({ id: note, type: "remove" });
+      }
+    }
+
+    await controller.flush();
+    const whileUndoable = [...deleted];
+    const last = notes.at(-1);
+
+    if (last !== null && last !== undefined) {
+      controller.apply({ id: last, type: "remove" });
+    }
+
+    await controller.flush();
+
+    expect({ deleted, whileUndoable }).toStrictEqual({
+      deleted: [`${uuid(61)}.pdf`, `${uuid(63)}.pdf`],
+      whileUndoable: [],
+    });
+  });
+
+  it("drops a discarded attachment's file after the next write and keeps the saved one's", async () => {
+    const { add, controller, deleted, disk } = onDisk();
+    const id = add("Quote");
+    const saved = attachedFile(60);
+    const discarded = attachedFile(62);
+
+    controller.apply({ attachments: [saved], id, type: "attach" });
+    await controller.flush();
+    disk.full = true;
+    controller.apply({ attachments: [discarded], id, type: "attach" });
+    await controller.flush();
+    const { notSaved } = controller.view();
+
+    controller.discard(id);
+    disk.full = false;
+    controller.apply({ text: "Anything", type: "compose" });
+    await controller.flush();
+
+    expect({
+      attachments: controller.item(id)?.attachments,
+      deleted,
+      notSaved,
+    }).toStrictEqual({
+      attachments: [saved],
+      deleted: [`${uuid(63)}.pdf`],
+      notSaved: [{ id, undo: "discard" }],
+    });
+  });
+});
+
+describe("an item deleted while a picture's replacement is still to be written", () => {
+  it("keeps the files of an annotated item deleted before the next write, so Undo brings it back whole", async () => {
+    const { controller, deleted, disk } = onDisk();
+
+    const id = controller.apply({
+      context: null,
+      image,
+      pins: [],
+      source: null,
+      type: "addImage",
+      via: "area",
+    });
+
+    if (id === null) {
+      throw new Error("not added");
+    }
+
+    controller.apply({ attachments: [attachedFile(60)], id, type: "attach" });
+    await controller.flush();
+    disk.full = true;
+    controller.apply({
+      id,
+      image: { ...image, file: `${uuid(91)}.png` },
+      type: "replaceImage",
+    });
+    await controller.flush();
+    controller.apply({ id, type: "remove" });
+    disk.full = false;
+    controller.apply({ text: "Anything", type: "compose" });
+    await controller.flush();
+    controller.apply({ type: "undoRemove" });
+
+    expect({
+      back: controller.item(id)?.attachments.length,
+      deleted,
+    }).toStrictEqual({ back: 1, deleted: [image.file] });
+  });
+
+  it("keeps the files of an item whose attached picture was annotated, when it is deleted before the next write", async () => {
+    const { add, controller, deleted, disk } = onDisk();
+    const id = add("Quote");
+
+    const picture: Attachment = {
+      addedAt: "2026-11-20T10:00:00.000Z",
+      id: AttachmentIdSchema.parse(uuid(70)),
+      image,
+      kind: "image",
+      name: "Screenshot",
+      pins: [],
+    };
+
+    controller.apply({
+      attachments: [picture, attachedFile(60)],
+      id,
+      type: "attach",
+    });
+    await controller.flush();
+    disk.full = true;
+    controller.apply({
+      attachmentId: picture.id,
+      id,
+      image: { ...image, file: `${uuid(91)}.png` },
+      type: "replaceAttachmentImage",
+    });
+    await controller.flush();
+    controller.apply({ id, type: "remove" });
+    disk.full = false;
+    add("Anything");
+    await controller.flush();
+
+    expect(deleted).toStrictEqual([image.file]);
   });
 });

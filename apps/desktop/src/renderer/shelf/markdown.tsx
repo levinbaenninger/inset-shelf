@@ -6,6 +6,8 @@ import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { tooltipText } from "@/shared/clamp";
+
 /** GitHub's Markdown (lists, tasks, tables, strikethrough), with a line break wherever one was typed. */
 const PLUGINS = [remarkGfm, remarkBreaks];
 
@@ -52,7 +54,7 @@ const Link = ({ children, href }: Children & { readonly href?: string }) => {
         event.preventDefault();
         onOpenLink(href);
       }}
-      title={href}
+      title={tooltipText(href)}
     >
       {children}
     </a>
@@ -78,23 +80,21 @@ const Code = ({ children }: Children) => (
 );
 
 /**
- * Code and tables scroll sideways in an open card. A closed one clips them
- * instead: a scroller starts its own layout, which a two-line clamp cannot
- * see into.
+ * An open card wraps a long code line, so reading it takes no sideways scroll.
+ * A closed one keeps its lines and clips them, so a two-line clamp counts
+ * lines of code and not lines of wrapping.
  */
-const useScrollsSideways = (): string | false =>
-  use(Mode).interactive && "overflow-x-auto";
-
 const CodeBlock = ({ children }: Children) => {
   const { interactive } = use(Mode);
 
   return (
     <Block
       className={cn(
-        "bg-foreground/5 rounded-md px-2 font-mono text-xs whitespace-pre [&_code]:bg-transparent [&_code]:p-0",
+        "bg-foreground/5 rounded-md px-2 font-mono text-xs [&_code]:bg-transparent [&_code]:p-0",
         // Padding under a clamped block would show a sliver of the line after the cut.
-        interactive && "py-1.5",
-        useScrollsSideways()
+        interactive
+          ? "py-1.5 wrap-anywhere whitespace-pre-wrap"
+          : "whitespace-pre"
       )}
     >
       {children}
@@ -116,8 +116,15 @@ const ListItem = ({ children }: Children) => (
 
 const Rule = () => <Block className="border-foreground/15 my-1 border-t" />;
 
+/**
+ * A table keeps its columns and scrolls sideways in an open card. A closed one
+ * clips it instead: a scroller starts its own layout, which a two-line clamp
+ * cannot see into.
+ */
 const Table = ({ children }: Children) => (
-  <Block className={cn(useScrollsSideways())}>{children}</Block>
+  <Block className={cn(use(Mode).interactive && "overflow-x-auto")}>
+    {children}
+  </Block>
 );
 
 /** Pictures from the web are not fetched; their words stand in. */

@@ -101,7 +101,9 @@ const Tip = ({
   </Tooltip>
 );
 
-const Divider = () => <div aria-hidden className="bg-border mx-1 h-5 w-px" />;
+const Divider = () => (
+  <div aria-hidden className="bg-border mx-1 h-5 w-px max-[720px]:mx-0.5" />
+);
 
 /** Inks and the stroke restyle what is selected or being typed, so a click on them leaves focus, and with it the selection, where it is. */
 const keepFocus = (event: MouseEvent): void => {
@@ -130,7 +132,8 @@ export const Toolbar = ({
 }: ToolbarProps) => (
   <div
     aria-label="Drawing tools"
-    className="bg-background flex items-center gap-0.5 rounded-xl border p-1 shadow-sm"
+    // In a window near its smallest (600 wide) the buttons draw smaller, so every tool still fits on one line.
+    className="bg-background flex items-center gap-0.5 rounded-xl border p-1 shadow-sm max-[720px]:gap-0 max-[720px]:[&>button]:size-6.5"
     role="toolbar"
   >
     {TOOLS.map((each) => (

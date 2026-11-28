@@ -1,6 +1,12 @@
-import type { NotSavedItem, ShelfStatus, ShelfView } from "@shared/contracts";
-import { applyOp, attachmentsOf, UNDO_MAX } from "@shared/shelf";
 import type {
+  DetailField,
+  NotSavedItem,
+  ShelfStatus,
+  ShelfView,
+} from "@shared/contracts";
+import { applyOp, storedFilesOf, UNDO_MAX } from "@shared/shelf";
+import type {
+  Attachment,
   ItemId,
   MainOp,
   OpEnv,
@@ -52,10 +58,17 @@ export interface ShelfController {
   /** Returns the id of an item the operation added. */
   readonly apply: (op: ShelfOp | MainOp) => ItemId | null;
   readonly item: (id: ItemId) => ShelfItem | undefined;
-  /** Selects an item in the shelf; `edit` opens its text for typing. */
-  readonly focus: (id: ItemId, edit?: boolean) => void;
+  /** Selects an item in the shelf; `edit` opens its text for typing, `field` its details at that field. */
+  readonly focus: (id: ItemId, edit?: boolean, field?: DetailField) => void;
   readonly setStatus: (patch: Partial<ShelfStatus>) => void;
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * Tells `listener` each time a write starts on the disk's way and each
+   * time one ends, landed or not: `stored` and `onItsWay` can read
+   * differently from then on. `subscribe` hears none of it, so a save
+   * never repaints the shelf.
+   */
+  readonly onWrite: (listener: () => void) => () => void;
   /** The shelf as it is now, with the revision that names it. Documents are never changed in place. */
   readonly snapshot: () => Revision;
   /**
@@ -80,6 +93,10 @@ export interface ShelfController {
   readonly discard: (id: ItemId) => boolean;
   /** A window removed in details that can still come back. */
   readonly removedWindow: (id: WindowId) => WindowRef | undefined;
+  /** The item as the disk holds it; undefined for one no write has landed yet. */
+  readonly stored: (id: ItemId) => ShelfItem | undefined;
+  /** The item as the write now on the disk's way holds it, which can still land; undefined when no write is, or it doesn't hold the item. */
+  readonly onItsWay: (id: ItemId) => ShelfItem | undefined;
 }
 
 /** Typing saves after a pause; everything else at once. */
@@ -91,6 +108,7 @@ const TYPED: ReadonlySet<string> = new Set([
   "setSteps",
   "describeWindow",
   "setPins",
+  "setAttachmentPins",
 ]);
 
 const isEdit = (op: ShelfOp | MainOp): boolean => TYPED.has(op.type);
@@ -104,6 +122,16 @@ interface RemovedWindow {
 
 /** Windows removed in details that can still come back; their pictures stay until the shelf is next opened. */
 const REMOVED_WINDOWS_MAX = 20;
+
+/** An attachment taken off an item, kept so details can put it back with ⌘Z. */
+interface RemovedAttachment {
+  readonly itemId: ItemId;
+  readonly attachment: Attachment;
+  readonly index: number;
+}
+
+/** Attachments removed in details that can still come back; their files stay until the shelf is next opened. */
+const REMOVED_ATTACHMENTS_MAX = 20;
 
 const byId = (doc: ShelfDoc): ReadonlyMap<ItemId, ShelfItem> =>
   new Map(doc.items.map((item) => [item.id, item]));
@@ -139,14 +167,15 @@ export const createShelfController = (
   let cancelTimer: (() => void) | null = null;
   let toDelete: ShelfItem[] = [];
   let removedWindows: readonly RemovedWindow[] = [];
+  let removedAttachments: readonly RemovedAttachment[] = [];
   let inFlight: Promise<void> = Promise.resolve();
   // Counts the changes; `saved` is the last one the disk holds.
   let version = 0;
   let saved = 0;
   // A save is on its way that hasn't read the document yet.
   let queued = false;
-  // The revision the write now on the disk's way holds, if one is.
-  let writing: number | null = null;
+  // The shelf the write now on the disk's way holds, if one is.
+  let writing: Revision | null = null;
   // Items a failed write held a change to. They stay failed, edited or not, until a write holding them succeeds or Discard changes.
   let failed: ReadonlySet<ItemId> = new Set();
   let discarded: ShelfView["discarded"] = null;
@@ -170,6 +199,17 @@ export const createShelfController = (
 
   const emit = (): void => {
     for (const listener of listeners) {
+      listener();
+    }
+  };
+
+  const writeListeners = new Set<() => void>();
+
+  /** A write starts on the disk's way, or the one on it ended (null) and the disk is as it left it. Only who watches writes hears it. */
+  const setWriting = (next: Revision | null): void => {
+    writing = next;
+
+    for (const listener of writeListeners) {
       listener();
     }
   };
@@ -234,13 +274,13 @@ export const createShelfController = (
       changes.every(([id, epoch]) => epochOf(id) === epoch);
 
     toDelete = [];
-    writing = snapshotVersion;
+    setWriting({ doc: snapshot, rev: snapshotVersion });
 
     const result = await deps.save(snapshot, current);
 
     // Dropped before it replaced the file, or failed once Discard had made it stale: the disk holds what it held before it, and its failure is no longer anyone's.
     if (!result.ok && ("dropped" in result || !current())) {
-      writing = null;
+      setWriting(null);
 
       return stale(deletable);
     }
@@ -248,7 +288,12 @@ export const createShelfController = (
     // Discarded while the file was being replaced: the file from before it goes back.
     const restored = result.ok && !current() && (await deps.restore());
 
-    writing = null;
+    if (result.ok && !restored) {
+      saved = Math.max(saved, snapshotVersion);
+      onDisk = snapshot;
+    }
+
+    setWriting(null);
 
     if (restored) {
       return stale(deletable);
@@ -265,8 +310,6 @@ export const createShelfController = (
       return false;
     }
 
-    saved = Math.max(saved, snapshotVersion);
-    onDisk = snapshot;
     // An item edited again since this write began stays failed until a write holds its latest version.
     const written = byId(snapshot);
 
@@ -283,18 +326,19 @@ export const createShelfController = (
       setStatus({ saveError: null });
     }
 
-    // A file the saved shelf, the shown shelf or a Discard's saved version still names stays: Discard changes can bring back an image's old picture while this write was on its way.
+    // A file the saved shelf, the shown shelf, a Discard's saved version or a deleted item Undo can still bring back names stays: Discard changes can bring back an image's old picture while this write was on its way.
     const used = new Set(
       [
         ...snapshot.items,
         ...doc.items,
         ...[...kept.values()].map((e) => e.item),
-      ].flatMap(attachmentsOf)
+        ...pending.map((removed) => removed.item),
+      ].flatMap(storedFilesOf)
     );
 
     await Promise.all(
       deletable
-        .flatMap(attachmentsOf)
+        .flatMap(storedFilesOf)
         .filter((file) => !used.has(file))
         .map(deps.deleteAttachment)
     );
@@ -424,9 +468,57 @@ export const createShelfController = (
     };
   };
 
+  /** removeAttachment remembers the attachment; restoreAttachment puts it back where it was. */
+  const attachmentOp = (op: ShelfOp | MainOp): ShelfOp | MainOp | null => {
+    if (op.type === "removeAttachment") {
+      const item = doc.items.find((candidate) => candidate.id === op.id);
+
+      const index =
+        item?.attachments.findIndex(
+          (attachment) => attachment.id === op.attachmentId
+        ) ?? -1;
+
+      const attachment = item?.attachments[index];
+
+      if (attachment !== undefined) {
+        removedAttachments = [
+          ...removedAttachments,
+          { attachment, index, itemId: op.id },
+        ].slice(-REMOVED_ATTACHMENTS_MAX);
+      }
+
+      return op;
+    }
+
+    if (op.type !== "restoreAttachment") {
+      return op;
+    }
+
+    const removed = removedAttachments.find(
+      (candidate) =>
+        candidate.itemId === op.id &&
+        candidate.attachment.id === op.attachmentId
+    );
+
+    if (removed === undefined) {
+      return null;
+    }
+
+    removedAttachments = removedAttachments.filter(
+      (candidate) => candidate !== removed
+    );
+
+    return {
+      attachment: removed.attachment,
+      id: removed.itemId,
+      index: removed.index,
+      type: "insertAttachment",
+    };
+  };
+
   const persisted = async (rev: number): Promise<WriteResult> => {
     // A typed edit waiting for its pause, or a change a failed save left unwritten.
-    if (saved < rev && !queued && (writing ?? 0) < rev) {
+    if (saved < rev && !queued && (writing?.rev ?? 0) < rev) {
       saveNow();
     }
 
@@ -480,7 +572,8 @@ export const createShelfController = (
 
   return {
     apply: (requested) => {
-      const op = windowOp(requested);
+      const windowed = windowOp(requested);
+      const op = windowed === null ? null : attachmentOp(windowed);
 
       if (op === null) {
         return null;
@@ -568,6 +661,9 @@ export const createShelfController = (
       removedWindows = removedWindows.filter(
         (removed) => removed.itemId !== id
       );
+      removedAttachments = removedAttachments.filter(
+        (removed) => removed.itemId !== id
+      );
 
       // Nothing is written to undo a save: a write on its way is dropped, or the file from before it renamed back.
       settleIfClean();
@@ -577,15 +673,30 @@ export const createShelfController = (
     },
     discards: (ids) => ids.reduce((sum, id) => sum + epochOf(id), 0),
     flush: async () => await persisted(version),
-    focus: (id, edit = false) => {
+    focus: (id, edit, field) => {
       focusSeq += 1;
-      focus = edit ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
+      focus =
+        edit === true ? { edit, id, seq: focusSeq } : { id, seq: focusSeq };
+
+      if (field !== undefined) {
+        focus = { ...focus, field };
+      }
+
       emit();
     },
     item: (id) => doc.items.find((item) => item.id === id),
+    onItsWay: (id) => writing?.doc.items.find((item) => item.id === id),
+    onWrite: (listener) => {
+      writeListeners.add(listener);
+
+      return () => {
+        writeListeners.delete(listener);
+      };
+    },
     persisted,
     setStatus,
     snapshot: () => ({ doc, rev: version }),
+    stored: (id) => onDisk.items.find((item) => item.id === id),
     subscribe: (listener) => {
       listeners.add(listener);
 

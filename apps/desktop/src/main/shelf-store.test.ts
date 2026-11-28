@@ -11,14 +11,16 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import v3 from "@shared/fixtures/shelf-v3.json";
 import {
+  AttachmentIdSchema,
   emptyShelf,
   ItemIdSchema,
   SectionIdSchema,
   NO_META,
   WindowIdSchema,
 } from "@shared/shelf";
-import type { ShelfDoc, WindowRef } from "@shared/shelf";
+import type { Attachment, ShelfDoc, WindowRef } from "@shared/shelf";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { createShelfController } from "./shelf-controller";
@@ -766,6 +768,120 @@ describe("the store under Discard changes and failing file operations (red-team 
       reopened: ["KEPT"],
       result: { ok: true },
       unsaved: 0,
+    });
+  });
+});
+
+const attachedFile = (n: number, stored: string): Attachment => ({
+  addedAt: "2026-11-20T10:00:00.000Z",
+  file: { bytes: 3, name: `File ${n}.pdf`, stored },
+  id: AttachmentIdSchema.parse(`3f1c2b9e-4a7d-4e21-9b0c-5d8e6f7a1d0${n}`),
+  kind: "file",
+});
+
+const withAttachments = (
+  doc: ShelfDoc,
+  attachments: readonly Attachment[]
+): ShelfDoc => ({
+  ...doc,
+  items: doc.items.map((item) => ({
+    ...item,
+    attachments: [...attachments],
+  })),
+});
+
+describe("attachments on an item (format 4)", () => {
+  let dir = "";
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "shelf-store-v4-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { force: true, recursive: true });
+  });
+
+  const V3_FIXTURE = path.join(
+    import.meta.dirname,
+    "../shared/fixtures/shelf-v3.json"
+  );
+
+  it("opens a version 3 shelf as version 4 without writing it, keeps it as the previous version on the first save, and reads it again when that is put back", async () => {
+    const v3Text = await readFile(V3_FIXTURE, "utf-8");
+    const named = v3Text.match(/[0-9a-f-]{36}\.(?:png|json|pdf)/gu) ?? [];
+
+    await writeFile(path.join(dir, "shelf.json"), v3Text);
+    await mkdir(path.join(dir, "attachments"));
+    await Promise.all(
+      named.map(async (name) => {
+        await writeFile(path.join(dir, "attachments", name), name);
+      })
+    );
+
+    const store = await openShelfStore(dir, options);
+    const untouched = await readFile(path.join(dir, "shelf.json"), "utf-8");
+
+    await store.save({
+      ...store.initial,
+      items: store.initial.items.map((item) => ({ ...item, done: true })),
+    });
+
+    const prev = await readFile(path.join(dir, "shelf.json.prev"), "utf-8");
+    const restored = await store.restorePrevious();
+    const reopened = await openShelfStore(dir, options);
+
+    expect({
+      initial: store.initial,
+      kept: await attachmentsIn(dir),
+      prev,
+      reopened: reopened.initial,
+      restored,
+      untouched,
+    }).toStrictEqual({
+      initial: {
+        ...v3,
+        items: v3.items.map((item) => ({ ...item, attachments: [] })),
+        schemaVersion: 4,
+      },
+      kept: [...new Set(named)].toSorted(),
+      prev: v3Text,
+      reopened: store.initial,
+      restored: true,
+      untouched: v3Text,
+    });
+  });
+
+  it("keeps attached files the shelf, its previous version or a set-aside file names through the tidy-up, and deletes one nothing names", async () => {
+    const store = await openShelfStore(dir, options);
+    const write = async () => await store.writeAttachment(new Uint8Array([1]));
+    const attached = await write();
+    const onlyPrev = await write();
+    const onlySetAside = await write();
+
+    // Named by no shelf file.
+    await write();
+    const note = withNote(store.initial, "Quote");
+
+    await store.save(
+      withAttachments(note, [
+        attachedFile(1, attached),
+        attachedFile(2, onlyPrev),
+      ])
+    );
+    await store.save(withAttachments(note, [attachedFile(1, attached)]));
+    await writeFile(
+      path.join(dir, "shelf.unreadable-2026-11-01T10-00-00.000Z.json"),
+      JSON.stringify(withAttachments(note, [attachedFile(3, onlySetAside)]))
+    );
+
+    const reopened = await openShelfStore(dir, options);
+
+    expect({
+      kept: await attachmentsIn(dir),
+      reopened: reopened.initial.items.flatMap((item) => item.attachments),
+    }).toStrictEqual({
+      kept: [attached, onlyPrev, onlySetAside].toSorted(),
+      reopened: [attachedFile(1, attached)],
     });
   });
 });
