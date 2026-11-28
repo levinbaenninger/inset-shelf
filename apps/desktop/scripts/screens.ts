@@ -9643,6 +9643,30 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-unmatched-row-left",
     page: "shelf",
   },
+  {
+    // ↓ to a row and Delete twice, with main's view arriving late as over IPC: each Delete removes a row, and the keyboard stays in the list, not in the search.
+    act: async (page) => {
+      await select(page, 10);
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Delete");
+      await page.waitForTimeout(400);
+    },
+    check: async (page) => {
+      const after = await keyboardPlace(page);
+
+      await page.keyboard.press("Delete");
+      await page.waitForTimeout(400);
+
+      const removed = await removes(page);
+
+      return removed === 2 && after.label !== "Search the shelf"
+        ? null
+        : `after the first Delete focus was on ${placeText(after)}, and two Deletes removed ${removed} rows`;
+    },
+    data: { echo: "later", view: shelfView() },
+    name: "shelf-keeps-place-delete-twice",
+    page: "shelf",
+  },
 ];
 
 const SETTINGS_VIEW = {
