@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a problem with the desktop app or website.
+body:
+  - type: input
+    id: environment
+    attributes:
+      label: Version and platform
+      description: Include the app version or commit and your OS version. For the website, include the browser.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use sample data. Remove private clipboard text, window titles, and file paths from screenshots or logs.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
