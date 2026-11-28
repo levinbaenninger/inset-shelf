@@ -28,8 +28,6 @@ import type { Rect } from "@shared/geometry";
 import { insetUrl } from "@shared/inset-url";
 import type { OnboardingView } from "@shared/onboarding";
 import { secondTap } from "@shared/pill";
-import { hereOf, hereWith, openingOf, typedNote } from "@shared/recall";
-import type { Opening } from "@shared/recall";
 import type { IconPlace, SettingsView } from "@shared/settings";
 import {
   AttachmentIdSchema,
@@ -106,6 +104,7 @@ import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { attachedFileName, imageFileName } from "./export-name";
 import { createDragStaging, createShotStaging, exportImage } from "./exports";
+import type { FrontRead } from "./front-watch";
 import { EDITORS, frontKind, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
@@ -145,6 +144,7 @@ import { openSettingsStore } from "./settings-store";
 import { updateSettings } from "./settings-update";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
+import { createShelfHere } from "./shelf-here";
 import {
   osMajor,
   SHELF_PERMISSIONS,
@@ -464,6 +464,17 @@ const setTimer = (run: () => void, ms: number): (() => void) => {
   };
 };
 
+/** The window in front as a watch reads it, null when it is Inset's own or none; with `address`, its page too. */
+const probeFront = async (address: boolean): Promise<FrontRead | null> => {
+  const front = await frontWindow(
+    address ? { page: true } : { address: false }
+  );
+
+  return front.own || front.context === null
+    ? null
+    : { bounds: front.bounds, source: front.context };
+};
+
 const exists = async (file: string): Promise<boolean> => {
   try {
     await access(file);
@@ -650,20 +661,21 @@ const start = async (): Promise<void> => {
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
 
-  // Recall: the window the shelf opened beside and the open items from it, sent with the shelf's view. Not shelf data.
-  let hereOpening: Opening | null = null;
-  let hereSeq = 0;
   // The window the recall pill showing now was shown for, so a click on it opens the shelf there.
   let recalledFrom: ItemContext | null = null;
   // Set once the shelf's IPC server exists.
   let emitShelfView: () => void = ignore;
 
-  /**
-   * Open decision 3: the shelf shows a "from here" chip whenever it opens
-   * beside a window open items came from. False keeps the filter for the
-   * recall pill's click only.
-   */
-  const HERE_CHIP = true;
+  const shelfHere = createShelfHere({
+    changed: () => {
+      emitShelfView();
+    },
+    doc: () => controller.view().doc,
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    probe: probeFront,
+    setTimer,
+    visible: () => shelf.isVisible(),
+  });
 
   const home = app.getPath("home");
 
@@ -674,25 +686,9 @@ const start = async (): Promise<void> => {
     return {
       ...view,
       editors: EDITORS,
-      here: hereOpening === null ? null : hereWith(hereOpening, view.doc),
+      here: shelfHere.here(),
       home,
     };
-  };
-
-  const setHere = (front: Awaited<ReturnType<typeof frontWindow>>): void => {
-    const context = front.own ? null : front.context;
-    const found = HERE_CHIP ? hereOf(controller.view().doc, context) : null;
-
-    hereSeq += 1;
-    hereOpening =
-      found === null || context === null
-        ? null
-        : openingOf(controller.view().doc, context, {
-            ...found,
-            filter: false,
-            seq: hereSeq,
-          });
-    emitShelfView();
   };
 
   /**
@@ -706,8 +702,7 @@ const start = async (): Promise<void> => {
     // From the notification area, the window in front is a part of the taskbar.
     if (options.dock === false) {
       // No window to be from: the last opening's window must not name a note typed now.
-      hereSeq += 1;
-      hereOpening = null;
+      shelfHere.opened(null);
       emitShelfView();
       shelf.show(null);
 
@@ -716,7 +711,8 @@ const start = async (): Promise<void> => {
 
     const front = await frontWindow();
 
-    setHere(front);
+    shelfHere.opened(front.own ? null : front.context);
+    emitShelfView();
 
     if (front.bounds !== null) {
       lastTarget = front.bounds;
@@ -773,16 +769,7 @@ const start = async (): Promise<void> => {
     },
     // The click made the pill, or nothing, the window in front: the shelf opens at the place the pill was shown for.
     openRecall: ({ ids, label, window }) => {
-      hereSeq += 1;
-      hereOpening =
-        recalledFrom === null
-          ? null
-          : openingOf(controller.view().doc, recalledFrom, {
-              filter: true,
-              ids,
-              label,
-              seq: hereSeq,
-            });
+      shelfHere.recalled(recalledFrom, { ids, label });
       emitShelfView();
 
       if (window !== null) {
@@ -1381,15 +1368,7 @@ const start = async (): Promise<void> => {
         systemPreferences.isTrustedAccessibilityClient(false)),
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
     now: () => Date.now(),
-    probe: async (address) => {
-      const front = await frontWindow(
-        address ? { page: true } : { address: false }
-      );
-
-      return front.own || front.context === null
-        ? null
-        : { bounds: front.bounds, source: front.context };
-    },
+    probe: probeFront,
     setTimer,
     show: ({ source, ...recalled }) => {
       const before = toast.view()?.seq;
@@ -1410,6 +1389,7 @@ const start = async (): Promise<void> => {
     }
 
     recall.activity(kind);
+    shelfHere.activity(kind);
   });
   recall.sync();
 
@@ -2400,9 +2380,7 @@ const start = async (): Promise<void> => {
       ...attachmentHandlers,
       addFiles: shotDrop.onShelf,
       apply: (op) => {
-        controller.apply(
-          op.type === "compose" ? typedNote(op, hereOpening) : op
-        );
+        controller.apply(op.type === "compose" ? shelfHere.typed(op) : op);
 
         if (op.type === "toggleDone" && controller.item(op.id)?.done === true) {
           tutorial.complete(SHELF_TASK_IDS.checkOrCopy);
