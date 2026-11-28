@@ -469,14 +469,25 @@ const extensionOf = (name: string): string => {
   return dot > 0 ? name.slice(dot).toLowerCase() : "";
 };
 
+/** An extension that can name a language in a class name and after a fence. */
+const LANGUAGE = /^[a-z0-9]+$/u;
+
+/** The language a file's extension names: "ts" for recall.ts, or null. */
+const languageOf = (name: string): string | null => {
+  const language = extensionOf(name).slice(1);
+
+  return LANGUAGE.test(language) ? language : null;
+};
+
 /**
- * A code capture's file, and whether its name is whole: a code place's, a
- * lone title's, or a title of exactly the row's parts. With more, a dash may
- * sit inside the name, so it may be only the name's first part.
+ * A code capture's file, and whether its language is sure. It is not when
+ * the title may name a longer file of another language, a dash inside its
+ * name: "worker.v2 - copy.ts - demo" names worker.v2 by the row, but may
+ * name "worker.v2 - copy.ts" in demo.
  */
 interface CodeFile {
   readonly name: string;
-  readonly whole: boolean;
+  readonly sure: boolean;
 }
 
 /**
@@ -503,7 +514,7 @@ const titleFile = (
       /\s/u.test(extensionOf(lone)) ||
       PROSE_FILES.has(extensionOf(lone))
       ? null
-      : { name: lone, whole: true };
+      : { name: lone, sure: true };
   }
 
   const prose = split.parts.some((_, index) =>
@@ -514,9 +525,21 @@ const titleFile = (
 
   const name = prose ? null : titleParts(editor, title, app).file;
 
-  return name === null
-    ? null
-    : { name, whole: split.parts.length === editor.title.length };
+  if (name === null) {
+    return null;
+  }
+
+  // Each longer file the parts after the project's place could still belong to; a profile ("Work") names no language.
+  const longer = split.parts
+    .slice(1, split.parts.length - editor.title.length + 1)
+    .map((_, index) => split.parts.slice(0, index + 2).join(split.dash));
+
+  return {
+    name,
+    sure: longer.every((file) =>
+      [null, languageOf(name)].includes(languageOf(file))
+    ),
+  };
 };
 
 /**
@@ -542,7 +565,7 @@ const codeFile = (
   if (place !== null) {
     const name = fileName(place);
 
-    return PROSE_FILES.has(extensionOf(name)) ? null : { name, whole: true };
+    return PROSE_FILES.has(extensionOf(name)) ? null : { name, sure: true };
   }
 
   const editor = codeEditor(context.app, editors);
@@ -559,20 +582,16 @@ export const isCodeCapture = (
   editors: readonly CodeEditor[] = CODE_EDITORS
 ): boolean => codeFile(item, editors) !== null;
 
-/** An extension that can name a language in a class name and after a fence. */
-const LANGUAGE = /^[a-z0-9]+$/u;
-
 /**
  * The language a code capture copies as, from its file's extension: "ts"
- * for recall.ts. Null for an item that is not code, whose file's name may be
- * only its first part (`CodeFile`), or whose extension names no language.
+ * for recall.ts. Null for an item that is not code, whose language is not
+ * sure (`CodeFile`), or whose extension names no language.
  */
 export const codeLanguage = (
   item: Pick<TextItem, "context" | "via">,
   editors: readonly CodeEditor[] = CODE_EDITORS
 ): string | null => {
   const file = codeFile(item, editors);
-  const language = file?.whole === true ? extensionOf(file.name).slice(1) : "";
 
-  return LANGUAGE.test(language) ? language : null;
+  return file?.sure === true ? languageOf(file.name) : null;
 };

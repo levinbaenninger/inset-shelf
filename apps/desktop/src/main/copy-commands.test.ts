@@ -1639,35 +1639,55 @@ describe(createCopyCommands, () => {
     });
   });
 
-  it("copies code under a Windows title whose dashes leave its file unsure as a block of no language", async () => {
-    const { commands, controller, written } = await setup();
+  it.each([
+    {
+      // "worker.v2 - copy.ts" in demo, or "worker.v2" in "copy.ts - demo": the title alone can't say.
+      language: null,
+      title: "worker.v2 - copy.ts - demo - Visual Studio Code",
+    },
+    // A profile after the project leaves the file sure.
+    {
+      language: "ts",
+      title: "recall.ts - inset-shelf - Work - Visual Studio Code",
+    },
+  ])(
+    "copies code under the Windows title $title as a block of the language its file surely has",
+    async ({ language, title }) => {
+      const { commands, controller, written } = await setup();
 
-    // "worker.v2 - copy.ts" in demo, or "worker.v2" in "copy.ts - demo": the title alone can't say.
-    const id = added(
-      controller.apply({
-        context: {
-          ...CODE_SOURCES[1].context,
-          title: "worker.v2 - copy.ts - demo - Visual Studio Code",
-        },
-        html: null,
-        text: CODE,
-        type: "addText",
-        via: "selection",
-      })
-    );
+      const id = added(
+        controller.apply({
+          context: { ...CODE_SOURCES[1].context, title },
+          html: null,
+          text: CODE,
+          type: "addText",
+          via: "selection",
+        })
+      );
 
-    await commands.copy(id);
-    await commands.copyDetails(id);
+      await commands.copy(id);
+      await commands.copyDetails(id);
 
-    const [copy, details] = await Promise.all(
-      written.map(async (contents) => await formats(contents[0]))
-    );
+      const [copy, details] = await Promise.all(
+        written.map(async (contents) => await formats(contents[0]))
+      );
 
-    expect({
-      block: copy?.["text/html"],
-      fence: details?.["text/plain"]?.includes(`\n\`\`\`\n${CODE}\n\`\`\``),
-    }).toStrictEqual({ block: `<pre><code>${CODE}</code></pre>`, fence: true });
-  });
+      const tag = language ?? "";
+
+      expect({
+        block: copy?.["text/html"],
+        fence: details?.["text/plain"]?.includes(
+          `\n\`\`\`${tag}\n${CODE}\n\`\`\``
+        ),
+      }).toStrictEqual({
+        block:
+          language === null
+            ? `<pre><code>${CODE}</code></pre>`
+            : `<pre><code class="language-${language}">${CODE}</code></pre>`,
+        fence: true,
+      });
+    }
+  );
 
   it("copies a Markdown file's selection as prose: its words and HTML as they were copied, and no fence with details", async () => {
     const { commands, controller, written } = await setup();
