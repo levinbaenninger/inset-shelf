@@ -254,6 +254,42 @@ describe(itemMenu, () => {
     ]);
   });
 
+  it("offers Copy with Details for a code capture with nothing more, which it copies under its file, and not for prose from the same editor", () => {
+    const [item] = doc.items;
+
+    if (item?.kind !== "text") {
+      throw new Error("missing item");
+    }
+
+    const from = (file: string) => ({
+      ...item,
+      context: {
+        app: "Code",
+        appLink: null,
+        code: {
+          file: `/Users/anna/p/${file}`,
+          line: null,
+          root: "/Users/anna/p",
+        },
+        title: `${file} — p`,
+        url: null,
+      },
+      via: "selection" as const,
+    });
+
+    expect(
+      (["row", "details"] as const).map((place) =>
+        labels(itemMenu(from("recall.ts"), doc, true, place)).slice(0, 2)
+      )
+    ).toStrictEqual([
+      ["Copy", "Copy with Details"],
+      ["Copy", "Copy with Details"],
+    ]);
+    expect(labels(itemMenu(from("README.md"), doc))).not.toContain(
+      "Copy with Details"
+    );
+  });
+
   it("opens a text item where it came from: its desktop app, else its page", () => {
     const [item] = doc.items;
 

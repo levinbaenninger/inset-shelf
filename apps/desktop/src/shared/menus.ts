@@ -1,4 +1,9 @@
-import { CODE_EDITORS, codeAction, codeWay } from "./code-editors";
+import {
+  CODE_EDITORS,
+  codeAction,
+  codeWay,
+  isCodeCapture,
+} from "./code-editors";
 import type { CodeEditor } from "./code-editors";
 import { hasAttachments, hasDetails } from "./shelf";
 import type {
@@ -268,11 +273,15 @@ const copyWithLink = (item: ShelfItem): readonly MenuEntry[] =>
         },
       ];
 
-/** ⌥⌘C in every Inset app; shown only where it copies more than Copy does. */
-const copyDetails = (item: ShelfItem): readonly MenuEntry[] =>
+/** ⌥⌘C in every Inset app; shown only where it copies more than Copy does, as code under its file does. */
+const copyDetails = (
+  item: ShelfItem,
+  editors: readonly CodeEditor[]
+): readonly MenuEntry[] =>
   hasDetails(item) ||
   hasAttachments(item) ||
-  (item.context?.url ?? null) !== null
+  (item.context?.url ?? null) !== null ||
+  (item.kind === "text" && isCodeCapture(item, editors))
     ? [
         {
           accelerator: "Alt+CommandOrControl+C",
@@ -358,7 +367,7 @@ export const itemMenu = (
     kind: "choice",
     label: "Copy",
   },
-  ...copyDetails(item),
+  ...copyDetails(item, editors),
   ...copyWithLink(item),
   SEPARATOR,
   ...(place === "details"
