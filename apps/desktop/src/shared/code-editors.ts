@@ -449,16 +449,26 @@ const extensionOf = (name: string): string => {
 /**
  * The file a code editor's title names, for telling code from prose: by the
  * row's parts, else the whole title when it holds no dash, as Code titles a
- * file opened on its own. Whether that lone part is a file or a folder only
- * its extension says, which is all this is read for.
+ * file opened on its own, unless what follows its last dot has a space, as
+ * a workspace's label does. Whether that lone part is a file or a folder
+ * only its extension says, which is all this is read for.
  */
 const titledFile = (
   editor: CodeEditor,
   title: string | null,
   app: string | null
-): string | null =>
-  titleParts(editor, title, app).file ??
-  (partsOf(editor, title, app).length === 0 ? cleanTitle(title, app) : null);
+): string | null => {
+  const named = titleParts(editor, title, app).file;
+
+  if (named !== null || partsOf(editor, title, app).length > 0) {
+    return named;
+  }
+
+  const lone = cleanTitle(title, app);
+
+  // A file's name has no space in its extension; a label such as "release.v2 (Workspace)" does.
+  return lone === null || /\s/u.test(extensionOf(lone)) ? null : lone;
+};
 
 /**
  * Whether a text item is code: a selection from a file a code editor
