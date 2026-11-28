@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { AttachResult } from "@shared/contracts";
-import { ATTACHMENTS_MAX } from "@shared/shelf";
+import { ATTACHMENTS_MAX, fitText } from "@shared/shelf";
 import type {
   Attachment,
   AttachmentId,
@@ -93,6 +93,21 @@ const storedFiles = (upload: StoredUpload): readonly string[] =>
 const pictureName = (fileName: string): string =>
   path.parse(fileName).name || fileName;
 
+/** The longest a file's name runs in a reason, so a toast's tooltip still holds the reason after it. */
+const REASON_NAME_MAX = 60;
+
+/** A file's name as a reason says it: cut at the end of its stem when long, so its extension still shows. */
+const reasonName = (name: string): string => {
+  if (name.length <= REASON_NAME_MAX) {
+    return name;
+  }
+
+  const extension = path.extname(name);
+  const kept = extension.length < REASON_NAME_MAX / 2 ? extension : "";
+
+  return `${fitText(name.slice(0, name.length - kept.length), REASON_NAME_MAX - kept.length)}${kept}`;
+};
+
 export const createAttachments = (deps: AttachmentDeps) => {
   const storePicture = async (
     image: DecodedImage,
@@ -116,11 +131,13 @@ export const createAttachments = (deps: AttachmentDeps) => {
       const info = await deps.stat(filePath);
 
       if (!info.isFile) {
-        return { problem: `${added.name} is a folder, not a file.` };
+        return {
+          problem: `${reasonName(added.name)} is a folder, not a file.`,
+        };
       }
 
       if (info.size > ADDED_FILE_MAX_BYTES) {
-        return { problem: `${added.name} is larger than 200 MB.` };
+        return { problem: `${reasonName(added.name)} is larger than 200 MB.` };
       }
 
       const image = added.kind === "image" ? deps.readImage(filePath) : null;
@@ -138,7 +155,7 @@ export const createAttachments = (deps: AttachmentDeps) => {
         kind: "file",
       };
     } catch {
-      return { problem: `${added.name} couldn’t be read.` };
+      return { problem: `${reasonName(added.name)} couldn’t be read.` };
     }
   };
 

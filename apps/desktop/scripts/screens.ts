@@ -9881,6 +9881,63 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-unmatched-note",
     page: "shelf",
   },
+  {
+    // The row's edit with main's view arriving after Return gave the row the keyboard: the row leaves the results then, and the keyboard still goes back to the search.
+    act: async (page) => {
+      await searchFor(page, "monday");
+      await page.keyboard.press("ArrowDown");
+      await unmatchWords(page);
+    },
+    check: async (page) => {
+      // Main's view arrives 250 ms after the edit (`echo: "later"`).
+      await page.waitForTimeout(500);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after an edit whose view left the search's results late put focus on ${placeText(left)}, not on the search`;
+    },
+    data: { echo: "later", view: shelfView() },
+    name: "shelf-keeps-place-unmatched-row-late",
+    page: "shelf",
+  },
+  {
+    // The note's edit with main's view arriving after Return gave the row the keyboard.
+    act: async (page) => {
+      await searchFor(page, "pallets");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        "document.activeElement?.getAttribute('aria-label') === 'Note for this file'"
+      );
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.type("Crates for the move");
+      await page.keyboard.press("Enter");
+    },
+    check: async (page) => {
+      await page.waitForTimeout(500);
+
+      const left = await keyboardPlace(page);
+
+      return left.label === "Search the shelf"
+        ? null
+        : `Return after a note edit whose view left the search's results late put focus on ${placeText(left)}, not on the search`;
+    },
+    data: {
+      echo: "later",
+      view: shelfView({
+        ...DOC,
+        items: ITEMS.map((each) =>
+          each.id === uuid(13)
+            ? { ...each, note: "Pallets for the move" }
+            : each
+        ),
+      }),
+    },
+    name: "shelf-keeps-place-unmatched-note-late",
+    page: "shelf",
+  },
 ];
 
 const SETTINGS_VIEW = {
