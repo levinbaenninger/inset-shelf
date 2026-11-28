@@ -63,6 +63,7 @@ const toItems = async (snapshot: Snapshot): Promise<Item[]> =>
  * snapshot reads that fail, `filesHeld` the file-list reads that come back
  * empty (as Chromium does when it can't open the clipboard), and `halfRead`
  * the snapshot reads a hold cuts short: the files' list comes back empty.
+ * `windows` reads it as Windows lists it.
  */
 const clipboard = (options: {
   readonly initial: readonly Item[];
@@ -73,6 +74,7 @@ const clipboard = (options: {
   readonly rejected?: readonly number[];
   readonly filesHeld?: readonly number[];
   readonly halfRead?: readonly number[];
+  readonly windows?: boolean;
 }) => {
   let items = options.initial;
   let reads = 0;
@@ -85,7 +87,8 @@ const clipboard = (options: {
     clear: () => {
       items = [];
     },
-    content: clipboardContent,
+    content: async (snapshot) =>
+      await clipboardContent(snapshot, options.windows ?? false),
     copy: () => {
       items = options.copied;
     },
@@ -466,6 +469,39 @@ describe("a cut and a copy of the same file", () => {
     const clip = clipboard({
       copied: [list(A)],
       initial: [EARLIER],
+    });
+
+    await expect(captureSelection(clip.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect(clip.items()).toStrictEqual([EARLIER]);
+  });
+
+  it("reads again on Windows when files are listed with no other format, as when the raw formats couldn't be listed, until the cut shows", async () => {
+    const clip = clipboard({
+      before: { 2: [list(A)], 3: [cutOf(A)] },
+      copied: [copyOf(A)],
+      initial: [EARLIER],
+      windows: true,
+    });
+
+    await captureSelection(clip.deps);
+
+    expect(clip.restored).toStrictEqual([]);
+    expect(clip.items()).toStrictEqual([cutOf(A)]);
+  });
+
+  it("puts the clipboard back at once on Windows when files are listed beside other raw formats but no effect", async () => {
+    const clip = clipboard({
+      copied: [
+        {
+          ...list(A),
+          'electron application/osclipboard;format="FileNameW"': "a.pdf",
+        },
+      ],
+      initial: [EARLIER],
+      windows: true,
     });
 
     await expect(captureSelection(clip.deps)).resolves.toMatchObject({
