@@ -127,3 +127,44 @@ export class ConcealedClipboardError extends Error {
     this.name = "ConcealedClipboardError";
   }
 }
+
+/** A read's formats, item by item, to tell whether the clipboard changed between two reads. */
+const formatsOf = (items: readonly MarkedItem[]): string =>
+  items.map((item) => item.types.join("\n")).join("\0");
+
+/**
+ * Every format of one clipboard read, with its data, checked for the private marks both before the data is
+ * read and after. The clipboard can change between listing its formats and reading their data, so a
+ * password manager's copy made meanwhile would be read under an unmarked list: the second check, which must
+ * see the same formats unmarked, catches it. Throws ConcealedClipboardError on a private clipboard; null
+ * when the clipboard changed while it was read, so nothing read can be trusted to belong together.
+ */
+export const readUnconcealed = async (
+  read: () => Promise<readonly MarkedItem[]>
+): Promise<readonly Record<string, Blob | ClipboardBookmark>[] | null> => {
+  const items = await read();
+
+  if (await itemsConcealed(items)) {
+    throw new ConcealedClipboardError();
+  }
+
+  const contents = await Promise.all(
+    items.map(async (item) =>
+      Object.fromEntries(
+        await Promise.all(
+          item.types.map(
+            async (type) => [type, await item.getType(type)] as const
+          )
+        )
+      )
+    )
+  );
+
+  const after = await read();
+
+  if (await itemsConcealed(after)) {
+    throw new ConcealedClipboardError();
+  }
+
+  return formatsOf(after) === formatsOf(items) ? contents : null;
+};

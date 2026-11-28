@@ -73,7 +73,7 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
-import { ConcealedClipboardError, itemsConcealed } from "./clipboard-privacy";
+import { readUnconcealed } from "./clipboard-privacy";
 import { chatGptThreadLink } from "./codex-threads";
 import { createCopyCommands } from "./copy-commands";
 import { createCopyGate } from "./copy-gate";
@@ -116,7 +116,7 @@ import { causeText, FsErrorSchema } from "./save-error";
 import { createScreenshotWatcher } from "./screenshot-watcher";
 import { createScreenshotWindow } from "./screenshot-window";
 import { captureSelection } from "./selection";
-import type { SelectionResult } from "./selection";
+import type { CopiedSelection, SelectionResult } from "./selection";
 import { openSettingsStore } from "./settings-store";
 import { createSettingsWindow } from "./settings-window";
 import { createShelfController } from "./shelf-controller";
@@ -220,9 +220,13 @@ const trayIconPath = (): string => {
 /** What Double Shift tells the user when the clipboard didn't go as planned, or null. */
 const selectionProblem = (result: SelectionResult): string | null => {
   if (result.kind === "concealed") {
-    return result.which === "original"
-      ? "The clipboard holds something marked private, such as a password, so Inset left it alone and copied nothing. Try again once it has cleared."
-      : "That selection is marked private, such as a password, so it wasn’t captured.";
+    if (result.which === "original") {
+      return "The clipboard holds something marked private, such as a password, so Inset left it alone and copied nothing. Try again once it has cleared.";
+    }
+
+    return result.restored
+      ? "That selection is marked private, such as a password, so it wasn’t captured."
+      : "That selection is marked private, such as a password, so it wasn’t captured. The clipboard couldn’t be put back, so it may still hold the private selection.";
   }
 
   if (result.unchecked) {
@@ -253,53 +257,44 @@ const withFormats = (
   items: readonly ClipboardItem[]
 ): readonly ClipboardItem[] => items.filter((item) => item.types.length > 0);
 
+const readClipboard = async (): Promise<readonly ClipboardItem[]> =>
+  withFormats(await clipboard.read());
+
 /**
  * The clipboard as it is, to be put back. A clipboard a password manager marked private (concealed or
- * transient) is not read at all and not copied: the capture ends here, and the clipboard is left untouched.
- * Rewriting it would be the only way to keep it, and a rewrite without the marks would let clipboard
- * managers record the password.
+ * transient) is not copied: the capture ends here, and the clipboard is left untouched. Rewriting it would
+ * be the only way to keep it, and a rewrite without the marks would let clipboard managers record the
+ * password. A clipboard that changed while it was read is no snapshot, and is read again.
  */
 const snapshotClipboard = async (): Promise<readonly ClipboardContents[]> => {
-  const items = withFormats(await clipboard.read());
+  const contents = await readUnconcealed(readClipboard);
 
-  if (await itemsConcealed(items)) {
-    throw new ConcealedClipboardError();
+  if (contents === null) {
+    throw new Error("The clipboard changed while it was read.");
   }
 
-  return await Promise.all(
-    items.map(async (item) =>
-      Object.fromEntries(
-        await Promise.all(
-          item.types.map(
-            async (type) => [type, await item.getType(type)] as const
-          )
-        )
-      )
-    )
-  );
+  return contents;
 };
 
-/** The text of the copied selection; throws when the app copied it marked private, as a password field does, which ends the capture. */
-const readSelectionText = async (): Promise<string> => {
-  if (await itemsConcealed(await clipboard.read())) {
-    throw new ConcealedClipboardError();
+/** The copied selection, from one read checked for the private marks (selection.ts). */
+const readSelection = async (): Promise<CopiedSelection> => {
+  const contents = await readUnconcealed(readClipboard);
+
+  if (contents === null) {
+    return { html: "", source: "", text: "" };
   }
 
-  return await clipboard.readText();
-};
+  const { html, text } = await clipboardContent(contents);
 
-/** The HTML on the clipboard, or "" without any. */
-const readClipboardHtml = async (): Promise<string> => {
-  const items = await clipboard.read();
-  const item = items.find((candidate) => candidate.types.includes("text/html"));
+  const source = await copySource(
+    contents.map((entry) => ({
+      getType: async (type: string) =>
+        await Promise.resolve(entry[type] ?? new Blob([])),
+      types: Object.keys(entry),
+    }))
+  ).catch(() => "");
 
-  if (item === undefined) {
-    return "";
-  }
-
-  const html = await item.getType("text/html");
-
-  return await html.text();
+  return { html, source, text };
 };
 
 /** Opens the chat or page an item came from in its desktop app, else (macOS only) just brings the app forward. */
@@ -817,9 +812,7 @@ const start = async (): Promise<void> => {
         copy: keyMonitor.copy,
         content: clipboardContent,
         holds: holdsAgainIn,
-        readHtml: readClipboardHtml,
-        readSource: async () => await copySource(await clipboard.read()),
-        readText: readSelectionText,
+        readSelection,
         restore: gate.restore,
         snapshot: snapshotClipboard,
         now: () => performance.now(),

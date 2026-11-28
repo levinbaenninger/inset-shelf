@@ -147,6 +147,42 @@ describe("Windows file names", () => {
   });
 });
 
+describe("Windows device names", () => {
+  it("rejects them alone and before an extension, in any case", () => {
+    expect(
+      accepted(isSafeFileName, [
+        "NUL.txt",
+        "PRN",
+        "con",
+        "Aux.tar.gz",
+        "COM1",
+        "lpt9.log",
+        "COM¹",
+      ])
+    ).toStrictEqual([]);
+  });
+
+  it("accepts names that only start like one", () => {
+    expect(
+      refused(isSafeFileName, [
+        "CONSOLE.txt",
+        "nullable.ts",
+        "COM10",
+        "auxiliary",
+      ])
+    ).toStrictEqual([]);
+  });
+
+  it("prefixes them", () => {
+    expect([
+      safeFileName("NUL.txt"),
+      safeFileName("PRN"),
+      safeFileName("com1.tar.gz"),
+      safeFileName("aux."),
+    ]).toStrictEqual(["_NUL.txt", "_PRN", "_com1.tar.gz", "_aux"]);
+  });
+});
+
 describe(safeFileName, () => {
   it("replaces separators", () => {
     expect(safeFileName("a/b.txt")).toBe("a_b.txt");

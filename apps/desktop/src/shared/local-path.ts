@@ -53,22 +53,38 @@ const UNSAFE_NAME_CHARS = /[<>:"|?*\\/\u0000-\u001F\u007F]/u;
 const TRAILING_DOTS_AND_SPACES = /[.\s]+$/u;
 
 /**
+ * Names Windows keeps for devices, alone or before any extension ("NUL", "nul.txt", "COM1.tar.gz"):
+ * Explorer can't treat a file so named as a regular file.
+ */
+const RESERVED_DEVICE_NAME =
+  /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/iu;
+
+/**
  * A name a stored file keeps and is written under when dragged out: one path
  * segment that is the same on macOS and Windows, never "." or "..", with none
- * of <>:"/\|?*, control characters, or trailing dots or spaces.
+ * of <>:"/\|?*, control characters, or trailing dots or spaces, and no Windows device name.
  */
 export const isSafeFileName = (value: string): boolean =>
   value !== "" &&
   !UNSAFE_NAME_CHARS.test(value) &&
+  !RESERVED_DEVICE_NAME.test(value) &&
   !TRAILING_DOTS_AND_SPACES.test(value);
 
-/** The name a dropped file is stored under: unsafe characters replaced with "_", trailing dots and spaces dropped; "File" when nothing usable is left. */
+/**
+ * The name a dropped file is stored under: unsafe characters replaced with "_", trailing dots and spaces
+ * dropped, a Windows device name prefixed with "_" ("NUL.txt" becomes "_NUL.txt"); "File" when nothing
+ * usable is left.
+ */
 export const safeFileName = (value: string): string => {
-  const cleaned = value
+  const trimmed = value
     .replaceAll(new RegExp(UNSAFE_NAME_CHARS, "gu"), "_")
     .slice(0, 255)
     .replace(TRAILING_DOTS_AND_SPACES, "")
     .trimStart();
+
+  const cleaned = RESERVED_DEVICE_NAME.test(trimmed)
+    ? `_${trimmed}`.slice(0, 255).replace(TRAILING_DOTS_AND_SPACES, "")
+    : trimmed;
 
   return isSafeFileName(cleaned) ? cleaned : "File";
 };

@@ -79,14 +79,16 @@ const fakeClipboard = (
     holds: async (saved, current) => await sameClipboard(saved, current),
     now: () => time,
     readable: readableClipboard,
-    readHtml: async () => await Promise.resolve(html),
-    readSource: async () => await Promise.resolve(source),
-    readText: async () => {
+    readSelection: async () => {
       const wasHeld = holding();
 
       time += wasHeld ? 350 : 1;
 
-      return await Promise.resolve(wasHeld ? "" : content);
+      return await Promise.resolve(
+        wasHeld
+          ? { html: "", source: "", text: "" }
+          : { html, source, text: content }
+      );
     },
     restore: async (saved) => {
       restoredWith.push(saved);
@@ -117,6 +119,7 @@ const fakeClipboard = (
     cleared: () => cleared,
     content: () => content,
     deps,
+    html: () => html,
     replace: (text: string, markup = "") => {
       content = text;
       html = markup;
@@ -257,7 +260,7 @@ describe(captureSelection, () => {
       ).resolves.toMatchObject({ restored: false, text: "x" });
       expect(clip.restoredWith).toHaveLength(0);
       expect(clip.content()).toBe(text);
-      await expect(clip.deps.readHtml()).resolves.toBe(markup);
+      expect(clip.html()).toBe(markup);
     }
   );
 
@@ -277,7 +280,7 @@ describe(captureSelection, () => {
       })
     ).resolves.toMatchObject({ restored: false, text: "x" });
     expect(clip.restoredWith).toHaveLength(1);
-    await expect(clip.deps.readHtml()).resolves.toBe("<i>x</i>");
+    expect(clip.html()).toBe("<i>x</i>");
   });
 
   it("does not retry when the clipboard cannot be checked for a newer copy", async () => {
@@ -482,7 +485,7 @@ describe(captureSelection, () => {
       });
       expect(clip.restoredWith).toHaveLength(0);
       expect(clip.content()).toBe(text);
-      await expect(clip.deps.readHtml()).resolves.toBe(markup);
+      expect(clip.html()).toBe(markup);
     }
   );
 
@@ -647,7 +650,7 @@ describe("captureSelection with a private clipboard", () => {
     await expect(
       captureSelection({
         ...clip.deps,
-        readText: async () => {
+        readSelection: async () => {
           reads += 1;
 
           return await Promise.reject(new ConcealedClipboardError());
@@ -661,6 +664,50 @@ describe("captureSelection with a private clipboard", () => {
     });
     expect(reads).toBe(1);
     expect(clip.restoredWith).toStrictEqual([clip.snapshot]);
+  });
+
+  it("says the private selection may still be on the clipboard when putting it back fails", async () => {
+    const clip = fakeClipboard("earlier", "hunter2");
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        readSelection: async () =>
+          await Promise.reject(new ConcealedClipboardError()),
+        restore: async () => {
+          await Promise.reject(new Error("busy"));
+        },
+      })
+    ).resolves.toStrictEqual({
+      kind: "concealed",
+      restored: false,
+      unchecked: false,
+      which: "selection",
+    });
+  });
+
+  it("says the private selection may still be on the clipboard when the put back didn't take", async () => {
+    const clip = fakeClipboard("earlier", "hunter2");
+    let snapshots = 0;
+
+    await expect(
+      captureSelection({
+        ...clip.deps,
+        readSelection: async () =>
+          await Promise.reject(new ConcealedClipboardError()),
+        // The write is dropped without an error: the private selection is still there.
+        restore: async () => {
+          await Promise.resolve();
+        },
+        snapshot: async () => {
+          snapshots += 1;
+
+          return snapshots === 1
+            ? await clip.deps.snapshot()
+            : await Promise.reject(new ConcealedClipboardError());
+        },
+      })
+    ).resolves.toMatchObject({ kind: "concealed", restored: false });
   });
 
   it("keeps a normal capture when a password manager conceals the clipboard during the restore", async () => {

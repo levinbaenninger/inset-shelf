@@ -121,25 +121,11 @@ jobs:
             | xargs sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
       # Installed apps read latest*.yml from /releases/latest/download, so the
-      # release stays a draft until every file is up. It becomes Latest only if its
-      # version is newer than the current Latest, so re-running an old tag never
-      # moves Latest backwards.
+      # release stays a draft until every file is up, and it is published without
+      # becoming Latest. The promote job decides Latest for every tag in turn.
       - name: Publish the versioned release
         run: |
           set -euo pipefail
-          # Only "no release yet" counts as no Latest; any other error stops here.
-          if ! current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
-            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
-            current=""
-          fi
-          newest="$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sort -V | tail -n 1)"
-          if [ "$newest" = "${TAG#v}" ]; then
-            latest=true
-          else
-            echo "$current is newer than $TAG, so $TAG is not marked Latest."
-            latest=false
-          fi
-
           draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null || echo missing)"
           case "$draft" in
             false)
@@ -149,9 +135,47 @@ jobs:
             missing)
               gh release create "$TAG" --verify-tag \
                 --draft \
+                --latest=false \
                 --title "Inset Shelf $TAG" \
                 --notes-file .github/release-notes.md
               ;;
           esac
           gh release upload "$TAG" dist/* --clobber
-          gh release edit "$TAG" --draft=false --latest="$latest"
+          gh release edit "$TAG" --draft=false --latest=false
+
+  # One promotion runs at a time across all tags (the workflow's own concurrency
+  # is per tag). Each marks the highest published vX.Y.Z as Latest, whichever tag
+  # started it, so tags finishing out of order, a re-run of an old tag, or a
+  # promotion GitHub skips as superseded never leave Latest on an older version.
+  promote:
+    name: Promote Latest
+    needs: publish
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-promote-latest
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Mark the newest release Latest
+        run: |
+          set -euo pipefail
+          newest="$(gh release list --limit 1000 --exclude-drafts --exclude-pre-releases \
+            --json tagName --jq '.[].tagName' \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)"
+          test -n "$newest"
+          # Only "no release yet" counts as no Latest; any other error stops here.
+          if ! current="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
+            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+            current=""
+          fi
+          if [ "$current" = "$newest" ]; then
+            echo "$newest is already Latest."
+          else
+            echo "Marking $newest Latest (was ${current:-none})."
+            gh release edit "$newest" --latest
+          fi

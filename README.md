@@ -144,7 +144,7 @@ To build installers on your machine, run `vp run package:mac` on macOS or `vp ru
 ```sh
 cd apps/desktop
 node scripts/e2e/verify-macos.ts dev       # builds, then tests out/ with Electron
-vp run package:dir && node scripts/e2e/verify-macos.ts packaged
+vp run package:e2e && node scripts/e2e/verify-macos.ts packaged
 ```
 
 The script takes over the mouse and keyboard for about three minutes and overwrites the clipboard. At the end it puts back plain text it found there, but not images or files. The terminal needs **Accessibility** access, Xcode command line tools must be installed for `swiftc`, and the app under test needs **Screen & System Audio Recording** access. It writes every result and the event log to a temporary folder and prints the path.
@@ -153,7 +153,7 @@ The script takes over the mouse and keyboard for about three minutes and overwri
 
 `.github/workflows/release.yml` publishes builds to GitHub Releases.
 
-Only a pushed `v*` tag signs and publishes a release; pushes to `main` and pull requests build and test without secrets. To release, set `version` in `apps/desktop/package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The workflow fails when the tag and the version differ. The release stays a draft until every file is uploaded, and it becomes **Latest** only when its version is newer than the current Latest, so re-running an old tag never moves it back. Earlier builds from `main` were numbered `0.1.<run number>`, so the first tagged release must be at least `0.2.0` for installed apps to see it as newer.
+Only a pushed `v*` tag signs and publishes a release; pushes to `main` and pull requests build and test without secrets. To release, set `version` in `apps/desktop/package.json` (for example `0.2.0`), merge it to `main`, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`. The workflow fails when the tag and the version differ. The release stays a draft until every file is uploaded. A last job, which runs for one tag at a time, then marks the highest published `vX.Y.Z` as **Latest**, so re-running an old tag or two tags publishing at once never moves it back. Earlier builds from `main` were numbered `0.1.<run number>`, so the first tagged release must be at least `0.2.0` for installed apps to see it as newer.
 
 Installed apps read `latest-mac.yml` and `latest.yml` from `/releases/latest/download` when the user checks for updates. CI rewrites the files they name into full links to their own release, so a feed an app has read stays valid after a newer release replaces it. Each release also carries `SHA256SUMS.txt` and the installers as `Inset-Shelf-mac-arm64.dmg`, `Inset-Shelf-mac-x64.dmg` and `Inset-Shelf-win-x64.exe`, which `/releases/latest/download/<name>` always serves from the newest release.
 

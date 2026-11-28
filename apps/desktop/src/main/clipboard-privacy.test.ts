@@ -2,8 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   isConcealedClipboard,
+  ConcealedClipboardError,
   itemsConcealed,
   rawFormat,
+  readUnconcealed,
 } from "./clipboard-privacy";
 
 const DWORD = (value: number): Buffer => {
@@ -84,6 +86,89 @@ describe(itemsConcealed, () => {
     await expect(
       itemsConcealed([item({ "text/plain": Buffer.from("a") })])
     ).resolves.toBeFalsy();
+  });
+});
+
+/**
+ * The system clipboard as Electron reads it: the format list is taken at once, but each format's data is
+ * fetched from the clipboard as it is when asked for. `onRead` runs after each format list is taken.
+ */
+const liveClipboard = (
+  initial: Readonly<Record<string, string>>,
+  onRead: (
+    reads: number,
+    set: (next: Readonly<Record<string, string>>) => void
+  ) => void
+) => {
+  let current = initial;
+  let reads = 0;
+
+  const set = (next: Readonly<Record<string, string>>): void => {
+    current = next;
+  };
+
+  return async () => {
+    reads += 1;
+
+    const types = Object.keys(current);
+
+    onRead(reads, set);
+
+    return await Promise.resolve([
+      {
+        getType: async (type: string) =>
+          await Promise.resolve(new Blob([current[type] ?? ""])),
+        types,
+      },
+    ]);
+  };
+};
+
+const concealed = {
+  [rawFormat("org.nspasteboard.ConcealedType")]: "",
+  "text/html": "<b>hunter2</b>",
+  "text/plain": "hunter2",
+};
+
+describe(readUnconcealed, () => {
+  it("returns every format of an unmarked clipboard", async () => {
+    const read = liveClipboard({ "text/plain": "notes" }, () => {});
+    const contents = await readUnconcealed(read);
+    const text = contents?.[0]?.["text/plain"];
+
+    expect(text instanceof Blob ? await text.text() : null).toBe("notes");
+  });
+
+  it("refuses a private clipboard", async () => {
+    await expect(
+      readUnconcealed(liveClipboard(concealed, () => {}))
+    ).rejects.toBeInstanceOf(ConcealedClipboardError);
+  });
+
+  it("refuses data a password manager copied after the marks were checked", async () => {
+    // The list was unmarked; the private copy lands before its data is read.
+    const read = liveClipboard(
+      { "text/html": "<i>notes</i>", "text/plain": "notes" },
+      (reads, set) => {
+        if (reads === 1) {
+          set(concealed);
+        }
+      }
+    );
+
+    await expect(readUnconcealed(read)).rejects.toBeInstanceOf(
+      ConcealedClipboardError
+    );
+  });
+
+  it("returns null when the clipboard changed while it was read", async () => {
+    const read = liveClipboard({ "text/plain": "notes" }, (reads, set) => {
+      if (reads === 1) {
+        set({ "text/html": "<i>new</i>", "text/plain": "new" });
+      }
+    });
+
+    await expect(readUnconcealed(read)).resolves.toBeNull();
   });
 });
 

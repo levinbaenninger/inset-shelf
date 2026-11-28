@@ -1,15 +1,24 @@
 import { ConcealedClipboardError } from "./clipboard-privacy";
 
+/** What a copy of the selection put on the clipboard, all from one read: "" for any part it hasn't. */
+export interface CopiedSelection {
+  readonly text: string;
+  readonly html: string;
+  /** The address of the page the text was copied from, as browsers note it beside the text. */
+  readonly source: string;
+}
+
 /** S is whatever the clipboard returns as a full copy of its content; it only goes back in. */
 export interface SelectionDeps<S> {
   readonly snapshot: () => Promise<S>;
   readonly restore: (snapshot: S) => Promise<void>;
   readonly clear: () => void;
-  readonly readText: () => Promise<string>;
-  /** The HTML the app copied next to the text, or "" when it copied none. */
-  readonly readHtml: () => Promise<string>;
-  /** The address of the page the text was copied from, as browsers note it beside the text, or "". */
-  readonly readSource: () => Promise<string>;
+  /**
+   * The copied text, HTML and source page, from one read checked for the private marks, so none of them
+   * can come from a newer copy than the check saw. Throws ConcealedClipboardError on a private selection;
+   * "" text when the clipboard changed while it was read.
+   */
+  readonly readSelection: () => Promise<CopiedSelection>;
   /** Sends the copy shortcut to the app in front. */
   readonly copy: () => void;
   /**
@@ -31,6 +40,8 @@ export interface SelectionDeps<S> {
 }
 
 const POLL_MS = 25;
+
+const NOTHING_COPIED: CopiedSelection = { html: "", source: "", text: "" };
 const POLL_LIMIT = 20;
 
 /**
@@ -118,14 +129,14 @@ const pollText = async <S>(
   deps: SelectionDeps<S>,
   quietUntil: number,
   until: number
-): Promise<{ readonly held: boolean; readonly text: string }> => {
-  // A readText that meets a private selection throws ConcealedClipboardError out of here.
+): Promise<{ readonly held: boolean; readonly copied: CopiedSelection }> => {
+  // A read that meets a private selection throws ConcealedClipboardError out of here.
   await deps.wait(POLL_MS);
 
-  const text = await deps.readText();
+  const copied = await deps.readSelection();
 
-  if (text !== "") {
-    return { held: false, text };
+  if (copied.text !== "") {
+    return { copied, held: false };
   }
 
   const snapshot = await deps.snapshot().catch(orNull);
@@ -133,15 +144,15 @@ const pollText = async <S>(
 
   // The text read may have run into a hold that has ended since: read once more.
   if (!held) {
-    const again = await deps.readText();
+    const again = await deps.readSelection();
 
-    if (again !== "") {
-      return { held: false, text: again };
+    if (again.text !== "") {
+      return { copied: again, held: false };
     }
   }
 
   if (deps.now() >= (held ? until : quietUntil)) {
-    return { held, text: "" };
+    return { copied: NOTHING_COPIED, held };
   }
 
   return await pollText(deps, quietUntil, until);
@@ -296,6 +307,23 @@ const restoreAfter = async <S>(
   }
 };
 
+/** One write putting `saved` back over a private selection, and whether one look then finds it there. */
+const putBackOnce = async <S>(
+  deps: SelectionDeps<S>,
+  saved: S
+): Promise<boolean> => {
+  try {
+    await deps.restore(saved);
+
+    const current = await deps.snapshot();
+
+    return deps.readable(current) && (await deps.holds(saved, current));
+  } catch {
+    // A failed write, or a clipboard still private: the private selection may still be there.
+    return false;
+  }
+};
+
 /**
  * Copies the selection of the app in front and puts the clipboard back as it was.
  * The clipboard is cleared first, so "nothing copied" is told apart from
@@ -336,7 +364,7 @@ export const captureSelection = async <S>(
   const copiedAt = deps.now();
   const until = copiedAt + RESTORE_DEADLINE_MS;
 
-  let polled: { readonly held: boolean; readonly text: string };
+  let polled: { readonly held: boolean; readonly copied: CopiedSelection };
 
   try {
     polled = await pollText(deps, copiedAt + POLL_MS * POLL_LIMIT, until);
@@ -346,31 +374,27 @@ export const captureSelection = async <S>(
     }
 
     // The clipboard was cleared for the copy and now holds a private selection: it goes back to what
-    // it held, as one write, without waiting on it.
-    try {
-      await deps.restore(saved);
-    } catch {
-      // A write that failed leaves the private copy as it is; the capture is over either way.
-    }
+    // it held, as one write, without waiting out a hold. One look says whether it took: a failed write,
+    // or a clipboard still private or unreadable, may still hold the private selection.
+    const restored = await putBackOnce(deps, saved);
 
     return {
       kind: "concealed",
-      restored: true,
+      restored,
       unchecked: false,
       which: "selection",
     };
   }
 
-  const { held, text } = polled;
+  const {
+    copied: { html, source, text },
+    held,
+  } = polled;
 
   // Without a readable selection, a later snapshot could be a newer copy: never put back over it.
   if (held) {
     return { kind: "busy", ...NOT_TRIED };
   }
-
-  // Read with the text, before the clipboard goes back to what it held.
-  const html = text === "" ? "" : await deps.readHtml().catch(() => "");
-  const source = text === "" ? "" : await deps.readSource().catch(() => "");
 
   let ended: PutBackResult;
 
@@ -382,7 +406,8 @@ export const captureSelection = async <S>(
     }
 
     // A password manager wrote a private item meanwhile: it is the user's newer copy, so the restore
-    // stops and leaves it, and the capture, which was copied before it, is kept.
+    // stops and leaves it. The capture is kept: it came from a read that saw no private mark before or
+    // after it, so it was copied before the private item.
     ended = { restored: true, unchecked: false };
   }
 
