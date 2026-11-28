@@ -44,13 +44,15 @@ const toItems = async (snapshot: Snapshot): Promise<Item[]> =>
 /**
  * A clipboard with Explorer's and Finder's formats, read as the app reads it:
  * `held` lists the numbers of the snapshot reads that run into another app's
- * hold, `before` what the user does just before a numbered read, and `swallow`
- * how many writes back a hold swallows without an error.
+ * hold, `rejected` those that fail outright, `before` what the user does just
+ * before a numbered read, and `swallow` how many writes back a hold swallows
+ * without an error.
  */
 const clipboard = (options: {
   readonly initial: readonly Item[];
   readonly copied: readonly Item[];
   readonly held?: readonly number[];
+  readonly rejected?: readonly number[];
   readonly before?: Readonly<Record<number, readonly Item[]>>;
   readonly swallow?: number;
 }) => {
@@ -109,6 +111,10 @@ const clipboard = (options: {
       time += 5;
       items = options.before?.[reads] ?? items;
 
+      if (options.rejected?.includes(reads) === true) {
+        throw new Error("The clipboard couldn't be read");
+      }
+
       return await Promise.resolve(
         options.held?.includes(reads) === true ? HELD_READ : toSnapshot(items)
       );
@@ -156,6 +162,35 @@ describe("a file copy followed by the user's own copy of another file", () => {
     });
     expect(clip.restored).toStrictEqual([]);
     expect(clip.items()).toStrictEqual([list(B)]);
+  });
+
+  it("leaves the clipboard alone when the next file is copied and the clipboard can't be read after the capture, and puts it back when it still lists the capture's file", async () => {
+    const newer = clipboard({
+      before: { 2: [list(B)] },
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: [2],
+    });
+
+    const same = clipboard({
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: [2],
+    });
+
+    await expect(captureSelection(newer.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+    });
+    await expect(captureSelection(same.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect([newer.restored, newer.items(), same.items()]).toStrictEqual([
+      [],
+      [list(B)],
+      [EARLIER],
+    ]);
   });
 
   it("puts the clipboard back when nothing was copied meanwhile", async () => {

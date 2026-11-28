@@ -9022,6 +9022,43 @@ const PlaceSchema = z.object({
   within: z.string(),
 });
 
+/** Holds every animation frame the page asks for until `releaseFrames`, so a key can land before a frame's handoff runs. */
+const holdFrames = async (page: Page): Promise<void> => {
+  await page.evaluate(`(() => {
+    const held = [];
+    const real = globalThis.requestAnimationFrame;
+
+    globalThis.__releaseFrames = () => {
+      globalThis.requestAnimationFrame = real;
+      for (const run of held.splice(0)) run(performance.now());
+    };
+    globalThis.requestAnimationFrame = (run) => held.push(run);
+  })()`);
+};
+
+/** Runs the frames `holdFrames` held, then waits for two more. */
+const releaseFrames = async (page: Page): Promise<void> => {
+  await page.evaluate(`new Promise((resolve) => {
+    globalThis.__releaseFrames();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  })`);
+};
+
+/** Marks what has the keyboard, so a later look can tell whether it kept it, and names it. */
+const markKeyboard = async (page: Page): Promise<string> =>
+  String(
+    await page.evaluate(`(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.dataset.tabbedTo = "";
+      return active?.getAttribute("aria-label") || active?.tagName || "";
+    })()`)
+  );
+
+const keptMark = async (page: Page): Promise<boolean> =>
+  (await page.evaluate(
+    "document.activeElement instanceof HTMLElement && document.activeElement.dataset.tabbedTo !== undefined"
+  )) === true;
+
 /** Where the keyboard is: a text field or not, the named part of details it sits in, and the list row. */
 const keyboardPlace = async (page: Page) =>
   PlaceSchema.parse(
@@ -9408,6 +9445,125 @@ const KEEPS_PLACE_SCENES: readonly Scene[] = [
     name: "shelf-keeps-place-row-note",
     page: "shelf",
   },
+  {
+    // A selection dragged out of the shelf carries the HTML it was copied with while its words are the captured ones, and the words as shown once they changed.
+    check: async (page) => {
+      const dragged = z
+        .array(z.object({ html: z.string(), text: z.string() }))
+        .parse(
+          await page.evaluate(
+            (ids) =>
+              ids.map((id) => {
+                const row = document.querySelector(`[data-item-id="${id}"]`);
+
+                const source =
+                  row?.closest("[draggable=true]") ??
+                  row?.querySelector("[draggable=true]");
+
+                const carried = new DataTransfer();
+
+                source?.dispatchEvent(
+                  new DragEvent("dragstart", {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer: carried,
+                  })
+                );
+                source?.dispatchEvent(
+                  new DragEvent("dragend", { bubbles: true })
+                );
+
+                return {
+                  html: carried.getData("text/html"),
+                  text: carried.getData("text/plain"),
+                };
+              }),
+            [uuid(60), uuid(61)]
+          )
+        );
+
+      const [captured, edited] = dragged;
+
+      if (
+        captured?.html !== "<b>Bold</b> plan" ||
+        captured.text !== "Bold plan"
+      ) {
+        return `A captured selection dragged out as ${JSON.stringify(captured)}, not with the HTML it was copied with`;
+      }
+
+      return edited?.text === "Bold plan, edited" &&
+        edited.html !== "" &&
+        !edited.html.includes("<b>")
+        ? null
+        : `An edited selection dragged out as ${JSON.stringify(edited)}, not as its words now read`;
+    },
+    data: {
+      view: {
+        ...shelfView(),
+        doc: {
+          ...DOC,
+          items: [
+            {
+              ...base(60, 20),
+              captured: "Bold plan",
+              html: "<b>Bold</b> plan",
+              kind: "text",
+              links: [],
+              text: "Bold plan",
+              via: "selection",
+            },
+            {
+              ...base(61, 10),
+              captured: "Bold plan",
+              capturedHtml: "<b>Bold</b> plan",
+              html: null,
+              kind: "text",
+              links: [],
+              text: "Bold plan, edited",
+              via: "selection",
+            },
+          ],
+        },
+      },
+    },
+    name: "shelf-drag-out-copied-html",
+    page: "shelf",
+  },
+  ...(
+    [
+      { label: "Edit item", n: 12, what: "words" },
+      { label: "Note for this image", n: 11, what: "note" },
+    ] as const
+  ).map(({ label, n, what }) => ({
+    // Return in a row's ${what}, then Tab before the next frame: the keyboard stays where Tab took it, and the row's handoff doesn't take it back.
+    act: async (page: Page) => {
+      await select(page, n);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        `document.activeElement?.getAttribute('aria-label') === '${label}'`
+      );
+      await page.keyboard.type(" today");
+      await holdFrames(page);
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Tab");
+    },
+    check: async (page: Page) => {
+      const tabbed = await markKeyboard(page);
+
+      await releaseFrames(page);
+
+      if (await keptMark(page)) {
+        return null;
+      }
+
+      const left = await keyboardPlace(page);
+
+      return `Tab after Return in a row's ${what} went to “${tabbed}”, then the row's handoff moved it to ${placeText(left)}`;
+    },
+    data: { view: shelfView() },
+    name: `shelf-keeps-place-row-${what}-tab`,
+    page: "shelf" as const,
+  })),
   {
     // ⌘F, a word, ↓ selects the first result and → opens it, as the list's own keys do.
     act: async (page) => {
