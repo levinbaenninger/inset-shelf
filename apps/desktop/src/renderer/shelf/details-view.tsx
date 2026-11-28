@@ -347,6 +347,49 @@ const StepsEditor = ({
   readonly onUndo: () => boolean;
 }) => {
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
+  // Rows a press took focus from: they go once the press is done, so what was pressed is still under the pointer when it is released.
+  const pressing = useRef(false);
+  const leftDuringPress = useRef<{ step: Step; row: Element }[]>([]);
+
+  const leave = useEffectEvent((step: Step) => {
+    onLeave(step);
+  });
+
+  useEffect(() => {
+    const down = (): void => {
+      pressing.current = true;
+    };
+
+    const up = (): void => {
+      const left = leftDuringPress.current;
+
+      pressing.current = false;
+      leftDuringPress.current = [];
+
+      if (left.length > 0) {
+        // The click comes after the release, so the rows go after it.
+        setTimeout(() => {
+          // A row the keyboard went back to during the press stays.
+          for (const { row, step } of left) {
+            if (!row.contains(document.activeElement)) {
+              leave(step);
+            }
+          }
+        }, 0);
+      }
+    };
+
+    document.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, []);
+
   // The step to focus once the next render has it on screen.
   const focusTarget = useRef<string | null>(null);
   // data-step-removed marks a removal not yet followed by typing: ⌘Z in a step
@@ -473,7 +516,14 @@ const StepsEditor = ({
                 event.currentTarget.contains(event.relatedTarget)
               )
             ) {
-              onLeave(step);
+              if (pressing.current) {
+                leftDuringPress.current.push({
+                  row: event.currentTarget,
+                  step,
+                });
+              } else {
+                onLeave(step);
+              }
             }
           }}
         >
@@ -568,6 +618,9 @@ const windowPlace = (window: WindowRef): string =>
     .filter((part, at, all) => part !== "" && all.indexOf(part) === at)
     .join(" · ");
 
+/** One line, as a window's description reads: a pasted text's breaks become spaces. */
+const oneLine = (text: string): string => text.replaceAll(/\s*\n\s*/gu, " ");
+
 /**
  * A window's description as words, or a quiet + Description when it has
  * none; a click edits it in a field of the same height. Return or leaving
@@ -609,14 +662,23 @@ const WindowDescription = ({
           setEditing(false);
         }}
         onChange={(event) => {
-          // One line, as it reads: a pasted text's breaks become spaces.
-          const typed = event.target.value.replaceAll(/\s*\n\s*/gu, " ");
+          // Text dropped in, which onPaste doesn't see, goes to one line here.
+          const typed = oneLine(event.target.value);
 
           if (typed !== event.target.value) {
             event.target.value = typed;
           }
 
           onSave(typed);
+        }}
+        onPaste={(event) => {
+          const pasted = event.clipboardData.getData("text/plain");
+
+          if (pasted.includes("\n")) {
+            event.preventDefault();
+            // oxlint-disable-next-line typescript/no-deprecated -- insertText is the browser's own edit, so the caret ends after it and Undo takes it back.
+            document.execCommand("insertText", false, oneLine(pasted));
+          }
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) {
@@ -666,7 +728,10 @@ const WindowDescription = ({
     <button
       aria-label={`${value}. Edit the description of ${name}`}
       // The field's own look, so a click turns the words into it without a move.
-      className={cn(IN_PLACE, "text-left break-words outline-none")}
+      className={cn(
+        IN_PLACE,
+        "text-left break-words whitespace-pre-wrap outline-none focus-visible:outline-hidden"
+      )}
       onClick={edit}
       ref={shown}
       type="button"
