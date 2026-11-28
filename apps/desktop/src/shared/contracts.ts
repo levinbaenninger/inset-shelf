@@ -106,7 +106,7 @@ export interface ShelfHere {
   readonly ids: readonly ItemId[];
   /** The window's place in a few words: "GitHub · acme/app #12". */
   readonly label: string;
-  /** Changes with every opening. */
+  /** Changes with every opening, and when another window comes to the front of the open shelf. */
   readonly seq: number;
   /** Opened from the recall pill: the list starts filtered to these items. */
   readonly filter: boolean;
