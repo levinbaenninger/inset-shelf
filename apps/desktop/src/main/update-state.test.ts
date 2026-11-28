@@ -103,9 +103,18 @@ describe(updateTransition, () => {
     expect(run([{ type: "download" }], downloaded)).toBe(downloaded);
   });
 
-  it("keeps a ready update when a later step fails", () => {
-    expect(run([{ message: "offline", type: "failed" }], downloaded)).toBe(
-      downloaded
+  it("drops a ready update that fails to install and says why", () => {
+    const failed = updateTransition(downloaded, {
+      message: "code signature invalid",
+      type: "failed",
+    });
+
+    expect(failed).toStrictEqual({
+      kind: "error",
+      message: "code signature invalid",
+    });
+    expect(updateNotice(downloaded, failed)).toBe(
+      "Couldn’t install the update: code signature invalid"
     );
   });
 

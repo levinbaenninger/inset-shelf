@@ -33,10 +33,26 @@ const MACH_O_MAGIC = new Set([
   0xbe_ba_fe_ca,
 ]);
 
+/** The app itself: JIT, library validation off while self-signed, Apple Events. */
 const ENTITLEMENTS = path.resolve(
   import.meta.dirname,
   "../build/entitlements.mac.plist"
 );
+
+/** Helper apps and other executables: the same without Apple Events. */
+const HELPER_ENTITLEMENTS = path.resolve(
+  import.meta.dirname,
+  "../build/entitlements.mac.helper.plist"
+);
+
+/** A double-quoted argument for `security -i`, which reads its commands from stdin. */
+const quoteForSecurity = (value: string): string => {
+  if (/[\n\r]/u.test(value)) {
+    throw new Error("A keychain password must be one line.");
+  }
+
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', String.raw`\"`)}"`;
+};
 
 const run = (
   command: string,
@@ -58,11 +74,14 @@ const signingKeychain = (): string | null => {
   }
 
   if (keychain === LOCAL_KEYCHAIN && existsSync(LOCAL_PASSWORD)) {
-    // Without -p, security reads the password from a piped stdin, so it never shows in argv.
+    // Through `security -i` on stdin, so the password never shows in argv. A plain
+    // `unlock-keychain` without -p would read /dev/tty instead and hang in a terminal.
+    const password = readFileSync(LOCAL_PASSWORD, "utf-8").trim();
+
     run(
       "security",
-      ["unlock-keychain", keychain],
-      `${readFileSync(LOCAL_PASSWORD, "utf-8").trim()}\n`
+      ["-i"],
+      `unlock-keychain -p ${quoteForSecurity(password)} ${quoteForSecurity(keychain)}\n`
     );
   }
 
@@ -76,18 +95,25 @@ const signingKeychain = (): string | null => {
     : null;
 };
 
-/** Executables and app bundles get the entitlements; libraries and frameworks never do. */
-const needsEntitlements = (target: string): boolean => {
+/**
+ * The entitlements a target is signed with: the app's own for the app, the helpers' for nested
+ * apps and executables, none for libraries and frameworks.
+ */
+const entitlementsFor = (target: string, app: string): string | null => {
+  if (target === app) {
+    return ENTITLEMENTS;
+  }
+
   if (target.endsWith(".app")) {
-    return true;
+    return HELPER_ENTITLEMENTS;
   }
 
   if (target.endsWith(".framework") || /\.(?:dylib|node)$/u.test(target)) {
-    return false;
+    return null;
   }
 
   // eslint-disable-next-line no-bitwise -- file mode bits
-  return (lstatSync(target).mode & 0o111) !== 0;
+  return (lstatSync(target).mode & 0o111) === 0 ? null : HELPER_ENTITLEMENTS;
 };
 
 const isMachO = (file: string): boolean => {
@@ -173,12 +199,14 @@ export default function signMac(context: AfterPackContext): void {
 
   // Inside out: a bundle's seal covers the signatures of the code it contains.
   for (const target of nestedCode(context.appOutDir)) {
+    const entitlements = entitlementsFor(target, app);
+
     run("codesign", [
       "--force",
       "--timestamp=none",
       "--options",
       "runtime",
-      ...(needsEntitlements(target) ? ["--entitlements", ENTITLEMENTS] : []),
+      ...(entitlements === null ? [] : ["--entitlements", entitlements]),
       ...identity,
       target,
     ]);

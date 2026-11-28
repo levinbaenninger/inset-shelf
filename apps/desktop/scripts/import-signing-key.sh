@@ -12,12 +12,21 @@ trap 'rm -f "$p12"' EXIT
 
 printf '%s' "$MAC_SIGNING_P12_BASE64" | base64 --decode > "$p12"
 
-security create-keychain -p "$password" "$keychain"
+# Commands that take a password go to `security -i` on stdin, so no password shows in argv.
+# A plain `unlock-keychain` without -p reads /dev/tty when there is one and hangs locally.
+quote() {
+  local value="${1//\\/\\\\}"
+  printf '"%s"' "${value//\"/\\\"}"
+}
+secure() {
+  printf '%s\n' "$1" | security -i
+}
+
+secure "create-keychain -p $(quote "$password") $(quote "$keychain")"
 security set-keychain-settings -lut 21600 "$keychain"
-# No -p: security reads the password from stdin when it is not a terminal, keeping it out of argv.
-security unlock-keychain "$keychain" <<< "$password"
-security import "$p12" -f pkcs12 -k "$keychain" -P "$MAC_SIGNING_P12_PASSWORD" -T /usr/bin/codesign >&2
-security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+secure "unlock-keychain -p $(quote "$password") $(quote "$keychain")"
+secure "import $(quote "$p12") -f pkcs12 -k $(quote "$keychain") -P $(quote "$MAC_SIGNING_P12_PASSWORD") -T /usr/bin/codesign" >&2
+secure "set-key-partition-list -S apple-tool:,apple: -s -k $(quote "$password") $(quote "$keychain")" > /dev/null
 
 if [[ "${ADD_TO_SEARCH_LIST:-}" == "1" ]]; then
   # shellcheck disable=SC2046

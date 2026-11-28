@@ -80,9 +80,9 @@ export const updateTransition = (
     }
 
     case "failed": {
-      return state.kind === "ready"
-        ? state
-        : { kind: "error", message: event.message };
+      // Once an update is ready, the only step left is installing it: when macOS rejects it there,
+      // the update has to be checked and downloaded again.
+      return { kind: "error", message: event.message };
     }
 
     default: {
@@ -141,6 +141,10 @@ export const updateNotice = (
 
   if (previous.kind === "downloading" && next.kind === "error") {
     return `Couldn’t download the update: ${next.message}`;
+  }
+
+  if (previous.kind === "ready" && next.kind === "error") {
+    return `Couldn’t install the update: ${next.message}`;
   }
 
   if (previous.kind !== "checking") {

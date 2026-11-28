@@ -48,6 +48,13 @@ const cannotUpdate = (): string | null => {
   return null;
 };
 
+/** The installer waits for every window to close, and the app's windows only hide when asked to. */
+const closeWindows = (): void => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.destroy();
+  }
+};
+
 /** Squirrel's errors run to many lines; the menu and notices show the first. */
 const firstLine = (error: Error): string =>
   error.message.split("\n")[0] ?? "unknown error";
@@ -69,6 +76,7 @@ export const createUpdater = (): Updater => {
 
   let state = INITIAL_UPDATE_STATE;
   let listener: Listener = ignore;
+  let installing = false;
 
   const dispatch = (event: UpdateEvent): void => {
     const previous = state;
@@ -157,31 +165,34 @@ export const createUpdater = (): Updater => {
       dispatch({ message: firstLine(error), type: "failed" });
     });
 
-    // On macOS the download is only installable once Squirrel has fetched and checked its signature.
-    if (process.platform === "darwin") {
-      squirrel.on("update-downloaded", () => {
-        dispatch({ type: "downloaded" });
-      });
-    } else {
-      autoUpdater.on("update-downloaded", () => {
-        dispatch({ type: "downloaded" });
-      });
-    }
+    // Both platforms report a finished download here. With autoInstallOnAppQuit off, macOS's
+    // Squirrel only fetches and verifies the update when the user chooses Restart (see restart).
+    autoUpdater.on("update-downloaded", () => {
+      dispatch({ type: "downloaded" });
+    });
   };
 
   return {
     check,
     download,
     restart: () => {
-      if (state.kind !== "ready") {
+      if (state.kind !== "ready" || installing) {
         return;
       }
 
+      installing = true;
       log("info", `restarting to install ${state.version}`);
 
-      // The installer waits for every window to close, and the app's windows only hide when asked to.
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.destroy();
+      // On macOS, Squirrel first fetches the update and checks its signature, so the windows
+      // stay until it has: a rejected update then shows its error in the menu and a notice.
+      if (process.platform === "darwin") {
+        squirrel.once("update-downloaded", closeWindows);
+        squirrel.once("error", () => {
+          squirrel.removeListener("update-downloaded", closeWindows);
+          installing = false;
+        });
+      } else {
+        closeWindows();
       }
 
       autoUpdater.quitAndInstall(true, true);
