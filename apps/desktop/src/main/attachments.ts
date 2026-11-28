@@ -29,8 +29,8 @@ export type StoredUpload =
       readonly image: ShelfImage;
       /** The picture's own name, without its extension. */
       readonly name: string;
-      /** A PNG's whole file name, as it spelled it. */
-      readonly fileName?: string;
+      /** A PNG's extension as its file spelled it, where that isn't .png. */
+      readonly extension?: string;
     }
   | { readonly kind: "file"; readonly file: StoredFile };
 
@@ -92,9 +92,9 @@ const toAttachment = (
     pins: [],
   };
 
-  return upload.fileName === undefined
+  return upload.extension === undefined
     ? picture
-    : { ...picture, fileName: upload.fileName };
+    : { ...picture, extension: upload.extension };
 };
 
 const storedFiles = (upload: StoredUpload): readonly string[] =>
@@ -138,9 +138,11 @@ export const createAttachments = (deps: AttachmentDeps) => {
       if (image !== null) {
         const stored = await storePicture(image, pictureName(added.name));
 
-        // A PNG that doesn't spell its name ".png" drags out under its own spelling.
-        return added.extension === "png" && !added.name.endsWith(".png")
-          ? { ...stored, fileName: added.name }
+        const extension = path.extname(added.name);
+
+        // A PNG that spells its extension another way (.PNG) drags out with it.
+        return added.extension === "png" && extension !== ".png"
+          ? { ...stored, extension }
           : stored;
       }
 
@@ -258,18 +260,24 @@ export const createAttachments = (deps: AttachmentDeps) => {
       return upload;
     }
 
-    return upload.kind === "image"
-      ? {
-          context: null,
-          fileName: upload.fileName ?? upload.name,
-          image: upload.image,
-          pins: [],
-          source: null,
-          title: upload.name,
-          type: "addImage",
-          via: "paste",
-        }
-      : { context: null, file: upload.file, type: "addFile" };
+    if (upload.kind === "file") {
+      return { context: null, file: upload.file, type: "addFile" };
+    }
+
+    const add: MainOp = {
+      context: null,
+      fileName: upload.name,
+      image: upload.image,
+      pins: [],
+      source: null,
+      title: upload.name,
+      type: "addImage",
+      via: "paste",
+    };
+
+    return upload.extension === undefined
+      ? add
+      : { ...add, extension: upload.extension };
   };
 
   return { attachFilesTo, attachTo, pasteImageTo, prepare, prepareItem };

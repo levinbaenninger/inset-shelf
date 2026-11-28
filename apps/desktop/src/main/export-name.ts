@@ -16,8 +16,8 @@ const fileSafe = (text: string): string =>
     .join("")
     .replaceAll(UNSAFE_FILE_CHARS, "-");
 
-const pngNamed = (base: string): string =>
-  `${base === "" ? "Screen area" : base}.png`;
+const pngNamed = (base: string, extension = ".png"): string =>
+  `${base === "" ? "Screen area" : base}${extension}`;
 
 /** Names an exported image after the first line of its note. */
 export const exportFileName = (note: string): string => {
@@ -32,23 +32,20 @@ export const exportFileName = (note: string): string => {
   );
 };
 
-const PNG_NAMED = /\.png$/iu;
-
 /**
  * A picture's own name as the file it drags out as: as it is, spaces, dots
  * and length too, but for what no file name can hold. A space or dot at its
- * end stays, since ".png" comes after it; a PNG's whole name keeps its own
- * spelling of it.
+ * end stays, since ".png" (or the PNG's own spelling of it) comes after it.
  */
-export const ownFileName = (name: string): string =>
-  PNG_NAMED.test(name) ? fileSafe(name) : pngNamed(fileSafe(name));
+export const ownFileName = (name: string, extension?: string): string =>
+  pngNamed(fileSafe(name), extension);
 
 /** The file a picture attached to an item drags out as. */
 export const attachedFileName = (attachment: AttachedImage): string =>
-  ownFileName(attachment.fileName ?? attachment.name);
+  ownFileName(attachment.name, attachment.extension);
 
 /** The file an image item drags out as: the name of the file it was added from, else named after its note. */
 export const imageFileName = (item: ImageItem): string =>
   item.fileName === undefined
     ? exportFileName(item.note)
-    : ownFileName(item.fileName);
+    : ownFileName(item.fileName, item.extension);
