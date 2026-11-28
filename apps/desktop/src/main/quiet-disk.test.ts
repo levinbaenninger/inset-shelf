@@ -325,6 +325,11 @@ describe(quietDisk, () => {
             size: 0,
           });
         },
+        open: async (at) => {
+          touched.push(onVolume(at));
+
+          return await Promise.reject(new Error(`opened ${at}`));
+        },
         readlink: async (at) => {
           touched.push(at);
 
