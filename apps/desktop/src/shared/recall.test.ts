@@ -362,6 +362,7 @@ const env = (start = 10): OpEnv => {
 const PR: ItemContext = {
   app: "Safari",
   appLink: null,
+  code: null,
   title: "Fix the build",
   url: "https://github.com/acme/app/pull/12",
 };
@@ -610,6 +611,7 @@ describe(hereWith, () => {
     const home = {
       app: "Safari",
       appLink: null,
+      code: null,
       title: "Example Domain",
       url: "https://example.com/",
     };

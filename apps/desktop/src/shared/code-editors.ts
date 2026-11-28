@@ -1,3 +1,5 @@
+import { CodePlaceSchema } from "./shelf";
+import type { CodePlace } from "./shelf";
 import { cleanTitle } from "./window-title";
 
 /**
@@ -16,6 +18,8 @@ export interface CodeEditor {
   readonly apps: readonly string[];
   /** The parts of the cleaned title in order, split on a dash with spaces. Later parts are ignored. */
   readonly title: readonly TitlePart[];
+  /** What the window's document attribute (AXDocument) names on macOS: the open file, or null when that is not confirmed. */
+  readonly document: "file" | null;
   /**
    * The dash an app name's titles are split on, where the name tells the
    * platform. A name it leaves out, or a title without that dash (the user
@@ -40,11 +44,15 @@ export const CODE_EDITORS: readonly CodeEditor[] = [
     // with a folder location and a profile after the project.
     apps: ["Code", "Visual Studio Code"],
     dash: { Code: " — ", "Visual Studio Code": " - " },
+    // From Code's bundle, which sets the window's document to the active
+    // editor's local file; not read from a running window with a file open.
+    document: "file",
     title: ["file", "project"],
   },
   {
     // Inferred from Code, which it forks; not read from a running Cursor.
     apps: ["Cursor"],
+    document: null,
     title: ["file", "project"],
   },
 ];
@@ -53,11 +61,24 @@ const EDITOR_NAMES: ReadonlySet<string> = new Set(
   CODE_EDITORS.flatMap((editor) => editor.apps)
 );
 
-/** The row for an app, or undefined. */
-export const codeEditor = (app: string | null): CodeEditor | undefined =>
+/** The row for an app among `editors`, or undefined. */
+export const codeEditor = (
+  app: string | null,
+  editors: readonly CodeEditor[] = CODE_EDITORS
+): CodeEditor | undefined =>
   app === null
     ? undefined
-    : CODE_EDITORS.find((editor) => editor.apps.includes(app));
+    : editors.find((editor) => editor.apps.includes(app));
+
+/** The dashes a title of `app` may be split on: its platform's own first. */
+const dashesOf = (
+  editor: CodeEditor,
+  app: string | null
+): readonly TitleDash[] => {
+  const own = app === null ? undefined : editor.dash?.[app];
+
+  return own === undefined ? TITLE_DASHES : [own, ...TITLE_DASHES];
+};
 
 /**
  * The file's and the project's name in a window title, by the editor's row.
@@ -70,9 +91,8 @@ export const titleParts = (
   app: string | null
 ): TitleParts => {
   const clean = cleanTitle(title, app);
-  const own = app === null ? undefined : editor.dash?.[app];
 
-  const dash = [...(own === undefined ? [] : [own]), ...TITLE_DASHES].find(
+  const dash = dashesOf(editor, app).find(
     (each) => clean?.includes(each) === true
   );
 
@@ -93,4 +113,67 @@ export const titleParts = (
   };
 
   return { file: named("file"), project: named("project") };
+};
+
+/**
+ * Which of a file's folders the title names as the project: the deepest one
+ * of that name, or -1. The title is read after the file's own name, against
+ * whole folder names, so a dash inside a name splits nothing. A title that
+ * doesn't start with the file's name is read by the row's parts.
+ */
+const projectFolder = (
+  editor: CodeEditor,
+  file: { readonly folders: readonly string[]; readonly name: string },
+  title: string | null,
+  app: string | null
+): number => {
+  const clean = cleanTitle(title, app);
+
+  // The dash after the file's name is the title's own: any other dash is part of a name.
+  const dash = dashesOf(editor, app).find(
+    (each) => clean?.startsWith(`${file.name}${each}`) === true
+  );
+
+  if (clean === null || dash === undefined) {
+    const { project } = titleParts(editor, title, app);
+
+    return project === null ? -1 : file.folders.lastIndexOf(project);
+  }
+
+  const rest = clean.slice(file.name.length + dash.length);
+
+  return file.folders.findLastIndex(
+    (folder) =>
+      folder !== "" &&
+      !EDITOR_NAMES.has(folder) &&
+      (rest === folder || rest.startsWith(folder + dash))
+  );
+};
+
+/**
+ * Where in the code a window is: the file its document names, and the
+ * deepest folder above it that the title names as the project. Only for an
+ * editor whose document is confirmed to be the file; reads no disk.
+ */
+export const codePlace = (
+  editor: CodeEditor | undefined,
+  document: string | null,
+  title: string | null,
+  app: string | null
+): CodePlace | null => {
+  if (editor?.document !== "file" || document?.startsWith("/") !== true) {
+    return null;
+  }
+
+  const folders = document.split("/").slice(0, -1);
+  const name = document.slice(document.lastIndexOf("/") + 1);
+  const deepest = projectFolder(editor, { folders, name }, title, app);
+
+  const parsed = CodePlaceSchema.safeParse({
+    file: document,
+    line: null,
+    root: deepest < 1 ? null : folders.slice(0, deepest + 1).join("/"),
+  });
+
+  return parsed.success ? parsed.data : null;
 };

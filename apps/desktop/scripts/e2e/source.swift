@@ -1,7 +1,8 @@
 import AppKit
 
 // A plain text window that stands in for "the app in front" during the desktop test.
-//   source "<text>" [all|none] [title] [fullscreen]   selects all of the text, or nothing
+//   source "<text>" [all|none] [title] [fullscreen|window] [document]   selects all of the text, or nothing;
+//   the window names the document's file, as an editor's does
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
@@ -22,11 +23,15 @@ let text = args.count > 1 ? args[1] : "Source text"
 let selectAll = !(args.count > 2 && args[2] == "none")
 let title = args.count > 3 ? args[3] : "Source"
 let fullScreen = args.count > 4 && args[4] == "fullscreen"
+let document = args.count > 5 ? args[5] : ""
 
 // Full screen needs a window that can resize; the other runs keep the fixed window they always had.
 let window = NSWindow(
   contentRect: NSRect(x: 200, y: 200, width: 1200, height: 700),
   styleMask: fullScreen ? [.titled, .resizable] : [.titled], backing: .buffered, defer: false)
+if !document.isEmpty {
+  window.representedURL = URL(fileURLWithPath: document)
+}
 window.title = title
 if fullScreen {
   window.collectionBehavior = [.fullScreenPrimary]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { codeEditor, titleParts } from "./code-editors";
+import { codeEditor, codePlace, titleParts } from "./code-editors";
 import type { CodeEditor } from "./code-editors";
 
 const rowOf = (app: string): CodeEditor => {
@@ -79,5 +79,110 @@ describe(titleParts, () => {
     expect(
       titleParts(rowOf("Code"), "index.ts - Visual Studio Code", "Code")
     ).toStrictEqual({ file: "index.ts", project: null });
+  });
+});
+
+describe(codePlace, () => {
+  const code = rowOf("Code");
+
+  it("takes the folder the title names as the file's project", () => {
+    expect(
+      codePlace(
+        code,
+        "/Users/anna/dev/inset-shelf/apps/desktop/src/a.ts",
+        "a.ts — inset-shelf",
+        "Code"
+      )
+    ).toStrictEqual({
+      file: "/Users/anna/dev/inset-shelf/apps/desktop/src/a.ts",
+      line: null,
+      root: "/Users/anna/dev/inset-shelf",
+    });
+  });
+
+  it("takes the deepest folder of that name", () => {
+    expect(
+      codePlace(
+        code,
+        "/Users/anna/proj/packages/proj/src/a.ts",
+        "a.ts — proj",
+        "Code"
+      )?.root
+    ).toBe("/Users/anna/proj/packages/proj");
+  });
+
+  it.each([
+    [
+      "the file's name",
+      "/Users/anna/proj/src/report — draft.ts",
+      "report — draft.ts — proj",
+      "/Users/anna/proj",
+    ],
+    [
+      "the project folder's name",
+      "/Users/anna/my — proj/src/a.ts",
+      "a.ts — my — proj",
+      "/Users/anna/my — proj",
+    ],
+    [
+      "both, with a profile after them",
+      "/Users/anna/my — proj/src/report — draft.ts",
+      "report — draft.ts — my — proj — Work",
+      "/Users/anna/my — proj",
+    ],
+    [
+      // The title's own dash is known from the file's name: a shorter one in the folder's name is part of the name.
+      "neither, with another dash in the project's name and a folder named like its start inside",
+      "/Users/anna/my - proj/my/a.ts",
+      "a.ts — my - proj",
+      "/Users/anna/my - proj",
+    ],
+  ])(
+    "finds the project when the title's dash is in %s",
+    (_, file, title, root) => {
+      expect(codePlace(code, file, title, "Code")?.root).toBe(root);
+    }
+  );
+
+  it.each([
+    ["a workspace", "a.ts — my (Workspace)"],
+    ["a remote", "a.ts — app [SSH: box]"],
+    ["no folder of the file", "a.ts — elsewhere"],
+    ["only the file", "a.ts"],
+    ["the file's own name as project", "a.ts — a.ts"],
+  ])("keeps the file without a project when the title names %s", (_, title) => {
+    expect(
+      codePlace(code, "/Users/anna/dev/my/a.ts", title, "Code")
+    ).toStrictEqual({
+      file: "/Users/anna/dev/my/a.ts",
+      line: null,
+      root: null,
+    });
+  });
+
+  it("drops a path longer than the shelf keeps, whole", () => {
+    const file = `/${"a".repeat(4096)}`;
+
+    expect(file).toHaveLength(4097);
+    expect(codePlace(code, file, "a — b", "Code")).toBeNull();
+  });
+
+  it.each([
+    ["no document", null],
+    ["an empty document", ""],
+    ["a relative path", "src/a.ts"],
+  ])("has no place with %s", (_, document) => {
+    expect(codePlace(code, document, "a.ts — proj", "Code")).toBeNull();
+  });
+
+  it("has no place for an app without a row, or a row whose document is not confirmed", () => {
+    const document = "/Users/anna/dev/proj/a.ts";
+
+    expect(
+      codePlace(codeEditor("Notes"), document, "a.ts — proj", "Notes")
+    ).toBeNull();
+    expect(
+      codePlace(rowOf("Cursor"), document, "a.ts — proj", "Cursor")
+    ).toBeNull();
   });
 });

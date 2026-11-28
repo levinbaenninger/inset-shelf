@@ -15,13 +15,14 @@ function attr(element, name) {
 `;
 
 /**
- * Reads the web areas in an app's focused window from its accessibility
- * tree: each one's address (AXURL) and title. This finds pages that
- * get-windows can't, such as Firefox, Zen and apps built on web views
- * (Claude, T3 Code). An app's own shell can come first, with a page in a
- * second web area, so all of them are returned, in tree order.
- * Runs as JavaScript for Automation, so it needs no helper binary; it only
- * works once Inset Shelf has Accessibility access, which double Shift needs too.
+ * Reads an app's focused window from its accessibility tree: the file it
+ * shows (AXDocument), and its web areas, each one's address (AXURL) and
+ * title. The areas find pages that get-windows can't, such as Firefox, Zen
+ * and apps built on web views (Claude, T3 Code). An app's own shell can come
+ * first, with a page in a second web area, so all of them are returned, in
+ * tree order. Runs as JavaScript for Automation, so it needs no helper
+ * binary; it only works once Inset Shelf has Accessibility access, which
+ * double Shift needs too.
  */
 const SCRIPT = `${AX_PRELUDE}
 function run(argv) {
@@ -30,6 +31,9 @@ function run(argv) {
     return value ? String(ObjC.unwrap(value)) : "";
   }
   var window = attr(root, "AXFocusedWindow");
+  var named = window ? attr(window, "AXDocument") : null;
+  var unwrapped = named ? ObjC.unwrap(named) : "";
+  var document = typeof unwrapped === "string" ? unwrapped : named ? text(named.absoluteString) : "";
   var queue = window ? [window] : [];
   var areas = [];
   for (var seen = 0; queue.length > 0 && seen < 3000 && areas.length < 5; seen++) {
@@ -42,7 +46,7 @@ function run(argv) {
     var count = children ? children.count : 0;
     for (var i = 0; i < count; i++) queue.push(children.objectAtIndex(i));
   }
-  return JSON.stringify(areas);
+  return JSON.stringify({ areas: areas, document: document });
 }
 `;
 
@@ -54,13 +58,27 @@ const WebAreasSchema = z.array(
 
 export type WebArea = z.output<typeof WebAreasSchema>[number];
 
-const parseAreas = (output: string): readonly WebArea[] => {
-  try {
-    const parsed = WebAreasSchema.safeParse(JSON.parse(output));
+/** What the focused window shows: its web areas, and its document as the system named it, a `file://` address. */
+export interface FocusedWindow {
+  readonly areas: readonly WebArea[];
+  readonly document: string | null;
+}
 
-    return parsed.success ? parsed.data : [];
+export const NO_WINDOW: FocusedWindow = { areas: [], document: null };
+
+/** The script's answer. Each part is read on its own, so an odd document never costs the page. */
+const AnswerSchema = z.object({
+  areas: WebAreasSchema.catch([]),
+  document: z.string().min(1).nullable().catch(null),
+});
+
+export const parseFocusedWindow = (output: string): FocusedWindow => {
+  try {
+    const parsed = AnswerSchema.safeParse(JSON.parse(output));
+
+    return parsed.success ? parsed.data : NO_WINDOW;
   } catch {
-    return [];
+    return NO_WINDOW;
   }
 };
 
@@ -92,11 +110,11 @@ export const runAutomation = async (
   }
 };
 
-/** The web areas in the app's focused window, or none. macOS only. */
-export const readWebAreas = async (
+/** What the app's focused window shows, or nothing. macOS only. */
+export const readFocusedWindow = async (
   pid: number
-): Promise<readonly WebArea[]> => {
+): Promise<FocusedWindow> => {
   const output = await runAutomation(SCRIPT, [String(pid)]);
 
-  return output === null ? [] : parseAreas(output);
+  return output === null ? NO_WINDOW : parseFocusedWindow(output);
 };

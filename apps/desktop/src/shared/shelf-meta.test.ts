@@ -76,6 +76,7 @@ const withItems = (): Sample => {
       context: {
         app: "Chrome",
         appLink: null,
+        code: null,
         title: "Quote",
         url: "https://example.com/quote",
       },

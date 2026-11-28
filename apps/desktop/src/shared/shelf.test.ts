@@ -15,6 +15,8 @@ import {
   ATTACHMENTS_MAX,
   AttachedImageSchema,
   AttachmentSchema,
+  CodePlaceSchema,
+  ContextSchema,
   ItemIdSchema,
   parseComposer,
   SectionIdSchema,
@@ -512,7 +514,13 @@ describe("selections with links", () => {
 
     const { doc } = apply(emptyShelf(INBOX), [
       {
-        context: { app: "Zen", appLink: null, title: "Anmeldung", url },
+        context: {
+          app: "Zen",
+          appLink: null,
+          code: null,
+          title: "Anmeldung",
+          url,
+        },
         html: null,
         text: "Anmeldung",
         type: "addText",
@@ -866,6 +874,7 @@ describe(itemsAsList, () => {
           context: {
             app: "Chrome",
             appLink: null,
+            code: null,
             title: "Pricing",
             url: "https://example.com/pricing",
           },
@@ -1070,7 +1079,11 @@ describe("attachments on an item (format 4)", () => {
 
     expect(doc).toStrictEqual({
       ...v3,
-      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      items: v3.items.map((item) => ({
+        ...item,
+        attachments: [],
+        context: item.context === null ? null : { ...item.context, code: null },
+      })),
       schemaVersion: 4,
     });
     expect(doc === null ? [] : doc.items.map(storedFilesOf)).toStrictEqual([
@@ -1330,5 +1343,84 @@ describe("attachment operations", () => {
       { ...picture, pins: [{ label: "Corner", x: 959, y: 0 }] },
       file,
     ]);
+  });
+});
+
+/** A context from Code holding this file and project folder, as the system would report it. */
+const codeContext = (file: string, root: string | null) => ({
+  app: "Code",
+  appLink: null,
+  code: { file, line: null, root },
+  title: "a.ts — proj",
+  url: null,
+});
+
+describe("where in the code an item came from", () => {
+  it("reads a version 4 shelf saved before it with no place in the code", () => {
+    const savedBefore = {
+      ...v3,
+      items: v3.items.map((item) => ({ ...item, attachments: [] })),
+      schemaVersion: 4,
+    };
+
+    const doc = parseShelfDocument(JSON.stringify(savedBefore));
+
+    expect(doc?.schemaVersion).toBe(4);
+    expect(doc?.items.map((item) => item.context?.code)).toStrictEqual(
+      v3.items.map((item) => (item.context === null ? undefined : null))
+    );
+  });
+
+  it("keeps a file and the project folder it sits in", () => {
+    const context = codeContext(
+      "/Users/anna/dev/proj/src/a.ts",
+      "/Users/anna/dev/proj"
+    );
+
+    expect(ContextSchema.parse(context).code).toStrictEqual(context.code);
+  });
+
+  it.each([
+    ["a folder elsewhere", "/Users/anna/dev/other"],
+    ["a folder whose name only starts the same", "/Users/anna/dev/pro"],
+    ["the file itself", "/Users/anna/dev/proj/src/a.ts"],
+  ])("refuses %s as the project", (_, root) => {
+    expect(
+      CodePlaceSchema.safeParse(
+        codeContext("/Users/anna/dev/proj/src/a.ts", root).code
+      ).success
+    ).toBeFalsy();
+  });
+
+  it("refuses a path longer than the shelf keeps", () => {
+    const file = `/${"a".repeat(4096)}`;
+
+    expect(file).toHaveLength(4097);
+    expect(
+      CodePlaceSchema.safeParse(codeContext(file, null).code).success
+    ).toBeFalsy();
+  });
+
+  it.each([
+    ["a file that is no whole path", "src/a.ts", null],
+    [
+      "a file that steps out of its project",
+      "/Users/anna/dev/proj/../other/a.ts",
+      "/Users/anna/dev/proj",
+    ],
+    ["a file with a dot step", "/Users/anna/dev/proj/./a.ts", null],
+  ])("refuses %s", (_, file, root) => {
+    expect(
+      CodePlaceSchema.safeParse(codeContext(file, root).code).success
+    ).toBeFalsy();
+  });
+
+  it("reads an item whose place in the code is odd without that place, never without the item", () => {
+    const context = codeContext("src/a.ts", "/Users/anna/dev/other");
+
+    expect(ContextSchema.parse(context)).toStrictEqual({
+      ...context,
+      code: null,
+    });
   });
 });
