@@ -603,7 +603,7 @@ type Shown = Omit<NonNullable<ShelfView["focus"]>, "seq">;
 /** A capture's focus closes details, unless it asks for them at a field: the why field's way in when the pill couldn't get the keyboard. */
 const showFocusDetails = (details: Details, focus: Shown): void => {
   if (focus.field === undefined) {
-    details.close();
+    details.close(focus.id);
   } else {
     details.open(focus.id, focus.field);
   }
