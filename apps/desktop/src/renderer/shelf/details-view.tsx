@@ -414,10 +414,15 @@ const StepsEditor = ({
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
   // Rows a press took focus from: they go once the press is done, so what was pressed is still under the pointer when it is released.
   const pressing = useRef(false);
-  const leftDuringPress = useRef<{ step: Step; row: Element }[]>([]);
+  const leftDuringPress = useRef<{ id: string; row: Element }[]>([]);
 
-  const leave = useEffectEvent((step: Step) => {
-    onChange(steps.filter((other) => other.id !== step.id));
+  // The step as it is now: words typed in during the press keep it.
+  const leave = useEffectEvent((id: string) => {
+    const step = steps.find((other) => other.id === id);
+
+    if (step !== undefined && goesWhenLeft(step)) {
+      onChange(steps.filter((other) => other.id !== id));
+    }
   });
 
   useEffect(() => {
@@ -435,9 +440,9 @@ const StepsEditor = ({
         // The click comes after the release, so the rows go after it.
         setTimeout(() => {
           // A row the keyboard went back to during the press stays.
-          for (const { row, step } of left) {
+          for (const { id, row } of left) {
             if (!row.contains(document.activeElement)) {
-              leave(step);
+              leave(id);
             }
           }
         }, 0);
@@ -594,8 +599,8 @@ const StepsEditor = ({
             ) {
               if (pressing.current) {
                 leftDuringPress.current.push({
+                  id: step.id,
                   row: event.currentTarget,
-                  step,
                 });
               } else {
                 onChange(steps.filter((other) => other.id !== step.id));
