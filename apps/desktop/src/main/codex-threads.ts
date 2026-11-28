@@ -38,18 +38,22 @@ export const threadNamed = (
 /**
  * The thread a ChatGPT window shows: found by its title as read, or without
  * the app's name Windows adds to it, which items kept by an earlier build
- * also lack. Null when both name a thread: `Plan - ChatGPT` is then thread
- * Plan as Windows shows it, or the thread of that name, and nothing says which.
+ * also lack. On Windows, null when both name a thread: `Plan - ChatGPT` is
+ * then thread Plan as Windows shows it, or the thread of that name, and
+ * nothing says which. A Mac adds no name, so there the title as read wins.
  */
 export const threadOfWindow = (
   threads: readonly Thread[],
-  title: string
+  title: string,
+  windows: boolean
 ): string | null => {
   const asRead = threadNamed(threads, title);
   const bare = withoutAppName(title, "ChatGPT");
   const shown = bare === title ? null : threadNamed(threads, bare);
 
-  return asRead !== null && shown !== null ? null : (asRead ?? shown);
+  return windows && asRead !== null && shown !== null
+    ? null
+    : (asRead ?? shown);
 };
 
 /**
@@ -70,7 +74,11 @@ export const chatGptThreadLink = async (
       "utf-8"
     );
 
-    const id = threadOfWindow(parseThreadIndex(text), title);
+    const id = threadOfWindow(
+      parseThreadIndex(text),
+      title,
+      process.platform === "win32"
+    );
 
     return id === null ? null : `codex://threads/${id}`;
   } catch {
