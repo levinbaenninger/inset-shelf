@@ -115,6 +115,7 @@ import {
 import { createOnboardingWindow } from "./onboarding-window";
 import { openApp, openAppAt } from "./open-app";
 import { fileIsThere, openCode } from "./open-code";
+import { openThreadByTitle } from "./open-thread";
 import { createPageSettle, followPage } from "./page-settle";
 import { appBundlePath, createAppTile } from "./permissions/bundle";
 import { createOnboarding } from "./permissions/onboarding";
@@ -911,12 +912,16 @@ const start = async (): Promise<void> => {
     const threadTitle =
       url === undefined ? chatGptTitleToFind(context, isMac, EDITORS) : null;
 
-    // Strict, as for a caption: a title that names two threads opens neither.
-    const thread =
-      threadTitle === null ? null : await chatGptThreadLink(threadTitle, true);
-
-    if (thread !== null && app.getApplicationNameForProtocol(thread) !== "") {
-      await shell.openExternal(thread);
+    if (threadTitle !== null) {
+      await openThreadByTitle(threadTitle, context?.url ?? null, {
+        // Strict, as for a caption: a title that names two threads opens neither.
+        find: async (title) => await chatGptThreadLink(title, true),
+        open: async (address) => {
+          await shell.openExternal(address);
+        },
+        registered: (address) =>
+          app.getApplicationNameForProtocol(address) !== "",
+      });
 
       return;
     }
