@@ -9174,6 +9174,41 @@ const SCENES: readonly Scene[] = [
     page: "shelf",
   },
   {
+    // A press on Add step, then Shift+Tab back into the blank step before the release elsewhere: the step the keyboard is in stays.
+    act: async (page) => {
+      await details(page, 12);
+      await page.getByRole("button", { name: "Add a field" }).click();
+      await page.getByRole("menuitem", { name: /^Next steps/u }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Step 1"
+      );
+
+      const add = await boxOf(page.getByRole("button", { name: "Add step" }));
+
+      await page.mouse.move((add.left + add.right) / 2, middle(add));
+      await page.mouse.down();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Shift+Tab");
+      await page.mouse.move(add.right + 40, add.bottom + 60);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    },
+    check: async (page) => {
+      const steps = await page.getByRole("textbox", { name: /^Step /u }).all();
+
+      const focus = await page.evaluate(
+        "document.activeElement?.getAttribute('aria-label') ?? ''"
+      );
+
+      return steps.length === 1 && focus === "Step 1"
+        ? null
+        : `after the release there are ${steps.length} steps and focus is on “${String(focus)}”`;
+    },
+    data: { view: shelfView() },
+    name: "shelf-details-add-step-press-back",
+    page: "shelf",
+  },
+  {
     // Two lines pasted into the middle of a window's description: one line, the caret after what was pasted, and one Undo takes the paste back.
     act: async (page) => {
       await page
