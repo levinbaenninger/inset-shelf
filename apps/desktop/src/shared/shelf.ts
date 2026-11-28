@@ -4,6 +4,7 @@ import { codeLanguage, isCodeCapture } from "./code-editors";
 import {
   atLine,
   CodePlaceSchema,
+  fileName,
   PATH_MAX,
   pathInProject,
   textMark,
@@ -1912,11 +1913,29 @@ const shownNote = (item: ShelfItem): Copied | null => {
   return shown.text.trim() === "" ? null : shown;
 };
 
-/** The file and project a code capture came from, as its row says them; null for any other item. */
-const codeSource = (item: ShelfItem): string | null =>
-  item.kind !== "text" || item.context === null || !isCodeCapture(item)
-    ? null
-    : sourceLabel(item.context).label;
+/**
+ * The file and project a code capture came from, for Copy with Details: the
+ * file's path inside the project in place of the row's short name and line,
+ * else, with no code place, what the registry knows. Null for any other item.
+ */
+const codeSource = (item: ShelfItem): string | null => {
+  if (item.kind !== "text" || item.context === null || !isCodeCapture(item)) {
+    return null;
+  }
+
+  const { label } = sourceLabel(item.context);
+  const { code } = item.context;
+
+  if (code === null) {
+    return label;
+  }
+
+  const short = atLine(fileName(code), code);
+
+  return label.startsWith(short)
+    ? `${pathInProject(code)}${label.slice(short.length)}`
+    : label;
+};
 
 /** Whether Copy gives an item's words as the shelf renders them. */
 export const copiesAsShown = (item: ShelfItem): boolean =>

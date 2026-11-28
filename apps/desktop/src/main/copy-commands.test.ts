@@ -1554,6 +1554,7 @@ describe(createCopyCommands, () => {
         url: null,
       },
       platform: "macOS",
+      source: "src/recall.ts · inset-shelf",
     },
     {
       context: {
@@ -1564,6 +1565,7 @@ describe(createCopyCommands, () => {
         url: null,
       },
       platform: "Windows",
+      source: "recall.ts · inset-shelf",
     },
   ] as const;
 
@@ -1576,7 +1578,7 @@ describe(createCopyCommands, () => {
     ])
   )(
     "copies a code capture from $platform, $edited, as a code block of its language, and with details under its file and project",
-    async ({ captured, context }) => {
+    async ({ captured, context, source }) => {
       const { commands, controller, written } = await setup();
 
       const id = added(
@@ -1603,8 +1605,8 @@ describe(createCopyCommands, () => {
       expect({ copy, details }).toStrictEqual({
         copy: { "text/html": block, "text/plain": CODE },
         details: {
-          "text/html": `<p>recall.ts · inset-shelf</p>${block}`,
-          "text/plain": `recall.ts · inset-shelf\n\n\`\`\`ts\n${CODE}\n\`\`\``,
+          "text/html": `<p>${source}</p>${block}`,
+          "text/plain": `${source}\n\n\`\`\`ts\n${CODE}\n\`\`\``,
         },
       });
     }
@@ -1633,7 +1635,7 @@ describe(createCopyCommands, () => {
     await commands.copyDetails(id);
 
     await expect(formats(written[0]?.[0])).resolves.toMatchObject({
-      "text/plain": `recall.ts · inset-shelf\n\n\`\`\`\`ts\n${code}\n\`\`\`\`\n\nWhy is it here?`,
+      "text/plain": `src/recall.ts · inset-shelf\n\n\`\`\`\`ts\n${code}\n\`\`\`\`\n\nWhy is it here?`,
     });
   });
 

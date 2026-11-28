@@ -841,12 +841,12 @@ describe("an item from a code editor", () => {
 
   const root = "/Users/anna/Developer/inset-shelf";
 
-  it("copies with details under the file, the line and the project it came from, never the whole path", () => {
+  it("copies with details under its path in the project and the project it came from, never the whole path", () => {
     const { item } = fromCode({ file, line: 147, root });
     const details = itemDetailsText(item);
 
     expect(details).toBe(
-      "recall.ts:147 · inset-shelf\n\n```ts\nThe pill counts done items\n```"
+      "apps/desktop/src/shared/recall.ts · inset-shelf\n\n```ts\nThe pill counts done items\n```"
     );
     expect(details).not.toContain("/Users/anna");
   });
