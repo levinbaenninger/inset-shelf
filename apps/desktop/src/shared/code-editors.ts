@@ -447,6 +447,20 @@ const extensionOf = (name: string): string => {
 };
 
 /**
+ * The file a code editor's title names, for telling code from prose: by the
+ * row's parts, else the whole title when it holds no dash, as Code titles a
+ * file opened on its own. Whether that lone part is a file or a folder only
+ * its extension says, which is all this is read for.
+ */
+const titledFile = (
+  editor: CodeEditor,
+  title: string | null,
+  app: string | null
+): string | null =>
+  titleParts(editor, title, app).file ??
+  (partsOf(editor, title, app).length === 0 ? cleanTitle(title, app) : null);
+
+/**
  * Whether a text item is code: a selection from a file a code editor
  * showed, that is not Markdown or plain text. The file is the code place's
  * (macOS), else the one the title names by the editor's row among `editors`
@@ -474,7 +488,7 @@ export const isCodeCapture = (
   const file =
     editor === undefined
       ? null
-      : titleParts(editor, context.title, context.app).file;
+      : titledFile(editor, context.title, context.app);
 
   const extension = file === null ? "" : extensionOf(file);
 

@@ -199,6 +199,35 @@ describe("a file copy followed by the user's own copy of another file", () => {
     expect(clip.items()).toStrictEqual([list(B)]);
   });
 
+  it("leaves the clipboard alone when the next file is copied and the clipboard can't be read after the capture, and puts it back when it still lists the capture's file", async () => {
+    const newer = clipboard({
+      before: { 2: [list(B)] },
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: [2],
+    });
+
+    const same = clipboard({
+      copied: [list(A)],
+      initial: [EARLIER],
+      rejected: [2],
+    });
+
+    await expect(captureSelection(newer.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: false,
+    });
+    await expect(captureSelection(same.deps)).resolves.toMatchObject({
+      kind: "files",
+      restored: true,
+    });
+    expect([newer.restored, newer.items(), same.items()]).toStrictEqual([
+      [],
+      [list(B)],
+      [EARLIER],
+    ]);
+  });
+
   it("puts the clipboard back when nothing was copied meanwhile", async () => {
     const clip = clipboard({
       copied: [list(A)],

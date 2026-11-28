@@ -27,8 +27,12 @@ export interface Details {
   readonly stepsReset: StepsReset | null;
   /** Pushes details for an item, remembering where the list was; a field shortcut opens that field. */
   readonly open: (id: ItemId, field?: DetailField) => void;
-  /** Back to the list, with the list where it was and the row focused. Does nothing when details are closed. */
-  readonly close: () => void;
+  /**
+   * Back to the list, with the list where it was and the row focused: the
+   * one details showed, or the item `to` the list goes to instead, unless
+   * that item already has the keyboard. Does nothing when details are closed.
+   */
+  readonly close: (to?: ItemId) => void;
   /** A field shortcut while details are open. */
   readonly requestField: (field: DetailField) => void;
   readonly pushUndo: (undo: DetailsUndo) => void;
@@ -102,7 +106,7 @@ export const useDetails = ({
   }
 
   return {
-    close: () => {
+    close: (to) => {
       if (id === null) {
         return;
       }
@@ -119,7 +123,14 @@ export const useDetails = ({
         }
 
         // Back on the row itself, so Return edits and Space checks off again; on the search when an edit took the row out of its results.
-        focusRowOrSearch(document.querySelector(`[data-item-id="${id}"]`));
+        const row = document.querySelector(`[data-item-id="${to ?? id}"]`);
+
+        if (
+          to === undefined ||
+          row?.contains(document.activeElement) !== true
+        ) {
+          focusRowOrSearch(row);
+        }
       });
     },
     forgetUndo: () => {
