@@ -608,6 +608,10 @@ describe(isCodeCapture, () => {
     expect(isCodeCapture(windows("recall.ts - inset-shelf"))).toBeTruthy();
   });
 
+  it("counts code from a Windows project named for its site, whose name reads as no prose file", () => {
+    expect(isCodeCapture(windows("index.ts - example.org"))).toBeTruthy();
+  });
+
   it("counts a selection from a file even when the app has no row, and a file without an extension", () => {
     expect(
       isCodeCapture(selection("Zed", inProject("src/shared/recall.ts")))

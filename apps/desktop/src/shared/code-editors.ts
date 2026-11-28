@@ -443,7 +443,11 @@ export const codeAction = (app: string, way: CodeWay, mac: boolean): string => {
   return mac ? "Show in Finder" : "Show in Folder";
 };
 
-/** Files whose words are prose, plain text and markup written to be read, which read as Markdown even from a code editor. */
+/**
+ * Files whose words are prose, plain text and markup written to be read,
+ * which read as Markdown even from a code editor. None ends as a site's
+ * domain does (.org): a Windows title's project can be named for its site.
+ */
 const PROSE_FILES = new Set([
   ".adoc",
   ".asciidoc",
@@ -452,7 +456,6 @@ const PROSE_FILES = new Set([
   ".mdown",
   ".mdx",
   ".mkd",
-  ".org",
   ".rst",
   ".text",
   ".textile",
