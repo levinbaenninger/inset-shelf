@@ -608,6 +608,16 @@ describe(isCodeCapture, () => {
     expect(isCodeCapture(windows("recall.ts - inset-shelf"))).toBeTruthy();
   });
 
+  it("counts a file Code on Windows opened on its own, whose title names only the file, and keeps prose and unnamed tabs out", () => {
+    expect([
+      isCodeCapture(windows("sample.ts")),
+      isCodeCapture(windows("● sample.ts")),
+      isCodeCapture(windows("README.md")),
+      isCodeCapture(windows("Welcome")),
+      isCodeCapture(windows("Untitled-1")),
+    ]).toStrictEqual([true, true, false, false, false]);
+  });
+
   it("counts a selection from a file even when the app has no row, and a file without an extension", () => {
     expect(
       isCodeCapture(selection("Zed", inProject("src/shared/recall.ts")))

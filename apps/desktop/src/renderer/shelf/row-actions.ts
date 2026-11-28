@@ -1,4 +1,4 @@
-import { itemText } from "@shared/shelf";
+import { copiedNote, itemText } from "@shared/shelf";
 import type { ItemId, ShelfItem, Step, WindowRef } from "@shared/shelf";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import type { DragEvent } from "react";
@@ -7,7 +7,7 @@ import type { AttachmentHandlers } from "./attachment-strip";
 import type { RowHandlers } from "./item-row";
 import type { MenuAnchor } from "./menus";
 import type { RowDropProps } from "./use-attach-drop";
-import type { ItemDrag } from "./use-item-drag";
+import type { DraggedWords, ItemDrag } from "./use-item-drag";
 
 /**
  * What every row can ask of the shelf, by the item's id. One object for the
@@ -15,6 +15,12 @@ import type { ItemDrag } from "./use-item-drag";
  * latest render's code, so a row re-renders only when its own data changes
  * (item-row.tsx memoises it on that).
  */
+/** What dragging an item out carries: a text item's words as Copy gives them, HTML included; any other item's words. */
+const draggedWords = (item: ShelfItem): DraggedWords =>
+  item.kind === "text"
+    ? copiedNote(item)
+    : { html: null, text: itemText(item) };
+
 export interface RowActions {
   readonly attachments: (id: ItemId) => AttachmentHandlers;
   readonly contextMenu: (id: ItemId, anchor: MenuAnchor) => void;
@@ -22,7 +28,7 @@ export interface RowActions {
   readonly dragImage: (id: ItemId) => void;
   readonly dragProps: (
     id: ItemId,
-    text: string
+    words: DraggedWords
   ) => ReturnType<ItemDrag["itemProps"]>;
   readonly dropProps: (item: ShelfItem, open: boolean) => Partial<RowDropProps>;
   readonly edit: (id: ItemId) => void;
@@ -61,7 +67,7 @@ export const useRowActions = (actions: RowActions): RowActions => {
       dragImage: (id) => {
         latest.current.dragImage(id);
       },
-      dragProps: (id, text) => latest.current.dragProps(id, text),
+      dragProps: (id, words) => latest.current.dragProps(id, words),
       dropProps: (item, open) => latest.current.dropProps(item, open),
       edit: (id) => {
         latest.current.edit(id);
@@ -149,10 +155,10 @@ export const bindRow = (
     dragProps: {
       draggable: true,
       onDragEnd: () => {
-        actions.dragProps(id, itemText(item)).onDragEnd();
+        actions.dragProps(id, draggedWords(item)).onDragEnd();
       },
       onDragStart: (event) => {
-        actions.dragProps(id, itemText(item)).onDragStart(event);
+        actions.dragProps(id, draggedWords(item)).onDragStart(event);
       },
     },
     // Only the open row takes files; the others pass them to the shelf.

@@ -202,7 +202,7 @@ const namesTheFiles = (text: string, files: readonly string[]): boolean => {
 type Baseline<S> =
   /** The clipboard as the capture left it, to tell a newer copy apart later. */
   | { readonly kind: "read"; readonly snapshot: S }
-  /** It couldn't be read at all: one try to put back, without retries. */
+  /** It couldn't be read at all, though it still lists any files the capture read: one try to put back, without retries. */
   | { readonly kind: "unread" }
   /** Another app copied something newer meanwhile: it is left alone. */
   | { readonly kind: "newer" }
@@ -227,8 +227,11 @@ const baseline = async <S>(
 ): Promise<Baseline<S>> => {
   const first = await deps.snapshot().catch(() => null);
 
+  // Unread, a newer copy of files is still told apart by their list, and left alone when the list differs or can't be read.
   if (first === null) {
-    return { kind: "unread" };
+    return (await stillCopied(deps, copied.files))
+      ? { kind: "unread" }
+      : { kind: "newer" };
   }
 
   if (deps.readable(first)) {

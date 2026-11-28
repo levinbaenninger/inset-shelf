@@ -86,7 +86,7 @@ import {
   contextMenuAt,
   DONE,
   EDITING,
-  focusRowOrSearch,
+  focusRowOrSearchLater,
   WORDS,
 } from "./row-look";
 import { checkedSteps, linksOf, ROW_CAPS, rowParts } from "./row-parts";
@@ -715,9 +715,7 @@ export const TextEditor = ({
       handle.current?.element()?.closest("[data-item-id], [data-details]") ??
       null;
 
-    requestAnimationFrame(() => {
-      focusRowOrSearch(words);
-    });
+    focusRowOrSearchLater(words);
   };
 
   const field = {
