@@ -444,6 +444,10 @@ describe(storedNote, () => {
       "[docs](<https://example.com/a b> 'API') and y",
     ],
     ["<https://example.com> and x", "<https://example.com> and y"],
+    [
+      "[docs](https://example.com) and [docs](<https://example.com>) x",
+      "[docs](https://example.com) and [docs](<https://example.com>) y",
+    ],
   ])(
     "keeps each link of %j the edit did not change byte for byte",
     (was, now) => {
