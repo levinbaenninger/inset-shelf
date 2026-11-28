@@ -104,6 +104,7 @@ import { createDrawingWindow } from "./drawing-window";
 import { e2eLog } from "./e2e-log";
 import { attachedFileName, imageFileName } from "./export-name";
 import { createDragStaging, createShotStaging, exportImage } from "./exports";
+import type { FrontRead } from "./front-watch";
 import { EDITORS, frontKind, frontWindow } from "./front-window";
 import { serveContract } from "./ipc-kit";
 import { createKeyMonitor } from "./key-monitor";
@@ -463,6 +464,17 @@ const setTimer = (run: () => void, ms: number): (() => void) => {
   };
 };
 
+/** The window in front as a watch reads it, null when it is Inset's own or none; with `address`, its page too. */
+const probeFront = async (address: boolean): Promise<FrontRead | null> => {
+  const front = await frontWindow(
+    address ? { page: true } : { address: false }
+  );
+
+  return front.own || front.context === null
+    ? null
+    : { bounds: front.bounds, source: front.context };
+};
+
 const exists = async (file: string): Promise<boolean> => {
   try {
     await access(file);
@@ -649,11 +661,21 @@ const start = async (): Promise<void> => {
   // The window the shelf last docked to, kept for when Inset itself is in front.
   let lastTarget: Rect<"screen"> | null = null;
 
-  const shelfHere = createShelfHere({ doc: () => controller.view().doc });
   // The window the recall pill showing now was shown for, so a click on it opens the shelf there.
   let recalledFrom: ItemContext | null = null;
   // Set once the shelf's IPC server exists.
   let emitShelfView: () => void = ignore;
+
+  const shelfHere = createShelfHere({
+    changed: () => {
+      emitShelfView();
+    },
+    doc: () => controller.view().doc,
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    probe: probeFront,
+    setTimer,
+    visible: () => shelf.isVisible(),
+  });
 
   const home = app.getPath("home");
 
@@ -1346,15 +1368,7 @@ const start = async (): Promise<void> => {
         systemPreferences.isTrustedAccessibilityClient(false)),
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
     now: () => Date.now(),
-    probe: async (address) => {
-      const front = await frontWindow(
-        address ? { page: true } : { address: false }
-      );
-
-      return front.own || front.context === null
-        ? null
-        : { bounds: front.bounds, source: front.context };
-    },
+    probe: probeFront,
     setTimer,
     show: ({ source, ...recalled }) => {
       const before = toast.view()?.seq;
@@ -1375,6 +1389,7 @@ const start = async (): Promise<void> => {
     }
 
     recall.activity(kind);
+    shelfHere.activity(kind);
   });
   recall.sync();
 

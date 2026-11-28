@@ -3,6 +3,8 @@ import { hereOf, hereWith, openingOf, typedNote } from "@shared/recall";
 import type { Opening } from "@shared/recall";
 import type { ItemContext, MainOp, ShelfDoc, ShelfOp } from "@shared/shelf";
 
+import type { Activity, FrontWatchDeps } from "./front-watch";
+
 /**
  * Open decision 3: the shelf shows a "from here" chip whenever it opens
  * beside a window open items came from. False keeps the filter for the
@@ -14,7 +16,17 @@ const HERE_CHIP = true;
  * Recall in main: the window the shelf shows beside and the open items from
  * it, sent with the shelf's view. Not shelf data.
  */
-export const createShelfHere = (deps: { readonly doc: () => ShelfDoc }) => {
+export const createShelfHere = (deps: {
+  readonly doc: () => ShelfDoc;
+  /** Reads the window in front; null when it is Inset's own or none. */
+  readonly probe: FrontWatchDeps["probe"];
+  readonly setTimer: FrontWatchDeps["setTimer"];
+  readonly idleSeconds: () => number;
+  /** The shelf shows, so the window in front is the one it floats over. */
+  readonly visible: () => boolean;
+  /** What is from here changed while the shelf shows. */
+  readonly changed: () => void;
+}) => {
   let opening: Opening | null = null;
   let seq = 0;
 
@@ -30,6 +42,8 @@ export const createShelfHere = (deps: { readonly doc: () => ShelfDoc }) => {
   };
 
   return {
+    /** Input the key hook saw. The opening keeps its window whatever comes to the front. */
+    activity: (_kind: Activity): void => undefined,
     /** The shelf opens beside `context`, or beside no window when it is null. */
     opened: (context: ItemContext | null): void => {
       const found = HERE_CHIP ? hereOf(deps.doc(), context) : null;
