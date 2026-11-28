@@ -55,7 +55,7 @@ jobs:
         run: test "v$(node -p 'require("./apps/desktop/package.json").version')" = "$GITHUB_REF_NAME"
       # The signing key is given only to this step, only on macOS, only for a v* tag.
       # The job still runs third-party setup actions before it, so the key lands in a
-      # temporary keychain that exists for the rest of this single-use runner.
+      # temporary keychain that is deleted right after the build.
       - name: Import the signing identity
         if: runner.os == 'macOS'
         env:
@@ -67,6 +67,10 @@ jobs:
       - shell: bash
         working-directory: apps/desktop
         run: vp run ${{ matrix.script }}
+      # The signing key is gone before any later action runs in this job.
+      - name: Delete the signing keychain
+        if: always() && runner.os == 'macOS' && env.INSET_SIGN_KEYCHAIN != ''
+        run: security delete-keychain "$INSET_SIGN_KEYCHAIN"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.name }}

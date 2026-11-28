@@ -41,7 +41,7 @@ Severity: **High**: a realistic path to code running with the app's grants, or d
 | F5 | Medium | **Local files and apps launched from items.** `isPageAddress` accepts `file:` URLs (misses `X.app` without slash, † allows UNC `file:////host/share`); `openLink` passes them to `openExternal`; `reopenWindow` runs `shell.openPath` on a linked window's document (an open `.command`/`.bat` file executes) and, on Windows, on its `appPath`; `open` is called without `--`. | Note links: http(s) only. Local files are revealed in Finder/Explorer, never opened; UNC rejected; "Open file" becomes "Show in Finder/Explorer". `appPath` must be an `.app` bundle (macOS) / is only revealed (Windows); `--` added before paths. |
 | F6 | Medium | **Reads other apps' private stores** (`~/.codex` session index, T3 Code's SQLite) at capture and on open, without asking. | Off by default behind a setting, explained in Settings. |
 | F7 | Medium † | **Test hooks in released builds.** `INSET_E2E_LOG` appends every captured selection in plain text to any path; `INSET_USER_DATA_DIR` and `INSET_FAIL_NEXT_WRITE` also work. | Compiled out unless built with `INSET_E2E_BUILD=1`; a `package:e2e` script for the E2E run. |
-| F8 | Medium | **Release supply chain.** Actions pinned by tag; `contents: write` for the whole workflow including the job running third-party code with the signing key; † `workflow_dispatch` from any branch can sign; † `pullfrog.yml` runs a floating action with `id-token: write` and many API-key secrets; no checksums; no audit. | Pin actions to SHAs, `contents: read` by default and `write` only for publishing, `persist-credentials: false`, signing only for `main`/tags, `SHA256SUMS.txt` per release, dependency audit in CI, Dependabot. |
+| F8 | Medium | **Release supply chain.** Actions pinned by tag; `contents: write` for the whole workflow including the job running third-party code with the signing key; † `workflow_dispatch` from any branch can sign; † `pullfrog.yml` runs a floating action with `id-token: write` and many API-key secrets; no checksums; no audit. | Pin actions to SHAs, `contents: read` by default and `write` only for publishing, `persist-credentials: false`, signing and publishing only for `v*` tags, `SHA256SUMS.txt` per release, dependency audit in CI, Dependabot. |
 | F9 † | Medium | **`addFiles` IPC takes any path string** from the page; main copies up to 50 × 200 MB files into the shelf and serves PNGs back. A compromised renderer can read any file the user can. | The preload resolves dropped `File` objects with `webUtils.getPathForFile`; the contract no longer takes raw paths from the page. |
 | F10 † | Medium | **Clipboard secrets.** Double Shift snapshots and restores the whole clipboard, and screenshot cards run a permanent `osascript` clipboard poller (EDR-unfriendly), ignoring password-manager concealed/transient markers. | Skip and never re-broadcast items marked concealed/transient (`org.nspasteboard.ConcealedType`, `TransientType`, `ExcludeClipboardContentFromMonitorProcessing`). † Screenshot cards default **off**. |
 | F11 † | Low | **Stored file names** may contain `/`, `\` or `..`; `exports.ts` joins them into a staging folder unchecked. | Schema rejects separators and dot names; containment check. |
@@ -62,4 +62,28 @@ Severity: **High**: a realistic path to code running with the app's grants, or d
 ## Review log
 
 - Gemini 4 Neon review of the analysis (2026-11-27): corrected F2, F3, F4, F5, F7 severities and scope; added F9–F13, F15 and the CI issues in F8; changed decisions on periodic checks, tag-only releases, cookie encryption and the screenshot-cards default. All accepted.
-- Gemini 4 Neon review of the changes: _pending_
+- Gemini 4 Neon review of the changes (2026-11-28), `main...feat/security-hardening`: 3 high, 3 medium, 6 low. Fixed:
+  - **Keychain password on stdin hung local builds** (high). `security unlock-keychain` without `-p` reads `/dev/tty` when there is one. Every password-taking `security` command in `sign-mac.ts` and `import-signing-key.sh` now goes through `security -i` on stdin (create, unlock, import, partition list), so none is in argv. Tested with and without a TTY, a wrong password and a password containing quotes and backslashes. Gemini's claim that CI also failed did not reproduce: without a TTY the old form worked. It is fixed either way.
+  - **macOS updates stuck at "Downloading… 100%"** (high). With `autoInstallOnAppQuit` off, electron-updater never asks Squirrel to fetch. The app now listens to electron-updater's `update-downloaded` on macOS too. On Restart, Squirrel fetches and verifies first, and the windows close only after that, so a rejected signature shows "Couldn't install the update" instead of leaving a windowless app.
+  - **Settings window taller than the `fitHeight` limit** (high). The limit was raised, the window is capped at 720 px or 85 % of its display's work area, and the groups scroll under a fixed header.
+  - **App links built in `openInApp` and `front-window.ts` skipped `isAppLink`** (medium). Every link passed to `openExternal` or stored is now checked; `desktopLink` validates Notion paths; the Codex thread id is a real UUID.
+  - **Double Shift on a private clipboard** (medium). It failed silently while hidden, retried for up to 1 s, and could discard a normal capture when a password was copied during restore. Now: a pointer toast, an immediate abort, and a restore that stops without discarding the capture.
+  - **Windows linked-window label** (medium). It said "Open app" though the app is now only revealed; it now says "Show in Explorer" (app, README, docs).
+  - Zod in the sandboxed preload (CSP `new Function` probe) replaced by a plain check.
+  - `safeFileName` now also replaces Windows-illegal characters (`<>:"|?*`, control characters) and trailing dots/spaces, and staging failures in drag-out are caught.
+  - `isAppBundlePath` requires a POSIX path.
+  - The dev-only `t3code-dev://` flag reaches the renderer.
+  - `org.nspasteboard.AutoGeneratedType` is no longer treated as private: text expanders set it.
+  - Apple Events is now only on the app itself; helpers and executables get `allow-jit` and `disable-library-validation` only.
+  - Gemini's suggested guard is added: the release job deletes the signing keychain right after the build, before `upload-artifact` runs.
+
+  Declined:
+  - **Dropping `allow-jit` and `disable-library-validation` from non-V8 executables** (ShipIt, crashpad, the get-windows helper). Without a team ID, library validation rejects the bundled frameworks they load. `allow-jit` on them adds little. Revisit with a Developer ID.
+  - **Moving signing into its own job.** That needs signing split out of `package:mac`. The keychain is now deleted before any later action, all actions are SHA-pinned, and the workflow runs only for tags; Gemini judged that acceptable.
+
+  Gemini agreed with the other decisions as made:
+  - Old `file:` addresses load as no link.
+  - Unsafe stored file names are cleaned on load.
+  - Double Shift copies nothing while a password is on the clipboard.
+  - The `preview` feed is retired.
+  - The site CSP keeps `'unsafe-inline'`.
