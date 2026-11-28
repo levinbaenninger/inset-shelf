@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { z } from "zod";
 
-import { CodePlaceSchema } from "./code-place";
+import { CodePlaceSchema, isCapturedText } from "./code-place";
 import v3 from "./fixtures/shelf-v3.json";
 import {
   applyOp,
@@ -20,6 +20,7 @@ import {
   ItemIdSchema,
   parseComposer,
   SectionIdSchema,
+  TEXT_MAX,
   ShelfDocSchema,
   UNDO_MAX,
   fitText,
@@ -1422,5 +1423,98 @@ describe("where in the code an item came from", () => {
       ...context,
       code: null,
     });
+  });
+});
+
+/** Whether the shelf's first item still holds the words it was captured with. */
+const asCaptured = (doc: ShelfDoc): boolean => {
+  const [item] = doc.items;
+  const place = item?.context?.code ?? null;
+
+  return (
+    item?.kind === "text" && place !== null && isCapturedText(place, item.text)
+  );
+};
+
+describe("a capture's words, known again when its file is opened", () => {
+  const file = "/Users/anna/dev/proj/src/a.ts";
+  const start = emptyShelf(INBOX);
+  // The first id env() gives.
+  const id = ItemIdSchema.parse(uuid(11));
+
+  const captured = (text: string): MainOp => ({
+    context: codeContext(file, "/Users/anna/dev/proj"),
+    html: null,
+    text,
+    type: "addText",
+    via: "selection",
+  });
+
+  it("knows a capture's words for its own, in the one step that adds it", () => {
+    const { doc } = apply(start, [captured("retry();")]);
+
+    expect(asCaptured(doc)).toBeTruthy();
+    expect(doc.items[0]?.context?.code).toMatchObject({ file, line: null });
+  });
+
+  it("no longer does once the words are edited, and does again when the edit is taken back", () => {
+    const edited = apply(start, [
+      captured("retry();"),
+      { id, text: "other();", type: "editText" },
+    ]);
+
+    expect(asCaptured(edited.doc)).toBeFalsy();
+    expect(
+      asCaptured(
+        applyOp(
+          edited.doc,
+          { id, text: "retry();", type: "editText" },
+          env(),
+          edited.pending
+        ).doc
+      )
+    ).toBeTruthy();
+  });
+
+  it("knows a capture's words when they are as long as the shelf keeps", () => {
+    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX))]);
+
+    expect(asCaptured(doc)).toBeTruthy();
+  });
+
+  it("knows no words for a capture longer than the shelf keeps, so a click looks for no line", () => {
+    // The words kept are only the selection's start: the whole of it may be nowhere in the file.
+    const { doc } = apply(start, [captured("a".repeat(TEXT_MAX + 5))]);
+
+    expect(asCaptured(doc)).toBeFalsy();
+    expect(doc.items[0]?.context?.code).toMatchObject({ file, line: null });
+  });
+
+  it("keeps nothing of the words but a mark that survives the shelf's own file", () => {
+    const { doc } = apply(start, [captured("retry();")]);
+    const read = ShelfDocSchema.parse(structuredClone(doc));
+
+    expect(asCaptured(read)).toBeTruthy();
+    expect(JSON.stringify(read.items[0]?.context)).not.toContain("retry");
+  });
+
+  it("knows no words for an item saved before the mark, or with one that reads odd", () => {
+    const { doc } = apply(start, [captured("retry();")]);
+
+    const without = (mark: string | number | undefined): ShelfDoc =>
+      ShelfDocSchema.parse({
+        ...doc,
+        items: doc.items.map((item) => ({
+          ...item,
+          context: {
+            ...item.context,
+            code: { file, line: null, mark, root: "/Users/anna/dev/proj" },
+          },
+        })),
+      });
+
+    expect(asCaptured(without(undefined))).toBeFalsy();
+    expect(asCaptured(without("../../etc"))).toBeFalsy();
+    expect(without(42).items[0]?.context?.code).toMatchObject({ file });
   });
 });

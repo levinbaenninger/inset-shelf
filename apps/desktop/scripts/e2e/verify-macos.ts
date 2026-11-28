@@ -836,9 +836,10 @@ const checkSelection = async (): Promise<void> => {
 
 /**
  * A capture from an editor keeps the file its window names and the project
- * folder its title names, and a window that names no file keeps none
- * (src/shared/code-editors.ts; the source app is an editor under the test).
- * The paths are compared here and never written to the results.
+ * folder its title names, and no line; a window that names no file keeps
+ * none (src/shared/code-editors.ts; the source app is an editor under the
+ * test). A click finds the line (src/main/code-line.ts). The paths are
+ * compared here and written to the results only from the run's folder on.
  */
 const waitUntil = async (test: () => boolean, ms = 8000): Promise<boolean> => {
   for (let waited = 0; waited < ms; waited += 200) {
@@ -859,14 +860,26 @@ const openedInSource = (): readonly string[] =>
     ? readFileSync(sourceOpened, "utf-8").split("\n").filter(Boolean)
     : [];
 
-/** The file an address of the source app's scheme names, or null for any other address. */
-const fileOfAddress = (address: string): string | null => {
+/** The file and line an address of the source app's scheme names, or null for any other address. */
+const placeOfAddress = (
+  address: string
+): { readonly file: string; readonly line: number | null } | null => {
   try {
     const url = new URL(address);
 
-    return url.protocol === `${sourceScheme}:` && url.host === "file"
-      ? decodeURIComponent(url.pathname)
-      : null;
+    if (url.protocol !== `${sourceScheme}:` || url.host !== "file") {
+      return null;
+    }
+
+    // A ":" inside the path is encoded: only the line's is left as it is.
+    const at = /:(?<line>\d+)$/u.exec(url.pathname);
+
+    return at === null
+      ? { file: decodeURIComponent(url.pathname), line: null }
+      : {
+          file: decodeURIComponent(url.pathname.slice(0, at.index)),
+          line: Number(at.groups?.line),
+        };
   } catch {
     return null;
   }
@@ -892,10 +905,10 @@ const received = (asked: readonly string[]): string =>
         )
         .join(", ")}`;
 
-/** Clicks the code item's source line, "a.ts · proj", in the shelf: the only button that names the file. */
-const clickCodeLine = async (attempts = 10): Promise<boolean> => {
+/** Clicks a code item's source line in the shelf, such as "a.ts · proj": the only button that holds `name`. */
+const clickCodeLine = async (name: string, attempts = 10): Promise<boolean> => {
   const found = jxa(`const hit = ${processElements}.findLast((e) => {
-      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => (t ?? "").includes("a.ts")); } catch { return false; }
+      try { return e.role() === "AXButton" && [e.name(), e.description()].some((t) => (t ?? "").includes(${JSON.stringify(name)})); } catch { return false; }
     });
     hit ? (() => { const [x, y] = hit.position(); const [w, h] = hit.size(); return Math.round(x + w / 2) + " " + Math.round(y + h / 2); })() : "";`);
 
@@ -913,17 +926,15 @@ const clickCodeLine = async (attempts = 10): Promise<boolean> => {
 
   await delay(500);
 
-  return await clickCodeLine(attempts - 1);
+  return await clickCodeLine(name, attempts - 1);
 };
 
 /**
- * The way back (src/main/open-code.ts): a click on a code item's source line
- * opens its file in the editor it came from, through the address the
- * editor's scheme takes, here the source app's own. A file that is gone
- * opens nothing and brings the editor forward. No other editor is touched.
+ * Whether the stand-in editor takes its scheme here. Without it a click
+ * would show the file in Finder, and leave that window open: no click is
+ * tried then.
  */
-const checkCodeWayBack = async (file: string): Promise<void> => {
-  // Without its scheme the app would show the file in Finder, and leave that window open.
+const standInTakesScheme = (): boolean => {
   const handler = jxa(`ObjC.import("AppKit");
     const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString(${JSON.stringify(`${sourceScheme}://file/a`)}));
     app.isNil() ? "" : ObjC.unwrap(app.path);`);
@@ -934,15 +945,21 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
     handler === "" ? "no app takes it" : handler
   );
 
-  if (handler !== sourceApp) {
-    return;
-  }
+  return handler === sourceApp;
+};
 
+/**
+ * The way back (src/main/open-code.ts): a click on a code item's source line
+ * opens its file in the editor it came from, through the address the
+ * editor's scheme takes, here the source app's own. A file that is gone
+ * opens nothing and brings the editor forward. No other editor is touched.
+ */
+const checkCodeWayBack = async (file: string): Promise<void> => {
   enableWebAccessibility();
   rmSync(sourceOpened, { force: true });
   showShelfFromTray();
 
-  const clicked = await clickCodeLine();
+  const clicked = await clickCodeLine("a.ts");
 
   await waitUntil(() => openedInSource().length > 0);
 
@@ -950,8 +967,11 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
 
   record("the code item's source line is a button", clicked);
   record(
-    "a click on it opens its file in the editor it came from, by the editor's address",
-    asked.length === 1 && asked.map(fileOfAddress).every((at) => at === file),
+    "a click on it opens its file in the editor it came from, by the editor's address, at no line where its words are not in the file",
+    asked.length === 1 &&
+      asked
+        .map(placeOfAddress)
+        .every((at) => at?.file === file && at.line === null),
     received(asked)
   );
 
@@ -962,7 +982,7 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   await delay(800);
   showShelfFromTray();
 
-  const clickedGone = await clickCodeLine();
+  const clickedGone = await clickCodeLine("a.ts");
 
   await waitUntil(() => frontmost() === "source", 6000);
   // A wrong open would start the editor too, and its record could land just after.
@@ -983,6 +1003,160 @@ const checkCodeWayBack = async (file: string): Promise<void> => {
   } catch {
     // Already gone.
   }
+};
+
+/** Line `n` of the code trial's file of 40 lines. */
+const lineText = (n: number): string => `const line${n} = codePlaceLine(${n});`;
+
+/**
+ * Clicks the source line of the code item from `name` ("lines.ts"), with
+ * nothing the stand-in received before: the line the address it receives
+ * opens at, null for none, or undefined when it receives no address of
+ * `file`, or more than one.
+ */
+const openedAtLine = async (
+  name: string,
+  file: string
+): Promise<{
+  readonly line: number | null | undefined;
+  readonly detail: string;
+}> => {
+  enableWebAccessibility();
+  rmSync(sourceOpened, { force: true });
+  showShelfFromTray();
+
+  const clicked = await clickCodeLine(name);
+
+  await waitUntil(() => openedInSource().length > 0);
+
+  const asked = openedInSource();
+  const [place] = asked.map(placeOfAddress);
+
+  return {
+    detail: received(asked),
+    line:
+      clicked && asked.length === 1 && place?.file === file
+        ? place.line
+        : undefined,
+  };
+};
+
+/**
+ * The line is found when the source line is clicked, never at capture
+ * (src/main/open-code.ts, src/main/code-line.ts): the file opens at the line
+ * the captured words are on now, and at the line they moved to after an
+ * edit of the file. Words in the file twice open at no line. An item whose
+ * own words were edited opens at no line: that is left to unit tests
+ * (src/main/open-code.test.ts), since typing into the shelf here could reach
+ * another app named Electron.
+ */
+const checkCodeLineWayBack = async ({
+  lines,
+  twice,
+}: {
+  readonly lines: string;
+  readonly twice: string;
+}): Promise<void> => {
+  const stored = await openedAtLine("lines.ts", lines);
+
+  record(
+    "a click opens the file at the line its captured words are on",
+    stored.line === 12,
+    stored.detail
+  );
+
+  const before = readFileSync(lines, "utf-8");
+
+  writeFileSync(lines, `${"// moved down\n".repeat(10)}${before}`);
+
+  const moved = await openedAtLine("lines.ts", lines);
+
+  record(
+    "after its words moved 10 lines down, a click opens at the line they are on now",
+    before.split("\n")[11] === lineText(12) && moved.line === 22,
+    moved.detail
+  );
+
+  const inTwo = await openedAtLine("twice.ts", twice);
+
+  record(
+    "words that are in the file twice open it at no line",
+    inTwo.line === null,
+    inTwo.detail
+  );
+};
+
+/**
+ * Captures `text` from the source app, all of it selected, in a window
+ * titled `title` that names `document`. Waits until the item is on disk.
+ */
+const captureCode = async (
+  text: string,
+  document?: string,
+  title = "a.ts — proj"
+) => {
+  if (await showSource(text, "all", { document, title })) {
+    const mark = events().length;
+
+    guardedKeys(() => {
+      input("double-shift");
+    });
+    await waitFor("itemAdded", mark);
+  } else {
+    record("source app in front for the code place", false, frontmost());
+  }
+
+  // The event comes with the item in memory; the shelf file is written after it.
+  const saved = () =>
+    items().find((item) => item.kind === "text" && item.text === text);
+
+  await waitUntil(() => saved() !== undefined, 4000);
+
+  return saved();
+};
+
+/**
+ * A capture reads no file and stores no line, whether its words are in the
+ * file once or twice: the line is found when it is clicked. Gives the two
+ * files, of 40 lines each: one with the captured words on line 12, one with
+ * them on lines 20 and 30.
+ */
+const checkCapturedLines = async (
+  project: string
+): Promise<{ readonly lines: string; readonly twice: string }> => {
+  const lines = path.join(project, "src", "lines.ts");
+  const twice = path.join(project, "src", "twice.ts");
+  const twiceWords = "retryTwice(); // the same words twice";
+
+  const numbered = (n: number): string =>
+    `${Array.from({ length: 40 }, (_, index) =>
+      n === 2 && (index === 19 || index === 29)
+        ? twiceWords
+        : lineText(index + 1)
+    ).join("\n")}\n`;
+
+  writeFileSync(lines, numbered(1));
+  writeFileSync(twice, numbered(2));
+
+  const inOne = await captureCode(lineText(12), lines, "lines.ts — proj");
+
+  record(
+    "a capture of words on one line of its file keeps the file and no line",
+    inOne?.context?.code?.file === lines && inOne.context.code.line === null
+  );
+
+  await delay(3000);
+
+  const inTwo = await captureCode(twiceWords, twice, "twice.ts — proj");
+
+  record(
+    "a capture of words that are in the file twice keeps the file and no line",
+    inTwo?.context?.code?.file === twice && inTwo.context.code.line === null
+  );
+
+  await delay(3000);
+
+  return { lines, twice };
 };
 
 /** The folder holding `at` that the shelf never looks in for a code file, however capitalised (src/main/quiet-disk.ts). */
@@ -1023,28 +1197,7 @@ const checkCodePlace = async (): Promise<void> => {
 
   writeFileSync(file, "export const answer = 42;\n");
 
-  const capture = async (text: string, document?: string) => {
-    if (await showSource(text, "all", { document, title: "a.ts — proj" })) {
-      const mark = events().length;
-
-      guardedKeys(() => {
-        input("double-shift");
-      });
-      await waitFor("itemAdded", mark);
-    } else {
-      record("source app in front for the code place", false, frontmost());
-    }
-
-    // The event comes with the item in memory; the shelf file is written after it.
-    const saved = () =>
-      items().find((item) => item.kind === "text" && item.text === text);
-
-    await waitUntil(() => saved() !== undefined, 4000);
-
-    return saved();
-  };
-
-  const inFile = await capture("Code place sentence in a file", file);
+  const inFile = await captureCode("Code place sentence in a file", file);
 
   record(
     "a capture from an editor keeps the file its window names",
@@ -1059,14 +1212,18 @@ const checkCodePlace = async (): Promise<void> => {
   // Once the capture notice has gone, as in checkSelection.
   await delay(3000);
 
-  const noFile = await capture("Code place sentence in no file");
+  const lined = await checkCapturedLines(project);
+  const noFile = await captureCode("Code place sentence in no file");
 
   record(
     "a window that names no file keeps no place in the code",
     noFile?.context?.app === "source" && noFile.context.code === null
   );
 
-  await checkCodeWayBack(file);
+  if (standInTakesScheme()) {
+    await checkCodeLineWayBack(lined);
+    await checkCodeWayBack(file);
+  }
 };
 
 const checkNoFalseTaps = async (): Promise<void> => {

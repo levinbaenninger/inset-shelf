@@ -89,6 +89,7 @@ import {
   readableClipboard,
   sameClipboard,
 } from "./clipboard-match";
+import { lineInFile } from "./code-line";
 import { chatGptThreadLink } from "./codex-threads";
 import { contained } from "./contained";
 import { createContextRecall } from "./context-recall";
@@ -854,18 +855,21 @@ const start = async (): Promise<void> => {
   /** Where main may look for a code item's file with no chance of a system prompt (src/main/quiet-disk.ts). */
   const codeDisk = quietDisk({ home });
 
-  /** Opens a code item's file in the editor it came from (src/main/open-code.ts). */
+  /** Opens a code item's file in the editor it came from (src/main/open-code.ts), at the line its words are on now. */
   const openCodeItem = async (
     name: string | null,
-    place: CodePlace
+    place: CodePlace,
+    text: string | null
   ): Promise<void> => {
-    await openCode(name, place, EDITORS, {
+    await openCode(name, place, text, EDITORS, {
       bringForward: async (address) => {
         const editor = await app.getApplicationInfoForProtocol(address);
 
         openAppAt(editor.path);
       },
       fileIsThere: async (file) => await fileIsThere(file, codeDisk),
+      lineOf: async (file, captured) =>
+        await lineInFile(file, captured, codeDisk),
       notify: (message) => {
         notify(message, "failed");
       },
@@ -890,7 +894,11 @@ const start = async (): Promise<void> => {
 
     // An item from a code editor opens its file there again, by an address only main builds.
     if (url === undefined && context !== null && context.code !== null) {
-      await openCodeItem(context.app, context.code);
+      await openCodeItem(
+        context.app,
+        context.code,
+        item?.kind === "text" ? item.text : null
+      );
 
       return;
     }

@@ -286,6 +286,124 @@ export const openAddress = (
     .replace("{line}", () => String(line));
 };
 
+/** Line breaks as Windows, old Macs and the rest write them, made one. Text without a CR is left as it is. */
+const oneLineBreak = (text: string): string =>
+  text.includes("\r") ? text.replaceAll(/\r\n?/gu, "\n") : text;
+
+/** The blank lines a capture can begin with: a drag begun at the end of the line above copies that line's break first. */
+const BLANK_START = /^(?:[ \t]*\n)+/u;
+
+/** Where a text was found: `at` its first place, `times` how often, counted to two. */
+interface Found {
+  readonly at: number;
+  readonly times: 0 | 1 | 2;
+}
+
+/**
+ * The UTF-16 unit at `at`. The search compares units, not code points: the
+ * shelf's cap can cut a pair in two, and the half kept is still in the file.
+ */
+// oxlint-disable-next-line unicorn/prefer-code-point -- a unit, as above.
+const unitAt = (text: string, at: number): number => text.charCodeAt(at);
+
+/**
+ * Where `wanted` is in `text`: at one place, at more than one, or nowhere.
+ * Stops at the second. One pass over `text`, never back (Knuth, Morris and Pratt): no
+ * file and no capture make it slower than their two lengths, where a
+ * built-in search can compare most of a long capture at each place.
+ */
+const placeOf = (text: string, wanted: string): Found => {
+  if (wanted === "") {
+    return { at: -1, times: 0 };
+  }
+
+  // For each start of `wanted`, how long a start of it that start also ends with.
+  const border = new Int32Array(wanted.length);
+
+  for (let index = 1, length = 0; index < wanted.length; index += 1) {
+    const code = unitAt(wanted, index);
+
+    while (length > 0 && code !== unitAt(wanted, length)) {
+      length = border[length - 1] ?? 0;
+    }
+
+    if (code === unitAt(wanted, length)) {
+      length += 1;
+    }
+
+    border[index] = length;
+  }
+
+  let at = -1;
+
+  for (let index = 0, matched = 0; index < text.length; index += 1) {
+    const code = unitAt(text, index);
+
+    while (matched > 0 && code !== unitAt(wanted, matched)) {
+      matched = border[matched - 1] ?? 0;
+    }
+
+    if (code === unitAt(wanted, matched)) {
+      matched += 1;
+    }
+
+    if (matched === wanted.length) {
+      if (at !== -1) {
+        return { at, times: 2 };
+      }
+
+      at = index + 1 - wanted.length;
+
+      matched = border[matched - 1] ?? 0;
+    }
+  }
+
+  return { at, times: at === -1 ? 0 : 1 };
+};
+
+/** The 1-based line the character at `index` is on: its breaks are counted, and no list of lines is built. */
+const lineAt = (text: string, index: number): number => {
+  let line = 1;
+
+  for (
+    let next = text.indexOf("\n");
+    next !== -1 && next < index;
+    next = text.indexOf("\n", next + 1)
+  ) {
+    line += 1;
+  }
+
+  return line;
+};
+
+/**
+ * The 1-based line where `captured` begins in `text`, when it is there
+ * exactly once; else null. Line endings count as one. Only the whole
+ * capture counts, blanks and all: a part of it, or the capture without its
+ * blanks, can be the end of another line or the other of two places, and a
+ * click would then land on code that was never selected. No line is better
+ * than a wrong one, since the file still opens.
+ *
+ * The file on disk is not the editor's buffer: a selection from unsaved
+ * edits may be nowhere in it. And a capture whose own place has changed
+ * since may now be found once elsewhere, where the same words stand: without
+ * the editor's own cursor this can't be told apart.
+ */
+export const lineOfText = (text: string, captured: string): number | null => {
+  const whole = oneLineBreak(captured);
+  const blankStart = BLANK_START.exec(whole)?.[0].length ?? 0;
+
+  if (whole.slice(blankStart).trim() === "") {
+    return null;
+  }
+
+  const file = oneLineBreak(text);
+  const found = placeOf(file, whole);
+
+  // The line that holds the capture's first text, not a break copied before it.
+  return found.times === 1 ? lineAt(file, found.at + blankStart) : null;
+};
+
 /** How a click on a code item reaches its file: opened in its editor, or shown in its folder. */
 export type CodeWay = "editor" | "folder";
 

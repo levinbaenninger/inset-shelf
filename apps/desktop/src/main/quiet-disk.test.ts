@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import {
+  constants,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -6,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { lstat, readlink, realpath } from "node:fs/promises";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -17,6 +19,12 @@ import type { QuietFs } from "./quiet-disk";
 
 /** As the test was handed it: on macOS it begins at /var, a link. */
 const given = mkdtempSync(path.join(tmpdir(), "quiet-disk-"));
+
+// oxlint-disable-next-line vitest/require-top-level-describe -- both describes below share this folder.
+afterAll(() => {
+  rmSync(given, { force: true, recursive: true });
+});
+
 const base = realpathSync(given);
 const home = path.join(base, "home");
 const temp = path.join(base, "temp");
@@ -59,6 +67,14 @@ symlinkSync("loop", path.join(dev, "loop"));
 
 symlinkSync(path.join(dev, "proj", "a.ts"), path.join(dev, "same.ts"));
 
+/** As the policy opens a file: for reading, never through a link, never waiting. */
+const NODE_OPEN: QuietFs["open"] = async (at) =>
+  await open(
+    at,
+    // oxlint-disable-next-line no-bitwise -- open(2) takes its flags as one number.
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
+
 interface Watched {
   readonly fs: QuietFs;
   readonly touched: string[];
@@ -79,6 +95,11 @@ const watched = (other: Partial<QuietFs> = {}): Watched => {
         touched.push(at);
 
         return await (other.readlink ?? readlink)(at);
+      },
+      open: async (at) => {
+        touched.push(at);
+
+        return await (other.open ?? NODE_OPEN)(at);
       },
       realpath: async (at) => {
         touched.push(at);
@@ -103,10 +124,6 @@ const inProtected = (touched: readonly string[]): boolean =>
   );
 
 describe(quietDisk, () => {
-  afterAll(() => {
-    rmSync(given, { force: true, recursive: true });
-  });
-
   it("finds a file in the home folder", async () => {
     const found = await disk.find(source);
 
@@ -280,7 +297,7 @@ describe(quietDisk, () => {
       await expect(
         quietDisk(
           { home: mounted },
-          { lstat: refuse, readlink: refuse, realpath: refuse }
+          { lstat: refuse, open: refuse, readlink: refuse, realpath: refuse }
         ).find(path.join(mounted, "dev", "a.ts"))
       ).resolves.toStrictEqual({ kind: "unsure" });
       expect(touched).toStrictEqual([]);
@@ -308,6 +325,11 @@ describe(quietDisk, () => {
             size: 0,
           });
         },
+        open: async (at) => {
+          touched.push(onVolume(at));
+
+          return await Promise.reject(new Error(`opened ${at}`));
+        },
         readlink: async (at) => {
           touched.push(at);
 
@@ -334,5 +356,137 @@ describe(quietDisk, () => {
     await expect(
       quietDisk({ home: path.join(base, "no-home") }).find(source)
     ).resolves.toStrictEqual({ kind: "unsure" });
+  });
+});
+
+const text = (bytes: Uint8Array | null): string | null =>
+  bytes === null ? null : new TextDecoder().decode(bytes);
+
+/** A disk on which `at` looked like the source file a moment ago. */
+const lookedLikeSource = (at: string): QuietFs =>
+  watched({
+    lstat: async (asked) => await lstat(asked === at ? source : asked),
+  }).fs;
+
+describe("reading a file through the policy", () => {
+  const words = "export {};\n";
+
+  it("reads a file's bytes, from one opening of it", async () => {
+    const { fs, touched } = watched();
+    const opened: string[] = [];
+
+    const counted: QuietFs = {
+      ...fs,
+      open: async (at) => {
+        opened.push(at);
+
+        return await fs.open(at);
+      },
+    };
+
+    await expect(
+      quietDisk({ home }, counted).read(source, 1024).then(text)
+    ).resolves.toBe(words);
+    expect(opened).toStrictEqual([source]);
+    expect(touched.filter((at) => at === source)).toHaveLength(2);
+  });
+
+  it("reads through a link, at the place the file really is", async () => {
+    await expect(
+      disk.read(path.join(dev, "chain", "a.ts"), 1024).then(text)
+    ).resolves.toBe(words);
+  });
+
+  it.each([
+    ["exactly as large as the cap", words.length, words],
+    ["one byte larger than the cap", words.length - 1, null],
+  ])("reads a file %s, or nothing", async (_, max, read) => {
+    await expect(disk.read(source, max).then(text)).resolves.toBe(read);
+  });
+
+  it.each([
+    ["in Documents", path.join(home, "Documents", "proj", "a.ts")],
+    ["linked into Documents", path.join(dev, "docs", "a.ts")],
+    ["outside the home folder", elsewhere],
+    ["that is gone", path.join(dev, "proj", "b.ts")],
+    ["that is a folder", path.join(dev, "proj")],
+  ])("reads nothing %s, and opens nothing", async (_, unread) => {
+    const { fs } = watched();
+    const opened: string[] = [];
+
+    await expect(
+      quietDisk(
+        { home },
+        {
+          ...fs,
+          open: async (at) => {
+            opened.push(at);
+
+            return await fs.open(at);
+          },
+        }
+      ).read(unread, 1024)
+    ).resolves.toBeNull();
+    expect(opened).toStrictEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "does not wait on a pipe that took the file's place after the look",
+    async () => {
+      const pipe = path.join(dev, "pipe.ts");
+
+      execFileSync("mkfifo", [pipe]);
+
+      await expect(
+        quietDisk({ home }, lookedLikeSource(pipe)).read(pipe, 1024)
+      ).resolves.toBeNull();
+    }
+  );
+
+  it("does not follow a link that took the file's place after the look", async () => {
+    const link = path.join(dev, "same.ts");
+
+    await expect(
+      quietDisk({ home }, lookedLikeSource(link)).read(link, 1024)
+    ).resolves.toBeNull();
+  });
+
+  it("reads nothing from another file that took the path after the look", async () => {
+    const other = file(path.join(dev, "proj", "other.ts"));
+
+    await expect(
+      quietDisk({ home }, lookedLikeSource(other)).read(other, 1024)
+    ).resolves.toBeNull();
+  });
+
+  it("abandons a file that grew past the cap after it was opened, and closes it", async () => {
+    const grown = file(path.join(dev, "proj", "grown.ts"));
+    const closed: string[] = [];
+    const { fs } = watched();
+
+    const growing: QuietFs = {
+      ...fs,
+      open: async (at) => {
+        const handle = await fs.open(at);
+        const small = await handle.stat();
+
+        // Grows once it is open and looked at: the read then meets more than the look saw.
+        writeFileSync(grown, "x".repeat(64));
+
+        return {
+          close: async () => {
+            closed.push(at);
+            await handle.close();
+          },
+          read: async (...args) => await handle.read(...args),
+          stat: async () => await Promise.resolve(small),
+        };
+      },
+    };
+
+    await expect(
+      quietDisk({ home }, growing).read(grown, 16)
+    ).resolves.toBeNull();
+    expect(closed).toStrictEqual([grown]);
   });
 });
