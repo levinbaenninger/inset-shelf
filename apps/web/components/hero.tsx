@@ -20,7 +20,7 @@ export const Hero = () => (
             href={RELEASES_URL}
             className="group text-foreground/80 hover:text-foreground inline-flex h-7 items-center gap-1 rounded-full bg-white/55 px-3 text-[13px] font-medium ring-1 ring-black/8 backdrop-blur-sm transition-colors hover:bg-white/80"
           >
-            Free test build for macOS and Windows
+            Free for macOS and Windows
             <HugeiconsIcon
               icon={ArrowRight01Icon}
               size={14}
