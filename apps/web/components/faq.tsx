@@ -26,8 +26,8 @@ const QUESTIONS = [
     a: "On your computer, in one file called shelf.json, with images and files in a folder beside it.",
   },
   {
-    q: "Is Inset Shelf finished?",
-    a: "No. It is a free test build that changes as people try it. If something breaks, report it on GitHub.",
+    q: "How much does Inset Shelf cost?",
+    a: "Inset Shelf is free to download and use on Mac and Windows.",
   },
 ];
 
@@ -36,7 +36,7 @@ export const Faq = () => (
     <div className="grid gap-12 lg:grid-cols-12 lg:gap-8">
       <div className="flex flex-col items-start lg:col-span-5">
         <h2 id="faq-h" className="text-title">
-          Questions about the test build
+          Common questions
         </h2>
         <p className="text-lead text-muted-foreground mt-5 max-w-[36ch]">
           Everything else, from permissions to keys, is in the{" "}

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/levinbaenninger/inset-shelf/security/advisories/new
+    about: Share sensitive details with the maintainers through GitHub.
