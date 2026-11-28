@@ -34,4 +34,23 @@ describe(threadOfWindow, () => {
     );
     expect(threadOfWindow(threads, "Other - ChatGPT")).toBeNull();
   });
+
+  it("links no thread for a title that is one thread as Windows shows it and another's own name, but finds either by its name alone", () => {
+    const threads = parseThreadIndex(
+      [
+        INDEX,
+        '{"id":"02b1ba92-9297-7ba3-b0bf-d525e7eeeb2b","thread_name":"Plan - ChatGPT","updated_at":"2026-10-01T08:00:00Z"}',
+      ].join("\n")
+    );
+
+    expect({
+      ambiguous: threadOfWindow(threads, "Plan - ChatGPT"),
+      saved: threadOfWindow(threads, "Plan"),
+      shown: threadOfWindow(threads, "Plan - ChatGPT - ChatGPT"),
+    }).toStrictEqual({
+      ambiguous: null,
+      saved: "01a0a981-8186-7a92-af7d-c414d6adda1a",
+      shown: "02b1ba92-9297-7ba3-b0bf-d525e7eeeb2b",
+    });
+  });
 });
