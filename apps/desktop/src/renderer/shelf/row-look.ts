@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 
 import type { MenuAnchor } from "./menus";
+import { leavesRowAlone } from "./use-shelf-keys";
 
 // How a row's parts read and answer alike: the row (item-row.tsx) and the note under its picture or file (note.tsx).
 
@@ -43,7 +44,8 @@ let watching: AbortController | null = null;
  * still in it: main's view of an edit can arrive after the row took the
  * keyboard, and take the row out of the search's results. Watching ends
  * when focus or a press moves outside the row, or at a key that acts, such
- * as Delete, which then looks after the keyboard itself.
+ * as Delete on the row, which then looks after the keyboard itself. Delete
+ * on Show details leaves the row alone, so the watch goes on.
  */
 const searchIfRowLeaves = (row: Element): void => {
   watching?.abort();
@@ -91,7 +93,7 @@ const searchIfRowLeaves = (row: Element): void => {
   document.addEventListener(
     "keydown",
     (event) => {
-      if (!PASSING_KEYS.has(event.key)) {
+      if (!(PASSING_KEYS.has(event.key) || leavesRowAlone(event))) {
         stop();
       }
     },
