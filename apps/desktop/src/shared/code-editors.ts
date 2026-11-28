@@ -481,7 +481,7 @@ const languageOf = (name: string): string | null => {
 
 /**
  * A code capture's file, and whether its language is sure. It is not when
- * the title may name a longer file of another language, a dash inside its
+ * the title may name a longer file of another extension, a dash inside its
  * name: "worker.v2 - copy.ts - demo" names worker.v2 by the row, but may
  * name "worker.v2 - copy.ts" in demo.
  */
@@ -529,16 +529,21 @@ const titleFile = (
     return null;
   }
 
-  // Each longer file the parts after the project's place could still belong to; a profile ("Work") names no language.
+  // Each longer file the title could name, the whole title opened on its own among them.
   const longer = split.parts
-    .slice(1, split.parts.length - editor.title.length + 1)
+    .slice(1)
     .map((_, index) => split.parts.slice(0, index + 2).join(split.dash));
+
+  // A longer file of another extension, one with no tag (.c++) too, leaves it unsure; a profile ("Work") or a project with no dot names none.
+  const own = extensionOf(name);
 
   return {
     name,
-    sure: longer.every((file) =>
-      [null, languageOf(name)].includes(languageOf(file))
-    ),
+    sure: longer.every((file) => {
+      const extension = extensionOf(file);
+
+      return extension === "" || /\s/u.test(extension) || extension === own;
+    }),
   };
 };
 
