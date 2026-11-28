@@ -92,6 +92,8 @@ export interface ShelfView {
   readonly canUndo: boolean;
   /** Recall: the open items from the window the shelf opened beside; absent or null when there are none. */
   readonly here?: ShelfHere | null;
+  /** The user's home folder, so a file's path shows from "~"; absent where it is not known. */
+  readonly home?: string;
 }
 
 /** The open items from the window the shelf opened beside (src/shared/recall.ts). */

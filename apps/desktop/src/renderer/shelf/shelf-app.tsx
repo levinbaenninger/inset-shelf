@@ -65,7 +65,7 @@ import type { DetailsUndo } from "./details-view";
 import { liveEdits } from "./drafts";
 import { EmptyShelf } from "./empty-shelf";
 import { useFromHere } from "./from-here";
-import { focusRow, ItemRow } from "./item-row";
+import { focusRow, HomeFolder, ItemRow } from "./item-row";
 import { keptItems } from "./kept-items";
 import { lookAt } from "./made-items";
 import { editorWithFocus } from "./markdown-field";
@@ -2079,5 +2079,9 @@ const Shelf = ({ view }: { readonly view: ShelfView }) => {
 export const ShelfApp = () => {
   const view = usePushedView<ShelfView | null>(load, subscribe, null);
 
-  return view === null ? null : <Shelf view={view} />;
+  return view === null ? null : (
+    <HomeFolder value={view.home ?? null}>
+      <Shelf view={view} />
+    </HomeFolder>
+  );
 };

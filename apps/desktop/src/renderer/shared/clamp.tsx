@@ -3,7 +3,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 /** A tooltip longer than this is cut: it is there to finish a line, not to be read like a page. */
-const TOOLTIP_MAX = 300;
+export const TOOLTIP_MAX = 300;
 
 export const tooltipText = (text: string): string =>
   text.length > TOOLTIP_MAX

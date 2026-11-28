@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { codeEditor, codePlace, titleParts } from "./code-editors";
+import { codeEditor, codeLabel, codePlace, titleParts } from "./code-editors";
 import type { CodeEditor } from "./code-editors";
 
 const rowOf = (app: string): CodeEditor => {
@@ -184,5 +184,71 @@ describe(codePlace, () => {
     expect(
       codePlace(rowOf("Cursor"), document, "a.ts — proj", "Cursor")
     ).toBeNull();
+  });
+});
+
+describe(codeLabel, () => {
+  const file =
+    "/Users/anna/Developer/inset-shelf/apps/desktop/src/shared/recall.ts";
+
+  const root = "/Users/anna/Developer/inset-shelf";
+
+  it("names the file at its line and the project, with the path from home", () => {
+    expect(codeLabel({ file, line: 147, root }, "/Users/anna")).toStrictEqual({
+      file: "recall.ts:147",
+      path: "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts",
+      project: "inset-shelf",
+    });
+  });
+
+  it("names the file alone when no line is stored", () => {
+    expect(codeLabel({ file, line: null, root }, "/Users/anna/").file).toBe(
+      "recall.ts"
+    );
+  });
+
+  it("names no project without a project folder", () => {
+    expect(
+      codeLabel({ file, line: null, root: null }, "/Users/anna")
+    ).toStrictEqual({
+      file: "recall.ts",
+      path: "~/Developer/inset-shelf/apps/desktop/src/shared/recall.ts",
+      project: null,
+    });
+  });
+
+  it.each([
+    ["the path inside the project", root, "apps/desktop/src/shared/recall.ts"],
+    ["the file's name without a project", null, "recall.ts"],
+  ])(
+    "shows %s when the home folder is not known, never the whole path",
+    (_, folder, path) => {
+      expect(codeLabel({ file, line: 147, root: folder }, null).path).toBe(
+        path
+      );
+    }
+  );
+
+  it.each([
+    ["/opt/src/proj/lib/a.ts", "/opt/src/proj"],
+    // The same disk by another name: the home folder's path doesn't start it.
+    [
+      "/System/Volumes/Data/Users/anna/proj/lib/a.ts",
+      "/System/Volumes/Data/Users/anna/proj",
+    ],
+  ])(
+    "shows %s, outside the home folder, by its path inside the project, never whole",
+    (outside, folder) => {
+      expect(
+        codeLabel({ file: outside, line: null, root: folder }, "/Users/anna")
+          .path
+      ).toBe("lib/a.ts");
+    }
+  );
+
+  it("writes no ~ for a home folder whose name only starts the same", () => {
+    expect(codeLabel({ file, line: null, root }, "/Users/an").path).toBe(
+      "apps/desktop/src/shared/recall.ts"
+    );
   });
 });

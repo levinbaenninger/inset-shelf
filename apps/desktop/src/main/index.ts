@@ -681,12 +681,16 @@ const start = async (): Promise<void> => {
    */
   const HERE_CHIP = true;
 
-  const viewWithHere = () => {
+  const home = app.getPath("home");
+
+  /** What the shelf's page is shown: the shelf, what is from the window beside it, and the home folder paths show from. */
+  const pageView = () => {
     const view = controller.view();
 
     return {
       ...view,
       here: hereOpening === null ? null : hereWith(hereOpening, view.doc),
+      home,
     };
   };
 
@@ -2313,7 +2317,7 @@ const start = async (): Promise<void> => {
       drafts: pageSettle.setDrafts,
       settled: pageSettle.answered,
       getTutorial: () => tutorial.view(HOME_PAGE),
-      getView: () => viewWithHere(),
+      getView: () => pageView(),
       gettingStarted: () => {
         tutorial.showChecklist();
       },
@@ -2664,7 +2668,7 @@ const start = async (): Promise<void> => {
   };
 
   emitShelfView = () => {
-    shelfServer.emit("view", viewWithHere());
+    shelfServer.emit("view", pageView());
   };
 
   notify = (message, tone = "done") => {
@@ -2856,7 +2860,7 @@ const start = async (): Promise<void> => {
     }
   });
   controller.subscribe(() => {
-    shelfServer.emit("view", viewWithHere());
+    shelfServer.emit("view", pageView());
     shotSaves.retarget();
     refreshTray();
     refreshAppMenu();
